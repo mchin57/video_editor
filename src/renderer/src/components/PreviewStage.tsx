@@ -111,6 +111,9 @@ export function PreviewStage(): JSX.Element {
     if (!playing) return undefined
     let raf = 0
     const tick = (): void => {
+      // A frame can already be queued when playback stops (e.g. scrubbing pauses
+      // it). Bail so a stray tick can't overwrite the new playhead position.
+      if (!usePlayback.getState().playing) return
       const v = videoRef.current
       const clips = clipsRef.current
       const startsNow = startsRef.current
