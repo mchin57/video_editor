@@ -1,5 +1,5 @@
 import { useMemo, useRef, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Clip } from '@shared/project'
+import type { Clip, TextOverlay } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -11,8 +11,9 @@ import { thumbUrl } from '@/ipc/client'
 const PX_PER_SEC = 48
 const HOOK_SEC = 3
 
-// Stable empty reference (see PreviewStage note) to avoid re-render loops.
+// Stable empty references (see PreviewStage note) to avoid re-render loops.
 const EMPTY_CLIPS: Clip[] = []
+const EMPTY_OVERLAYS: TextOverlay[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
@@ -49,7 +50,9 @@ function ToolbarButton({
 export function Timeline(): JSX.Element {
   const project = useProject((s) => s.project)
   const clips = project?.clips ?? EMPTY_CLIPS
+  const overlays = project?.overlays ?? EMPTY_OVERLAYS
   const selectedClipId = useProject((s) => s.selectedClipId)
+  const selectedOverlayId = useUi((s) => s.selectedOverlayId)
   const selectClip = useProject((s) => s.selectClip)
   const removeClip = useProject((s) => s.removeClip)
   const reorderClips = useProject((s) => s.reorderClips)
@@ -135,6 +138,44 @@ export function Timeline(): JSX.Element {
     if (selectedIndex < 0) return
     const p = locate(clips, time)
     if (p && p.index === selectedIndex) splitClipAt(clips[selectedIndex].id, p.localTime)
+  }
+
+  // Drag a text overlay's time window (or its edges) on the timeline.
+  const startOverlayDrag = (
+    e: ReactPointerEvent,
+    o: TextOverlay,
+    mode: 'move' | 'start' | 'end'
+  ): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    selectOverlay(o.id)
+    const before = useProject.getState().project
+    if (!before) return
+    const startX = e.clientX
+    const { startSec, endSec } = o
+    const dur = endSec - startSec
+    const onMove = (ev: PointerEvent): void => {
+      const d = (ev.clientX - startX) / PX_PER_SEC
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        overlays: p.overlays.map((x) => {
+          if (x.id !== o.id) return x
+          if (mode === 'move') {
+            const ns = Math.max(0, startSec + d)
+            return { ...x, startSec: ns, endSec: ns + dur }
+          }
+          if (mode === 'start') return { ...x, startSec: clamp(startSec + d, 0, x.endSec - 0.2) }
+          return { ...x, endSec: Math.max(x.startSec + 0.2, endSec + d) }
+        })
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
   }
 
   return (
@@ -232,7 +273,7 @@ export function Timeline(): JSX.Element {
             )}
 
             {/* Clip blocks */}
-            <div className="absolute inset-x-0 top-5 bottom-1 flex">
+            <div className="absolute inset-x-0 top-5 flex h-14">
               {clips.map((clip, i) => {
                 const asset = assetById.get(clip.mediaId)
                 const maxOut = asset?.probe.durationSec ?? clip.outSec
@@ -271,6 +312,40 @@ export function Timeline(): JSX.Element {
                       title="Trim end"
                     />
                     {i < clips.length - 1 && <span className="sr-only">clip {i + 1}</span>}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Text overlay lane */}
+            <div className="absolute inset-x-0 top-[80px] h-6">
+              {overlays.map((o) => {
+                const left = o.startSec * PX_PER_SEC
+                const width = Math.max(10, (o.endSec - o.startSec) * PX_PER_SEC)
+                const selected = o.id === selectedOverlayId
+                return (
+                  <div
+                    key={o.id}
+                    onPointerDown={(e) => startOverlayDrag(e, o, 'move')}
+                    title={o.text}
+                    className={`group absolute top-0 flex h-6 cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                      selected
+                        ? 'border-violet-300 ring-1 ring-violet-300/50'
+                        : 'border-violet-400/40'
+                    } bg-violet-500/25`}
+                    style={{ left, width }}
+                  >
+                    <span className="truncate text-[9px] font-medium text-violet-100">
+                      T&nbsp;&nbsp;{o.text}
+                    </span>
+                    <div
+                      onPointerDown={(e) => startOverlayDrag(e, o, 'start')}
+                      className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-200/70"
+                    />
+                    <div
+                      onPointerDown={(e) => startOverlayDrag(e, o, 'end')}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-200/70"
+                    />
                   </div>
                 )
               })}

@@ -130,7 +130,7 @@ export default function App(): JSX.Element {
         </aside>
       </div>
 
-      <div className="h-40 border-t border-white/10 bg-black/20">
+      <div className="h-44 border-t border-white/10 bg-black/20">
         <Timeline />
       </div>
 
