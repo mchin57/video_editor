@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+out/
+build/
+release/
+*.tsbuildinfo
+
+# electron-vite / electron-builder
+.vite/
+dist-electron/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# App data / bundled binaries that are downloaded on first run, not committed
+resources/bin/
+resources/whisper-models/
+
+# Test coverage
+coverage/
+
+# Misc scratch
+tmp/
+*.local
