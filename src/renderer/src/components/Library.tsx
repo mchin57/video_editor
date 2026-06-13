@@ -126,7 +126,7 @@ export function Library(): JSX.Element {
   const importMedia = useImportMedia()
 
   return (
-    <div className="flex h-full w-64 flex-col">
+    <div className="flex h-full w-full flex-col">
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Library</span>
         <button

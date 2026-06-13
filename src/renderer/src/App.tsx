@@ -5,6 +5,7 @@ import { PreviewStage } from '@/components/PreviewStage'
 import { Inspector } from '@/components/Inspector'
 import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
+import { Splitter } from '@/components/Splitter'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
@@ -15,10 +16,32 @@ import { useUi } from '@/state/ui'
 import { locate } from '@/lib/timeline'
 import { makeOverlay } from '@/lib/overlays'
 
+const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
+
+interface PanelSizes {
+  libW: number
+  inspW: number
+  tlH: number
+}
+
+function loadPanelSizes(): PanelSizes {
+  try {
+    const saved = JSON.parse(localStorage.getItem('panelSizes') ?? '{}')
+    return { libW: saved.libW ?? 256, inspW: saved.inspW ?? 256, tlH: saved.tlH ?? 176 }
+  } catch {
+    return { libW: 256, inspW: 256, tlH: 176 }
+  }
+}
+
 export default function App(): JSX.Element {
   const queryClient = useQueryClient()
   const importMedia = useImportMedia()
   const [dragging, setDragging] = useState(false)
+  const [panels, setPanels] = useState<PanelSizes>(loadPanelSizes)
+
+  useEffect(() => {
+    localStorage.setItem('panelSizes', JSON.stringify(panels))
+  }, [panels])
 
   // Load the persisted project once on startup.
   useEffect(() => {
@@ -115,9 +138,13 @@ export default function App(): JSX.Element {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="border-r border-white/10">
+        <aside style={{ width: panels.libW }} className="shrink-0 border-r border-white/10">
           <Library />
         </aside>
+        <Splitter
+          orientation="vertical"
+          onDrag={(d) => setPanels((p) => ({ ...p, libW: clamp(p.libW + d, 180, 520) }))}
+        />
 
         <main className="flex min-h-0 flex-1 items-center justify-center p-6">
           <div className="h-full max-h-[78vh]">
@@ -125,12 +152,20 @@ export default function App(): JSX.Element {
           </div>
         </main>
 
-        <aside className="border-l border-white/10">
+        <Splitter
+          orientation="vertical"
+          onDrag={(d) => setPanels((p) => ({ ...p, inspW: clamp(p.inspW - d, 180, 520) }))}
+        />
+        <aside style={{ width: panels.inspW }} className="shrink-0 border-l border-white/10">
           <Inspector />
         </aside>
       </div>
 
-      <div className="h-44 border-t border-white/10 bg-black/20">
+      <Splitter
+        orientation="horizontal"
+        onDrag={(d) => setPanels((p) => ({ ...p, tlH: clamp(p.tlH - d, 120, 460) }))}
+      />
+      <div style={{ height: panels.tlH }} className="shrink-0 border-t border-white/10 bg-black/20">
         <Timeline />
       </div>
 
