@@ -82,9 +82,9 @@ export function PreviewStage(): JSX.Element {
     return undefined
   }, [activeAsset?.id, activeAsset?.proxyReady, pos?.sourceTime, playing])
 
-  // Start/stop. On play, sync the video to the playhead (resume where the
-  // timeline is, not where the element happens to be), restarting from 0 if
-  // we're parked at the very end.
+  // Start/stop. The seek effect already parks the <video> at the playhead while
+  // paused, so resume-from-playhead works without gating play. We only special-
+  // case "parked at the end" → restart from 0. play() is always attempted.
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
@@ -93,16 +93,12 @@ export function PreviewStage(): JSX.Element {
       return
     }
     const total = timelineDuration(previewClips)
-    const cur = usePlayback.getState().time
-    const startTime = cur >= total - 0.05 ? 0 : cur
-    if (startTime !== cur) setTime(startTime)
-    const p = locate(previewClips, startTime)
-    if (p && loadedIdRef.current === p.clip.mediaId) {
-      if (Math.abs(v.currentTime - p.sourceTime) > 0.1) v.currentTime = p.sourceTime
-      void v.play()
+    if (usePlayback.getState().time >= total - 0.05) {
+      setTime(0)
+      const first = locate(previewClips, 0)
+      if (first && loadedIdRef.current === first.clip.mediaId) v.currentTime = first.sourceTime
     }
-    // Different media (e.g. restart crossing a source boundary) is handled by
-    // the load effect, which seeks and plays once the new metadata loads.
+    void v.play().catch(() => {})
   }, [playing, ready, previewClips, setTime])
 
   useEffect(() => {
