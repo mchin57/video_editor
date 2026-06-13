@@ -14,6 +14,8 @@ interface EditorState {
 
   /** Proxy job state keyed by mediaId. */
   proxyJobs: Record<string, ProxyJobState>
+  /** Most recent export job progress (single export at a time). */
+  exportJob: ProxyJobState | null
   applyJobEvent: (ev: JobProgressEvent) => void
 }
 
@@ -22,8 +24,12 @@ export const useEditor = create<EditorState>((set) => ({
   select: (id) => set({ selectedId: id }),
 
   proxyJobs: {},
+  exportJob: null,
   applyJobEvent: (ev) =>
     set((state) => {
+      if (ev.type === 'export') {
+        return { exportJob: { progress: ev.progress, status: ev.status, error: ev.error } }
+      }
       if (ev.type !== 'proxy' || !ev.subjectId) return state
       return {
         proxyJobs: {

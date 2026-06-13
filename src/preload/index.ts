@@ -5,6 +5,7 @@ import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
+import type { PresetId } from '@shared/export'
 
 /** Typed surface exposed to the renderer as window.api. */
 const api = {
@@ -21,6 +22,11 @@ const api = {
   // Project (M2)
   loadProject: (): Promise<Project> => ipcRenderer.invoke(IPC.loadProject),
   saveProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.saveProject, project),
+
+  // Export (M3)
+  exportProject: (project: Project, opts: { preset: PresetId; preferNvenc: boolean }): Promise<string> =>
+    ipcRenderer.invoke(IPC.exportProject, project, opts),
+  revealFile: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.revealFile, path),
 
   /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

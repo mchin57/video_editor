@@ -6,6 +6,7 @@ import { Inspector } from '@/components/Inspector'
 import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
 import { Splitter } from '@/components/Splitter'
+import { ExportButton } from '@/components/ExportButton'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
@@ -131,10 +132,11 @@ export default function App(): JSX.Element {
         <button
           onClick={() => importMedia.mutate(undefined)}
           disabled={importMedia.isPending}
-          className="rounded-md bg-sky-500/90 px-3 py-1 text-xs font-medium text-white hover:bg-sky-400 disabled:opacity-50"
+          className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20 disabled:opacity-50"
         >
           {importMedia.isPending ? 'Importing…' : 'Import video'}
         </button>
+        <ExportButton />
       </header>
 
       <div className="flex min-h-0 flex-1">

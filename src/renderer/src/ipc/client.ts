@@ -2,6 +2,7 @@ import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
+import type { PresetId } from '@shared/export'
 
 /** Thin typed wrappers over the preload-exposed window.api. */
 export const getCapabilities = (): Promise<FfmpegCapabilities> => window.api.getCapabilities()
@@ -15,6 +16,12 @@ export const removeMedia = (id: string): Promise<void> => window.api.removeMedia
 
 export const loadProject = (): Promise<Project> => window.api.loadProject()
 export const saveProject = (project: Project): Promise<void> => window.api.saveProject(project)
+
+export const exportProject = (
+  project: Project,
+  opts: { preset: PresetId; preferNvenc: boolean }
+): Promise<string> => window.api.exportProject(project, opts)
+export const revealFile = (path: string): Promise<boolean> => window.api.revealFile(path)
 export const pathForFile = (file: File): string => window.api.pathForFile(file)
 export const onJobProgress = (cb: (ev: JobProgressEvent) => void): (() => void) =>
   window.api.onJobProgress(cb)

@@ -1,11 +1,13 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import type { Project } from '@shared/project'
+import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
 import { ensureProxy, importFile, listLibrary, removeMedia } from './services/mediaStore'
 import { loadProject, saveProject } from './services/projectStore'
+import { exportProject } from './services/exporter'
 
 const VIDEO_EXTS = [
   'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
@@ -56,4 +58,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.loadProject, () => loadProject())
   ipcMain.handle(IPC.saveProject, (_event, project: Project) => saveProject(project))
+
+  ipcMain.handle(
+    IPC.exportProject,
+    (_event, project: Project, opts: { preset: PresetId; preferNvenc: boolean }) =>
+      exportProject(project, opts)
+  )
+  ipcMain.handle(IPC.revealFile, (_event, path: string) => {
+    shell.showItemInFolder(path)
+    return true
+  })
 }

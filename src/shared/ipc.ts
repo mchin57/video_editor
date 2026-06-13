@@ -11,7 +11,10 @@ export const IPC = {
   removeMedia: 'media:remove',
   // Project (M2)
   loadProject: 'project:load',
-  saveProject: 'project:save'
+  saveProject: 'project:save',
+  // Export (M3)
+  exportProject: 'export:run',
+  revealFile: 'shell:reveal'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -48,6 +48,9 @@ async function readAsset(id: string): Promise<MediaAsset | null> {
   }
 }
 
+/** Public accessor for a single asset record (used by the exporter). */
+export const getAsset = (id: string): Promise<MediaAsset | null> => readAsset(id)
+
 async function writeAsset(asset: MediaAsset): Promise<void> {
   await fsp.writeFile(assetJsonPath(asset.id), JSON.stringify(asset, null, 2))
 }
