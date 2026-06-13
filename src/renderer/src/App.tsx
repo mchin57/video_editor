@@ -4,13 +4,16 @@ import { Library } from '@/components/Library'
 import { PreviewStage } from '@/components/PreviewStage'
 import { Inspector } from '@/components/Inspector'
 import { Timeline } from '@/components/Timeline'
+import { CropEditor } from '@/components/CropEditor'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
+import { useUi } from '@/state/ui'
 import { locate } from '@/lib/timeline'
+import { makeOverlay } from '@/lib/overlays'
 
 export default function App(): JSX.Element {
   const queryClient = useQueryClient()
@@ -61,6 +64,16 @@ export default function App(): JSX.Element {
         const idx = clips.findIndex((c) => c.id === project.selectedClipId)
         const pos = locate(clips, usePlayback.getState().time)
         if (idx >= 0 && pos && pos.index === idx) project.splitClipAt(clips[idx].id, pos.localTime)
+      } else if (e.key.toLowerCase() === 't') {
+        if ((project.project?.clips.length ?? 0) > 0) {
+          const id = crypto.randomUUID()
+          const start = usePlayback.getState().time
+          project.addOverlay(makeOverlay(id, start, start + 3))
+          useUi.getState().selectOverlay(id)
+        }
+      } else if (e.key === 'Escape') {
+        useUi.getState().setCropEditing(false)
+        useUi.getState().selectOverlay(null)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -122,6 +135,8 @@ export default function App(): JSX.Element {
       </div>
 
       <StatusFooter />
+
+      <CropEditor />
 
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">

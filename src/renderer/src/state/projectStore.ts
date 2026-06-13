@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Project } from '@shared/project'
+import type { CropRect, Project, TextOverlay } from '@shared/project'
 import { reorder, splitClip } from '@/lib/timeline'
 import { loadProject, saveProject } from '@/ipc/client'
 
@@ -32,6 +32,10 @@ interface ProjectState {
   trimClip: (clipId: string, inSec: number, outSec: number) => void
   splitClipAt: (clipId: string, localTime: number) => void
   toggleMute: (clipId: string) => void
+  setClipCrop: (clipId: string, crop: CropRect | null) => void
+  addOverlay: (overlay: TextOverlay) => void
+  updateOverlay: (id: string, patch: Partial<TextOverlay>) => void
+  removeOverlay: (id: string) => void
   undo: () => void
   redo: () => void
 }
@@ -125,6 +129,22 @@ export const useProject = create<ProjectState>((set, get) => {
         ...p,
         clips: p.clips.map((c) => (c.id === clipId ? { ...c, mute: !c.mute } : c))
       })),
+
+    setClipCrop: (clipId, crop) =>
+      commit((p) => ({
+        ...p,
+        clips: p.clips.map((c) => (c.id === clipId ? { ...c, crop } : c))
+      })),
+
+    addOverlay: (overlay) => commit((p) => ({ ...p, overlays: [...p.overlays, overlay] })),
+
+    updateOverlay: (id, patch) =>
+      commit((p) => ({
+        ...p,
+        overlays: p.overlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
+      })),
+
+    removeOverlay: (id) => commit((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) })),
 
     undo: () => {
       const { past, project, future } = get()

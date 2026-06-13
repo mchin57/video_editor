@@ -3,7 +3,9 @@ import type { Clip } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
+import { useUi } from '@/state/ui'
 import { clipDuration, locate, timelineDuration } from '@/lib/timeline'
+import { makeOverlay } from '@/lib/overlays'
 import { thumbUrl } from '@/ipc/client'
 
 const PX_PER_SEC = 48
@@ -53,6 +55,8 @@ export function Timeline(): JSX.Element {
   const reorderClips = useProject((s) => s.reorderClips)
   const splitClipAt = useProject((s) => s.splitClipAt)
   const toggleMute = useProject((s) => s.toggleMute)
+  const addOverlay = useProject((s) => s.addOverlay)
+  const selectOverlay = useUi((s) => s.selectOverlay)
   const canUndo = useProject((s) => s.past.length > 0)
   const canRedo = useProject((s) => s.future.length > 0)
   const undo = useProject((s) => s.undo)
@@ -153,6 +157,18 @@ export function Timeline(): JSX.Element {
           ✂ Split
         </ToolbarButton>
         <ToolbarButton
+          title="Add hook text at the playhead (T)"
+          onClick={() => {
+            const id = crypto.randomUUID()
+            const start = usePlayback.getState().time
+            addOverlay(makeOverlay(id, start, start + 3))
+            selectOverlay(id)
+          }}
+          disabled={clips.length === 0}
+        >
+          ＋ Text
+        </ToolbarButton>
+        <ToolbarButton
           title="Move selected clip left"
           onClick={() => selectedIndex > 0 && reorderClips(selectedIndex, selectedIndex - 1)}
           disabled={selectedIndex <= 0}
@@ -225,7 +241,10 @@ export function Timeline(): JSX.Element {
                 return (
                   <div
                     key={clip.id}
-                    onClick={() => selectClip(clip.id)}
+                    onClick={() => {
+                      selectClip(clip.id)
+                      selectOverlay(null)
+                    }}
                     className={`group relative mx-px flex shrink-0 cursor-pointer items-center overflow-hidden rounded-md border ${
                       selected ? 'border-sky-400 ring-1 ring-sky-400/50' : 'border-white/10'
                     } bg-zinc-800/80`}

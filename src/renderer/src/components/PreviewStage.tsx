@@ -1,35 +1,34 @@
-import { useEffect, useMemo, useRef, type JSX } from 'react'
-import type { Clip } from '@shared/project'
+import { useEffect, useMemo, useRef, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import type { Clip, TextOverlay } from '@shared/project'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
+import { overlaysAtTime } from '@/lib/overlays'
 import { proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
+import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { clipStartTimes, locate, timelineDuration } from '@/lib/timeline'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
+const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
-// Stable empty reference so the zustand selector doesn't return a new array each
-// render (which would make getSnapshot uncacheable → infinite re-render loop).
+// Stable empty references so zustand selectors don't return new arrays each render.
 const EMPTY_CLIPS: Clip[] = []
+const EMPTY_OVERLAYS: TextOverlay[] = []
 
 /**
- * The 9:16 playback surface. Plays the timeline (one track of clips) through a
- * single <video> keyed by the active media id, so React swaps the proxy source
- * cleanly at clip boundaries. When the timeline is empty it previews the library
- * selection instead, so a freshly imported clip is still watchable.
- *
- * Clock model:
- *   - playing → the <video> is the clock; a rAF loop reads currentTime, advances
- *     the timeline `time`, and hops to the next clip at each out-point.
- *   - paused  → `time` is the clock; an effect seeks the <video> to the playhead.
- * The two never run at once, so there's no feedback fight.
+ * The 9:16 playback surface. Plays the timeline through a single <video> keyed
+ * by the active media id; applies the active clip's crop with CSS; and renders
+ * draggable text overlays positioned in the logical 1080x1920 space (cqw units
+ * keep them sized exactly as they'll burn at export).
  */
 export function PreviewStage(): JSX.Element {
   const project = useProject((s) => s.project)
   const projectClips = project?.clips ?? EMPTY_CLIPS
+  const overlays = project?.overlays ?? EMPTY_OVERLAYS
   const selectedLibId = useEditor((s) => s.selectedId)
+  const selectedOverlayId = useUi((s) => s.selectedOverlayId)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
@@ -62,6 +61,7 @@ export function PreviewStage(): JSX.Element {
   const activeMediaId = activeAsset?.proxyReady ? activeAsset.id : null
   const ready = activeMediaId != null
 
+  const stageRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   // Live refs so the rAF loop reads current values without re-subscribing.
@@ -72,7 +72,6 @@ export function PreviewStage(): JSX.Element {
   const posRef = useRef(pos)
   posRef.current = pos
 
-  // On (re)mount of a media source, seek to the right spot and resume if playing.
   const onLoadedMetadata = (): void => {
     const v = videoRef.current
     const p = posRef.current
@@ -91,7 +90,7 @@ export function PreviewStage(): JSX.Element {
     }
   }, [playing, pos?.sourceTime])
 
-  // Play/pause the element (restart from 0 if parked at the very end).
+  // Play/pause (restart from 0 if parked at the very end).
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
@@ -107,8 +106,7 @@ export function PreviewStage(): JSX.Element {
     void v.play().catch(() => {})
   }, [playing, ready, activeMediaId])
 
-  // The clock. Depends only on `playing`; reads everything else from refs so it
-  // runs uninterrupted across clip boundaries.
+  // The clock. Depends only on `playing`; reads everything else from refs.
   useEffect(() => {
     if (!playing) return undefined
     let raf = 0
@@ -117,7 +115,6 @@ export function PreviewStage(): JSX.Element {
       const clips = clipsRef.current
       const startsNow = startsRef.current
       const { setTime, setPlaying } = usePlayback.getState()
-      // Skip until the (possibly just-swapped) source has a real currentTime.
       if (v && v.readyState >= 2 && clips.length) {
         const p = locate(clips, usePlayback.getState().time)
         if (p) {
@@ -145,24 +142,75 @@ export function PreviewStage(): JSX.Element {
     return () => cancelAnimationFrame(raf)
   }, [playing])
 
-  // Keep mute in sync when switching clips while paused.
   useEffect(() => {
     const v = videoRef.current
     if (v && activeClip) v.muted = activeClip.mute
   }, [activeClip])
 
+  // Crop: map the active clip's source-pixel crop into the 9:16 stage with CSS.
+  const videoStyle: CSSProperties = useMemo(() => {
+    const crop = activeClip?.crop
+    const v = activeAsset?.probe.video
+    if (crop && v) {
+      return {
+        position: 'absolute',
+        width: `${(v.displayWidth / crop.w) * 100}%`,
+        height: `${(v.displayHeight / crop.h) * 100}%`,
+        left: `${-(crop.x / crop.w) * 100}%`,
+        top: `${-(crop.y / crop.h) * 100}%`,
+        objectFit: 'fill',
+        maxWidth: 'none',
+        background: 'black'
+      }
+    }
+    return { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: 'black' }
+  }, [activeClip?.crop, activeAsset?.probe.video])
+
+  const startOverlayDrag = (e: ReactPointerEvent, o: TextOverlay): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    useUi.getState().selectOverlay(o.id)
+    const stage = stageRef.current
+    const before = useProject.getState().project
+    if (!stage || !before) return
+    const scale = LOGICAL.width / stage.getBoundingClientRect().width // logical px per screen px
+    const startX = e.clientX
+    const startY = e.clientY
+    const onMove = (ev: PointerEvent): void => {
+      const nx = clamp(o.x + (ev.clientX - startX) * scale, 0, LOGICAL.width)
+      const ny = clamp(o.y + (ev.clientY - startY) * scale, 0, LOGICAL.height)
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        overlays: p.overlays.map((x) => (x.id === o.id ? { ...x, x: nx, y: ny } : x))
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  const visibleOverlays = overlaysAtTime(overlays, time)
   const hasContent = previewClips.length > 0
 
   return (
-    <div className="relative aspect-[9/16] h-full overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-white/10">
+    <div
+      ref={stageRef}
+      style={{ containerType: 'size' }}
+      className="relative aspect-[9/16] h-full overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-white/10"
+    >
       <video
         key={activeMediaId ?? 'empty'}
         ref={videoRef}
         src={activeMediaId ? proxyUrl(activeMediaId) : undefined}
         playsInline
+        style={videoStyle}
         onLoadedMetadata={onLoadedMetadata}
         onClick={() => usePlayback.getState().toggle()}
-        className={`absolute inset-0 h-full w-full bg-black object-contain ${ready ? '' : 'opacity-0'}`}
+        className={ready ? '' : 'opacity-0'}
       />
 
       {!ready && (
@@ -183,21 +231,57 @@ export function PreviewStage(): JSX.Element {
         </div>
       )}
 
+      {/* Text overlays (only those visible at the current time) */}
+      {visibleOverlays.map((o) => (
+        <div
+          key={o.id}
+          onPointerDown={(e) => startOverlayDrag(e, o)}
+          style={{
+            position: 'absolute',
+            left: pct(o.x, LOGICAL.width),
+            top: pct(o.y, LOGICAL.height),
+            transform: o.anchor === 'center' ? 'translate(-50%, -50%)' : 'none',
+            fontSize: `${(o.fontSizePx / LOGICAL.width) * 100}cqw`,
+            color: o.color,
+            maxWidth: '92%'
+          }}
+          className={`z-30 cursor-move select-none whitespace-pre-wrap text-center font-extrabold leading-tight ${
+            selectedOverlayId === o.id ? 'outline-dashed outline-2 outline-sky-400' : ''
+          }`}
+        >
+          <span
+            style={
+              o.pill.enabled
+                ? {
+                    background: o.pill.color,
+                    padding: `${(o.pill.padPx / LOGICAL.width) * 100}cqw`,
+                    borderRadius: `${(10 / LOGICAL.width) * 100}cqw`,
+                    boxDecorationBreak: 'clone',
+                    WebkitBoxDecorationBreak: 'clone'
+                  }
+                : { textShadow: '0 0.2cqw 0.8cqw rgba(0,0,0,0.85)' }
+            }
+          >
+            {o.text}
+          </span>
+        </div>
+      ))}
+
       {/* Hook zone (first 3 seconds) */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
         Hook zone · first 3s
       </div>
       {/* Bottom safe zone */}
       <div
-        className="pointer-events-none absolute left-0 w-full border-t border-rose-400/40 bg-rose-500/10"
+        className="pointer-events-none absolute left-0 z-40 w-full border-t border-rose-400/40 bg-rose-500/10"
         style={{ top: pct(SAFE_ZONES.bottom.y, LOGICAL.height), height: pct(SAFE_ZONES.bottom.h, LOGICAL.height) }}
       />
       {/* Right action rail */}
       <div
-        className="pointer-events-none absolute top-0 h-full border-l border-rose-400/40 bg-rose-500/10"
+        className="pointer-events-none absolute top-0 z-40 h-full border-l border-rose-400/40 bg-rose-500/10"
         style={{ left: pct(SAFE_ZONES.rightRail.x, LOGICAL.width), width: pct(SAFE_ZONES.rightRail.w, LOGICAL.width) }}
       />
-      <div className="pointer-events-none absolute left-2 top-2 text-[10px] uppercase tracking-wide text-zinc-500">
+      <div className="pointer-events-none absolute left-2 top-2 z-40 text-[10px] uppercase tracking-wide text-zinc-500">
         {LOGICAL.width} × {LOGICAL.height}
       </div>
     </div>
