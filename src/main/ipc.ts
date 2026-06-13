@@ -10,6 +10,7 @@ import { ensureProxy, importFile, listLibrary, removeMedia } from './services/me
 import { loadProject, saveProject } from './services/projectStore'
 import { exportProject, suggestedExportName } from './services/exporter'
 import { getSettings, updateSettings } from './services/settings'
+import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 
 const VIDEO_EXTS = [
   'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
@@ -83,6 +84,10 @@ export function registerIpcHandlers(): void {
     shell.showItemInFolder(path)
     return true
   })
+
+  ipcMain.handle(IPC.whisperAvailable, () => whisperAvailable())
+  ipcMain.handle(IPC.transcribeMedia, (_event, mediaId: string) => transcribeMedia(mediaId))
+  ipcMain.handle(IPC.getTranscript, (_event, mediaId: string) => getTranscript(mediaId))
 
   ipcMain.handle(IPC.getSettings, () => getSettings())
   ipcMain.handle(IPC.chooseExportDir, async (event) => {

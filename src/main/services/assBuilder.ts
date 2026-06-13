@@ -7,7 +7,7 @@
  * opaque box behind the text). Per-overlay position/size/colour are inline tags.
  */
 
-import type { TextOverlay } from '@shared/project'
+import type { CaptionsConfig, TextOverlay } from '@shared/project'
 import type { Target } from './exporterArgs'
 
 function assTime(sec: number): string {
@@ -38,7 +38,11 @@ function escapeText(text: string): string {
     .replace(/\r?\n/g, '\\N')
 }
 
-export function buildAss(overlays: TextOverlay[], target: Target): string {
+export function buildAss(
+  overlays: TextOverlay[],
+  target: Target,
+  captions?: CaptionsConfig | null
+): string {
   const lines = [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -51,10 +55,22 @@ export function buildAss(overlays: TextOverlay[], target: Target): string {
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     'Style: Plain,Arial,76,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,1,5,0,0,0,1',
     'Style: Pill,Arial,76,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,3,18,0,5,0,0,0,1',
+    'Style: Caption,Arial,64,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,5,1,5,0,0,0,1',
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
   ]
+
+  // Captions (auto-generated) sit at the configured baseline, above the safe zone.
+  if (captions?.enabled) {
+    for (const seg of captions.segments) {
+      if (!seg.enabled || seg.text.trim().length === 0) continue
+      const tags = `{\\an5\\pos(${Math.round(target.width / 2)},${Math.round(captions.yBaseline)})}`
+      lines.push(
+        `Dialogue: 0,${assTime(seg.startSec)},${assTime(seg.endSec)},Caption,,0,0,0,,${tags}${escapeText(seg.text)}`
+      )
+    }
+  }
 
   for (const o of overlays) {
     if (o.text.trim().length === 0) continue

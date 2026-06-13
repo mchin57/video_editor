@@ -4,6 +4,7 @@ import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import type { Settings } from '@shared/settings'
+import type { Transcript } from '@shared/transcript'
 
 /** Thin typed wrappers over the preload-exposed window.api. */
 export const getCapabilities = (): Promise<FfmpegCapabilities> => window.api.getCapabilities()
@@ -26,6 +27,12 @@ export const revealFile = (path: string): Promise<boolean> => window.api.revealF
 
 export const getSettings = (): Promise<Settings> => window.api.getSettings()
 export const chooseExportDir = (): Promise<Settings> => window.api.chooseExportDir()
+
+export const whisperAvailable = (): Promise<boolean> => window.api.whisperAvailable()
+export const transcribeMedia = (mediaId: string): Promise<Transcript> =>
+  window.api.transcribeMedia(mediaId)
+export const getTranscript = (mediaId: string): Promise<Transcript | null> =>
+  window.api.getTranscript(mediaId)
 export const pathForFile = (file: File): string => window.api.pathForFile(file)
 export const onJobProgress = (cb: (ev: JobProgressEvent) => void): (() => void) =>
   window.api.onJobProgress(cb)

@@ -17,7 +17,11 @@ export const IPC = {
   revealFile: 'shell:reveal',
   // Settings
   getSettings: 'settings:get',
-  chooseExportDir: 'settings:chooseExportDir'
+  chooseExportDir: 'settings:chooseExportDir',
+  // Captions (M4)
+  whisperAvailable: 'whisper:available',
+  transcribeMedia: 'whisper:transcribe',
+  getTranscript: 'whisper:getTranscript'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

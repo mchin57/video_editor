@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CropRect, Project, TextOverlay } from '@shared/project'
+import type { CaptionsConfig, CropRect, Project, TextOverlay } from '@shared/project'
 import { reorder, splitClip } from '@/lib/timeline'
 import { loadProject, saveProject } from '@/ipc/client'
 
@@ -36,6 +36,7 @@ interface ProjectState {
   addOverlay: (overlay: TextOverlay) => void
   updateOverlay: (id: string, patch: Partial<TextOverlay>) => void
   removeOverlay: (id: string) => void
+  setCaptions: (captions: CaptionsConfig) => void
   undo: () => void
   redo: () => void
 }
@@ -145,6 +146,8 @@ export const useProject = create<ProjectState>((set, get) => {
       })),
 
     removeOverlay: (id) => commit((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) })),
+
+    setCaptions: (captions) => commit((p) => ({ ...p, captions })),
 
     undo: () => {
       const { past, project, future } = get()

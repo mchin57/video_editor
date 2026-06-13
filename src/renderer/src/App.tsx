@@ -7,6 +7,7 @@ import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
 import { Splitter } from '@/components/Splitter'
 import { ExportButton } from '@/components/ExportButton'
+import { CaptionsButton } from '@/components/CaptionsButton'
 import { SettingsModal } from '@/components/SettingsModal'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
@@ -138,6 +139,7 @@ export default function App(): JSX.Element {
         >
           {importMedia.isPending ? 'Importing…' : 'Import video'}
         </button>
+        <CaptionsButton />
         <ExportButton />
         <button
           onClick={() => useUi.getState().setSettingsOpen(true)}

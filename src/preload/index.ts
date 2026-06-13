@@ -7,6 +7,7 @@ import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import type { Settings } from '@shared/settings'
+import type { Transcript } from '@shared/transcript'
 
 /** Typed surface exposed to the renderer as window.api. */
 const api = {
@@ -34,6 +35,13 @@ const api = {
   // Settings
   getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
   chooseExportDir: (): Promise<Settings> => ipcRenderer.invoke(IPC.chooseExportDir),
+
+  // Captions (M4)
+  whisperAvailable: (): Promise<boolean> => ipcRenderer.invoke(IPC.whisperAvailable),
+  transcribeMedia: (mediaId: string): Promise<Transcript> =>
+    ipcRenderer.invoke(IPC.transcribeMedia, mediaId),
+  getTranscript: (mediaId: string): Promise<Transcript | null> =>
+    ipcRenderer.invoke(IPC.getTranscript, mediaId),
 
   /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

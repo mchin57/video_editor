@@ -197,6 +197,10 @@ export function PreviewStage(): JSX.Element {
   }
 
   const visibleOverlays = overlaysAtTime(overlays, time)
+  const captions = project?.captions
+  const activeCaption = captions?.enabled
+    ? captions.segments.find((s) => s.enabled && time >= s.startSec && time < s.endSec)
+    : undefined
   const hasContent = previewClips.length > 0
 
   return (
@@ -269,6 +273,25 @@ export function PreviewStage(): JSX.Element {
           </span>
         </div>
       ))}
+
+      {/* Active caption (auto-generated), at the configured baseline */}
+      {activeCaption && captions && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: pct(captions.yBaseline, LOGICAL.height),
+            transform: 'translate(-50%, -50%)',
+            fontSize: `${(64 / LOGICAL.width) * 100}cqw`,
+            maxWidth: '88%',
+            color: '#ffffff',
+            textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)'
+          }}
+          className="z-30 text-center font-extrabold leading-tight"
+        >
+          {activeCaption.text}
+        </div>
+      )}
 
       {/* Hook zone (first 3 seconds) */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">

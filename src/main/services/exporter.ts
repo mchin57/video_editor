@@ -96,9 +96,10 @@ async function runExport(
   // referenced by relative name (ffmpeg cwd = tmp) to avoid filter-path escaping.
   let assFile: string | undefined
   const overlays = project.overlays.filter((o) => o.text.trim().length > 0)
-  if (overlays.length > 0) {
+  const hasCaptions = project.captions.enabled && project.captions.segments.some((s) => s.enabled)
+  if (overlays.length > 0 || hasCaptions) {
     assFile = 'overlays.ass'
-    await fsp.writeFile(join(tmp, assFile), buildAss(overlays, target), 'utf8')
+    await fsp.writeFile(join(tmp, assFile), buildAss(overlays, target, project.captions), 'utf8')
   }
 
   await fsp.mkdir(dirname(output), { recursive: true })
