@@ -15,10 +15,16 @@ const pct = (value: number, total: number): string => `${(value / total) * 100}%
 const EMPTY_CLIPS: Clip[] = []
 
 /**
- * The 9:16 playback surface. Plays the timeline (a single track of clips)
- * through one shared <video>, switching the proxy source at clip boundaries.
- * When the timeline is empty it falls back to previewing the library selection,
- * so a freshly imported clip is still watchable before it's added.
+ * The 9:16 playback surface. Plays the timeline (one track of clips) through a
+ * single <video> keyed by the active media id, so React swaps the proxy source
+ * cleanly at clip boundaries. When the timeline is empty it previews the library
+ * selection instead, so a freshly imported clip is still watchable.
+ *
+ * Clock model:
+ *   - playing → the <video> is the clock; a rAF loop reads currentTime, advances
+ *     the timeline `time`, and hops to the next clip at each out-point.
+ *   - paused  → `time` is the clock; an effect seeks the <video> to the playhead.
+ * The two never run at once, so there's no feedback fight.
  */
 export function PreviewStage(): JSX.Element {
   const project = useProject((s) => s.project)
@@ -29,8 +35,6 @@ export function PreviewStage(): JSX.Element {
 
   const time = usePlayback((s) => s.time)
   const playing = usePlayback((s) => s.playing)
-  const setTime = usePlayback((s) => s.setTime)
-  const setPlaying = usePlayback((s) => s.setPlaying)
 
   const selectedAsset = selectedLibId ? assetById.get(selectedLibId) : undefined
   const previewClips: Clip[] = useMemo(() => {
@@ -55,36 +59,39 @@ export function PreviewStage(): JSX.Element {
   const pos = locate(previewClips, time)
   const activeClip = pos?.clip ?? null
   const activeAsset = activeClip ? assetById.get(activeClip.mediaId) : undefined
-  const ready = Boolean(activeAsset?.proxyReady)
+  const activeMediaId = activeAsset?.proxyReady ? activeAsset.id : null
+  const ready = activeMediaId != null
 
   const videoRef = useRef<HTMLVideoElement>(null)
-  const loadedIdRef = useRef<string | null>(null)
 
-  // Load the active proxy on media change; reseek while paused/scrubbing.
-  useEffect(() => {
+  // Live refs so the rAF loop reads current values without re-subscribing.
+  const clipsRef = useRef(previewClips)
+  clipsRef.current = previewClips
+  const startsRef = useRef(starts)
+  startsRef.current = starts
+  const posRef = useRef(pos)
+  posRef.current = pos
+
+  // On (re)mount of a media source, seek to the right spot and resume if playing.
+  const onLoadedMetadata = (): void => {
     const v = videoRef.current
-    if (!v || !activeAsset?.proxyReady || !pos) return undefined
-    if (loadedIdRef.current !== activeAsset.id) {
-      loadedIdRef.current = activeAsset.id
-      v.src = proxyUrl(activeAsset.id)
-      v.load()
-      const seekTo = pos.sourceTime
-      const onMeta = (): void => {
-        v.currentTime = seekTo
-        if (usePlayback.getState().playing) void v.play()
-      }
-      v.addEventListener('loadedmetadata', onMeta, { once: true })
-      return () => v.removeEventListener('loadedmetadata', onMeta)
-    }
-    if (!playing && Math.abs(v.currentTime - pos.sourceTime) > 0.08) {
+    const p = posRef.current
+    if (!v || !p) return
+    v.currentTime = p.sourceTime
+    v.muted = p.clip.mute
+    if (usePlayback.getState().playing) void v.play().catch(() => {})
+  }
+
+  // Paused/scrubbing: keep the video parked at the playhead.
+  useEffect(() => {
+    if (playing) return
+    const v = videoRef.current
+    if (v && pos && v.readyState >= 1 && Math.abs(v.currentTime - pos.sourceTime) > 0.06) {
       v.currentTime = pos.sourceTime
     }
-    return undefined
-  }, [activeAsset?.id, activeAsset?.proxyReady, pos?.sourceTime, playing])
+  }, [playing, pos?.sourceTime])
 
-  // Start/stop. The seek effect already parks the <video> at the playhead while
-  // paused, so resume-from-playhead works without gating play. We only special-
-  // case "parked at the end" → restart from 0. play() is always attempted.
+  // Play/pause the element (restart from 0 if parked at the very end).
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
@@ -92,55 +99,68 @@ export function PreviewStage(): JSX.Element {
       v.pause()
       return
     }
-    const total = timelineDuration(previewClips)
-    if (usePlayback.getState().time >= total - 0.05) {
-      setTime(0)
-      const first = locate(previewClips, 0)
-      if (first && loadedIdRef.current === first.clip.mediaId) v.currentTime = first.sourceTime
+    if (usePlayback.getState().time >= timelineDuration(clipsRef.current) - 0.05) {
+      usePlayback.getState().setTime(0)
+      const first = locate(clipsRef.current, 0)
+      if (first && first.clip.mediaId === activeMediaId) v.currentTime = first.sourceTime
     }
     void v.play().catch(() => {})
-  }, [playing, ready, previewClips, setTime])
+  }, [playing, ready, activeMediaId])
 
-  useEffect(() => {
-    const v = videoRef.current
-    if (v && activeClip) v.muted = activeClip.mute
-  }, [activeClip])
-
-  // During playback the video is the clock and drives clip advancement.
+  // The clock. Depends only on `playing`; reads everything else from refs so it
+  // runs uninterrupted across clip boundaries.
   useEffect(() => {
     if (!playing) return undefined
     let raf = 0
     const tick = (): void => {
       const v = videoRef.current
-      if (v && pos && activeClip) {
-        if (v.currentTime >= activeClip.outSec - 0.03) {
-          const nextIndex = pos.index + 1
-          if (nextIndex < previewClips.length) {
-            const next = previewClips[nextIndex]
-            setTime(starts[nextIndex] ?? 0)
-            if (next.mediaId === activeClip.mediaId) v.currentTime = next.inSec
+      const clips = clipsRef.current
+      const startsNow = startsRef.current
+      const { setTime, setPlaying } = usePlayback.getState()
+      // Skip until the (possibly just-swapped) source has a real currentTime.
+      if (v && v.readyState >= 2 && clips.length) {
+        const p = locate(clips, usePlayback.getState().time)
+        if (p) {
+          if (v.currentTime >= p.clip.outSec - 0.04) {
+            const nextIdx = p.index + 1
+            if (nextIdx < clips.length) {
+              const next = clips[nextIdx]
+              setTime(startsNow[nextIdx] ?? 0)
+              if (next.mediaId === p.clip.mediaId && Math.abs(v.currentTime - next.inSec) > 0.05) {
+                v.currentTime = next.inSec
+              }
+            } else {
+              setPlaying(false)
+              setTime(timelineDuration(clips))
+              return
+            }
           } else {
-            setPlaying(false)
-            setTime(timelineDuration(previewClips))
-            return
+            setTime((startsNow[p.index] ?? 0) + Math.max(0, v.currentTime - p.clip.inSec))
           }
-        } else {
-          setTime((starts[pos.index] ?? 0) + Math.max(0, v.currentTime - activeClip.inSec))
         }
       }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing, pos?.index, activeClip, previewClips, starts, setTime, setPlaying])
+  }, [playing])
+
+  // Keep mute in sync when switching clips while paused.
+  useEffect(() => {
+    const v = videoRef.current
+    if (v && activeClip) v.muted = activeClip.mute
+  }, [activeClip])
 
   const hasContent = previewClips.length > 0
 
   return (
     <div className="relative aspect-[9/16] h-full overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-white/10">
       <video
+        key={activeMediaId ?? 'empty'}
         ref={videoRef}
+        src={activeMediaId ? proxyUrl(activeMediaId) : undefined}
         playsInline
+        onLoadedMetadata={onLoadedMetadata}
         onClick={() => usePlayback.getState().toggle()}
         className={`absolute inset-0 h-full w-full bg-black object-contain ${ready ? '' : 'opacity-0'}`}
       />
