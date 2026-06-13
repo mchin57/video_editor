@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { useLibrary, useImportMedia, useRemoveMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
+import { useProject } from '@/state/projectStore'
 import { formatDuration } from '@/lib/format'
 import { thumbUrl } from '@/ipc/client'
 
@@ -43,6 +44,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const selectedId = useEditor((s) => s.selectedId)
   const select = useEditor((s) => s.select)
   const job = useEditor((s) => (asset.id in s.proxyJobs ? s.proxyJobs[asset.id] : undefined))
+  const addClip = useProject((s) => s.addClip)
   const remove = useRemoveMedia()
 
   const v = asset.probe.video
@@ -86,19 +88,35 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
         </div>
       </div>
 
-      <span
-        role="button"
-        tabIndex={-1}
-        onClick={(e) => {
-          e.stopPropagation()
-          if (selected) select(null)
-          remove.mutate(asset.id)
-        }}
-        className="self-start rounded px-1 text-zinc-600 opacity-0 transition hover:text-rose-400 group-hover:opacity-100"
-        title="Remove from library"
-      >
-        ×
-      </span>
+      <div className="flex flex-col items-center gap-1">
+        <span
+          role="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (asset.proxyReady) addClip(asset.id, asset.probe.durationSec)
+          }}
+          className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
+            asset.proxyReady ? '' : 'pointer-events-none opacity-30'
+          }`}
+          title="Add to timeline"
+        >
+          ＋
+        </span>
+        <span
+          role="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (selected) select(null)
+            remove.mutate(asset.id)
+          }}
+          className="rounded px-1 text-zinc-600 opacity-0 transition hover:text-rose-400 group-hover:opacity-100"
+          title="Remove from library"
+        >
+          ×
+        </span>
+      </div>
     </button>
   )
 }

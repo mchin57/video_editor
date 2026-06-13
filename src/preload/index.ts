@@ -4,6 +4,7 @@ import { IPC, IPC_EVENT } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
+import type { Project } from '@shared/project'
 
 /** Typed surface exposed to the renderer as window.api. */
 const api = {
@@ -16,6 +17,10 @@ const api = {
   listLibrary: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.listLibrary),
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
   removeMedia: (id: string): Promise<void> => ipcRenderer.invoke(IPC.removeMedia, id),
+
+  // Project (M2)
+  loadProject: (): Promise<Project> => ipcRenderer.invoke(IPC.loadProject),
+  saveProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.saveProject, project),
 
   /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

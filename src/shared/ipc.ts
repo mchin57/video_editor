@@ -8,7 +8,10 @@ export const IPC = {
   importPaths: 'media:importPaths',
   listLibrary: 'media:list',
   ensureProxy: 'media:ensureProxy',
-  removeMedia: 'media:remove'
+  removeMedia: 'media:remove',
+  // Project (M2)
+  loadProject: 'project:load',
+  saveProject: 'project:save'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

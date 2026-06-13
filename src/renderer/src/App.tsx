@@ -3,15 +3,24 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Library } from '@/components/Library'
 import { PreviewStage } from '@/components/PreviewStage'
 import { Inspector } from '@/components/Inspector'
+import { Timeline } from '@/components/Timeline'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
+import { useProject } from '@/state/projectStore'
+import { usePlayback } from '@/state/playback'
+import { locate } from '@/lib/timeline'
 
 export default function App(): JSX.Element {
   const queryClient = useQueryClient()
   const importMedia = useImportMedia()
   const [dragging, setDragging] = useState(false)
+
+  // Load the persisted project once on startup.
+  useEffect(() => {
+    void useProject.getState().load()
+  }, [])
 
   // Subscribe to background job progress; refresh library when a proxy lands.
   useEffect(() => {
@@ -23,6 +32,40 @@ export default function App(): JSX.Element {
       }
     })
   }, [queryClient])
+
+  // Keyboard shortcuts: space play/pause, Ctrl+Z/Y undo/redo, Del delete, S split.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+      const project = useProject.getState()
+      if (e.code === 'Space') {
+        e.preventDefault()
+        usePlayback.getState().toggle()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) project.redo()
+        else project.undo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        project.redo()
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (project.selectedClipId) {
+          e.preventDefault()
+          project.removeClip(project.selectedClipId)
+        }
+      } else if (e.key.toLowerCase() === 's') {
+        const clips = project.project?.clips ?? []
+        const idx = clips.findIndex((c) => c.id === project.selectedClipId)
+        const pos = locate(clips, usePlayback.getState().time)
+        if (idx >= 0 && pos && pos.index === idx) project.splitClipAt(clips[idx].id, pos.localTime)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const onDrop = (e: DragEvent): void => {
     e.preventDefault()
@@ -74,8 +117,8 @@ export default function App(): JSX.Element {
         </aside>
       </div>
 
-      <div className="flex h-28 items-center justify-center border-t border-white/10 bg-black/20 text-xs text-zinc-600">
-        Timeline (M2)
+      <div className="h-40 border-t border-white/10 bg-black/20">
+        <Timeline />
       </div>
 
       <StatusFooter />
