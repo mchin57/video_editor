@@ -7,6 +7,7 @@ import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
 import { Splitter } from '@/components/Splitter'
 import { ExportButton } from '@/components/ExportButton'
+import { SettingsModal } from '@/components/SettingsModal'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
@@ -97,6 +98,7 @@ export default function App(): JSX.Element {
         }
       } else if (e.key === 'Escape') {
         useUi.getState().setCropEditing(false)
+        useUi.getState().setSettingsOpen(false)
         useUi.getState().selectOverlay(null)
       }
     }
@@ -137,6 +139,13 @@ export default function App(): JSX.Element {
           {importMedia.isPending ? 'Importing…' : 'Import video'}
         </button>
         <ExportButton />
+        <button
+          onClick={() => useUi.getState().setSettingsOpen(true)}
+          title="Settings"
+          className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+        >
+          ⚙
+        </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -174,6 +183,7 @@ export default function App(): JSX.Element {
       <StatusFooter />
 
       <CropEditor />
+      <SettingsModal />
 
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">

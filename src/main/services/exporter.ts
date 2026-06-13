@@ -6,7 +6,7 @@
  */
 
 import { promises as fsp } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir } from '../config'
@@ -27,19 +27,34 @@ function sanitize(name: string): string {
   return name.replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'reel'
 }
 
-export async function exportProject(project: Project, opts: ExportOptions): Promise<string> {
+/** Suggested output filename for the Save dialog. */
+export function suggestedExportName(projectName: string, preset: PresetId): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  return `${sanitize(projectName)}_${preset}_${stamp}.mp4`
+}
+
+export async function exportProject(
+  project: Project,
+  opts: ExportOptions,
+  outputPath: string
+): Promise<string> {
   const job = createJob('export', `Export · ${project.name}`, project.id)
   try {
-    const output = await runExport(project, opts, job.id)
-    finishJob(job.id, output)
-    return output
+    await runExport(project, opts, job.id, outputPath)
+    finishJob(job.id, outputPath)
+    return outputPath
   } catch (error) {
     failJob(job.id, error instanceof Error ? error.message : String(error))
     throw error
   }
 }
 
-async function runExport(project: Project, opts: ExportOptions, jobId: string): Promise<string> {
+async function runExport(
+  project: Project,
+  opts: ExportOptions,
+  jobId: string,
+  output: string
+): Promise<string> {
   if (project.clips.length === 0) throw new Error('Timeline is empty — add a clip first.')
 
   const target = targetForPreset(opts.preset)
@@ -76,8 +91,7 @@ async function runExport(project: Project, opts: ExportOptions, jobId: string): 
   const listPath = join(tmp, 'concat.txt')
   await fsp.writeFile(listPath, listLines.join('\n'), 'utf8')
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const output = join(getSubdir('exports'), `${sanitize(project.name)}_${opts.preset}_${stamp}.mp4`)
+  await fsp.mkdir(dirname(output), { recursive: true })
   const finalArgs = buildFinalArgs(listPath, output, caps, { preferNvenc: opts.preferNvenc })
   await runFfmpeg(ffmpeg, finalArgs, totalDur, (p) => setProgress(jobId, NORMALIZE_SHARE + p * (1 - NORMALIZE_SHARE)))
 

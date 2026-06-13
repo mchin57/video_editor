@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -7,7 +8,8 @@ import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
 import { ensureProxy, importFile, listLibrary, removeMedia } from './services/mediaStore'
 import { loadProject, saveProject } from './services/projectStore'
-import { exportProject } from './services/exporter'
+import { exportProject, suggestedExportName } from './services/exporter'
+import { getSettings, updateSettings } from './services/settings'
 
 const VIDEO_EXTS = [
   'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
@@ -61,11 +63,36 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC.exportProject,
-    (_event, project: Project, opts: { preset: PresetId; preferNvenc: boolean }) =>
-      exportProject(project, opts)
+    async (event, project: Project, opts: { preset: PresetId; preferNvenc: boolean }) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const settings = await getSettings()
+      const defaultPath = join(settings.exportDir, suggestedExportName(project.name, opts.preset))
+      const options: Electron.SaveDialogOptions = {
+        title: 'Export Reel',
+        defaultPath,
+        filters: [{ name: 'MP4 Video', extensions: ['mp4'] }]
+      }
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return null
+      return exportProject(project, opts, result.filePath)
+    }
   )
   ipcMain.handle(IPC.revealFile, (_event, path: string) => {
     shell.showItemInFolder(path)
     return true
+  })
+
+  ipcMain.handle(IPC.getSettings, () => getSettings())
+  ipcMain.handle(IPC.chooseExportDir, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Choose default export folder',
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return getSettings()
+    return updateSettings({ exportDir: result.filePaths[0] })
   })
 }

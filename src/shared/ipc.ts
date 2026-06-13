@@ -14,7 +14,10 @@ export const IPC = {
   saveProject: 'project:save',
   // Export (M3)
   exportProject: 'export:run',
-  revealFile: 'shell:reveal'
+  revealFile: 'shell:reveal',
+  // Settings
+  getSettings: 'settings:get',
+  chooseExportDir: 'settings:chooseExportDir'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

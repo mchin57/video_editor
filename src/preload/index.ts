@@ -6,6 +6,7 @@ import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
+import type { Settings } from '@shared/settings'
 
 /** Typed surface exposed to the renderer as window.api. */
 const api = {
@@ -23,10 +24,16 @@ const api = {
   loadProject: (): Promise<Project> => ipcRenderer.invoke(IPC.loadProject),
   saveProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.saveProject, project),
 
-  // Export (M3)
-  exportProject: (project: Project, opts: { preset: PresetId; preferNvenc: boolean }): Promise<string> =>
-    ipcRenderer.invoke(IPC.exportProject, project, opts),
+  // Export (M3) — returns the output path, or null if the Save dialog was canceled.
+  exportProject: (
+    project: Project,
+    opts: { preset: PresetId; preferNvenc: boolean }
+  ): Promise<string | null> => ipcRenderer.invoke(IPC.exportProject, project, opts),
   revealFile: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.revealFile, path),
+
+  // Settings
+  getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
+  chooseExportDir: (): Promise<Settings> => ipcRenderer.invoke(IPC.chooseExportDir),
 
   /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

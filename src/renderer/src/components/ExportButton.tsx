@@ -22,7 +22,7 @@ export function ExportButton(): JSX.Element {
     setError(null)
     try {
       const path = await exportProject(project, { preset: 'reel', preferNvenc: true })
-      setOutput(path)
+      if (path) setOutput(path) // null = Save dialog canceled
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
