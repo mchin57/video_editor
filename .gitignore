@@ -45,3 +45,6 @@ coverage/
 # Misc scratch
 tmp/
 *.local
+
+# Local test media (synthetic clips for manual testing)
+samples/

@@ -2,6 +2,10 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
+import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaProtocol'
+
+// Must be declared before app 'ready'.
+registerMediaSchemePrivileges()
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -37,6 +41,7 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.reeleditor.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
+  registerMediaProtocol()
   registerIpcHandlers()
   createWindow()
 

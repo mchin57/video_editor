@@ -2,7 +2,13 @@
 
 export const IPC = {
   getCapabilities: 'system:getCapabilities',
-  getDataDir: 'system:getDataDir'
+  getDataDir: 'system:getDataDir',
+  // Media library (M1)
+  importDialog: 'media:importDialog',
+  importPaths: 'media:importPaths',
+  listLibrary: 'media:list',
+  ensureProxy: 'media:ensureProxy',
+  removeMedia: 'media:remove'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

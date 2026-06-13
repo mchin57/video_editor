@@ -6,10 +6,11 @@
 
 ## TL;DR — where we are right now
 
-- **Phase:** Planning is **complete and approved-in-substance**. No application code exists yet. The repo has been initialized (git, `.gitignore`, `README.md`, `docs/PLAN.md`, this file).
-- **Next action:** Begin **Milestone M0** (environment install + Electron scaffold). See "Exact next step" at the bottom.
-- **Stack is settled:** Electron + TypeScript (React 19 + Vite + Tailwind 4) orchestrating ffmpeg + whisper.cpp. *Not* Python. *Not* a browser web app.
+- **Phase:** **M0 complete and verified** (2026-06-12). The app builds, typechecks, tests pass, and the Electron window launches with a working ffmpeg/NVENC capability probe (confirmed on screen). All work is on branch **`prototype`** (per owner instruction — do all build work there, not `main`).
+- **Next action:** Begin **Milestone M1** (media import → ffprobe → proxy job → player → library). See "Exact next step" at the bottom.
+- **Stack is settled and now real:** Electron 42 + TypeScript (React 19 + Vite 7 + Tailwind 4 + zustand + react-query) orchestrating ffmpeg (+ whisper.cpp later). *Not* Python. *Not* a browser web app.
 - **The full plan lives in [`PLAN.md`](PLAN.md)** in this folder (also mirrored at `C:\Users\57tuc\.claude\plans\build-a-video-editing-glowing-torvalds.md`). Read it in full before writing code.
+- **To run:** `npm install` then `npm run dev` (must prepend Node to PATH in agent shells — see env note). `npm run build` / `npm run typecheck` / `npm test` all green.
 
 ---
 
@@ -41,12 +42,13 @@ Owner preferences (from the strategy vault's "how to behave" note): prefers **co
 | GPU | **NVIDIA RTX 4070 Ti Super** (NVENC h264/hevc + CUDA) + Intel UHD 770 |
 | CPU | **i9-14900K** |
 | RAM | 31.8 GB |
-| ffmpeg | **NOT installed** — install `Gyan.FFmpeg` (full build) via winget |
-| Node | **NOT installed** — install `OpenJS.NodeJS.LTS` via winget |
+| ffmpeg | **INSTALLED 2026-06-12** — `Gyan.FFmpeg` full build **8.1.1** via winget. Verified present: `h264_nvenc`, `hevc_nvenc`, `libx264`, `aac`, and filters `ass`, `subtitles`, `zscale`, `tonemap`, `sidechaincompress`, `showwavespic`. Binary at `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-8.1.1-full_build\bin\`. |
+| Node | **ALREADY INSTALLED** — v24.16.0 / npm 11.13.0 at `C:\Program Files\nodejs` (on the Machine PATH). It was never missing; the earlier "not installed" claim was wrong — a bare PATH lookup in the *agent* shell fails (see env note below). |
+| **Agent-shell PATH** | The harness launches its tool shells (`bash -c`, PowerShell `-NoProfile`) with a **stripped PATH** that excludes the Windows Machine PATH and **ignores `~/.bashrc` and the PS profile**. To run node/npm/ffmpeg from a tool shell, prepend the dir: `export PATH="/c/Program Files/nodejs:$PATH"`. Verified — do not waste time re-testing profile files. |
 | Docker | Installed (v29.4.0) — not needed for this project |
 | conda | miniconda3 at `C:\Users\57tuc\miniconda3` (no longer relevant after pivot off Python) |
 | git | v2.53.0; global user.name = `mchin57` |
-| Project dir | `C:\Users\57tuc\Desktop\Code\video_editor` — git initialized, branch `main` |
+| Project dir | `C:\Users\57tuc\Desktop\Code\video_editor` — git initialized. **Active branch: `prototype`** (build here; `main` holds only planning/handoff commits). |
 
 **Reference for conventions** (his other project, if you want to mirror code style): `C:\Users\57tuc\Desktop\Code\coaching_webapp` — React 19 + Vite + TS + Tailwind 4 (`@tailwindcss/vite`, `@` alias, `/api` proxy), `@tanstack/react-query`, eslint 9 + prettier + vitest. The renderer of *this* project should feel familiar to him (same React/Vite/Tailwind/react-query/vitest tooling).
 
@@ -91,12 +93,12 @@ Owner preferences (from the strategy vault's "how to behave" note): prefers **co
 
 ---
 
-## Milestones (resume marker: ⬜ none started)
+## Milestones (resume marker: ✅ M0 done → M1 next)
 
 | # | Scope | Status |
 |---|---|---|
-| M0 | winget installs; electron-vite + Tailwind scaffold; ffmpeg discovery + capability probe; localhost media server; status footer | ⬜ next |
-| M1 | Import + ffprobe + proxy job + player + safe-zone overlay | ⬜ |
+| M0 | winget installs; electron-vite + Tailwind scaffold; ffmpeg discovery + capability probe; status footer | ✅ **done 2026-06-12** (localhost media server deferred to M1, where the player needs it) |
+| M1 | Import + ffprobe + proxy job + player + safe-zone overlay | ⬜ **next** |
 | M2 | Timeline (trim/split/reorder/delete), playback engine, crop tool, hook overlays + 3s marker, undo, autosave | ⬜ |
 | M3 | Export pipeline + Reel preset + NVENC fallback | ⬜ |
 | M4 | whisper.cpp + caption editor + ASS burn | ⬜ |
@@ -109,13 +111,17 @@ Each milestone's "done when" acceptance test is in PLAN.md §Milestones. End-to-
 
 ## Exact next step (for the resuming iteration)
 
-1. Re-read `docs/PLAN.md` fully.
-2. Confirm with the owner whether to (a) install prerequisites and scaffold now, or (b) keep planning. (The last ExitPlanMode was never approved — he diverted to "save state" + a model switch. **Do not assume build approval; confirm first.**)
-3. If approved, execute **M0**:
-   - `winget install Gyan.FFmpeg OpenJS.NodeJS.LTS`
-   - Scaffold electron-vite (React + TS), add Tailwind 4, eslint/prettier/vitest (mirror coaching_webapp config).
-   - Implement `src/main/services/ffmpeg.ts` discovery + capability probe; surface ffmpeg path + NVENC=yes/no in a status footer.
-   - Commit locally. **Do NOT `git push`** — the owner runs pushes himself.
+M0 is done. Begin **M1** on the `prototype` branch:
+
+1. Skim `docs/PLAN.md` §"Core pipelines" (proxy command) and §Milestones M1 acceptance test.
+2. Build, roughly in this order (test-first where pure):
+   - `src/main/services/ffprobe.ts` — run `ffprobe -show_streams -show_format -print_format json`; parse into `ProbeInfo` (`src/shared/media.ts`). Handle **rotation** (displaymatrix side-data → displayW/H), **VFR** (avg vs r frame rate), **HDR** (transfer `smpte2084`/`arib-std-b67`). Unit-test the parser against captured JSON fixtures.
+   - `src/main/services/mediaStore.ts` — content-hash import into `%USERPROFILE%\Documents\VideoEditor\media\{hash}\`, keep original, write probe.json.
+   - `src/main/services/jobs.ts` + `proxy.ts` — H.264 proxy transcode (tonemap if HDR), progress pushed to renderer over IPC.
+   - Media serving for `<video>` — `protocol.registerFileProtocol` (or small localhost server) so the renderer can play proxies.
+   - Renderer: Library panel (clips + thumbnails, dialog + drag-drop import), player wired to the existing 9:16 `PreviewStage` + safe-zone overlay.
+3. **Verification needs a real iPhone clip** (HEVC + rotation + VFR). Ask the owner to drop one in; synthetic `testsrc` clips only exercise the mechanics.
+4. **Do NOT `git push`** — owner runs pushes himself. (And per owner: light checkpointing on `prototype` — don't over-document.)
 
 ## Guardrails carried over
 

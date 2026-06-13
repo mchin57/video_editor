@@ -21,8 +21,11 @@ export interface Job {
 /** Event pushed from main → renderer over IPC as a job advances. */
 export interface JobProgressEvent {
   id: string
+  type: JobType
   status: JobStatus
   progress: number
   label: string
+  /** mediaId / projectId / output path the job concerns (lets the UI react). */
+  subjectId?: string
   error?: string
 }

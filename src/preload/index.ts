@@ -1,12 +1,31 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC } from '@shared/ipc'
+import { IPC, IPC_EVENT } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
+import type { MediaAsset } from '@shared/media'
+import type { JobProgressEvent } from '@shared/jobs'
 
 /** Typed surface exposed to the renderer as window.api. */
 const api = {
   getCapabilities: (): Promise<FfmpegCapabilities> => ipcRenderer.invoke(IPC.getCapabilities),
-  getDataDir: (): Promise<string> => ipcRenderer.invoke(IPC.getDataDir)
+  getDataDir: (): Promise<string> => ipcRenderer.invoke(IPC.getDataDir),
+
+  // Media library (M1)
+  importDialog: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importDialog),
+  importPaths: (paths: string[]): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importPaths, paths),
+  listLibrary: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.listLibrary),
+  ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
+  removeMedia: (id: string): Promise<void> => ipcRenderer.invoke(IPC.removeMedia, id),
+
+  /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
+
+  /** Subscribe to background job progress. Returns an unsubscribe function. */
+  onJobProgress: (cb: (ev: JobProgressEvent) => void): (() => void) => {
+    const handler = (_e: unknown, ev: JobProgressEvent): void => cb(ev)
+    ipcRenderer.on(IPC_EVENT.jobProgress, handler)
+    return () => ipcRenderer.removeListener(IPC_EVENT.jobProgress, handler)
+  }
 }
 
 export type RendererApi = typeof api
