@@ -14,6 +14,7 @@ import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import { buildFinalArgs, buildNormalizeArgs, targetForPreset } from './exporterArgs'
+import { buildAss } from './assBuilder'
 import { runFfmpeg } from './ffmpegRun'
 
 export interface ExportOptions {
@@ -91,9 +92,24 @@ async function runExport(
   const listPath = join(tmp, 'concat.txt')
   await fsp.writeFile(listPath, listLines.join('\n'), 'utf8')
 
+  // Burn text overlays (if any) via an ASS pass in the final encode. The file is
+  // referenced by relative name (ffmpeg cwd = tmp) to avoid filter-path escaping.
+  let assFile: string | undefined
+  const overlays = project.overlays.filter((o) => o.text.trim().length > 0)
+  if (overlays.length > 0) {
+    assFile = 'overlays.ass'
+    await fsp.writeFile(join(tmp, assFile), buildAss(overlays, target), 'utf8')
+  }
+
   await fsp.mkdir(dirname(output), { recursive: true })
-  const finalArgs = buildFinalArgs(listPath, output, caps, { preferNvenc: opts.preferNvenc })
-  await runFfmpeg(ffmpeg, finalArgs, totalDur, (p) => setProgress(jobId, NORMALIZE_SHARE + p * (1 - NORMALIZE_SHARE)))
+  const finalArgs = buildFinalArgs(listPath, output, caps, { preferNvenc: opts.preferNvenc, assFile })
+  await runFfmpeg(
+    ffmpeg,
+    finalArgs,
+    totalDur,
+    (p) => setProgress(jobId, NORMALIZE_SHARE + p * (1 - NORMALIZE_SHARE)),
+    tmp
+  )
 
   await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {})
   return output

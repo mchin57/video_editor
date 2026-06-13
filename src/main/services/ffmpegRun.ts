@@ -8,10 +8,11 @@ export function runFfmpeg(
   ffmpeg: string,
   args: string[],
   durationSec: number,
-  onProgress?: (p: number) => void
+  onProgress?: (p: number) => void,
+  cwd?: string
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(ffmpeg, args, { windowsHide: true })
+    const child = spawn(ffmpeg, args, { windowsHide: true, cwd })
     let tail = ''
     child.stdout.on('data', (buf: Buffer) => {
       const last = [...buf.toString().matchAll(/out_time_(?:us|ms)=(\d+)/g)].at(-1)

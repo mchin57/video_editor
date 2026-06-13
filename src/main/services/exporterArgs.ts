@@ -110,17 +110,25 @@ export function buildNormalizeArgs(
   return args
 }
 
-/** Concat the normalized segments and encode the delivery file once. */
+/**
+ * Concat the normalized segments and encode the delivery file once.
+ * `assFile` is a filename RELATIVE to ffmpeg's cwd (the temp dir) — referencing
+ * the ASS by relative name sidesteps the Windows drive-colon escaping mess in
+ * filtergraph option values.
+ */
 export function buildFinalArgs(
   listPath: string,
   output: string,
   caps: FfmpegCapabilities,
-  opts: { preferNvenc: boolean }
+  opts: { preferNvenc: boolean; assFile?: string }
 ): string[] {
   const nvenc = opts.preferNvenc && caps.encoders.h264_nvenc
   const videoArgs = nvenc
     ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0']
     : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20']
+
+  // Burn text overlays via the ass filter (re-encodes video, which we do anyway).
+  const filterArgs = opts.assFile ? ['-vf', `ass=${opts.assFile}`] : []
 
   return [
     '-y',
@@ -132,6 +140,7 @@ export function buildFinalArgs(
     '0',
     '-i',
     listPath,
+    ...filterArgs,
     ...videoArgs,
     '-pix_fmt',
     'yuv420p',
