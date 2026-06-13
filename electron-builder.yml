@@ -1,0 +1,17 @@
+appId: com.reeleditor.app
+productName: Reel Editor
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+asarUnpack:
+  - resources/**
+win:
+  target: nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
