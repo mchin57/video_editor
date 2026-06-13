@@ -9,6 +9,9 @@ import { thumbUrl } from '@/ipc/client'
 const PX_PER_SEC = 48
 const HOOK_SEC = 3
 
+// Stable empty reference (see PreviewStage note) to avoid re-render loops.
+const EMPTY_CLIPS: Clip[] = []
+
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 function tc(sec: number): string {
@@ -42,7 +45,8 @@ function ToolbarButton({
 }
 
 export function Timeline(): JSX.Element {
-  const clips = useProject((s) => s.project?.clips ?? [])
+  const project = useProject((s) => s.project)
+  const clips = project?.clips ?? EMPTY_CLIPS
   const selectedClipId = useProject((s) => s.selectedClipId)
   const selectClip = useProject((s) => s.selectClip)
   const removeClip = useProject((s) => s.removeClip)

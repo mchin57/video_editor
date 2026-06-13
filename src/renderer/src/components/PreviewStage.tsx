@@ -10,6 +10,10 @@ import { clipStartTimes, locate, timelineDuration } from '@/lib/timeline'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
 
+// Stable empty reference so the zustand selector doesn't return a new array each
+// render (which would make getSnapshot uncacheable → infinite re-render loop).
+const EMPTY_CLIPS: Clip[] = []
+
 /**
  * The 9:16 playback surface. Plays the timeline (a single track of clips)
  * through one shared <video>, switching the proxy source at clip boundaries.
@@ -17,7 +21,8 @@ const pct = (value: number, total: number): string => `${(value / total) * 100}%
  * so a freshly imported clip is still watchable before it's added.
  */
 export function PreviewStage(): JSX.Element {
-  const projectClips = useProject((s) => s.project?.clips ?? [])
+  const project = useProject((s) => s.project)
+  const projectClips = project?.clips ?? EMPTY_CLIPS
   const selectedLibId = useEditor((s) => s.selectedId)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])

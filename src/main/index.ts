@@ -25,6 +25,21 @@ function createWindow(): void {
 
   win.on('ready-to-show', () => win.show())
 
+  if (is.dev) {
+    // Surface renderer console + crashes in the dev terminal for debugging.
+    win.webContents.on('console-message', (...args: unknown[]) => {
+      const ev = args[0] as { message?: string; level?: string }
+      const message = ev && typeof ev === 'object' && 'message' in ev ? ev.message : args[2]
+      console.log('[renderer]', message)
+    })
+    win.webContents.on('render-process-gone', (_e, details) =>
+      console.log('[render-process-gone]', JSON.stringify(details))
+    )
+    win.webContents.on('preload-error', (_e, path, error) =>
+      console.log('[preload-error]', path, error?.message)
+    )
+  }
+
   win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
