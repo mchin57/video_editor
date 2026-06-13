@@ -12,6 +12,7 @@ import type { MediaAsset } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy } from './proxy'
+import { generateThumbnail } from './thumbnail'
 import { createJob, failJob, finishJob } from './jobs'
 
 function hashFile(path: string): Promise<string> {
@@ -26,7 +27,18 @@ function hashFile(path: string): Promise<string> {
 
 const mediaDir = (id: string): string => join(getSubdir('media'), id)
 const proxyPath = (id: string): string => join(mediaDir(id), 'proxy.mp4')
+const thumbPath = (id: string): string => join(mediaDir(id), 'thumb.jpg')
 const assetJsonPath = (id: string): string => join(mediaDir(id), 'asset.json')
+
+/** Best-effort first-frame thumbnail; never fails the import if it errors. */
+async function makeThumb(asset: MediaAsset): Promise<void> {
+  if (!asset.probe.video || existsSync(thumbPath(asset.id))) return
+  try {
+    await generateThumbnail(asset.originalPath, thumbPath(asset.id), asset.probe)
+  } catch (error) {
+    console.error('thumbnail failed for', asset.id, error)
+  }
+}
 
 async function readAsset(id: string): Promise<MediaAsset | null> {
   try {
@@ -48,6 +60,7 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
   const existing = await readAsset(id)
   if (existing) {
     existing.proxyReady = existsSync(proxyPath(id))
+    await makeThumb(existing) // backfill for assets imported before thumbnails
     return existing
   }
 
@@ -62,6 +75,7 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
     transcribed: existsSync(join(mediaDir(id), 'transcript.json'))
   }
   await writeAsset(asset)
+  await makeThumb(asset)
   return asset
 }
 
@@ -71,6 +85,7 @@ export async function ensureProxy(id: string): Promise<void> {
   const asset = await readAsset(id)
   if (!asset) throw new Error(`unknown media ${id}`)
 
+  await makeThumb(asset) // ensure a thumbnail exists even if import-time gen failed
   const job = createJob('proxy', `Proxy · ${asset.fileName}`, id)
   try {
     await generateProxy(asset.originalPath, proxyPath(id), asset.probe, job.id)

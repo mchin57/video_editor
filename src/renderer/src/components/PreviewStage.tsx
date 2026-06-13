@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
-import { proxyUrl } from '@/ipc/client'
+import { proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 
@@ -26,8 +26,16 @@ export function PreviewStage(): JSX.Element {
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-zinc-600">
           {asset ? (
             <>
-              <span>Generating preview…</span>
-              <span className="text-xs text-sky-400/80">{Math.round((job?.progress ?? 0) * 100)}%</span>
+              <img
+                src={thumbUrl(asset.id)}
+                alt=""
+                onError={(e) => (e.currentTarget.style.display = 'none')}
+                className="absolute inset-0 h-full w-full object-contain opacity-40"
+              />
+              <span className="z-10">Generating preview…</span>
+              <span className="z-10 text-xs text-sky-400/80">
+                {Math.round((job?.progress ?? 0) * 100)}%
+              </span>
             </>
           ) : (
             'Import a clip to begin'

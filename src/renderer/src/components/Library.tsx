@@ -1,8 +1,23 @@
-import type { JSX } from 'react'
+import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { useLibrary, useImportMedia, useRemoveMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { formatDuration } from '@/lib/format'
+import { thumbUrl } from '@/ipc/client'
+
+/** First-frame thumbnail with a ▶ fallback until/if the jpg is available. */
+function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <span className="text-base text-zinc-600">▶</span>
+  return (
+    <img
+      src={thumbUrl(asset.id)}
+      alt=""
+      onError={() => setFailed(true)}
+      className="h-full w-full object-cover"
+    />
+  )
+}
 
 function ClipBadges({ asset }: { asset: MediaAsset }): JSX.Element | null {
   const v = asset.probe.video
@@ -43,9 +58,9 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           : 'border-white/5 bg-white/[0.02] hover:bg-white/5'
       }`}
     >
-      {/* 9:16 thumbnail placeholder */}
+      {/* 9:16 thumbnail */}
       <div className="relative flex h-16 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-black/60 text-zinc-600">
-        <span className="text-base">▶</span>
+        <ClipThumb asset={asset} />
         {!asset.proxyReady && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 bg-zinc-700">
             <div className="h-full bg-sky-400 transition-all" style={{ width: `${pct}%` }} />

@@ -17,3 +17,6 @@ export const onJobProgress = (cb: (ev: JobProgressEvent) => void): (() => void) 
 
 /** Stream URL for a media asset's proxy via the reelmedia:// scheme. */
 export const proxyUrl = (id: string): string => `reelmedia://${id}/proxy.mp4`
+
+/** URL for a media asset's first-frame thumbnail. */
+export const thumbUrl = (id: string): string => `reelmedia://${id}/thumb.jpg`
