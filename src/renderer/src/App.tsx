@@ -78,7 +78,7 @@ export default function App(): JSX.Element {
 
   return (
     <div
-      className="relative flex h-full flex-col bg-[#0b0b0f]"
+      className="relative flex h-full select-none flex-col bg-[#0b0b0f]"
       onDragOver={(e) => {
         e.preventDefault()
         if (!dragging) setDragging(true)

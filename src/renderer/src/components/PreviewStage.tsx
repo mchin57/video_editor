@@ -82,12 +82,28 @@ export function PreviewStage(): JSX.Element {
     return undefined
   }, [activeAsset?.id, activeAsset?.proxyReady, pos?.sourceTime, playing])
 
+  // Start/stop. On play, sync the video to the playhead (resume where the
+  // timeline is, not where the element happens to be), restarting from 0 if
+  // we're parked at the very end.
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
-    if (playing && ready) void v.play()
-    else v.pause()
-  }, [playing, ready])
+    if (!(playing && ready)) {
+      v.pause()
+      return
+    }
+    const total = timelineDuration(previewClips)
+    const cur = usePlayback.getState().time
+    const startTime = cur >= total - 0.05 ? 0 : cur
+    if (startTime !== cur) setTime(startTime)
+    const p = locate(previewClips, startTime)
+    if (p && loadedIdRef.current === p.clip.mediaId) {
+      if (Math.abs(v.currentTime - p.sourceTime) > 0.1) v.currentTime = p.sourceTime
+      void v.play()
+    }
+    // Different media (e.g. restart crossing a source boundary) is handled by
+    // the load effect, which seeks and plays once the new metadata loads.
+  }, [playing, ready, previewClips, setTime])
 
   useEffect(() => {
     const v = videoRef.current

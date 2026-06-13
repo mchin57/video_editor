@@ -111,6 +111,7 @@ export async function listLibrary(): Promise<MediaAsset[]> {
     const asset = await readAsset(id)
     if (asset) {
       asset.proxyReady = existsSync(proxyPath(id))
+      await makeThumb(asset) // backfill thumbnails for assets imported pre-feature
       assets.push(asset)
     }
   }

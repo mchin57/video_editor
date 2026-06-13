@@ -79,7 +79,10 @@ export function Timeline(): JSX.Element {
     setTime(clamp(x / PX_PER_SEC, 0, total))
   }
 
-  const onRulerDown = (e: ReactPointerEvent): void => {
+  // Scrub from a pointer-down anywhere on the track (clips included). Trim
+  // handles stopPropagation so they aren't treated as scrubs.
+  const onTrackDown = (e: ReactPointerEvent): void => {
+    e.preventDefault()
     setPlaying(false)
     scrubToClientX(e.clientX)
     const onMove = (ev: PointerEvent): void => scrubToClientX(ev.clientX)
@@ -195,14 +198,12 @@ export function Timeline(): JSX.Element {
         ) : (
           <div
             ref={trackInnerRef}
-            className="relative h-full"
+            onPointerDown={onTrackDown}
+            className="relative h-full cursor-pointer"
             style={{ width: Math.max(total * PX_PER_SEC + 24, 200) }}
           >
-            {/* Ruler (click/drag to scrub) */}
-            <div
-              onPointerDown={onRulerDown}
-              className="absolute inset-x-0 top-0 h-5 cursor-pointer border-b border-white/10 bg-black/30"
-            />
+            {/* Ruler strip (the whole track scrubs; this is just the visual band) */}
+            <div className="absolute inset-x-0 top-0 h-5 border-b border-white/10 bg-black/30" />
 
             {/* 3-second hook marker */}
             {total >= HOOK_SEC && (
