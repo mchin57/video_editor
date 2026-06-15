@@ -1,5 +1,5 @@
 import { useMemo, useRef, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Clip, TextOverlay } from '@shared/project'
+import type { CaptionSegment, Clip, TextOverlay } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -14,6 +14,7 @@ const HOOK_SEC = 3
 // Stable empty references (see PreviewStage note) to avoid re-render loops.
 const EMPTY_CLIPS: Clip[] = []
 const EMPTY_OVERLAYS: TextOverlay[] = []
+const EMPTY_CAPTIONS: CaptionSegment[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
@@ -51,8 +52,11 @@ export function Timeline(): JSX.Element {
   const project = useProject((s) => s.project)
   const clips = project?.clips ?? EMPTY_CLIPS
   const overlays = project?.overlays ?? EMPTY_OVERLAYS
+  const captionSegs = project?.captions.enabled ? project.captions.segments : EMPTY_CAPTIONS
   const selectedClipId = useProject((s) => s.selectedClipId)
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
+  const selectedCaptionId = useUi((s) => s.selectedCaptionId)
+  const selectCaption = useUi((s) => s.selectCaption)
   const selectClip = useProject((s) => s.selectClip)
   const removeClip = useProject((s) => s.removeClip)
   const reorderClips = useProject((s) => s.reorderClips)
@@ -149,6 +153,7 @@ export function Timeline(): JSX.Element {
     e.stopPropagation()
     e.preventDefault()
     selectOverlay(o.id)
+    selectCaption(null)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
@@ -167,6 +172,48 @@ export function Timeline(): JSX.Element {
           if (mode === 'start') return { ...x, startSec: clamp(startSec + d, 0, x.endSec - 0.2) }
           return { ...x, endSec: Math.max(x.startSec + 0.2, endSec + d) }
         })
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // Drag a caption segment's time window (or its edges) on the timeline.
+  const startCaptionDrag = (
+    e: ReactPointerEvent,
+    seg: CaptionSegment,
+    mode: 'move' | 'start' | 'end'
+  ): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    selectCaption(seg.id)
+    selectOverlay(null)
+    const before = useProject.getState().project
+    if (!before) return
+    const startX = e.clientX
+    const { startSec, endSec } = seg
+    const dur = endSec - startSec
+    const onMove = (ev: PointerEvent): void => {
+      const d = (ev.clientX - startX) / PX_PER_SEC
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        captions: {
+          ...p.captions,
+          segments: p.captions.segments.map((s) => {
+            if (s.id !== seg.id) return s
+            if (mode === 'move') {
+              const ns = Math.max(0, startSec + d)
+              return { ...s, startSec: ns, endSec: ns + dur }
+            }
+            if (mode === 'start') return { ...s, startSec: clamp(startSec + d, 0, s.endSec - 0.1) }
+            return { ...s, endSec: Math.max(s.startSec + 0.1, endSec + d) }
+          })
+        }
       }))
     }
     const onUp = (): void => {
@@ -285,6 +332,7 @@ export function Timeline(): JSX.Element {
                     onClick={() => {
                       selectClip(clip.id)
                       selectOverlay(null)
+                      selectCaption(null)
                     }}
                     className={`group relative mx-px flex shrink-0 cursor-pointer items-center overflow-hidden rounded-md border ${
                       selected ? 'border-sky-400 ring-1 ring-sky-400/50' : 'border-white/10'
@@ -345,6 +393,38 @@ export function Timeline(): JSX.Element {
                     <div
                       onPointerDown={(e) => startOverlayDrag(e, o, 'end')}
                       className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-200/70"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Caption lane */}
+            <div className="absolute inset-x-0 top-[108px] h-6">
+              {captionSegs.map((seg) => {
+                const left = seg.startSec * PX_PER_SEC
+                const width = Math.max(10, (seg.endSec - seg.startSec) * PX_PER_SEC)
+                const selected = seg.id === selectedCaptionId
+                return (
+                  <div
+                    key={seg.id}
+                    onPointerDown={(e) => startCaptionDrag(e, seg, 'move')}
+                    title={seg.text}
+                    className={`group absolute top-0 flex h-6 cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                      selected ? 'border-emerald-300 ring-1 ring-emerald-300/50' : 'border-emerald-400/40'
+                    } ${seg.enabled ? 'bg-emerald-500/25' : 'bg-zinc-600/30'}`}
+                    style={{ left, width }}
+                  >
+                    <span className="truncate text-[9px] font-medium text-emerald-100">
+                      CC&nbsp;&nbsp;{seg.text}
+                    </span>
+                    <div
+                      onPointerDown={(e) => startCaptionDrag(e, seg, 'start')}
+                      className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70"
+                    />
+                    <div
+                      onPointerDown={(e) => startCaptionDrag(e, seg, 'end')}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70"
                     />
                   </div>
                 )

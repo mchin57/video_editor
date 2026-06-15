@@ -170,8 +170,74 @@ function ClipDetails(): JSX.Element {
   )
 }
 
+function CaptionEditor(): JSX.Element | null {
+  const selectedCaptionId = useUi((s) => s.selectedCaptionId)
+  const seg = useProject(
+    (s) => s.project?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null
+  )
+  const update = useProject((s) => s.updateCaption)
+  const remove = useProject((s) => s.removeCaption)
+  const selectCaption = useUi((s) => s.selectCaption)
+  if (!seg) return null
+
+  return (
+    <div>
+      <div className="mb-2 text-sm font-medium text-zinc-200">Caption</div>
+      <Field label="Text">
+        <textarea
+          value={seg.text}
+          rows={2}
+          onChange={(e) => update(seg.id, { text: e.target.value })}
+          className={inputCls}
+        />
+      </Field>
+      <div className="flex gap-2">
+        <Field label="Start (s)">
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            value={seg.startSec.toFixed(1)}
+            onChange={(e) => update(seg.id, { startSec: Math.max(0, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="End (s)">
+          <input
+            type="number"
+            step="0.1"
+            value={seg.endSec.toFixed(1)}
+            onChange={(e) =>
+              update(seg.id, { endSec: Math.max(seg.startSec + 0.1, Number(e.target.value)) })
+            }
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={seg.enabled}
+          onChange={(e) => update(seg.id, { enabled: e.target.checked })}
+        />
+        Show this caption
+      </label>
+      <button
+        onClick={() => {
+          remove(seg.id)
+          selectCaption(null)
+        }}
+        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+      >
+        Delete caption
+      </button>
+    </div>
+  )
+}
+
 export function Inspector(): JSX.Element {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
+  const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const overlays = useProject((s) => s.project?.overlays)
   const hookOk = hookCovered(overlays ?? [])
 
@@ -193,7 +259,13 @@ export function Inspector(): JSX.Element {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {selectedOverlayId ? <OverlayEditor /> : <ClipDetails />}
+        {selectedOverlayId ? (
+          <OverlayEditor />
+        ) : selectedCaptionId ? (
+          <CaptionEditor />
+        ) : (
+          <ClipDetails />
+        )}
       </div>
     </div>
   )

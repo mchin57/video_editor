@@ -5,6 +5,9 @@ interface UiState {
   /** Currently selected text overlay (for editing/dragging). */
   selectedOverlayId: string | null
   selectOverlay: (id: string | null) => void
+  /** Currently selected caption segment (for editing/dragging). */
+  selectedCaptionId: string | null
+  selectCaption: (id: string | null) => void
   /** Whether the crop editor modal is open. */
   cropEditing: boolean
   setCropEditing: (v: boolean) => void
@@ -16,6 +19,8 @@ interface UiState {
 export const useUi = create<UiState>((set) => ({
   selectedOverlayId: null,
   selectOverlay: (id) => set({ selectedOverlayId: id }),
+  selectedCaptionId: null,
+  selectCaption: (id) => set({ selectedCaptionId: id }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   settingsOpen: false,

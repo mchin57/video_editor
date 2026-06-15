@@ -101,6 +101,7 @@ export default function App(): JSX.Element {
         useUi.getState().setCropEditing(false)
         useUi.getState().setSettingsOpen(false)
         useUi.getState().selectOverlay(null)
+        useUi.getState().selectCaption(null)
       }
     }
     window.addEventListener('keydown', onKey)
