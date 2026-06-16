@@ -8,7 +8,7 @@ import type {
   TextOverlay
 } from '@shared/project'
 import { migrateProject } from '@shared/project'
-import { clipStartTimes, reorder, splitClip } from '@/lib/timeline'
+import { clipStartTimes, reorder, splitClip, timelineDuration } from '@/lib/timeline'
 import { loadProject, saveProject } from '@/ipc/client'
 
 const HISTORY_LIMIT = 50
@@ -34,7 +34,7 @@ interface ProjectState {
   liveUpdate: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
   commitLive: (before: Project) => void
-  addClip: (mediaId: string, durationSec: number) => void
+  addClip: (mediaId: string, durationSec: number, hasAudio?: boolean) => void
   removeClip: (clipId: string) => void
   reorderClips: (from: number, to: number) => void
   trimClip: (clipId: string, inSec: number, outSec: number) => void
@@ -94,22 +94,32 @@ export const useProject = create<ProjectState>((set, get) => {
       scheduleSave(current)
     },
 
-    addClip: (mediaId, durationSec) =>
-      commit((p) => ({
-        ...p,
-        clips: [
-          ...p.clips,
-          {
-            id: newId(),
-            mediaId,
-            inSec: 0,
-            outSec: Math.max(0.1, durationSec),
-            crop: null,
-            mute: false,
-            gainDb: 0
-          }
-        ]
-      })),
+    addClip: (mediaId, durationSec, hasAudio = false) =>
+      commit((p) => {
+        const out = Math.max(0.1, durationSec)
+        const startSec = timelineDuration(p.clips) // appended at the current end
+        const clip = { id: newId(), mediaId, inSec: 0, outSec: out, crop: null, mute: hasAudio, gainDb: 0 }
+        // Auto-extract the clip's audio onto the audio track (and mute the clip),
+        // so dialogue can be mixed independently.
+        const audioClips = hasAudio
+          ? [
+              ...p.audioClips,
+              {
+                id: newId(),
+                mediaId,
+                startSec,
+                inSec: 0,
+                outSec: out,
+                gainDb: 0,
+                fadeInSec: 0,
+                fadeOutSec: 0,
+                duck: false,
+                kind: 'extracted' as const
+              }
+            ]
+          : p.audioClips
+        return { ...p, clips: [...p.clips, clip], audioClips }
+      }),
 
     removeClip: (clipId) => {
       commit((p) => ({ ...p, clips: p.clips.filter((c) => c.id !== clipId) }))

@@ -132,7 +132,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
             tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation()
-              if (asset.proxyReady) addClip(asset.id, asset.probe.durationSec)
+              if (asset.proxyReady) addClip(asset.id, asset.probe.durationSec, !!asset.probe.audio)
             }}
             className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
               asset.proxyReady ? '' : 'pointer-events-none opacity-30'

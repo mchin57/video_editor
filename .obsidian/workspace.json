@@ -185,6 +185,9 @@
   },
   "active": "c7b3de711a73d466",
   "lastOpenFiles": [
+    "electron.vite.config.1781572037515.mjs",
+    "src/renderer/src/state/projectStore.ts.tmp.19448.89d7d6c7658b",
+    "src/renderer/src/state/projectStore.ts.tmp.19448.32aed49956b0",
     "electron.vite.config.1781571607492.mjs",
     "out/renderer/assets/index-BU_7LaIH.js",
     "out/renderer/assets/index-lAIxEEEz.css",
@@ -193,9 +196,6 @@
     "tmpa/out.mp4",
     "tmpa/vo.m4a",
     "tmpa/music.m4a",
-    "tmpa/overlays.ass",
-    "tmpa/concat.txt",
-    "tmpa/seg_1.mov",
     "docs/PLAN.md",
     "docs/TODO.md",
     "README.md"
