@@ -102,6 +102,7 @@ export default function App(): JSX.Element {
         useUi.getState().setSettingsOpen(false)
         useUi.getState().selectOverlay(null)
         useUi.getState().selectCaption(null)
+        useUi.getState().selectMusic(false)
       }
     }
     window.addEventListener('keydown', onKey)

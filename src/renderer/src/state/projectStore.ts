@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { CaptionSegment, CaptionsConfig, CropRect, Project, TextOverlay } from '@shared/project'
+import type {
+  CaptionSegment,
+  CaptionsConfig,
+  CropRect,
+  MusicConfig,
+  Project,
+  TextOverlay
+} from '@shared/project'
 import { reorder, splitClip } from '@/lib/timeline'
 import { loadProject, saveProject } from '@/ipc/client'
 
@@ -39,6 +46,7 @@ interface ProjectState {
   setCaptions: (captions: CaptionsConfig) => void
   updateCaption: (id: string, patch: Partial<CaptionSegment>) => void
   removeCaption: (id: string) => void
+  setMusic: (patch: Partial<MusicConfig>) => void
   undo: () => void
   redo: () => void
 }
@@ -165,6 +173,8 @@ export const useProject = create<ProjectState>((set, get) => {
         ...p,
         captions: { ...p.captions, segments: p.captions.segments.filter((s) => s.id !== id) }
       })),
+
+    setMusic: (patch) => commit((p) => ({ ...p, music: { ...p.music, ...patch } })),
 
     undo: () => {
       const { past, project, future } = get()

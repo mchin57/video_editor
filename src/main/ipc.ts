@@ -15,6 +15,7 @@ import { getTranscript, transcribeMedia, whisperAvailable } from './services/whi
 const VIDEO_EXTS = [
   'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
 ]
+const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'wma']
 
 /** Import each path (fast hash+probe), then kick proxy generation in the background. */
 async function importMany(paths: string[]): Promise<MediaAsset[]> {
@@ -40,10 +41,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.importDialog, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
-      title: 'Import video',
+      title: 'Import media',
       properties: ['openFile', 'multiSelections'],
       filters: [
+        { name: 'Media', extensions: [...VIDEO_EXTS, ...AUDIO_EXTS] },
         { name: 'Video', extensions: VIDEO_EXTS },
+        { name: 'Audio', extensions: AUDIO_EXTS },
         { name: 'All files', extensions: ['*'] }
       ]
     }

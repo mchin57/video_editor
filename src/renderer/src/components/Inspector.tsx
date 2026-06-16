@@ -235,9 +235,83 @@ function CaptionEditor(): JSX.Element | null {
   )
 }
 
+function MusicEditor(): JSX.Element | null {
+  const music = useProject((s) => s.project?.music)
+  const setMusic = useProject((s) => s.setMusic)
+  const selectMusic = useUi((s) => s.selectMusic)
+  const { data: assets = [] } = useLibrary()
+  if (!music) return null
+  const asset = music.mediaId ? assets.find((a) => a.id === music.mediaId) : undefined
+
+  if (!music.mediaId) {
+    return (
+      <p className="text-sm text-zinc-600">
+        No music yet. Import an audio file, then click ♪ on it in the Library.
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <div className="mb-1 text-sm font-medium text-zinc-200">Music</div>
+      <div className="mb-3 truncate text-xs text-zinc-400" title={asset?.fileName}>
+        {asset?.fileName ?? music.mediaId}
+      </div>
+      <Field label={`Volume · ${music.volumeDb} dB`}>
+        <input
+          type="range"
+          min={-40}
+          max={6}
+          step={1}
+          value={music.volumeDb}
+          onChange={(e) => setMusic({ volumeDb: Number(e.target.value) })}
+          className="w-full accent-sky-400"
+        />
+      </Field>
+      <Field label="Fade out (s)">
+        <input
+          type="number"
+          step="0.5"
+          min="0"
+          value={music.fadeOutSec}
+          onChange={(e) => setMusic({ fadeOutSec: Math.max(0, Number(e.target.value)) })}
+          className={inputCls}
+        />
+      </Field>
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={music.muteVideo}
+          onChange={(e) => setMusic({ muteVideo: e.target.checked })}
+        />
+        Mute clip audio (music only)
+      </label>
+      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={music.duck}
+          disabled={music.muteVideo}
+          onChange={(e) => setMusic({ duck: e.target.checked })}
+        />
+        Duck music under speech
+      </label>
+      <button
+        onClick={() => {
+          setMusic({ mediaId: null })
+          selectMusic(false)
+        }}
+        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+      >
+        Remove music
+      </button>
+    </div>
+  )
+}
+
 export function Inspector(): JSX.Element {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
+  const musicSelected = useUi((s) => s.musicSelected)
   const overlays = useProject((s) => s.project?.overlays)
   const hookOk = hookCovered(overlays ?? [])
 
@@ -263,6 +337,8 @@ export function Inspector(): JSX.Element {
           <OverlayEditor />
         ) : selectedCaptionId ? (
           <CaptionEditor />
+        ) : musicSelected ? (
+          <MusicEditor />
         ) : (
           <ClipDetails />
         )}

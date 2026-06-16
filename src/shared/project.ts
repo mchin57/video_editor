@@ -75,8 +75,11 @@ export interface CaptionsConfig {
 export interface MusicConfig {
   mediaId: string | null
   volumeDb: number
+  /** Lower the music under spoken/clip audio (sidechain) on export. */
   duck: boolean
   fadeOutSec: number
+  /** Mute the clips' original audio so only music plays. */
+  muteVideo: boolean
 }
 
 export interface Project {
@@ -103,7 +106,7 @@ export function createEmptyProject(id: string, name: string): Project {
     clips: [],
     overlays: [],
     captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
-    music: { mediaId: null, volumeDb: -14, duck: true, fadeOutSec: 1.5 },
+    music: { mediaId: null, volumeDb: -14, duck: true, fadeOutSec: 1.5, muteVideo: false },
     createdAt: now,
     updatedAt: now
   }

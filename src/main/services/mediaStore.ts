@@ -13,6 +13,7 @@ import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
+import { generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
 
 function hashFile(path: string): Promise<string> {
@@ -27,8 +28,16 @@ function hashFile(path: string): Promise<string> {
 
 const mediaDir = (id: string): string => join(getSubdir('media'), id)
 const proxyPath = (id: string): string => join(mediaDir(id), 'proxy.mp4')
+const audioProxyPath = (id: string): string => join(mediaDir(id), 'audio.m4a')
+const waveformPath = (id: string): string => join(mediaDir(id), 'waveform.png')
 const thumbPath = (id: string): string => join(mediaDir(id), 'thumb.jpg')
 const assetJsonPath = (id: string): string => join(mediaDir(id), 'asset.json')
+
+/** Audio-only asset: has audio but no video stream. */
+export const isAudioAsset = (a: MediaAsset): boolean => !a.probe.video && !!a.probe.audio
+/** The playable proxy path for an asset (audio bed vs video proxy). */
+const playableProxyPath = (a: MediaAsset): string =>
+  isAudioAsset(a) ? audioProxyPath(a.id) : proxyPath(a.id)
 
 /** Best-effort first-frame thumbnail; never fails the import if it errors. */
 async function makeThumb(asset: MediaAsset): Promise<void> {
@@ -62,7 +71,7 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
 
   const existing = await readAsset(id)
   if (existing) {
-    existing.proxyReady = existsSync(proxyPath(id))
+    existing.proxyReady = existsSync(playableProxyPath(existing))
     await makeThumb(existing) // backfill for assets imported before thumbnails
     return existing
   }
@@ -74,9 +83,10 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
     originalPath: srcPath,
     importedAt: new Date().toISOString(),
     probe,
-    proxyReady: existsSync(proxyPath(id)),
+    proxyReady: false,
     transcribed: existsSync(join(mediaDir(id), 'transcript.json'))
   }
+  asset.proxyReady = existsSync(playableProxyPath(asset))
   await writeAsset(asset)
   await makeThumb(asset)
   return asset
@@ -84,9 +94,27 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
 
 /** Generate the proxy if missing, reporting progress via the jobs channel. */
 export async function ensureProxy(id: string): Promise<void> {
-  if (existsSync(proxyPath(id))) return
   const asset = await readAsset(id)
   if (!asset) throw new Error(`unknown media ${id}`)
+  if (existsSync(playableProxyPath(asset))) return
+
+  // Audio-only: small AAC proxy + a waveform for the music lane.
+  if (isAudioAsset(asset)) {
+    const job = createJob('proxy', `Audio · ${asset.fileName}`, id)
+    try {
+      await generateAudioProxy(asset.originalPath, audioProxyPath(id))
+      await generateWaveform(asset.originalPath, waveformPath(id)).catch((e) =>
+        console.error('waveform failed', e)
+      )
+      asset.proxyReady = true
+      await writeAsset(asset)
+      finishJob(job.id)
+    } catch (error) {
+      failJob(job.id, error instanceof Error ? error.message : String(error))
+      throw error
+    }
+    return
+  }
 
   await makeThumb(asset) // ensure a thumbnail exists even if import-time gen failed
   const job = createJob('proxy', `Proxy · ${asset.fileName}`, id)
@@ -113,7 +141,7 @@ export async function listLibrary(): Promise<MediaAsset[]> {
   for (const id of ids) {
     const asset = await readAsset(id)
     if (asset) {
-      asset.proxyReady = existsSync(proxyPath(id))
+      asset.proxyReady = existsSync(playableProxyPath(asset))
       await makeThumb(asset) // backfill thumbnails for assets imported pre-feature
       assets.push(asset)
     }

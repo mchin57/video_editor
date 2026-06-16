@@ -42,3 +42,9 @@ export const proxyUrl = (id: string): string => `reelmedia://${id}/proxy.mp4`
 
 /** URL for a media asset's first-frame thumbnail. */
 export const thumbUrl = (id: string): string => `reelmedia://${id}/thumb.jpg`
+
+/** Stream URL for an audio-only asset's AAC proxy (music bed). */
+export const audioUrl = (id: string): string => `reelmedia://${id}/audio.m4a`
+
+/** URL for an audio asset's waveform image. */
+export const waveformUrl = (id: string): string => `reelmedia://${id}/waveform.png`

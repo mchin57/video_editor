@@ -3,6 +3,7 @@ import type { MediaAsset } from '@shared/media'
 import { useLibrary, useImportMedia, useRemoveMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
+import { useUi } from '@/state/ui'
 import { formatDuration } from '@/lib/format'
 import { thumbUrl } from '@/ipc/client'
 
@@ -45,9 +46,13 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const select = useEditor((s) => s.select)
   const job = useEditor((s) => (asset.id in s.proxyJobs ? s.proxyJobs[asset.id] : undefined))
   const addClip = useProject((s) => s.addClip)
+  const setMusic = useProject((s) => s.setMusic)
+  const selectMusic = useUi((s) => s.selectMusic)
+  const isMusic = useProject((s) => s.project?.music.mediaId === asset.id)
   const remove = useRemoveMedia()
 
   const v = asset.probe.video
+  const isAudio = !v && !!asset.probe.audio
   const selected = selectedId === asset.id
   const pct = Math.round((job?.progress ?? 0) * 100)
 
@@ -60,9 +65,9 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           : 'border-white/5 bg-white/[0.02] hover:bg-white/5'
       }`}
     >
-      {/* 9:16 thumbnail */}
+      {/* 9:16 thumbnail (or a music glyph for audio) */}
       <div className="relative flex h-16 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-black/60 text-zinc-600">
-        <ClipThumb asset={asset} />
+        {isAudio ? <span className="text-base text-sky-300">♪</span> : <ClipThumb asset={asset} />}
         {!asset.proxyReady && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 bg-zinc-700">
             <div className="h-full bg-sky-400 transition-all" style={{ width: `${pct}%` }} />
@@ -89,20 +94,40 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
       </div>
 
       <div className="flex flex-col items-center gap-1">
-        <span
-          role="button"
-          tabIndex={-1}
-          onClick={(e) => {
-            e.stopPropagation()
-            if (asset.proxyReady) addClip(asset.id, asset.probe.durationSec)
-          }}
-          className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
-            asset.proxyReady ? '' : 'pointer-events-none opacity-30'
-          }`}
-          title="Add to timeline"
-        >
-          ＋
-        </span>
+        {isAudio ? (
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              setMusic({ mediaId: asset.id })
+              selectMusic(true)
+            }}
+            className={`rounded px-1.5 text-xs font-semibold transition ${
+              isMusic
+                ? 'bg-emerald-500/30 text-emerald-200'
+                : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'
+            }`}
+            title={isMusic ? 'Current music bed' : 'Set as music bed'}
+          >
+            ♪
+          </span>
+        ) : (
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (asset.proxyReady) addClip(asset.id, asset.probe.durationSec)
+            }}
+            className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
+              asset.proxyReady ? '' : 'pointer-events-none opacity-30'
+            }`}
+            title="Add to timeline"
+          >
+            ＋
+          </span>
+        )}
         <span
           role="button"
           tabIndex={-1}

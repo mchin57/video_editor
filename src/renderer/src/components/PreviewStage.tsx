@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, type CSSProperties, type JSX, type PointerE
 import type { Clip, TextOverlay } from '@shared/project'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { overlaysAtTime } from '@/lib/overlays'
-import { proxyUrl, thumbUrl } from '@/ipc/client'
+import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
@@ -61,8 +61,14 @@ export function PreviewStage(): JSX.Element {
   const activeMediaId = activeAsset?.proxyReady ? activeAsset.id : null
   const ready = activeMediaId != null
 
+  // Music bed
+  const music = project?.music
+  const musicAsset = music?.mediaId ? assetById.get(music.mediaId) : undefined
+  const musicSrc = musicAsset?.proxyReady && music?.mediaId ? audioUrl(music.mediaId) : undefined
+
   const stageRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
 
   // Live refs so the rAF loop reads current values without re-subscribing.
   const clipsRef = useRef(previewClips)
@@ -147,8 +153,26 @@ export function PreviewStage(): JSX.Element {
 
   useEffect(() => {
     const v = videoRef.current
-    if (v && activeClip) v.muted = activeClip.mute
-  }, [activeClip])
+    if (v && activeClip) v.muted = activeClip.mute || Boolean(music?.muteVideo)
+  }, [activeClip, music?.muteVideo])
+
+  // Music bed: a hidden <audio> that follows the timeline clock.
+  useEffect(() => {
+    const a = audioRef.current
+    if (a && music) a.volume = Math.min(1, Math.max(0, Math.pow(10, music.volumeDb / 20)))
+  }, [music?.volumeDb])
+
+  useEffect(() => {
+    const a = audioRef.current
+    if (!a || !musicSrc) return
+    if (playing) {
+      if (Math.abs(a.currentTime - time) > 0.3) a.currentTime = time
+      if (a.paused) void a.play().catch(() => {})
+    } else {
+      a.pause()
+      if (a.readyState >= 1 && Math.abs(a.currentTime - time) > 0.05) a.currentTime = time
+    }
+  }, [playing, musicSrc, time])
 
   // Crop: map the active clip's source-pixel crop into the 9:16 stage with CSS.
   const videoStyle: CSSProperties = useMemo(() => {
@@ -219,6 +243,10 @@ export function PreviewStage(): JSX.Element {
         onClick={() => usePlayback.getState().toggle()}
         className={ready ? '' : 'opacity-0'}
       />
+
+      {/* Music bed (hidden audio element, synced to the timeline clock) */}
+      <audio ref={audioRef} key={music?.mediaId ?? 'nomusic'} src={musicSrc} preload="auto" />
+
 
       {!ready && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-zinc-600">

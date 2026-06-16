@@ -5,7 +5,7 @@
  * not the proxy. Text overlays / captions are burned in a later milestone (M4).
  */
 
-import { promises as fsp } from 'node:fs'
+import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
@@ -102,8 +102,22 @@ async function runExport(
     await fsp.writeFile(join(tmp, assFile), buildAss(overlays, target, project.captions), 'utf8')
   }
 
+  // Music bed (if set): mix into the final audio. Prefer the AAC proxy; fall
+  // back to the original if the proxy isn't there.
+  let music: { path: string; config: typeof project.music; totalSec: number } | undefined
+  if (project.music.mediaId) {
+    const musicAsset = await getAsset(project.music.mediaId)
+    const proxy = join(getSubdir('media'), project.music.mediaId, 'audio.m4a')
+    const path = existsSync(proxy) ? proxy : musicAsset?.originalPath
+    if (path) music = { path, config: project.music, totalSec: totalDur }
+  }
+
   await fsp.mkdir(dirname(output), { recursive: true })
-  const finalArgs = buildFinalArgs(listPath, output, caps, { preferNvenc: opts.preferNvenc, assFile })
+  const finalArgs = buildFinalArgs(listPath, output, caps, {
+    preferNvenc: opts.preferNvenc,
+    assFile,
+    music
+  })
   await runFfmpeg(
     ffmpeg,
     finalArgs,

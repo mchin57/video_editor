@@ -6,7 +6,7 @@ import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { clipDuration, locate, timelineDuration } from '@/lib/timeline'
 import { makeOverlay } from '@/lib/overlays'
-import { thumbUrl } from '@/ipc/client'
+import { thumbUrl, waveformUrl } from '@/ipc/client'
 
 const PX_PER_SEC = 48
 const HOOK_SEC = 3
@@ -57,6 +57,9 @@ export function Timeline(): JSX.Element {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectCaption = useUi((s) => s.selectCaption)
+  const musicSelected = useUi((s) => s.musicSelected)
+  const selectMusic = useUi((s) => s.selectMusic)
+  const music = project?.music
   const selectClip = useProject((s) => s.selectClip)
   const removeClip = useProject((s) => s.removeClip)
   const reorderClips = useProject((s) => s.reorderClips)
@@ -154,6 +157,7 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     selectOverlay(o.id)
     selectCaption(null)
+    selectMusic(false)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
@@ -193,6 +197,7 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     selectCaption(seg.id)
     selectOverlay(null)
+    selectMusic(false)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
@@ -294,7 +299,7 @@ export function Timeline(): JSX.Element {
       </div>
 
       {/* Track */}
-      <div className="relative min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+      <div className="relative min-h-0 flex-1 overflow-auto">
         {clips.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-zinc-600">
             Add clips from the Library (＋ on a clip) to build your reel.
@@ -303,7 +308,7 @@ export function Timeline(): JSX.Element {
           <div
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
-            className="relative h-full cursor-pointer"
+            className="relative h-full min-h-[168px] cursor-pointer"
             style={{ width: Math.max(total * PX_PER_SEC + 24, 200) }}
           >
             {/* Ruler strip (the whole track scrubs; this is just the visual band) */}
@@ -333,6 +338,7 @@ export function Timeline(): JSX.Element {
                       selectClip(clip.id)
                       selectOverlay(null)
                       selectCaption(null)
+                      selectMusic(false)
                     }}
                     className={`group relative mx-px flex shrink-0 cursor-pointer items-center overflow-hidden rounded-md border ${
                       selected ? 'border-sky-400 ring-1 ring-sky-400/50' : 'border-white/10'
@@ -430,6 +436,42 @@ export function Timeline(): JSX.Element {
                 )
               })}
             </div>
+
+            {/* Music lane (waveform) */}
+            {music?.mediaId &&
+              (() => {
+                const musicAsset = assetById.get(music.mediaId)
+                if (!musicAsset) return null
+                const width = Math.max(40, musicAsset.probe.durationSec * PX_PER_SEC)
+                return (
+                  <div className="absolute inset-x-0 top-[136px] h-7">
+                    <div
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        selectMusic(true)
+                        selectClip(null)
+                        selectOverlay(null)
+                        selectCaption(null)
+                      }}
+                      title={musicAsset.fileName}
+                      className={`absolute top-0 flex h-7 cursor-pointer items-center overflow-hidden rounded border ${
+                        musicSelected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
+                      } bg-sky-500/15`}
+                      style={{ left: 0, width }}
+                    >
+                      <img
+                        src={waveformUrl(musicAsset.id)}
+                        alt=""
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                        className="h-full w-full object-cover opacity-70"
+                      />
+                      <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
+                        ♪&nbsp;{musicAsset.fileName}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
 
             {/* Playhead */}
             <div

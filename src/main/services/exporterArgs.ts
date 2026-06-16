@@ -9,11 +9,12 @@
  * Kept dependency-light (only the shared HDR chain) so it's unit-testable.
  */
 
-import type { Clip } from '@shared/project'
+import type { Clip, MusicConfig } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EXPORT_PRESETS, type PresetId } from '@shared/export'
 import { hdrToSdrChain } from './proxy'
+import { buildMusicMixGraph } from './audio'
 
 export interface Target {
   width: number
@@ -120,27 +121,48 @@ export function buildFinalArgs(
   listPath: string,
   output: string,
   caps: FfmpegCapabilities,
-  opts: { preferNvenc: boolean; assFile?: string }
+  opts: {
+    preferNvenc: boolean
+    assFile?: string
+    music?: { path: string; config: MusicConfig; totalSec: number }
+  }
 ): string[] {
   const nvenc = opts.preferNvenc && caps.encoders.h264_nvenc
   const videoArgs = nvenc
     ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0']
     : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20']
 
-  // Burn text overlays via the ass filter (re-encodes video, which we do anyway).
-  const filterArgs = opts.assFile ? ['-vf', `ass=${opts.assFile}`] : []
+  const inputs = ['-f', 'concat', '-safe', '0', '-i', listPath]
+  if (opts.music) inputs.push('-i', opts.music.path)
+
+  let filterArgs: string[] = []
+  let mapArgs: string[] = []
+
+  if (opts.music) {
+    // Music present → everything goes through filter_complex (can't mix -vf with it).
+    const { filter: audioFilter, outLabel } = buildMusicMixGraph(
+      opts.music.config,
+      '0:a',
+      '1:a',
+      opts.music.totalSec
+    )
+    const chains: string[] = []
+    if (opts.assFile) chains.push(`[0:v]ass=${opts.assFile}[v]`)
+    chains.push(audioFilter)
+    filterArgs = ['-filter_complex', chains.join(';')]
+    mapArgs = ['-map', opts.assFile ? '[v]' : '0:v', '-map', `[${outLabel}]`]
+  } else if (opts.assFile) {
+    // Burn overlays/captions via the ass video filter.
+    filterArgs = ['-vf', `ass=${opts.assFile}`]
+  }
 
   return [
     '-y',
     '-hide_banner',
     '-nostdin',
-    '-f',
-    'concat',
-    '-safe',
-    '0',
-    '-i',
-    listPath,
+    ...inputs,
     ...filterArgs,
+    ...mapArgs,
     ...videoArgs,
     '-pix_fmt',
     'yuv420p',

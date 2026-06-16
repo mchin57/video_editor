@@ -21,6 +21,10 @@ const MIME: Record<string, string> = {
   '.mov': 'video/mp4',
   '.m4v': 'video/mp4',
   '.webm': 'video/webm',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png'
