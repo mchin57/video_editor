@@ -308,7 +308,7 @@ export function Timeline(): JSX.Element {
           <div
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
-            className="relative h-full min-h-[168px] cursor-pointer"
+            className="relative h-full min-h-[142px] cursor-pointer"
             style={{ width: Math.max(total * PX_PER_SEC + 24, 200) }}
           >
             {/* Ruler strip (the whole track scrubs; this is just the visual band) */}
@@ -325,7 +325,7 @@ export function Timeline(): JSX.Element {
             )}
 
             {/* Clip blocks */}
-            <div className="absolute inset-x-0 top-5 flex h-14">
+            <div className="absolute inset-x-0 top-5 flex h-12">
               {clips.map((clip, i) => {
                 const asset = assetById.get(clip.mediaId)
                 const maxOut = asset?.probe.durationSec ?? clip.outSec
@@ -372,7 +372,7 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Text overlay lane */}
-            <div className="absolute inset-x-0 top-[80px] h-6">
+            <div className="absolute inset-x-0 top-[70px] h-5">
               {overlays.map((o) => {
                 const left = o.startSec * PX_PER_SEC
                 const width = Math.max(10, (o.endSec - o.startSec) * PX_PER_SEC)
@@ -382,7 +382,7 @@ export function Timeline(): JSX.Element {
                     key={o.id}
                     onPointerDown={(e) => startOverlayDrag(e, o, 'move')}
                     title={o.text}
-                    className={`group absolute top-0 flex h-6 cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                    className={`group absolute top-0 flex h-5 cursor-move items-center overflow-hidden rounded border px-1.5 ${
                       selected
                         ? 'border-violet-300 ring-1 ring-violet-300/50'
                         : 'border-violet-400/40'
@@ -406,7 +406,7 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Caption lane */}
-            <div className="absolute inset-x-0 top-[108px] h-6">
+            <div className="absolute inset-x-0 top-[92px] h-5">
               {captionSegs.map((seg) => {
                 const left = seg.startSec * PX_PER_SEC
                 const width = Math.max(10, (seg.endSec - seg.startSec) * PX_PER_SEC)
@@ -416,7 +416,7 @@ export function Timeline(): JSX.Element {
                     key={seg.id}
                     onPointerDown={(e) => startCaptionDrag(e, seg, 'move')}
                     title={seg.text}
-                    className={`group absolute top-0 flex h-6 cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                    className={`group absolute top-0 flex h-5 cursor-move items-center overflow-hidden rounded border px-1.5 ${
                       selected ? 'border-emerald-300 ring-1 ring-emerald-300/50' : 'border-emerald-400/40'
                     } ${seg.enabled ? 'bg-emerald-500/25' : 'bg-zinc-600/30'}`}
                     style={{ left, width }}
@@ -437,41 +437,46 @@ export function Timeline(): JSX.Element {
               })}
             </div>
 
-            {/* Music lane (waveform) */}
-            {music?.mediaId &&
-              (() => {
-                const musicAsset = assetById.get(music.mediaId)
-                if (!musicAsset) return null
+            {/* Music lane (waveform, or a hint when empty) */}
+            <div className="absolute inset-x-0 top-[114px] h-6">
+              {(() => {
+                const musicAsset = music?.mediaId ? assetById.get(music.mediaId) : undefined
+                if (!musicAsset) {
+                  return (
+                    <div className="flex h-6 items-center pl-1 text-[9px] text-zinc-600">
+                      ♪ No music — import audio &amp; click ♪ in the Library
+                    </div>
+                  )
+                }
                 const width = Math.max(40, musicAsset.probe.durationSec * PX_PER_SEC)
                 return (
-                  <div className="absolute inset-x-0 top-[136px] h-7">
-                    <div
-                      onPointerDown={(e) => {
-                        e.stopPropagation()
-                        selectMusic(true)
-                        selectClip(null)
-                        selectOverlay(null)
-                        selectCaption(null)
-                      }}
-                      title={musicAsset.fileName}
-                      className={`absolute top-0 flex h-7 cursor-pointer items-center overflow-hidden rounded border ${
-                        musicSelected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
-                      } bg-sky-500/15`}
-                      style={{ left: 0, width }}
-                    >
-                      <img
-                        src={waveformUrl(musicAsset.id)}
-                        alt=""
-                        onError={(e) => (e.currentTarget.style.display = 'none')}
-                        className="h-full w-full object-cover opacity-70"
-                      />
-                      <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
-                        ♪&nbsp;{musicAsset.fileName}
-                      </span>
-                    </div>
+                  <div
+                    onPointerDown={(e) => {
+                      e.stopPropagation()
+                      selectMusic(true)
+                      selectClip(null)
+                      selectOverlay(null)
+                      selectCaption(null)
+                    }}
+                    title={musicAsset.fileName}
+                    className={`absolute top-0 flex h-6 cursor-pointer items-center overflow-hidden rounded border ${
+                      musicSelected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
+                    } bg-sky-500/15`}
+                    style={{ left: 0, width }}
+                  >
+                    <img
+                      src={waveformUrl(musicAsset.id)}
+                      alt=""
+                      onError={(e) => (e.currentTarget.style.display = 'none')}
+                      className="h-full w-full object-cover opacity-70"
+                    />
+                    <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
+                      ♪&nbsp;{musicAsset.fileName}
+                    </span>
                   </div>
                 )
               })()}
+            </div>
 
             {/* Playhead */}
             <div

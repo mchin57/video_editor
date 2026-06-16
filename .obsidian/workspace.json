@@ -185,6 +185,8 @@
   },
   "active": "c7b3de711a73d466",
   "lastOpenFiles": [
+    "electron.vite.config.1781569343696.mjs",
+    "src/renderer/src/components/Timeline.tsx.tmp.19448.884392b88292",
     "electron.vite.config.1781568976590.mjs",
     "out/renderer/assets/index-BNIObfqR.js",
     "out/renderer/assets/index-D130dI6L.css",
@@ -194,8 +196,6 @@
     "tmpm/out.mp4",
     "tmpm/music.m4a",
     "tmpm/overlays.ass",
-    "tmpm/concat.txt",
-    "tmpm/seg_1.mov",
     "README.md"
   ]
 }
