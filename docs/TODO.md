@@ -16,6 +16,8 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ### Not planned / missing features
 
+- [ ] **Auto background removal (subject-aware crop)** — detect the primary subject (person) in a clip using a segmentation model and remove or replace the background automatically. Likely approach: run a lightweight portrait segmentation model (e.g. MediaPipe Selfie Segmentation or ONNX rembg) frame-by-frame as a job in the main process, output an alpha-masked overlay, then composite via ffmpeg `overlay` + `alphaextract`/`alphamerge`. User can choose to replace the background with a solid color, blur, or a custom image. Useful for creating clean talking-head Reels without needing a physical green screen.
+
 - [ ] **Color correction controls** — no user-facing exposure/contrast/saturation/LUT controls. Only automated HDR→SDR tonemap runs on import. Needed for basic grading and cinematic looks.
 - [ ] **Speed ramping** — no variable speed or slow-mo support. Common in short-form video; would require ffmpeg `setpts` + `atempo` per clip segment and timeline representation of speed curves.
 - [ ] **Keyframe animation** — no way to animate overlay position, scale, or opacity over time. Would require a keyframe store per overlay property and interpolation in both preview and ASS export.

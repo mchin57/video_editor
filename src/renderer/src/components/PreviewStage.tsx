@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Clip, TextOverlay } from '@shared/project'
+import type { AudioClip, Clip, TextOverlay } from '@shared/project'
+import { audioClipEnd, effectiveOut } from '@shared/project'
+import type { MediaAsset } from '@shared/media'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { overlaysAtTime } from '@/lib/overlays'
 import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
@@ -16,6 +18,47 @@ const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.m
 // Stable empty references so zustand selectors don't return new arrays each render.
 const EMPTY_CLIPS: Clip[] = []
 const EMPTY_OVERLAYS: TextOverlay[] = []
+const EMPTY_AUDIO: AudioClip[] = []
+
+/** A hidden <audio> that follows the timeline clock for one audio clip. Several
+ * of these play at once; the browser mixes them (no Web Audio needed). */
+function AudioFollower({
+  clip,
+  asset,
+  src,
+  time,
+  playing
+}: {
+  clip: AudioClip
+  asset: MediaAsset
+  src: string
+  time: number
+  playing: boolean
+}): JSX.Element {
+  const ref = useRef<HTMLAudioElement>(null)
+  const eo = effectiveOut(clip, asset.probe.durationSec)
+  const active = time >= clip.startSec - 0.001 && time < clip.startSec + (eo - clip.inSec)
+  const target = clip.inSec + (time - clip.startSec)
+
+  useEffect(() => {
+    const a = ref.current
+    if (a) a.volume = Math.min(1, Math.max(0, Math.pow(10, clip.gainDb / 20)))
+  }, [clip.gainDb])
+
+  useEffect(() => {
+    const a = ref.current
+    if (!a) return
+    if (playing && active) {
+      if (Math.abs(a.currentTime - target) > 0.3) a.currentTime = target
+      if (a.paused) void a.play().catch(() => {})
+    } else {
+      if (!a.paused) a.pause()
+      if (active && a.readyState >= 1 && Math.abs(a.currentTime - target) > 0.05) a.currentTime = target
+    }
+  }, [playing, active, target])
+
+  return <audio ref={ref} src={src} preload="auto" />
+}
 
 /**
  * The 9:16 playback surface. Plays the timeline through a single <video> keyed
@@ -61,14 +104,21 @@ export function PreviewStage(): JSX.Element {
   const activeMediaId = activeAsset?.proxyReady ? activeAsset.id : null
   const ready = activeMediaId != null
 
-  // Music bed
-  const music = project?.music
-  const musicAsset = music?.mediaId ? assetById.get(music.mediaId) : undefined
-  const musicSrc = musicAsset?.proxyReady && music?.mediaId ? audioUrl(music.mediaId) : undefined
+  // Audio track: end of the furthest audio clip, and the overall project end.
+  const audioClips = project?.audioClips ?? EMPTY_AUDIO
+  const audioEnd = useMemo(
+    () =>
+      audioClips.reduce(
+        (max, a) => Math.max(max, audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)),
+        0
+      ),
+    [audioClips, assetById]
+  )
+  const audioEndRef = useRef(audioEnd)
+  audioEndRef.current = audioEnd
 
   const stageRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
 
   // Live refs so the rAF loop reads current values without re-subscribing.
   const clipsRef = useRef(previewClips)
@@ -96,7 +146,7 @@ export function PreviewStage(): JSX.Element {
     }
   }, [playing, pos?.sourceTime])
 
-  // Play/pause (restart from 0 if parked at the very end).
+  // Play/pause (restart from 0 if parked at the very end of the project).
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
@@ -104,7 +154,8 @@ export function PreviewStage(): JSX.Element {
       v.pause()
       return
     }
-    if (usePlayback.getState().time >= timelineDuration(clipsRef.current) - 0.05) {
+    const projEnd = Math.max(timelineDuration(clipsRef.current), audioEndRef.current)
+    if (usePlayback.getState().time >= projEnd - 0.05) {
       usePlayback.getState().setTime(0)
       const first = locate(clipsRef.current, 0)
       if (first && first.clip.mediaId === activeMediaId) v.currentTime = first.sourceTime
@@ -112,67 +163,72 @@ export function PreviewStage(): JSX.Element {
     void v.play().catch(() => {})
   }, [playing, ready, activeMediaId])
 
-  // The clock. Depends only on `playing`; reads everything else from refs.
+  // The clock. The video drives time while it's the active source; past the last
+  // clip (audio-only tail) a wall clock takes over so audio keeps playing.
   useEffect(() => {
     if (!playing) return undefined
     let raf = 0
+    let lastNow = performance.now()
     const tick = (): void => {
-      // A frame can already be queued when playback stops (e.g. scrubbing pauses
-      // it). Bail so a stray tick can't overwrite the new playhead position.
       if (!usePlayback.getState().playing) return
       const v = videoRef.current
       const clips = clipsRef.current
       const startsNow = startsRef.current
       const { setTime, setPlaying } = usePlayback.getState()
-      if (v && v.readyState >= 2 && clips.length) {
-        const p = locate(clips, usePlayback.getState().time)
-        if (p) {
-          if (v.currentTime >= p.clip.outSec - 0.04) {
-            const nextIdx = p.index + 1
-            if (nextIdx < clips.length) {
-              const next = clips[nextIdx]
-              setTime(startsNow[nextIdx] ?? 0)
-              if (next.mediaId === p.clip.mediaId && Math.abs(v.currentTime - next.inSec) > 0.05) {
-                v.currentTime = next.inSec
+      const t = usePlayback.getState().time
+      const videoTotal = timelineDuration(clips)
+      const projTotal = Math.max(videoTotal, audioEndRef.current)
+      const inVideo = clips.length > 0 && t < videoTotal - 0.001
+
+      if (inVideo) {
+        if (v && ready && v.paused) void v.play().catch(() => {})
+        if (v && v.readyState >= 2) {
+          const p = locate(clips, t)
+          if (p) {
+            if (v.currentTime >= p.clip.outSec - 0.04) {
+              const nextIdx = p.index + 1
+              if (nextIdx < clips.length) {
+                const next = clips[nextIdx]
+                setTime(startsNow[nextIdx] ?? 0)
+                if (next.mediaId === p.clip.mediaId && Math.abs(v.currentTime - next.inSec) > 0.05) {
+                  v.currentTime = next.inSec
+                }
+              } else if (videoTotal < projTotal) {
+                setTime(videoTotal) // fall through to the audio-only tail
+              } else {
+                setPlaying(false)
+                setTime(projTotal)
+                return
               }
             } else {
-              setPlaying(false)
-              setTime(timelineDuration(clips))
-              return
+              setTime((startsNow[p.index] ?? 0) + Math.max(0, v.currentTime - p.clip.inSec))
             }
-          } else {
-            setTime((startsNow[p.index] ?? 0) + Math.max(0, v.currentTime - p.clip.inSec))
           }
         }
+        lastNow = performance.now()
+      } else {
+        if (v && !v.paused) v.pause() // freeze the last frame while audio plays on
+        const now = performance.now()
+        const dt = (now - lastNow) / 1000
+        lastNow = now
+        const nt = t + dt
+        if (nt >= projTotal - 0.001) {
+          setPlaying(false)
+          setTime(projTotal)
+          return
+        }
+        setTime(nt)
       }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing])
+  }, [playing, ready])
 
   useEffect(() => {
     const v = videoRef.current
-    if (v && activeClip) v.muted = activeClip.mute || Boolean(music?.muteVideo)
-  }, [activeClip, music?.muteVideo])
-
-  // Music bed: a hidden <audio> that follows the timeline clock.
-  useEffect(() => {
-    const a = audioRef.current
-    if (a && music) a.volume = Math.min(1, Math.max(0, Math.pow(10, music.volumeDb / 20)))
-  }, [music?.volumeDb])
-
-  useEffect(() => {
-    const a = audioRef.current
-    if (!a || !musicSrc) return
-    if (playing) {
-      if (Math.abs(a.currentTime - time) > 0.3) a.currentTime = time
-      if (a.paused) void a.play().catch(() => {})
-    } else {
-      a.pause()
-      if (a.readyState >= 1 && Math.abs(a.currentTime - time) > 0.05) a.currentTime = time
-    }
-  }, [playing, musicSrc, time])
+    if (v && activeClip) v.muted = activeClip.mute
+  }, [activeClip])
 
   // Crop: map the active clip's source-pixel crop into the 9:16 stage with CSS.
   const videoStyle: CSSProperties = useMemo(() => {
@@ -244,8 +300,13 @@ export function PreviewStage(): JSX.Element {
         className={ready ? '' : 'opacity-0'}
       />
 
-      {/* Music bed (hidden audio element, synced to the timeline clock) */}
-      <audio ref={audioRef} key={music?.mediaId ?? 'nomusic'} src={musicSrc} preload="auto" />
+      {/* Audio track: one follower <audio> per clip (the browser mixes them) */}
+      {audioClips.map((a) => {
+        const asset = assetById.get(a.mediaId)
+        if (!asset?.proxyReady) return null
+        const src = asset.probe.video ? proxyUrl(asset.id) : audioUrl(asset.id)
+        return <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
+      })}
 
 
       {!ready && (

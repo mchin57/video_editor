@@ -1,9 +1,18 @@
 import { describe, it, expect } from 'vitest'
-import { buildAudioProxyArgs, buildWaveformArgs, dbToGain, buildMusicMixGraph } from './audio'
-import type { MusicConfig } from '@shared/project'
+import { buildAudioProxyArgs, buildWaveformArgs, dbToGain, buildAudioGraph, type AudioGraphItem } from './audio'
 
-function music(over: Partial<MusicConfig> = {}): MusicConfig {
-  return { mediaId: 'm', volumeDb: -14, duck: false, fadeOutSec: 0, muteVideo: false, ...over }
+function item(over: Partial<AudioGraphItem> = {}): AudioGraphItem {
+  return {
+    inputLabel: '1:a',
+    startSec: 0,
+    inSec: 0,
+    outSec: 10,
+    gainDb: -14,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    duck: false,
+    ...over
+  }
 }
 
 describe('buildAudioProxyArgs', () => {
@@ -31,27 +40,31 @@ describe('dbToGain', () => {
   })
 })
 
-describe('buildMusicMixGraph', () => {
-  it('music-only when muteVideo (no clip audio)', () => {
-    const { filter, outLabel } = buildMusicMixGraph(music({ muteVideo: true }), '0:a', '1:a', 10)
-    expect(outLabel).toBe('music')
-    expect(filter).toContain('[1:a]atrim=0:10.00')
-    expect(filter).not.toContain('amix')
+describe('buildAudioGraph', () => {
+  it('returns null with no dialogue and no items', () => {
+    expect(buildAudioGraph([], null)).toBeNull()
   })
-  it('mixes music + clip audio when not ducking', () => {
-    const { filter, outLabel } = buildMusicMixGraph(music(), '0:a', '1:a', 10)
-    expect(outLabel).toBe('aout')
-    expect(filter).toContain('amix=inputs=2')
-    expect(filter).not.toContain('sidechaincompress')
+  it('trims, delays, gains each clip and mixes with the dialogue', () => {
+    const res = buildAudioGraph([item({ startSec: 2, inSec: 1, outSec: 5 })], '0:a')!
+    expect(res.outLabel).toBe('aout')
+    expect(res.filter).toContain('[1:a]atrim=1.000:5.000')
+    expect(res.filter).toContain('adelay=2000|2000')
+    expect(res.filter).toContain('amix=inputs=2')
+    expect(res.filter).not.toContain('sidechaincompress')
   })
-  it('splits clip audio and sidechains when ducking', () => {
-    const { filter } = buildMusicMixGraph(music({ duck: true }), '0:a', '1:a', 10)
-    expect(filter).toContain('[0:a]asplit=2[a_sc][a_mix]')
-    expect(filter).toContain('sidechaincompress')
-    expect(filter).toContain('[ducked][a_mix]amix')
+  it('sidechains ducked clips under the non-ducked sources', () => {
+    const res = buildAudioGraph([item({ duck: true })], '0:a')!
+    expect(res.filter).toContain('asplit=2[nd_sc][nd_mix]')
+    expect(res.filter).toContain('sidechaincompress')
   })
-  it('adds a fade-out when fadeOutSec > 0', () => {
-    const { filter } = buildMusicMixGraph(music({ fadeOutSec: 1.5 }), '0:a', '1:a', 10)
-    expect(filter).toContain('afade=t=out:st=8.50:d=1.50')
+  it('no sidechain when a ducked clip has nothing to duck against', () => {
+    const res = buildAudioGraph([item({ duck: true })], null)!
+    expect(res.filter).not.toContain('sidechaincompress')
+    expect(res.outLabel).toBe('aout')
+  })
+  it('applies fades', () => {
+    const res = buildAudioGraph([item({ startSec: 0, inSec: 0, outSec: 10, fadeInSec: 1, fadeOutSec: 2 })], null)!
+    expect(res.filter).toContain('afade=t=in:st=0.00:d=1.00')
+    expect(res.filter).toContain('afade=t=out:st=8.00:d=2.00')
   })
 })

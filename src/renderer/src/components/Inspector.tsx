@@ -115,6 +115,7 @@ function ClipDetails(): JSX.Element {
   const selectedClipId = useProject((s) => s.selectedClipId)
   const clip = useProject((s) => s.project?.clips.find((c) => c.id === selectedClipId) ?? null)
   const setClipCrop = useProject((s) => s.setClipCrop)
+  const extractClipAudio = useProject((s) => s.extractClipAudio)
   const setCropEditing = useUi((s) => s.setCropEditing)
   const { data: assets = [] } = useLibrary()
   const libSelectedId = useEditor((s) => s.selectedId)
@@ -162,6 +163,15 @@ function ClipDetails(): JSX.Element {
               className="rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-400 hover:bg-white/10"
             >
               Remove crop
+            </button>
+          )}
+          {asset?.probe.audio && (
+            <button
+              onClick={() => extractClipAudio(clip.id)}
+              className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+              title="Move this clip's audio onto the audio track and mute the clip"
+            >
+              ♪ Extract audio
             </button>
           )}
         </div>
@@ -235,74 +245,81 @@ function CaptionEditor(): JSX.Element | null {
   )
 }
 
-function MusicEditor(): JSX.Element | null {
-  const music = useProject((s) => s.project?.music)
-  const setMusic = useProject((s) => s.setMusic)
-  const selectMusic = useUi((s) => s.selectMusic)
+function AudioClipEditor(): JSX.Element | null {
+  const selectedAudioId = useUi((s) => s.selectedAudioId)
+  const clip = useProject((s) => s.project?.audioClips.find((a) => a.id === selectedAudioId) ?? null)
+  const update = useProject((s) => s.updateAudioClip)
+  const remove = useProject((s) => s.removeAudioClip)
+  const selectAudio = useUi((s) => s.selectAudio)
   const { data: assets = [] } = useLibrary()
-  if (!music) return null
-  const asset = music.mediaId ? assets.find((a) => a.id === music.mediaId) : undefined
-
-  if (!music.mediaId) {
-    return (
-      <p className="text-sm text-zinc-600">
-        No music yet. Import an audio file, then click ♪ on it in the Library.
-      </p>
-    )
-  }
+  if (!clip) return null
+  const asset = assets.find((a) => a.id === clip.mediaId)
 
   return (
     <div>
-      <div className="mb-1 text-sm font-medium text-zinc-200">Music</div>
+      <div className="mb-1 text-sm font-medium text-zinc-200">Audio clip</div>
       <div className="mb-3 truncate text-xs text-zinc-400" title={asset?.fileName}>
-        {asset?.fileName ?? music.mediaId}
+        {asset?.fileName ?? clip.mediaId} · {clip.kind}
       </div>
-      <Field label={`Volume · ${music.volumeDb} dB`}>
+      <Field label={`Volume · ${clip.gainDb} dB`}>
         <input
           type="range"
           min={-40}
           max={6}
           step={1}
-          value={music.volumeDb}
-          onChange={(e) => setMusic({ volumeDb: Number(e.target.value) })}
+          value={clip.gainDb}
+          onChange={(e) => update(clip.id, { gainDb: Number(e.target.value) })}
           className="w-full accent-sky-400"
         />
       </Field>
-      <Field label="Fade out (s)">
+      <Field label="Start (s)">
         <input
           type="number"
-          step="0.5"
+          step="0.1"
           min="0"
-          value={music.fadeOutSec}
-          onChange={(e) => setMusic({ fadeOutSec: Math.max(0, Number(e.target.value)) })}
+          value={clip.startSec.toFixed(1)}
+          onChange={(e) => update(clip.id, { startSec: Math.max(0, Number(e.target.value)) })}
           className={inputCls}
         />
       </Field>
-      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={music.muteVideo}
-          onChange={(e) => setMusic({ muteVideo: e.target.checked })}
-        />
-        Mute clip audio (music only)
-      </label>
+      <div className="flex gap-2">
+        <Field label="Fade in (s)">
+          <input
+            type="number"
+            step="0.5"
+            min="0"
+            value={clip.fadeInSec}
+            onChange={(e) => update(clip.id, { fadeInSec: Math.max(0, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Fade out (s)">
+          <input
+            type="number"
+            step="0.5"
+            min="0"
+            value={clip.fadeOutSec}
+            onChange={(e) => update(clip.id, { fadeOutSec: Math.max(0, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+      </div>
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
         <input
           type="checkbox"
-          checked={music.duck}
-          disabled={music.muteVideo}
-          onChange={(e) => setMusic({ duck: e.target.checked })}
+          checked={clip.duck}
+          onChange={(e) => update(clip.id, { duck: e.target.checked })}
         />
-        Duck music under speech
+        Duck under other audio (music bed)
       </label>
       <button
         onClick={() => {
-          setMusic({ mediaId: null })
-          selectMusic(false)
+          remove(clip.id)
+          selectAudio(null)
         }}
         className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
       >
-        Remove music
+        Remove audio clip
       </button>
     </div>
   )
@@ -311,7 +328,7 @@ function MusicEditor(): JSX.Element | null {
 export function Inspector(): JSX.Element {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
-  const musicSelected = useUi((s) => s.musicSelected)
+  const selectedAudioId = useUi((s) => s.selectedAudioId)
   const overlays = useProject((s) => s.project?.overlays)
   const hookOk = hookCovered(overlays ?? [])
 
@@ -337,8 +354,8 @@ export function Inspector(): JSX.Element {
           <OverlayEditor />
         ) : selectedCaptionId ? (
           <CaptionEditor />
-        ) : musicSelected ? (
-          <MusicEditor />
+        ) : selectedAudioId ? (
+          <AudioClipEditor />
         ) : (
           <ClipDetails />
         )}

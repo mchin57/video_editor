@@ -8,9 +8,9 @@ interface UiState {
   /** Currently selected caption segment (for editing/dragging). */
   selectedCaptionId: string | null
   selectCaption: (id: string | null) => void
-  /** Whether the music bed is selected (shows music controls in the Inspector). */
-  musicSelected: boolean
-  selectMusic: (v: boolean) => void
+  /** Currently selected audio clip (shows its controls in the Inspector). */
+  selectedAudioId: string | null
+  selectAudio: (id: string | null) => void
   /** Whether the crop editor modal is open. */
   cropEditing: boolean
   setCropEditing: (v: boolean) => void
@@ -24,8 +24,8 @@ export const useUi = create<UiState>((set) => ({
   selectOverlay: (id) => set({ selectedOverlayId: id }),
   selectedCaptionId: null,
   selectCaption: (id) => set({ selectedCaptionId: id }),
-  musicSelected: false,
-  selectMusic: (v) => set({ musicSelected: v }),
+  selectedAudioId: null,
+  selectAudio: (id) => set({ selectedAudioId: id }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   settingsOpen: false,

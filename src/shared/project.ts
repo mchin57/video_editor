@@ -72,14 +72,27 @@ export interface CaptionsConfig {
   segments: CaptionSegment[]
 }
 
-export interface MusicConfig {
-  mediaId: string | null
-  volumeDb: number
-  /** Lower the music under spoken/clip audio (sidechain) on export. */
-  duck: boolean
+export type AudioKind = 'music' | 'voice' | 'extracted' | 'audio'
+
+/**
+ * An independent audio clip on the audio track. Source is any media asset
+ * (audio-only file, or a video asset whose audio we use — e.g. extracted from a
+ * clip). Positioned freely on the timeline; trimmed within the source.
+ */
+export interface AudioClip {
+  id: string
+  mediaId: string
+  /** Position on the timeline (seconds). */
+  startSec: number
+  /** Trim within the source. outSec <= 0 means "to the end of the source". */
+  inSec: number
+  outSec: number
+  gainDb: number
+  fadeInSec: number
   fadeOutSec: number
-  /** Mute the clips' original audio so only music plays. */
-  muteVideo: boolean
+  /** Duck under dialogue/other audio on export (typical for a music bed). */
+  duck: boolean
+  kind: AudioKind
 }
 
 export interface Project {
@@ -91,9 +104,19 @@ export interface Project {
   clips: Clip[]
   overlays: TextOverlay[]
   captions: CaptionsConfig
-  music: MusicConfig
+  audioClips: AudioClip[]
   createdAt: string
   updatedAt: string
+}
+
+/** Effective source out-point (outSec<=0 means "to the source end"). */
+export function effectiveOut(c: AudioClip, sourceDurationSec: number): number {
+  return c.outSec > 0 ? Math.min(c.outSec, sourceDurationSec) : sourceDurationSec
+}
+
+/** Timeline end of an audio clip, given its source duration. */
+export function audioClipEnd(c: AudioClip, sourceDurationSec: number): number {
+  return c.startSec + Math.max(0, effectiveOut(c, sourceDurationSec) - c.inSec)
 }
 
 export function createEmptyProject(id: string, name: string): Project {
@@ -101,13 +124,44 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 1,
+    version: 2,
     preset: 'reel',
     clips: [],
     overlays: [],
     captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
-    music: { mediaId: null, volumeDb: -14, duck: true, fadeOutSec: 1.5, muteVideo: false },
+    audioClips: [],
     createdAt: now,
     updatedAt: now
   }
+}
+
+/**
+ * Bring an on-disk project up to the current shape. Notably migrates the old
+ * single `music` bed (v1) into an audio clip on the new audio track (v2).
+ */
+export function migrateProject(raw: unknown): Project {
+  const p = { ...(raw as Record<string, unknown>) } as Record<string, unknown> & Partial<Project>
+  if (!Array.isArray(p.audioClips)) {
+    const clips: AudioClip[] = []
+    const music = (raw as { music?: Record<string, unknown> }).music
+    if (music && typeof music.mediaId === 'string') {
+      clips.push({
+        id: 'music-0',
+        mediaId: music.mediaId,
+        startSec: 0,
+        inSec: 0,
+        outSec: 0, // whole source
+        gainDb: typeof music.volumeDb === 'number' ? music.volumeDb : -14,
+        fadeInSec: 0,
+        fadeOutSec: typeof music.fadeOutSec === 'number' ? music.fadeOutSec : 0,
+        duck: music.duck !== false,
+        kind: 'music'
+      })
+    }
+    p.audioClips = clips
+  }
+  delete (p as { music?: unknown }).music
+  if (!Array.isArray(p.overlays)) p.overlays = []
+  if (!Array.isArray(p.clips)) p.clips = []
+  return p as Project
 }

@@ -9,12 +9,11 @@
  * Kept dependency-light (only the shared HDR chain) so it's unit-testable.
  */
 
-import type { Clip, MusicConfig } from '@shared/project'
+import type { Clip } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EXPORT_PRESETS, type PresetId } from '@shared/export'
 import { hdrToSdrChain } from './proxy'
-import { buildMusicMixGraph } from './audio'
 
 export interface Target {
   width: number
@@ -124,7 +123,7 @@ export function buildFinalArgs(
   opts: {
     preferNvenc: boolean
     assFile?: string
-    music?: { path: string; config: MusicConfig; totalSec: number }
+    audio?: { inputPaths: string[]; filter: string; outLabel: string }
   }
 ): string[] {
   const nvenc = opts.preferNvenc && caps.encoders.h264_nvenc
@@ -133,24 +132,18 @@ export function buildFinalArgs(
     : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20']
 
   const inputs = ['-f', 'concat', '-safe', '0', '-i', listPath]
-  if (opts.music) inputs.push('-i', opts.music.path)
+  for (const p of opts.audio?.inputPaths ?? []) inputs.push('-i', p)
 
   let filterArgs: string[] = []
   let mapArgs: string[] = []
 
-  if (opts.music) {
-    // Music present → everything goes through filter_complex (can't mix -vf with it).
-    const { filter: audioFilter, outLabel } = buildMusicMixGraph(
-      opts.music.config,
-      '0:a',
-      '1:a',
-      opts.music.totalSec
-    )
+  if (opts.audio) {
+    // Audio mix present → everything goes through filter_complex (can't mix -vf).
     const chains: string[] = []
     if (opts.assFile) chains.push(`[0:v]ass=${opts.assFile}[v]`)
-    chains.push(audioFilter)
+    chains.push(opts.audio.filter)
     filterArgs = ['-filter_complex', chains.join(';')]
-    mapArgs = ['-map', opts.assFile ? '[v]' : '0:v', '-map', `[${outLabel}]`]
+    mapArgs = ['-map', opts.assFile ? '[v]' : '0:v', '-map', `[${opts.audio.outLabel}]`]
   } else if (opts.assFile) {
     // Burn overlays/captions via the ass video filter.
     filterArgs = ['-vf', `ass=${opts.assFile}`]

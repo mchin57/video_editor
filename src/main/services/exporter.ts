@@ -8,12 +8,14 @@
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Project } from '@shared/project'
+import { effectiveOut } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import { buildFinalArgs, buildNormalizeArgs, targetForPreset } from './exporterArgs'
+import { buildAudioGraph, type AudioGraphItem } from './audio'
 import { buildAss } from './assBuilder'
 import { runFfmpeg } from './ffmpegRun'
 
@@ -102,21 +104,35 @@ async function runExport(
     await fsp.writeFile(join(tmp, assFile), buildAss(overlays, target, project.captions), 'utf8')
   }
 
-  // Music bed (if set): mix into the final audio. Prefer the AAC proxy; fall
-  // back to the original if the proxy isn't there.
-  let music: { path: string; config: typeof project.music; totalSec: number } | undefined
-  if (project.music.mediaId) {
-    const musicAsset = await getAsset(project.music.mediaId)
-    const proxy = join(getSubdir('media'), project.music.mediaId, 'audio.m4a')
-    const path = existsSync(proxy) ? proxy : musicAsset?.originalPath
-    if (path) music = { path, config: project.music, totalSec: totalDur }
+  // Audio track: each audio clip → an input + a node in the mix graph. The
+  // concat's audio (0:a, the clip dialogue) is the base non-ducked source.
+  const inputPaths: string[] = []
+  const audioItems: AudioGraphItem[] = []
+  for (const a of project.audioClips) {
+    const asset = await getAsset(a.mediaId)
+    if (!asset) continue
+    const proxy = join(getSubdir('media'), a.mediaId, 'audio.m4a')
+    const path = existsSync(proxy) ? proxy : asset.originalPath
+    audioItems.push({
+      inputLabel: `${1 + inputPaths.length}:a`,
+      startSec: a.startSec,
+      inSec: a.inSec,
+      outSec: effectiveOut(a, asset.probe.durationSec),
+      gainDb: a.gainDb,
+      fadeInSec: a.fadeInSec,
+      fadeOutSec: a.fadeOutSec,
+      duck: a.duck
+    })
+    inputPaths.push(path)
   }
+  const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, '0:a') : null
+  const audio = graph ? { inputPaths, filter: graph.filter, outLabel: graph.outLabel } : undefined
 
   await fsp.mkdir(dirname(output), { recursive: true })
   const finalArgs = buildFinalArgs(listPath, output, caps, {
     preferNvenc: opts.preferNvenc,
     assFile,
-    music
+    audio
   })
   await runFfmpeg(
     ffmpeg,

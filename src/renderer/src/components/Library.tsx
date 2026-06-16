@@ -4,6 +4,7 @@ import { useLibrary, useImportMedia, useRemoveMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
+import { usePlayback } from '@/state/playback'
 import { formatDuration } from '@/lib/format'
 import { thumbUrl } from '@/ipc/client'
 
@@ -46,9 +47,9 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const select = useEditor((s) => s.select)
   const job = useEditor((s) => (asset.id in s.proxyJobs ? s.proxyJobs[asset.id] : undefined))
   const addClip = useProject((s) => s.addClip)
-  const setMusic = useProject((s) => s.setMusic)
-  const selectMusic = useUi((s) => s.selectMusic)
-  const isMusic = useProject((s) => s.project?.music.mediaId === asset.id)
+  const addAudioClip = useProject((s) => s.addAudioClip)
+  const selectAudio = useUi((s) => s.selectAudio)
+  const onTrack = useProject((s) => s.project?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const remove = useRemoveMedia()
 
   const v = asset.probe.video
@@ -100,15 +101,28 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
             tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation()
-              setMusic({ mediaId: asset.id })
-              selectMusic(true)
+              if (!asset.proxyReady) return
+              const id = crypto.randomUUID()
+              addAudioClip({
+                id,
+                mediaId: asset.id,
+                startSec: usePlayback.getState().time,
+                inSec: 0,
+                outSec: asset.probe.durationSec,
+                gainDb: 0,
+                fadeInSec: 0,
+                fadeOutSec: 0,
+                duck: false,
+                kind: 'audio'
+              })
+              selectAudio(id)
             }}
             className={`rounded px-1.5 text-xs font-semibold transition ${
-              isMusic
+              onTrack
                 ? 'bg-emerald-500/30 text-emerald-200'
                 : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'
-            }`}
-            title={isMusic ? 'Current music bed' : 'Set as music bed'}
+            } ${asset.proxyReady ? '' : 'pointer-events-none opacity-30'}`}
+            title="Add to audio track at the playhead"
           >
             ♪
           </span>

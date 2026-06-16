@@ -1,5 +1,6 @@
 import { useMemo, useRef, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { CaptionSegment, Clip, TextOverlay } from '@shared/project'
+import type { AudioClip, CaptionSegment, Clip, TextOverlay } from '@shared/project'
+import { audioClipEnd, effectiveOut } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -15,6 +16,7 @@ const HOOK_SEC = 3
 const EMPTY_CLIPS: Clip[] = []
 const EMPTY_OVERLAYS: TextOverlay[] = []
 const EMPTY_CAPTIONS: CaptionSegment[] = []
+const EMPTY_AUDIO: AudioClip[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
@@ -57,9 +59,9 @@ export function Timeline(): JSX.Element {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectCaption = useUi((s) => s.selectCaption)
-  const musicSelected = useUi((s) => s.musicSelected)
-  const selectMusic = useUi((s) => s.selectMusic)
-  const music = project?.music
+  const selectedAudioId = useUi((s) => s.selectedAudioId)
+  const selectAudio = useUi((s) => s.selectAudio)
+  const audioClips = project?.audioClips ?? EMPTY_AUDIO
   const selectClip = useProject((s) => s.selectClip)
   const removeClip = useProject((s) => s.removeClip)
   const reorderClips = useProject((s) => s.reorderClips)
@@ -81,7 +83,14 @@ export function Timeline(): JSX.Element {
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
-  const total = timelineDuration(clips)
+  const total = useMemo(() => {
+    const videoTotal = timelineDuration(clips)
+    const audioEnd = audioClips.reduce(
+      (m, a) => Math.max(m, audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)),
+      0
+    )
+    return Math.max(videoTotal, audioEnd)
+  }, [clips, audioClips, assetById])
   const trackInnerRef = useRef<HTMLDivElement>(null)
 
   const selectedIndex = clips.findIndex((c) => c.id === selectedClipId)
@@ -157,7 +166,7 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     selectOverlay(o.id)
     selectCaption(null)
-    selectMusic(false)
+    selectAudio(null)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
@@ -197,7 +206,7 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     selectCaption(seg.id)
     selectOverlay(null)
-    selectMusic(false)
+    selectAudio(null)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
@@ -219,6 +228,48 @@ export function Timeline(): JSX.Element {
             return { ...s, endSec: Math.max(s.startSec + 0.1, endSec + d) }
           })
         }
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // Drag an audio clip's position (or its edges) on the audio track.
+  const startAudioDrag = (
+    e: ReactPointerEvent,
+    clip: AudioClip,
+    mode: 'move' | 'start' | 'end',
+    maxOut: number
+  ): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    selectAudio(clip.id)
+    selectClip(null)
+    selectOverlay(null)
+    selectCaption(null)
+    const before = useProject.getState().project
+    if (!before) return
+    const startX = e.clientX
+    const { startSec, inSec } = clip
+    const effOut = effectiveOut(clip, maxOut)
+    const onMove = (ev: PointerEvent): void => {
+      const d = (ev.clientX - startX) / PX_PER_SEC
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        audioClips: p.audioClips.map((a) => {
+          if (a.id !== clip.id) return a
+          if (mode === 'move') return { ...a, startSec: Math.max(0, startSec + d) }
+          if (mode === 'start') {
+            const ni = clamp(inSec + d, 0, effOut - 0.1)
+            return { ...a, inSec: ni, startSec: Math.max(0, startSec + (ni - inSec)) }
+          }
+          return { ...a, outSec: clamp(effOut + d, a.inSec + 0.1, maxOut) }
+        })
       }))
     }
     const onUp = (): void => {
@@ -338,7 +389,7 @@ export function Timeline(): JSX.Element {
                       selectClip(clip.id)
                       selectOverlay(null)
                       selectCaption(null)
-                      selectMusic(false)
+                      selectAudio(null)
                     }}
                     className={`group relative mx-px flex shrink-0 cursor-pointer items-center overflow-hidden rounded-md border ${
                       selected ? 'border-sky-400 ring-1 ring-sky-400/50' : 'border-white/10'
@@ -437,45 +488,52 @@ export function Timeline(): JSX.Element {
               })}
             </div>
 
-            {/* Music lane (waveform, or a hint when empty) */}
+            {/* Audio track lane (music / voiceover / extracted clip audio) */}
             <div className="absolute inset-x-0 top-[114px] h-6">
-              {(() => {
-                const musicAsset = music?.mediaId ? assetById.get(music.mediaId) : undefined
-                if (!musicAsset) {
-                  return (
-                    <div className="flex h-6 items-center pl-1 text-[9px] text-zinc-600">
-                      ♪ No music — import audio &amp; click ♪ in the Library
-                    </div>
-                  )
-                }
-                const width = Math.max(40, musicAsset.probe.durationSec * PX_PER_SEC)
+              {audioClips.length === 0 && (
+                <div className="flex h-6 items-center pl-1 text-[9px] text-zinc-600">
+                  ♪ No audio — add an audio file (♪ in Library) or Extract a clip&apos;s audio
+                </div>
+              )}
+              {audioClips.map((a) => {
+                const asset = assetById.get(a.mediaId)
+                const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
+                const eo = effectiveOut(a, maxOut)
+                const left = a.startSec * PX_PER_SEC
+                const width = Math.max(12, (eo - a.inSec) * PX_PER_SEC)
+                const selected = a.id === selectedAudioId
                 return (
                   <div
-                    onPointerDown={(e) => {
-                      e.stopPropagation()
-                      selectMusic(true)
-                      selectClip(null)
-                      selectOverlay(null)
-                      selectCaption(null)
-                    }}
-                    title={musicAsset.fileName}
-                    className={`absolute top-0 flex h-6 cursor-pointer items-center overflow-hidden rounded border ${
-                      musicSelected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
+                    key={a.id}
+                    onPointerDown={(e) => startAudioDrag(e, a, 'move', maxOut)}
+                    title={asset?.fileName}
+                    className={`group absolute top-0 flex h-6 cursor-move items-center overflow-hidden rounded border ${
+                      selected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
                     } bg-sky-500/15`}
-                    style={{ left: 0, width }}
+                    style={{ left, width }}
                   >
-                    <img
-                      src={waveformUrl(musicAsset.id)}
-                      alt=""
-                      onError={(e) => (e.currentTarget.style.display = 'none')}
-                      className="h-full w-full object-cover opacity-70"
-                    />
+                    {asset && (
+                      <img
+                        src={waveformUrl(asset.id)}
+                        alt=""
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                        className="h-full w-full object-cover opacity-70"
+                      />
+                    )}
                     <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
-                      ♪&nbsp;{musicAsset.fileName}
+                      {a.duck ? '♪' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;{asset?.fileName ?? a.mediaId}
                     </span>
+                    <div
+                      onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)}
+                      className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"
+                    />
+                    <div
+                      onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"
+                    />
                   </div>
                 )
-              })()}
+              })}
             </div>
 
             {/* Playhead */}

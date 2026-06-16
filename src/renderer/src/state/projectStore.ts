@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import type {
+  AudioClip,
   CaptionSegment,
   CaptionsConfig,
   CropRect,
-  MusicConfig,
   Project,
   TextOverlay
 } from '@shared/project'
-import { reorder, splitClip } from '@/lib/timeline'
+import { migrateProject } from '@shared/project'
+import { clipStartTimes, reorder, splitClip } from '@/lib/timeline'
 import { loadProject, saveProject } from '@/ipc/client'
 
 const HISTORY_LIMIT = 50
@@ -46,7 +47,11 @@ interface ProjectState {
   setCaptions: (captions: CaptionsConfig) => void
   updateCaption: (id: string, patch: Partial<CaptionSegment>) => void
   removeCaption: (id: string) => void
-  setMusic: (patch: Partial<MusicConfig>) => void
+  addAudioClip: (clip: AudioClip) => void
+  updateAudioClip: (id: string, patch: Partial<AudioClip>) => void
+  removeAudioClip: (id: string) => void
+  /** Pull a video clip's audio onto the audio track and mute the clip. */
+  extractClipAudio: (clipId: string) => void
   undo: () => void
   redo: () => void
 }
@@ -70,7 +75,7 @@ export const useProject = create<ProjectState>((set, get) => {
     loaded: false,
 
     load: async () => {
-      const project = await loadProject()
+      const project = migrateProject(await loadProject())
       set({ project, loaded: true, past: [], future: [] })
     },
 
@@ -174,7 +179,41 @@ export const useProject = create<ProjectState>((set, get) => {
         captions: { ...p.captions, segments: p.captions.segments.filter((s) => s.id !== id) }
       })),
 
-    setMusic: (patch) => commit((p) => ({ ...p, music: { ...p.music, ...patch } })),
+    addAudioClip: (clip) => commit((p) => ({ ...p, audioClips: [...p.audioClips, clip] })),
+
+    updateAudioClip: (id, patch) =>
+      commit((p) => ({
+        ...p,
+        audioClips: p.audioClips.map((a) => (a.id === id ? { ...a, ...patch } : a))
+      })),
+
+    removeAudioClip: (id) =>
+      commit((p) => ({ ...p, audioClips: p.audioClips.filter((a) => a.id !== id) })),
+
+    extractClipAudio: (clipId) =>
+      commit((p) => {
+        const idx = p.clips.findIndex((c) => c.id === clipId)
+        if (idx < 0) return p
+        const clip = p.clips[idx]
+        const startSec = clipStartTimes(p.clips)[idx]
+        const audio: AudioClip = {
+          id: newId(),
+          mediaId: clip.mediaId,
+          startSec,
+          inSec: clip.inSec,
+          outSec: clip.outSec,
+          gainDb: 0,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false,
+          kind: 'extracted'
+        }
+        return {
+          ...p,
+          clips: p.clips.map((c) => (c.id === clipId ? { ...c, mute: true } : c)),
+          audioClips: [...p.audioClips, audio]
+        }
+      }),
 
     undo: () => {
       const { past, project, future } = get()
