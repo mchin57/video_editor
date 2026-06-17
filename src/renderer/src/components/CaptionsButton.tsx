@@ -1,19 +1,22 @@
 import { useEffect, useState, type JSX } from 'react'
 import type { CaptionWord } from '@shared/project'
+import { effectiveOut } from '@shared/project'
 import { useProject } from '@/state/projectStore'
+import { useLibrary } from '@/hooks/useMedia'
 import { transcribeMedia, whisperAvailable } from '@/ipc/client'
-import { buildTimelineCaptions } from '@/lib/captions'
+import { buildTimelineCaptions, type CaptionSource } from '@/lib/captions'
 
 /**
- * Generates auto-captions: transcribes each clip's media (cached), groups words
- * into timeline segments, and stores them on the project. Also toggles caption
- * visibility once generated.
+ * Generates auto-captions from the AUDIO track: transcribes each audio clip's
+ * media (cached), projects the words to timeline time, groups them into segments,
+ * and stores them on the project. Also toggles caption visibility.
  */
 export function CaptionsButton(): JSX.Element {
   const project = useProject((s) => s.project)
-  const clips = project?.clips
+  const audioClips = project?.audioClips
   const captions = project?.captions
   const setCaptions = useProject((s) => s.setCaptions)
+  const { data: assets = [] } = useLibrary()
 
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState('')
@@ -24,22 +27,28 @@ export function CaptionsButton(): JSX.Element {
     void whisperAvailable().then(setAvailable)
   }, [])
 
-  const hasClips = (clips?.length ?? 0) > 0
+  const hasAudio = (audioClips?.length ?? 0) > 0
   const hasCaptions = (captions?.segments.length ?? 0) > 0
 
   const generate = async (): Promise<void> => {
-    if (!clips || !captions || !hasClips || busy) return
+    if (!audioClips || !captions || !hasAudio || busy) return
     setBusy(true)
     setError(null)
     try {
-      const mediaIds = [...new Set(clips.map((c) => c.mediaId))]
+      const mediaIds = [...new Set(audioClips.map((a) => a.mediaId))]
       const wordsByMedia: Record<string, CaptionWord[]> = {}
       for (let i = 0; i < mediaIds.length; i++) {
         setStep(`${i + 1}/${mediaIds.length}`)
         const transcript = await transcribeMedia(mediaIds[i])
         wordsByMedia[mediaIds[i]] = transcript.words
       }
-      const segments = buildTimelineCaptions(clips, wordsByMedia)
+      const sources: CaptionSource[] = audioClips.map((a) => ({
+        mediaId: a.mediaId,
+        startSec: a.startSec,
+        inSec: a.inSec,
+        outSec: effectiveOut(a, assets.find((m) => m.id === a.mediaId)?.probe.durationSec ?? a.outSec)
+      }))
+      const segments = buildTimelineCaptions(sources, wordsByMedia)
       setCaptions({ ...captions, enabled: true, segments })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -83,9 +92,9 @@ export function CaptionsButton(): JSX.Element {
       )}
       <button
         onClick={generate}
-        disabled={!hasClips || busy}
+        disabled={!hasAudio || busy}
         className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20 disabled:opacity-50"
-        title="Auto-caption the timeline with whisper.cpp"
+        title="Auto-caption the audio track with whisper.cpp"
       >
         {busy ? `Transcribing… ${step}` : hasCaptions ? '↻ Captions' : '✨ Captions'}
       </button>
