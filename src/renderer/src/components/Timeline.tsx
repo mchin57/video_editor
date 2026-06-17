@@ -5,12 +5,17 @@ import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
-import { clipDuration, locate, timelineDuration } from '@/lib/timeline'
+import { clipDuration, clipStartTimes, locate, timelineDuration } from '@/lib/timeline'
 import { makeOverlay } from '@/lib/overlays'
+import { packRows, rowCount } from '@/lib/lanes'
+import { snap } from '@/lib/snap'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
 
 const PX_PER_SEC = 48
 const HOOK_SEC = 3
+const ROW_T = 22 // text/caption lane row height (px)
+const ROW_A = 30 // audio lane row height (px)
+const SNAP_PX = 7 // magnetic snap threshold
 
 // Stable empty references (see PreviewStage note) to avoid re-render loops.
 const EMPTY_CLIPS: Clip[] = []
@@ -92,6 +97,57 @@ export function Timeline(): JSX.Element {
     return Math.max(videoTotal, audioEnd)
   }, [clips, audioClips, assetById])
   const trackInnerRef = useRef<HTMLDivElement>(null)
+
+  // Stack overlapping blocks into rows so they don't obscure each other, and
+  // lay the lanes out vertically based on how many rows each needs.
+  const overlayRows = useMemo(
+    () => packRows(overlays.map((o) => ({ id: o.id, startSec: o.startSec, endSec: o.endSec }))),
+    [overlays]
+  )
+  const captionRows = useMemo(
+    () => packRows(captionSegs.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec }))),
+    [captionSegs]
+  )
+  const audioRows = useMemo(
+    () =>
+      packRows(
+        audioClips.map((a) => ({
+          id: a.id,
+          startSec: a.startSec,
+          endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
+        }))
+      ),
+    [audioClips, assetById]
+  )
+  const layout = useMemo(() => {
+    const ruler = 20
+    const gap = 4
+    const clipsTop = ruler
+    const clipsH = 48
+    const textTop = clipsTop + clipsH + gap
+    const textH = rowCount(overlayRows) * ROW_T
+    const capTop = textTop + textH + gap
+    const capH = rowCount(captionRows) * ROW_T
+    const audTop = capTop + capH + gap
+    const audH = rowCount(audioRows, 1) * ROW_A
+    return { clipsTop, clipsH, textTop, textH, capTop, capH, audTop, audH, totalH: audTop + audH + gap }
+  }, [overlayRows, captionRows, audioRows])
+
+  // Magnetic snap targets: clip boundaries, audio-clip boundaries, playhead, 0.
+  const snapTargets = useMemo(() => {
+    const t = new Set<number>([0, total])
+    const starts = clipStartTimes(clips)
+    starts.forEach((s, i) => {
+      t.add(s)
+      t.add(s + clipDuration(clips[i]))
+    })
+    for (const a of audioClips) {
+      t.add(a.startSec)
+      t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
+    }
+    return [...t]
+  }, [clips, audioClips, assetById, total])
+  const snapSec = (v: number): number => snap(v, snapTargets, SNAP_PX / PX_PER_SEC)
 
   const selectedIndex = clips.findIndex((c) => c.id === selectedClipId)
 
@@ -180,11 +236,11 @@ export function Timeline(): JSX.Element {
         overlays: p.overlays.map((x) => {
           if (x.id !== o.id) return x
           if (mode === 'move') {
-            const ns = Math.max(0, startSec + d)
+            const ns = Math.max(0, snapSec(startSec + d))
             return { ...x, startSec: ns, endSec: ns + dur }
           }
-          if (mode === 'start') return { ...x, startSec: clamp(startSec + d, 0, x.endSec - 0.2) }
-          return { ...x, endSec: Math.max(x.startSec + 0.2, endSec + d) }
+          if (mode === 'start') return { ...x, startSec: clamp(snapSec(startSec + d), 0, x.endSec - 0.2) }
+          return { ...x, endSec: Math.max(x.startSec + 0.2, snapSec(endSec + d)) }
         })
       }))
     }
@@ -223,11 +279,11 @@ export function Timeline(): JSX.Element {
           segments: p.captions.segments.map((s) => {
             if (s.id !== seg.id) return s
             if (mode === 'move') {
-              const ns = Math.max(0, startSec + d)
+              const ns = Math.max(0, snapSec(startSec + d))
               return { ...s, startSec: ns, endSec: ns + dur }
             }
-            if (mode === 'start') return { ...s, startSec: clamp(startSec + d, 0, s.endSec - 0.1) }
-            return { ...s, endSec: Math.max(s.startSec + 0.1, endSec + d) }
+            if (mode === 'start') return { ...s, startSec: clamp(snapSec(startSec + d), 0, s.endSec - 0.1) }
+            return { ...s, endSec: Math.max(s.startSec + 0.1, snapSec(endSec + d)) }
           })
         }
       }))
@@ -259,13 +315,19 @@ export function Timeline(): JSX.Element {
     const startX = e.clientX
     const { startSec, inSec } = clip
     const effOut = effectiveOut(clip, maxOut)
+    // Snap to other boundaries, but not this clip's own (would stick to origin).
+    const ownEnd = startSec + (effOut - inSec)
+    const others = snapTargets.filter(
+      (t) => Math.abs(t - startSec) > 1e-6 && Math.abs(t - ownEnd) > 1e-6
+    )
+    const audioSnap = (v: number): number => snap(v, others, SNAP_PX / PX_PER_SEC)
     const onMove = (ev: PointerEvent): void => {
       const d = (ev.clientX - startX) / PX_PER_SEC
       useProject.getState().liveUpdate((p) => ({
         ...p,
         audioClips: p.audioClips.map((a) => {
           if (a.id !== clip.id) return a
-          if (mode === 'move') return { ...a, startSec: Math.max(0, startSec + d) }
+          if (mode === 'move') return { ...a, startSec: Math.max(0, audioSnap(startSec + d)) }
           if (mode === 'start') {
             const ni = clamp(inSec + d, 0, effOut - 0.1)
             return { ...a, inSec: ni, startSec: Math.max(0, startSec + (ni - inSec)) }
@@ -361,8 +423,8 @@ export function Timeline(): JSX.Element {
           <div
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
-            className="relative h-full min-h-[142px] cursor-pointer"
-            style={{ width: Math.max(total * PX_PER_SEC + 24, 200) }}
+            className="relative h-full cursor-pointer"
+            style={{ width: Math.max(total * PX_PER_SEC + 24, 200), minHeight: layout.totalH }}
           >
             {/* Ruler strip (the whole track scrubs; this is just the visual band) */}
             <div className="absolute inset-x-0 top-0 h-5 border-b border-white/10 bg-black/30" />
@@ -425,7 +487,7 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Text overlay lane */}
-            <div className="absolute inset-x-0 top-[70px] h-5">
+            <div className="absolute inset-x-0" style={{ top: layout.textTop, height: layout.textH }}>
               {overlays.map((o) => {
                 const left = o.startSec * PX_PER_SEC
                 const width = Math.max(10, (o.endSec - o.startSec) * PX_PER_SEC)
@@ -435,12 +497,12 @@ export function Timeline(): JSX.Element {
                     key={o.id}
                     onPointerDown={(e) => startOverlayDrag(e, o, 'move')}
                     title={o.text}
-                    className={`group absolute top-0 flex h-5 cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                    className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
                       selected
                         ? 'border-violet-300 ring-1 ring-violet-300/50'
                         : 'border-violet-400/40'
                     } bg-violet-500/25`}
-                    style={{ left, width }}
+                    style={{ left, width, top: (overlayRows.get(o.id) ?? 0) * ROW_T, height: ROW_T - 2 }}
                   >
                     <span className="truncate text-[9px] font-medium text-violet-100">
                       T&nbsp;&nbsp;{o.text}
@@ -459,7 +521,7 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Caption lane */}
-            <div className="absolute inset-x-0 top-[92px] h-5">
+            <div className="absolute inset-x-0" style={{ top: layout.capTop, height: layout.capH }}>
               {captionSegs.map((seg) => {
                 const left = seg.startSec * PX_PER_SEC
                 const width = Math.max(10, (seg.endSec - seg.startSec) * PX_PER_SEC)
@@ -469,10 +531,10 @@ export function Timeline(): JSX.Element {
                     key={seg.id}
                     onPointerDown={(e) => startCaptionDrag(e, seg, 'move')}
                     title={seg.text}
-                    className={`group absolute top-0 flex h-5 cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                    className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
                       selected ? 'border-emerald-300 ring-1 ring-emerald-300/50' : 'border-emerald-400/40'
                     } ${seg.enabled ? 'bg-emerald-500/25' : 'bg-zinc-600/30'}`}
-                    style={{ left, width }}
+                    style={{ left, width, top: (captionRows.get(seg.id) ?? 0) * ROW_T, height: ROW_T - 2 }}
                   >
                     <span className="truncate text-[9px] font-medium text-emerald-100">
                       CC&nbsp;&nbsp;{seg.text}
@@ -491,7 +553,7 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Audio track lane (music / voiceover / extracted clip audio) */}
-            <div className="absolute inset-x-0 top-[114px] h-6">
+            <div className="absolute inset-x-0" style={{ top: layout.audTop, height: layout.audH }}>
               {audioClips.length === 0 && (
                 <div className="flex h-6 items-center pl-1 text-[9px] text-zinc-600">
                   ♪ No audio — add an audio file (♪ in Library) or Extract a clip&apos;s audio
@@ -509,10 +571,10 @@ export function Timeline(): JSX.Element {
                     key={a.id}
                     onPointerDown={(e) => startAudioDrag(e, a, 'move', maxOut)}
                     title={asset?.fileName}
-                    className={`group absolute top-0 flex h-6 cursor-move items-center overflow-hidden rounded border ${
+                    className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
                       selected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
                     } bg-sky-500/15`}
-                    style={{ left, width }}
+                    style={{ left, width, top: (audioRows.get(a.id) ?? 0) * ROW_A, height: ROW_A - 2 }}
                   >
                     {asset && (
                       <img
