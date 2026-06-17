@@ -81,7 +81,21 @@ export default function App(): JSX.Element {
         e.preventDefault()
         project.redo()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (project.selectedClipId) {
+        // Delete whatever is selected, matching the Inspector's priority.
+        const ui = useUi.getState()
+        if (ui.selectedOverlayId) {
+          e.preventDefault()
+          project.removeOverlay(ui.selectedOverlayId)
+          ui.selectOverlay(null)
+        } else if (ui.selectedCaptionId) {
+          e.preventDefault()
+          project.removeCaption(ui.selectedCaptionId)
+          ui.selectCaption(null)
+        } else if (ui.selectedAudioId) {
+          e.preventDefault()
+          project.removeAudioClip(ui.selectedAudioId)
+          ui.selectAudio(null)
+        } else if (project.selectedClipId) {
           e.preventDefault()
           project.removeClip(project.selectedClipId)
         }

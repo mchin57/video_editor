@@ -167,6 +167,7 @@ export function Timeline(): JSX.Element {
     selectOverlay(o.id)
     selectCaption(null)
     selectAudio(null)
+    selectClip(null)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
@@ -207,6 +208,7 @@ export function Timeline(): JSX.Element {
     selectCaption(seg.id)
     selectOverlay(null)
     selectAudio(null)
+    selectClip(null)
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
