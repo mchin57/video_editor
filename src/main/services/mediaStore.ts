@@ -49,6 +49,17 @@ async function makeThumb(asset: MediaAsset): Promise<void> {
   }
 }
 
+/** Best-effort waveform for any asset with audio (video included, for the
+ *  audio lane when its audio is extracted onto the track). */
+async function makeWaveform(asset: MediaAsset): Promise<void> {
+  if (!asset.probe.audio || existsSync(waveformPath(asset.id))) return
+  try {
+    await generateWaveform(asset.originalPath, waveformPath(asset.id))
+  } catch (error) {
+    console.error('waveform failed for', asset.id, error)
+  }
+}
+
 async function readAsset(id: string): Promise<MediaAsset | null> {
   try {
     return JSON.parse(await fsp.readFile(assetJsonPath(id), 'utf8')) as MediaAsset
@@ -73,6 +84,7 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
   if (existing) {
     existing.proxyReady = existsSync(playableProxyPath(existing))
     await makeThumb(existing) // backfill for assets imported before thumbnails
+    await makeWaveform(existing) // backfill waveform (e.g. video whose audio is extracted)
     return existing
   }
 
@@ -103,9 +115,7 @@ export async function ensureProxy(id: string): Promise<void> {
     const job = createJob('proxy', `Audio · ${asset.fileName}`, id)
     try {
       await generateAudioProxy(asset.originalPath, audioProxyPath(id))
-      await generateWaveform(asset.originalPath, waveformPath(id)).catch((e) =>
-        console.error('waveform failed', e)
-      )
+      await makeWaveform(asset)
       asset.proxyReady = true
       await writeAsset(asset)
       finishJob(job.id)
@@ -120,6 +130,7 @@ export async function ensureProxy(id: string): Promise<void> {
   const job = createJob('proxy', `Proxy · ${asset.fileName}`, id)
   try {
     await generateProxy(asset.originalPath, proxyPath(id), asset.probe, job.id)
+    await makeWaveform(asset) // for the audio lane if this clip's audio is extracted
     asset.proxyReady = true
     await writeAsset(asset)
     finishJob(job.id)
@@ -143,6 +154,7 @@ export async function listLibrary(): Promise<MediaAsset[]> {
     if (asset) {
       asset.proxyReady = existsSync(playableProxyPath(asset))
       await makeThumb(asset) // backfill thumbnails for assets imported pre-feature
+      await makeWaveform(asset) // backfill waveforms (incl. video assets)
       assets.push(asset)
     }
   }

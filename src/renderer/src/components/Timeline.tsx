@@ -602,7 +602,15 @@ export function Timeline(): JSX.Element {
                         src={waveformUrl(asset.id)}
                         alt=""
                         onError={(e) => (e.currentTarget.style.display = 'none')}
-                        className="h-full w-full object-cover opacity-70"
+                        className="pointer-events-none absolute inset-y-0 opacity-70"
+                        style={{
+                          // The waveform PNG spans the whole source; show only the
+                          // clip's [inSec, eo] slice, scaled to fill the tile.
+                          left: `${-(a.inSec / Math.max(0.01, eo - a.inSec)) * 100}%`,
+                          width: `${(maxOut / Math.max(0.01, eo - a.inSec)) * 100}%`,
+                          height: '100%',
+                          objectFit: 'fill'
+                        }}
                       />
                     )}
                     <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
