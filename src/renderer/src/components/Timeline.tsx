@@ -11,23 +11,26 @@ import { packRows, rowCount } from '@/lib/lanes'
 import { snap } from '@/lib/snap'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
 
-const DEFAULT_PPS = 48 // default pixels per second (time zoom)
+const DEFAULT_PPS = 48 // default pixels per second (horizontal zoom)
 const HOOK_SEC = 3
-const BASE_TEXT_ROW = 22 // text/caption lane row height at scale 1
-const BASE_AUDIO_ROW = 30 // audio lane row height at scale 1
-const BASE_CLIP_ROW = 48 // clip lane height at scale 1
 const SNAP_PX = 7 // magnetic snap threshold (px)
+const LANE_MIN = 16 // min per-row lane height
+const LANE_MAX = 160 // max per-row lane height
+
+type LaneKey = 'clips' | 'text' | 'caption' | 'audio'
+type LaneHeights = Record<LaneKey, number>
+const DEFAULT_LANES: LaneHeights = { clips: 48, text: 22, caption: 22, audio: 30 }
 
 interface TimelineView {
   pxPerSec: number
-  heightScale: number
+  laneH: LaneHeights
 }
 function loadView(): TimelineView {
   try {
     const v = JSON.parse(localStorage.getItem('timelineView') ?? '{}')
-    return { pxPerSec: v.pxPerSec ?? DEFAULT_PPS, heightScale: v.heightScale ?? 1 }
+    return { pxPerSec: v.pxPerSec ?? DEFAULT_PPS, laneH: { ...DEFAULT_LANES, ...(v.laneH ?? {}) } }
   } catch {
-    return { pxPerSec: DEFAULT_PPS, heightScale: 1 }
+    return { pxPerSec: DEFAULT_PPS, laneH: DEFAULT_LANES }
   }
 }
 
@@ -104,15 +107,12 @@ export function Timeline(): JSX.Element {
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
-  // Timeline view scale (persisted): horizontal time zoom + vertical row height.
+  // Timeline view (persisted): horizontal zoom + per-lane heights.
   const [pxPerSec, setPxPerSec] = useState(() => loadView().pxPerSec)
-  const [heightScale, setHeightScale] = useState(() => loadView().heightScale)
+  const [laneH, setLaneH] = useState<LaneHeights>(() => loadView().laneH)
   useEffect(() => {
-    localStorage.setItem('timelineView', JSON.stringify({ pxPerSec, heightScale }))
-  }, [pxPerSec, heightScale])
-  const rowT = Math.round(BASE_TEXT_ROW * heightScale)
-  const rowA = Math.round(BASE_AUDIO_ROW * heightScale)
-  const clipH = Math.round(BASE_CLIP_ROW * heightScale)
+    localStorage.setItem('timelineView', JSON.stringify({ pxPerSec, laneH }))
+  }, [pxPerSec, laneH])
 
   const total = useMemo(() => {
     const videoTotal = timelineDuration(clips)
@@ -147,17 +147,24 @@ export function Timeline(): JSX.Element {
   )
   const layout = useMemo(() => {
     const ruler = 20
-    const gap = 4
+    const gap = 6 // also the resize-handle strip below each lane
     const clipsTop = ruler
-    const clipsH = clipH
+    const clipsH = laneH.clips
+    const textRows = rowCount(overlayRows)
+    const capRows = rowCount(captionRows)
+    const audRows = rowCount(audioRows, 1)
     const textTop = clipsTop + clipsH + gap
-    const textH = rowCount(overlayRows) * rowT
+    const textH = textRows * laneH.text
     const capTop = textTop + textH + gap
-    const capH = rowCount(captionRows) * rowT
+    const capH = capRows * laneH.caption
     const audTop = capTop + capH + gap
-    const audH = rowCount(audioRows, 1) * rowA
-    return { clipsTop, clipsH, textTop, textH, capTop, capH, audTop, audH, totalH: audTop + audH + gap }
-  }, [overlayRows, captionRows, audioRows, rowT, rowA, clipH])
+    const audH = audRows * laneH.audio
+    return {
+      clipsTop, clipsH, textTop, textH, capTop, capH, audTop, audH,
+      textRows, capRows, audRows,
+      totalH: audTop + audH + gap
+    }
+  }, [overlayRows, captionRows, audioRows, laneH])
 
   // Magnetic snap targets: clip boundaries, audio-clip boundaries, playhead, 0.
   const snapTargets = useMemo(() => {
@@ -174,6 +181,25 @@ export function Timeline(): JSX.Element {
     return [...t]
   }, [clips, audioClips, assetById, total])
   const snapSec = (v: number): number => snap(v, snapTargets, SNAP_PX / pxPerSec)
+
+  // Drag a lane's bottom edge to resize just that lane (per-row height).
+  const startLaneResize = (e: ReactPointerEvent, lane: LaneKey, rows: number): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = laneH[lane]
+    const r = Math.max(1, rows)
+    const onMove = (ev: PointerEvent): void => {
+      const nh = clamp(startH + (ev.clientY - startY) / r, LANE_MIN, LANE_MAX)
+      setLaneH((prev) => ({ ...prev, [lane]: nh }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   const selectedIndex = clips.findIndex((c) => c.id === selectedClipId)
 
@@ -431,25 +457,14 @@ export function Timeline(): JSX.Element {
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />
-        <div className="relative mr-1 flex items-center gap-0.5 rounded-md border border-white/15 pl-2 pr-0.5 py-0.5">
-          <span className="absolute -top-2 left-1.5 bg-[#0b0b0f] px-1 text-[8px] uppercase tracking-wider text-zinc-500">
-            Zoom
-          </span>
-          <span className="text-[10px] text-zinc-500">Time</span>
-          <ToolbarButton title="Zoom out (time)" onClick={() => setPxPerSec((p) => clamp(p / 1.3, 8, 240))}>
-            −
-          </ToolbarButton>
-          <ToolbarButton title="Zoom in (time)" onClick={() => setPxPerSec((p) => clamp(p * 1.3, 8, 240))}>
-            ＋
-          </ToolbarButton>
-          <span className="ml-1 text-[10px] text-zinc-500">Rows</span>
-          <ToolbarButton title="Shorter rows" onClick={() => setHeightScale((h) => clamp(h / 1.2, 0.6, 2.4))}>
-            −
-          </ToolbarButton>
-          <ToolbarButton title="Taller rows" onClick={() => setHeightScale((h) => clamp(h * 1.2, 0.6, 2.4))}>
-            ＋
-          </ToolbarButton>
-        </div>
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">Horizontal zoom</span>
+        <ToolbarButton title="Zoom out" onClick={() => setPxPerSec((p) => clamp(p / 1.3, 8, 240))}>
+          −
+        </ToolbarButton>
+        <ToolbarButton title="Zoom in" onClick={() => setPxPerSec((p) => clamp(p * 1.3, 8, 240))}>
+          ＋
+        </ToolbarButton>
+        <div className="mx-1 h-4 w-px bg-white/10" />
         <ToolbarButton title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
           ↶ Undo
         </ToolbarButton>
@@ -569,7 +584,7 @@ export function Timeline(): JSX.Element {
                         ? 'border-violet-300 ring-1 ring-violet-300/50'
                         : 'border-violet-400/40'
                     } bg-violet-500/25`}
-                    style={{ left, width, top: (overlayRows.get(o.id) ?? 0) * rowT, height: rowT - 2 }}
+                    style={{ left, width, top: (overlayRows.get(o.id) ?? 0) * laneH.text, height: laneH.text - 2 }}
                   >
                     <span className="truncate text-[9px] font-medium text-violet-100">
                       T&nbsp;&nbsp;{o.text}
@@ -601,7 +616,7 @@ export function Timeline(): JSX.Element {
                     className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
                       selected ? 'border-emerald-300 ring-1 ring-emerald-300/50' : 'border-emerald-400/40'
                     } ${seg.enabled ? 'bg-emerald-500/25' : 'bg-zinc-600/30'}`}
-                    style={{ left, width, top: (captionRows.get(seg.id) ?? 0) * rowT, height: rowT - 2 }}
+                    style={{ left, width, top: (captionRows.get(seg.id) ?? 0) * laneH.caption, height: laneH.caption - 2 }}
                   >
                     <span className="truncate text-[9px] font-medium text-emerald-100">
                       CC&nbsp;&nbsp;{seg.text}
@@ -641,7 +656,7 @@ export function Timeline(): JSX.Element {
                     className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
                       selected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
                     } bg-sky-500/15`}
-                    style={{ left, width, top: (audioRows.get(a.id) ?? 0) * rowA, height: rowA - 2 }}
+                    style={{ left, width, top: (audioRows.get(a.id) ?? 0) * laneH.audio, height: laneH.audio - 2 }}
                   >
                     {asset && (
                       <img
@@ -674,6 +689,26 @@ export function Timeline(): JSX.Element {
                 )
               })}
             </div>
+
+            {/* Per-lane resize handles — drag the gap below a lane to resize it */}
+            {(
+              [
+                { key: 'clips', bottom: layout.clipsTop + layout.clipsH, rows: 1 },
+                { key: 'text', bottom: layout.textTop + layout.textH, rows: layout.textRows },
+                { key: 'caption', bottom: layout.capTop + layout.capH, rows: layout.capRows },
+                { key: 'audio', bottom: layout.audTop + layout.audH, rows: layout.audRows }
+              ] as { key: LaneKey; bottom: number; rows: number }[]
+            ).map((h) => (
+              <div
+                key={h.key}
+                onPointerDown={(e) => startLaneResize(e, h.key, h.rows)}
+                title={`Drag to resize the ${h.key} lane`}
+                className="group/lh absolute inset-x-0 z-30 h-1.5 cursor-row-resize"
+                style={{ top: h.bottom }}
+              >
+                <div className="h-full w-full transition-colors group-hover/lh:bg-sky-400/50" />
+              </div>
+            ))}
 
             {/* Playhead */}
             <div
