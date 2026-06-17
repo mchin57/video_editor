@@ -431,21 +431,25 @@ export function Timeline(): JSX.Element {
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />
-        <span className="text-[10px] uppercase tracking-wide text-zinc-600">Time</span>
-        <ToolbarButton title="Zoom out (time)" onClick={() => setPxPerSec((p) => clamp(p / 1.3, 8, 240))}>
-          −
-        </ToolbarButton>
-        <ToolbarButton title="Zoom in (time)" onClick={() => setPxPerSec((p) => clamp(p * 1.3, 8, 240))}>
-          ＋
-        </ToolbarButton>
-        <span className="ml-1 text-[10px] uppercase tracking-wide text-zinc-600">Rows</span>
-        <ToolbarButton title="Shorter rows" onClick={() => setHeightScale((h) => clamp(h / 1.2, 0.6, 2.4))}>
-          −
-        </ToolbarButton>
-        <ToolbarButton title="Taller rows" onClick={() => setHeightScale((h) => clamp(h * 1.2, 0.6, 2.4))}>
-          ＋
-        </ToolbarButton>
-        <div className="mx-1 h-4 w-px bg-white/10" />
+        <div className="relative mr-1 flex items-center gap-0.5 rounded-md border border-white/15 pl-2 pr-0.5 py-0.5">
+          <span className="absolute -top-2 left-1.5 bg-[#0b0b0f] px-1 text-[8px] uppercase tracking-wider text-zinc-500">
+            Zoom
+          </span>
+          <span className="text-[10px] text-zinc-500">Time</span>
+          <ToolbarButton title="Zoom out (time)" onClick={() => setPxPerSec((p) => clamp(p / 1.3, 8, 240))}>
+            −
+          </ToolbarButton>
+          <ToolbarButton title="Zoom in (time)" onClick={() => setPxPerSec((p) => clamp(p * 1.3, 8, 240))}>
+            ＋
+          </ToolbarButton>
+          <span className="ml-1 text-[10px] text-zinc-500">Rows</span>
+          <ToolbarButton title="Shorter rows" onClick={() => setHeightScale((h) => clamp(h / 1.2, 0.6, 2.4))}>
+            −
+          </ToolbarButton>
+          <ToolbarButton title="Taller rows" onClick={() => setHeightScale((h) => clamp(h * 1.2, 0.6, 2.4))}>
+            ＋
+          </ToolbarButton>
+        </div>
         <ToolbarButton title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
           ↶ Undo
         </ToolbarButton>
