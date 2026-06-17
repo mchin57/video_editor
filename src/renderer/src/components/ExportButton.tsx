@@ -1,15 +1,19 @@
 import { useState, type JSX } from 'react'
+import type { PresetId } from '@shared/export'
+import { EXPORT_PRESETS } from '@shared/export'
 import { useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { exportProject, revealFile } from '@/ipc/client'
 
 /**
- * Exports the current timeline to a 1080x1920 Reel .mp4 (NVENC when available).
- * Shows live progress from the export job, then a Reveal action on success.
+ * Exports the current timeline to the selected preset (.mp4, NVENC when
+ * available). Shows live progress, then a Reveal action on success.
  */
 export function ExportButton(): JSX.Element {
   const project = useProject((s) => s.project)
   const clipCount = project?.clips.length ?? 0
+  const preset = project?.preset ?? 'reel'
+  const setPreset = useProject((s) => s.setPreset)
   const exportJob = useEditor((s) => s.exportJob)
   const [busy, setBusy] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
@@ -21,7 +25,7 @@ export function ExportButton(): JSX.Element {
     setOutput(null)
     setError(null)
     try {
-      const path = await exportProject(project, { preset: 'reel', preferNvenc: true })
+      const path = await exportProject(project, { preset, preferNvenc: true })
       if (path) setOutput(path) // null = Save dialog canceled
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -48,13 +52,27 @@ export function ExportButton(): JSX.Element {
           Export failed: {error}
         </span>
       )}
+      {!busy && (
+        <select
+          value={preset}
+          onChange={(e) => setPreset(e.target.value as PresetId)}
+          className="rounded-md border border-white/10 bg-zinc-800 px-1.5 py-1 text-xs text-zinc-200 outline-none"
+          title="Export preset"
+        >
+          {Object.values(EXPORT_PRESETS).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
       <button
         onClick={run}
         disabled={busy || clipCount === 0}
         className="rounded-md bg-sky-500/90 px-3 py-1 text-xs font-medium text-white hover:bg-sky-400 disabled:opacity-50"
-        title={clipCount === 0 ? 'Add a clip to the timeline first' : 'Export a 1080×1920 Reel'}
+        title={clipCount === 0 ? 'Add a clip to the timeline first' : `Export ${EXPORT_PRESETS[preset].name}`}
       >
-        {busy ? `Exporting… ${pct}%` : 'Export Reel'}
+        {busy ? `Exporting… ${pct}%` : 'Export'}
       </button>
     </div>
   )

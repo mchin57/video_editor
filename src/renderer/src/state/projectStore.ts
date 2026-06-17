@@ -8,6 +8,7 @@ import type {
   TextOverlay
 } from '@shared/project'
 import { migrateProject } from '@shared/project'
+import type { PresetId } from '@shared/export'
 import { clipStartTimes, reorder, splitClip, timelineDuration } from '@/lib/timeline'
 import { loadProject, saveProject } from '@/ipc/client'
 
@@ -30,6 +31,7 @@ interface ProjectState {
 
   load: () => Promise<void>
   selectClip: (id: string | null) => void
+  setPreset: (preset: PresetId) => void
   /** Update the project without recording history (for live drag previews). */
   liveUpdate: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
@@ -80,6 +82,8 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     selectClip: (id) => set({ selectedClipId: id }),
+
+    setPreset: (preset) => commit((p) => ({ ...p, preset })),
 
     liveUpdate: (transform) => {
       const current = get().project

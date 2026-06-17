@@ -17,6 +17,7 @@ export const IPC = {
   revealFile: 'shell:reveal',
   // Settings
   getSettings: 'settings:get',
+  updateSettings: 'settings:update',
   chooseExportDir: 'settings:chooseExportDir',
   // Captions (M4)
   whisperAvailable: 'whisper:available',

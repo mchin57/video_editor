@@ -9,6 +9,7 @@ import { getDataDir } from './config'
 import { ensureProxy, importFile, listLibrary, removeMedia } from './services/mediaStore'
 import { loadProject, saveProject } from './services/projectStore'
 import { exportProject, suggestedExportName } from './services/exporter'
+import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 
@@ -93,6 +94,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getTranscript, (_event, mediaId: string) => getTranscript(mediaId))
 
   ipcMain.handle(IPC.getSettings, () => getSettings())
+  ipcMain.handle(IPC.updateSettings, (_event, patch: Partial<Settings>) => updateSettings(patch))
   ipcMain.handle(IPC.chooseExportDir, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {

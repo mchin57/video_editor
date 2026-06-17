@@ -17,6 +17,9 @@ interface UiState {
   /** Whether the settings modal is open. */
   settingsOpen: boolean
   setSettingsOpen: (v: boolean) => void
+  /** Whether the checklist modal is open. */
+  checklistOpen: boolean
+  setChecklistOpen: (v: boolean) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -29,5 +32,7 @@ export const useUi = create<UiState>((set) => ({
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   settingsOpen: false,
-  setSettingsOpen: (v) => set({ settingsOpen: v })
+  setSettingsOpen: (v) => set({ settingsOpen: v }),
+  checklistOpen: false,
+  setChecklistOpen: (v) => set({ checklistOpen: v })
 }))

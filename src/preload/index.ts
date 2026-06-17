@@ -34,6 +34,8 @@ const api = {
 
   // Settings
   getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
+  updateSettings: (patch: Partial<Settings>): Promise<Settings> =>
+    ipcRenderer.invoke(IPC.updateSettings, patch),
   chooseExportDir: (): Promise<Settings> => ipcRenderer.invoke(IPC.chooseExportDir),
 
   // Captions (M4)

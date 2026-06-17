@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from 'react'
 import type { Settings } from '@shared/settings'
 import { useUi } from '@/state/ui'
-import { chooseExportDir, getSettings } from '@/ipc/client'
+import { chooseExportDir, getSettings, updateSettings } from '@/ipc/client'
 
 /** Settings modal. Currently: the default export folder the Save dialog opens to. */
 export function SettingsModal(): JSX.Element | null {
@@ -47,6 +47,28 @@ export function SettingsModal(): JSX.Element | null {
         </div>
         <p className="mt-2 text-[11px] text-zinc-500">
           Each export still opens a Save dialog — this is just where it starts.
+        </p>
+
+        <div className="mt-5 mb-1 text-[10px] uppercase tracking-wide text-zinc-500">
+          Niche keyword bank (one per line)
+        </div>
+        <textarea
+          value={(settings?.keywordBank ?? []).join('\n')}
+          onChange={(e) => {
+            const keywordBank = e.target.value.split('\n').map((k) => k.trim())
+            setSettings((s) => (s ? { ...s, keywordBank } : s))
+          }}
+          onBlur={() =>
+            settings &&
+            void updateSettings({
+              keywordBank: settings.keywordBank.map((k) => k.trim()).filter(Boolean)
+            })
+          }
+          rows={6}
+          className="w-full rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-sky-400/60"
+        />
+        <p className="mt-1 text-[11px] text-zinc-500">
+          The checklist scores your captions against these for spoken-keyword reach.
         </p>
 
         <div className="mt-5 flex justify-end">

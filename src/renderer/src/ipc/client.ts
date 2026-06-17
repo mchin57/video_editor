@@ -26,6 +26,8 @@ export const exportProject = (
 export const revealFile = (path: string): Promise<boolean> => window.api.revealFile(path)
 
 export const getSettings = (): Promise<Settings> => window.api.getSettings()
+export const updateSettings = (patch: Partial<Settings>): Promise<Settings> =>
+  window.api.updateSettings(patch)
 export const chooseExportDir = (): Promise<Settings> => window.api.chooseExportDir()
 
 export const whisperAvailable = (): Promise<boolean> => window.api.whisperAvailable()
