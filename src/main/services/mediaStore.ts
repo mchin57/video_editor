@@ -54,7 +54,7 @@ async function makeThumb(asset: MediaAsset): Promise<void> {
 async function makeWaveform(asset: MediaAsset): Promise<void> {
   if (!asset.probe.audio || existsSync(waveformPath(asset.id))) return
   try {
-    await generateWaveform(asset.originalPath, waveformPath(asset.id))
+    await generateWaveform(asset.originalPath, waveformPath(asset.id), asset.probe.durationSec)
   } catch (error) {
     console.error('waveform failed for', asset.id, error)
   }

@@ -25,10 +25,11 @@ describe('buildAudioProxyArgs', () => {
 })
 
 describe('buildWaveformArgs', () => {
-  it('uses showwavespic at the given size', () => {
-    const a = buildWaveformArgs('in.m4a', 'wave.png', 1600, 200).join(' ')
-    expect(a).toContain('showwavespic=s=1600x200')
-    expect(a).toContain('-frames:v 1')
+  it('scales width with duration (~120 px/s), clamped to [2000, 6000]', () => {
+    expect(buildWaveformArgs('in.m4a', 'w.png', 10).join(' ')).toContain('showwavespic=s=2000x') // 1200 → clamp 2000
+    expect(buildWaveformArgs('in.m4a', 'w.png', 40).join(' ')).toContain('showwavespic=s=4800x')
+    expect(buildWaveformArgs('in.m4a', 'w.png', 120).join(' ')).toContain('showwavespic=s=6000x') // 14400 → clamp 6000
+    expect(buildWaveformArgs('in.m4a', 'w.png', 40).join(' ')).toContain('-frames:v 1')
   })
 })
 

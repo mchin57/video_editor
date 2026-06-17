@@ -17,7 +17,12 @@ export function buildAudioProxyArgs(input: string, output: string): string[] {
   ]
 }
 
-export function buildWaveformArgs(input: string, output: string, width = 1600, height = 200): string[] {
+export function buildWaveformArgs(input: string, output: string, durationSec = 0): string[] {
+  // Scale the PNG width to the clip length (~120 px/s) so it stays crisp at
+  // realistic zoom, clamped to a sane range. Still raster — for sample-level
+  // zoom a canvas-from-peaks renderer would be the next step.
+  const width = Math.round(Math.min(6000, Math.max(2000, durationSec * 120)))
+  const height = 320
   return [
     '-y', '-hide_banner', '-nostdin',
     '-i', input,
@@ -113,7 +118,7 @@ export async function generateAudioProxy(input: string, output: string): Promise
   await run(ffmpeg, buildAudioProxyArgs(input, output))
 }
 
-export async function generateWaveform(input: string, output: string): Promise<void> {
+export async function generateWaveform(input: string, output: string, durationSec = 0): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await run(ffmpeg, buildWaveformArgs(input, output))
+  await run(ffmpeg, buildWaveformArgs(input, output, durationSec))
 }
