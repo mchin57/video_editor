@@ -24,6 +24,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
+- [ ] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline labeling each lane (Clips / Text / Captions / Audio) with per-lane controls (e.g. mute, solo, height presets), like Premiere/Resolve. The track content scrolls horizontally beside it. Pairs with the existing per-lane resize handles (`Timeline.tsx`); would replace the unlabeled lanes with a clearer, more pro layout. Doesn't change the data model — purely a timeline layout/UI change.
 
 ### Explicitly out of scope for v1 (revisit post-launch)
 
