@@ -6,6 +6,7 @@ import type {
   ColorAdjust,
   CropRect,
   Project,
+  ScriptLine,
   TextOverlay
 } from '@shared/project'
 import { migrateProject } from '@shared/project'
@@ -49,6 +50,9 @@ interface ProjectState {
   updateOverlay: (id: string, patch: Partial<TextOverlay>) => void
   removeOverlay: (id: string) => void
   setCaptions: (captions: CaptionsConfig) => void
+  addScriptLine: (atSec: number | null) => void
+  updateScriptLine: (id: string, patch: Partial<ScriptLine>) => void
+  removeScriptLine: (id: string) => void
   updateCaption: (id: string, patch: Partial<CaptionSegment>) => void
   removeCaption: (id: string) => void
   addAudioClip: (clip: AudioClip) => void
@@ -187,6 +191,17 @@ export const useProject = create<ProjectState>((set, get) => {
     removeOverlay: (id) => commit((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) })),
 
     setCaptions: (captions) => commit((p) => ({ ...p, captions })),
+
+    addScriptLine: (atSec) =>
+      commit((p) => ({ ...p, script: [...p.script, { id: newId(), text: '', atSec }] })),
+
+    updateScriptLine: (id, patch) =>
+      commit((p) => ({
+        ...p,
+        script: p.script.map((l) => (l.id === id ? { ...l, ...patch } : l))
+      })),
+
+    removeScriptLine: (id) => commit((p) => ({ ...p, script: p.script.filter((l) => l.id !== id) })),
 
     updateCaption: (id, patch) =>
       commit((p) => ({

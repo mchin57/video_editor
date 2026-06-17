@@ -112,6 +112,14 @@ export interface AudioClip {
   kind: AudioKind
 }
 
+/** A storyboard/script line, optionally pinned to a timeline time. */
+export interface ScriptLine {
+  id: string
+  text: string
+  /** Timeline position this line is linked to (null = unpinned). */
+  atSec: number | null
+}
+
 export interface Project {
   id: string
   name: string
@@ -122,6 +130,7 @@ export interface Project {
   overlays: TextOverlay[]
   captions: CaptionsConfig
   audioClips: AudioClip[]
+  script: ScriptLine[]
   createdAt: string
   updatedAt: string
 }
@@ -147,6 +156,7 @@ export function createEmptyProject(id: string, name: string): Project {
     overlays: [],
     captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
     audioClips: [],
+    script: [],
     createdAt: now,
     updatedAt: now
   }
@@ -180,5 +190,6 @@ export function migrateProject(raw: unknown): Project {
   delete (p as { music?: unknown }).music
   if (!Array.isArray(p.overlays)) p.overlays = []
   if (!Array.isArray(p.clips)) p.clips = []
+  if (!Array.isArray(p.script)) p.script = []
   return p as Project
 }

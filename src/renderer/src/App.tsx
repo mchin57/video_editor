@@ -10,6 +10,7 @@ import { ExportButton } from '@/components/ExportButton'
 import { CaptionsButton } from '@/components/CaptionsButton'
 import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
+import { ScriptModal } from '@/components/ScriptModal'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
@@ -116,6 +117,7 @@ export default function App(): JSX.Element {
         useUi.getState().setCropEditing(false)
         useUi.getState().setSettingsOpen(false)
         useUi.getState().setChecklistOpen(false)
+        useUi.getState().setScriptOpen(false)
         useUi.getState().selectOverlay(null)
         useUi.getState().selectCaption(null)
         useUi.getState().selectAudio(null)
@@ -158,6 +160,13 @@ export default function App(): JSX.Element {
           {importMedia.isPending ? 'Importing…' : 'Import video'}
         </button>
         <CaptionsButton />
+        <button
+          onClick={() => useUi.getState().setScriptOpen(!useUi.getState().scriptOpen)}
+          title="Script / talking points"
+          className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
+        >
+          📝 Script
+        </button>
         <button
           onClick={() => useUi.getState().setChecklistOpen(true)}
           title="Reel checklist — score this reel against Instagram best practices"
@@ -212,6 +221,7 @@ export default function App(): JSX.Element {
       <CropEditor />
       <SettingsModal />
       <ChecklistModal />
+      <ScriptModal />
 
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">

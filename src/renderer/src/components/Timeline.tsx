@@ -1,5 +1,5 @@
 import { useMemo, useRef, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { AudioClip, CaptionSegment, Clip, TextOverlay } from '@shared/project'
+import type { AudioClip, CaptionSegment, Clip, ScriptLine, TextOverlay } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
@@ -21,6 +21,7 @@ const SNAP_PX = 7 // magnetic snap threshold
 const EMPTY_CLIPS: Clip[] = []
 const EMPTY_OVERLAYS: TextOverlay[] = []
 const EMPTY_CAPTIONS: CaptionSegment[] = []
+const EMPTY_SCRIPT: ScriptLine[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
@@ -67,6 +68,7 @@ export function Timeline(): JSX.Element {
   const selectedAudioId = useUi((s) => s.selectedAudioId)
   const selectAudio = useUi((s) => s.selectAudio)
   const audioClips = project?.audioClips ?? EMPTY_AUDIO
+  const script = project?.script ?? EMPTY_SCRIPT
   const selectClip = useProject((s) => s.selectClip)
   const removeClip = useProject((s) => s.removeClip)
   const reorderClips = useProject((s) => s.reorderClips)
@@ -437,6 +439,25 @@ export function Timeline(): JSX.Element {
               >
                 <span className="ml-1 text-[9px] uppercase text-amber-300/90">3s hook</span>
               </div>
+            )}
+
+            {/* Script markers (pinned lines) on the ruler */}
+            {script.map((l) =>
+              l.atSec == null ? null : (
+                <div
+                  key={l.id}
+                  onPointerDown={(e) => {
+                    e.stopPropagation()
+                    setPlaying(false)
+                    setTime(l.atSec!)
+                  }}
+                  title={l.text || 'Script marker'}
+                  className="absolute top-0 z-20 h-5 cursor-pointer border-l border-amber-300"
+                  style={{ left: l.atSec * PX_PER_SEC }}
+                >
+                  <div className="-ml-[3px] h-1.5 w-1.5 rounded-sm bg-amber-300" />
+                </div>
+              )
             )}
 
             {/* Clip blocks */}

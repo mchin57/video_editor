@@ -20,6 +20,9 @@ interface UiState {
   /** Whether the checklist modal is open. */
   checklistOpen: boolean
   setChecklistOpen: (v: boolean) => void
+  /** Whether the script panel is open. */
+  scriptOpen: boolean
+  setScriptOpen: (v: boolean) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -34,5 +37,7 @@ export const useUi = create<UiState>((set) => ({
   settingsOpen: false,
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   checklistOpen: false,
-  setChecklistOpen: (v) => set({ checklistOpen: v })
+  setChecklistOpen: (v) => set({ checklistOpen: v }),
+  scriptOpen: false,
+  setScriptOpen: (v) => set({ scriptOpen: v })
 }))
