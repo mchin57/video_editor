@@ -19,6 +19,16 @@ export const removeMedia = (id: string): Promise<void> => window.api.removeMedia
 export const loadProject = (): Promise<Project> => window.api.loadProject()
 export const saveProject = (project: Project): Promise<void> => window.api.saveProject(project)
 
+/** Open a portable .reel file via a native dialog. null = canceled. */
+export const openProjectFile = (): Promise<{ path: string; project: Project } | null> =>
+  window.api.openProjectFile()
+/** Save As… via a native dialog. Returns the chosen path + saved doc, or null. */
+export const saveProjectAs = (project: Project): Promise<{ path: string; project: Project } | null> =>
+  window.api.saveProjectAs(project)
+/** Save to an already-bound path (no dialog). */
+export const writeProjectFile = (project: Project, path: string): Promise<Project> =>
+  window.api.writeProjectFile(project, path)
+
 export const exportProject = (
   project: Project,
   opts: { preset: PresetId; preferNvenc: boolean }

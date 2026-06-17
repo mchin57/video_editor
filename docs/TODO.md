@@ -27,6 +27,14 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 - [ ] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline labeling each lane (Clips / Text / Captions / Audio) with per-lane controls (e.g. mute, solo, height presets), like Premiere/Resolve. The track content scrolls horizontally beside it. Pairs with the existing per-lane resize handles (`Timeline.tsx`); would replace the unlabeled lanes with a clearer, more pro layout. Doesn't change the data model — purely a timeline layout/UI change.
 
+### Distribution & auto-update pipeline
+
+- [ ] **Distributable installer + auto-update** — package the app for sharing with friends and deliver updates automatically without requiring manual reinstalls.
+  - **Installer:** electron-builder NSIS is already planned for M6. Extend it to produce a shareable `.exe` setup file and a delta-update feed.
+  - **Update server:** host a simple release feed (e.g. a GitHub Releases page or a static JSON manifest on a private server) that electron-updater (`autoUpdater` from `electron-updater` package) polls on launch. Users get a "Update available — restart to install" prompt rather than needing to do anything manually.
+  - **Code signing:** unsigned installers trigger Windows SmartScreen warnings for recipients. Either self-sign with a free cert (suppresses some warnings) or purchase an EV code-signing cert to fully clear SmartScreen. Worth deciding before distributing widely.
+  - **Private vs. public:** if this stays friend-only, a private GitHub repo's Releases tab is the simplest update host — no server to run. If it eventually goes wider, consider a proper release channel (stable / beta).
+
 ### Explicitly out of scope for v1 (revisit post-launch)
 
 - [ ] **Transitions beyond hard cuts** — no dissolves, fades, or wipes. ASS/libass can't do video transitions; would need ffmpeg `xfade` filter wired into the export pipeline.

@@ -10,8 +10,13 @@ export const IPC = {
   ensureProxy: 'media:ensureProxy',
   removeMedia: 'media:remove',
   // Project (M2)
+  // loadProject/saveProject persist the working copy (crash recovery + restore on
+  // launch). The *File ▸* actions below read/write user-chosen portable .reel files.
   loadProject: 'project:load',
   saveProject: 'project:save',
+  openProjectFile: 'project:openFile',
+  saveProjectAs: 'project:saveAs',
+  writeProjectFile: 'project:writeFile',
   // Export (M3)
   exportProject: 'export:run',
   revealFile: 'shell:reveal',

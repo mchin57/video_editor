@@ -9,10 +9,16 @@ import type {
   ScriptLine,
   TextOverlay
 } from '@shared/project'
-import { migrateProject } from '@shared/project'
+import { createEmptyProject, migrateProject } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { clipStartTimes, reorder, splitClip, timelineDuration } from '@/lib/timeline'
-import { loadProject, saveProject } from '@/ipc/client'
+import {
+  loadProject,
+  openProjectFile,
+  saveProject,
+  saveProjectAs,
+  writeProjectFile
+} from '@/ipc/client'
 
 const HISTORY_LIMIT = 50
 
@@ -24,14 +30,54 @@ function scheduleSave(project: Project): void {
 
 const newId = (): string => crypto.randomUUID()
 
+/**
+ * The file binding (which .reel file, and whether there are unsaved changes)
+ * lives outside the project document so it survives a relaunch without polluting
+ * the saved JSON. The document itself is autosaved separately as the working copy.
+ */
+const SESSION_KEY = 'projectSession'
+interface Session {
+  filePath: string | null
+  dirty: boolean
+}
+function loadSession(): Session {
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? '{}')
+    return { filePath: typeof s.filePath === 'string' ? s.filePath : null, dirty: Boolean(s.dirty) }
+  } catch {
+    return { filePath: null, dirty: false }
+  }
+}
+function saveSession(filePath: string | null, dirty: boolean): void {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ filePath, dirty }))
+  } catch {
+    /* localStorage is a convenience; ignore write failures */
+  }
+}
+
+const DISCARD_PROMPT = 'Discard unsaved changes to the current project?'
+
 interface ProjectState {
   project: Project | null
   past: Project[]
   future: Project[]
   selectedClipId: string | null
   loaded: boolean
+  /** Path of the bound .reel file, or null if this project was never saved to one. */
+  filePath: string | null
+  /** Whether there are edits since the last file Save/Open. */
+  dirty: boolean
 
   load: () => Promise<void>
+  /** File ▸ New — start a blank project (prompts if there are unsaved changes). */
+  newProjectFile: () => void
+  /** File ▸ Open… — pick a .reel file (prompts if there are unsaved changes). */
+  openFile: () => Promise<void>
+  /** File ▸ Save — write to the bound file, or fall back to Save As… if unbound. */
+  save: () => Promise<void>
+  /** File ▸ Save As… — choose a new .reel file and bind to it. */
+  saveAs: () => Promise<void>
   selectClip: (id: string | null) => void
   setPreset: (preset: PresetId) => void
   /** Update the project without recording history (for live drag previews). */
@@ -67,6 +113,12 @@ interface ProjectState {
 }
 
 export const useProject = create<ProjectState>((set, get) => {
+  /** Flag the document as changed-since-last-file-save and persist the binding. */
+  function markDirty(): void {
+    if (!get().dirty) set({ dirty: true })
+    saveSession(get().filePath, true)
+  }
+
   /** Apply a pure transform, recording undo history and autosaving. */
   function commit(transform: (p: Project) => Project): void {
     const current = get().project
@@ -75,6 +127,14 @@ export const useProject = create<ProjectState>((set, get) => {
     if (next === current) return
     set({ project: next, past: [...get().past, current].slice(-HISTORY_LIMIT), future: [] })
     scheduleSave(next)
+    markDirty()
+  }
+
+  /** Switch to a different project document, resetting history and selection. */
+  function adopt(project: Project, filePath: string | null): void {
+    set({ project, past: [], future: [], selectedClipId: null, filePath, dirty: false })
+    saveSession(filePath, false)
+    scheduleSave(project) // keep the working copy in sync with what's on screen
   }
 
   return {
@@ -83,10 +143,45 @@ export const useProject = create<ProjectState>((set, get) => {
     future: [],
     selectedClipId: null,
     loaded: false,
+    filePath: null,
+    dirty: false,
 
     load: async () => {
       const project = migrateProject(await loadProject())
-      set({ project, loaded: true, past: [], future: [] })
+      const session = loadSession()
+      set({ project, loaded: true, past: [], future: [], ...session })
+    },
+
+    newProjectFile: () => {
+      if (get().dirty && !window.confirm(DISCARD_PROMPT)) return
+      adopt(createEmptyProject(newId(), 'Untitled Reel'), null)
+    },
+
+    openFile: async () => {
+      if (get().dirty && !window.confirm(DISCARD_PROMPT)) return
+      const res = await openProjectFile()
+      if (!res) return
+      adopt(migrateProject(res.project), res.path)
+    },
+
+    save: async () => {
+      const { project, filePath } = get()
+      if (!project) return
+      if (!filePath) return get().saveAs()
+      await writeProjectFile(project, filePath)
+      set({ dirty: false })
+      saveSession(filePath, false)
+    },
+
+    saveAs: async () => {
+      const { project } = get()
+      if (!project) return
+      const res = await saveProjectAs(project)
+      if (!res) return
+      // The chosen filename becomes the project name; reflect it in the working copy.
+      set({ project: res.project, filePath: res.path, dirty: false })
+      saveSession(res.path, false)
+      scheduleSave(res.project)
     },
 
     selectClip: (id) => set({ selectedClipId: id }),
@@ -104,6 +199,7 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!current || current === before) return
       set({ past: [...get().past, before].slice(-HISTORY_LIMIT), future: [] })
       scheduleSave(current)
+      markDirty()
     },
 
     addClip: (mediaId, durationSec, hasAudio = false) =>
@@ -279,6 +375,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const prev = past[past.length - 1]
       set({ project: prev, past: past.slice(0, -1), future: [project, ...future] })
       scheduleSave(prev)
+      markDirty()
     },
 
     redo: () => {
@@ -287,6 +384,7 @@ export const useProject = create<ProjectState>((set, get) => {
       const next = future[0]
       set({ project: next, future: future.slice(1), past: [...past, project] })
       scheduleSave(next)
+      markDirty()
     }
   }
 })

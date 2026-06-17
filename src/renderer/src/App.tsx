@@ -7,6 +7,7 @@ import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
 import { Splitter } from '@/components/Splitter'
 import { ExportButton } from '@/components/ExportButton'
+import { FileMenu } from '@/components/FileMenu'
 import { CaptionsButton } from '@/components/CaptionsButton'
 import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
@@ -67,6 +68,25 @@ export default function App(): JSX.Element {
   // Keyboard shortcuts: space play/pause, Ctrl+Z/Y undo/redo, Del delete, S split.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      const mod = e.ctrlKey || e.metaKey
+      // File shortcuts work everywhere, even while a text field has focus.
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        const ps = useProject.getState()
+        void (e.shiftKey ? ps.saveAs() : ps.save())
+        return
+      }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        void useProject.getState().openFile()
+        return
+      }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        useProject.getState().newProjectFile()
+        return
+      }
+
       const target = e.target as HTMLElement
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return
@@ -151,6 +171,7 @@ export default function App(): JSX.Element {
       <header className="flex items-center gap-3 border-b border-white/10 px-4 py-2">
         <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
         <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
+        <FileMenu />
         <div className="flex-1" />
         <button
           onClick={() => importMedia.mutate(undefined)}

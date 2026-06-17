@@ -1,0 +1,93 @@
+import { useEffect, useRef, useState, type JSX } from 'react'
+import { useProject } from '@/state/projectStore'
+
+/** Last path segment, handling both Windows and POSIX separators. */
+function basename(path: string): string {
+  const m = /[^\\/]*$/.exec(path)
+  return m ? m[0] : path
+}
+
+function MenuItem({
+  label,
+  shortcut,
+  onClick
+}: {
+  label: string
+  shortcut: string
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center justify-between gap-6 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
+    >
+      <span>{label}</span>
+      <span className="text-[10px] text-zinc-500">{shortcut}</span>
+    </button>
+  )
+}
+
+/**
+ * File menu: New / Open… / Save / Save As… for portable .reel project files.
+ * Shows the bound filename and an unsaved-changes dot. Keyboard shortcuts for
+ * the same actions live in App's global key handler.
+ */
+export function FileMenu(): JSX.Element {
+  const project = useProject((s) => s.project)
+  const filePath = useProject((s) => s.filePath)
+  const dirty = useProject((s) => s.dirty)
+  const newProjectFile = useProject((s) => s.newProjectFile)
+  const openFile = useProject((s) => s.openFile)
+  const save = useProject((s) => s.save)
+  const saveAs = useProject((s) => s.saveAs)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const run = (fn: () => void | Promise<void>) => (): void => {
+    setOpen(false)
+    void fn()
+  }
+
+  const label = filePath ? basename(filePath) : (project?.name ?? 'Untitled')
+
+  return (
+    <div ref={ref} className="relative flex items-center gap-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
+      >
+        File ▾
+      </button>
+      <span
+        className="max-w-[220px] truncate text-xs text-zinc-400"
+        title={filePath ?? 'Unsaved project (not yet written to a file)'}
+      >
+        {label}
+        {dirty && (
+          <span className="ml-1 text-amber-400" title="Unsaved changes">
+            ●
+          </span>
+        )}
+      </span>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-52 rounded-lg border border-white/10 bg-zinc-900 p-1 shadow-2xl">
+          <MenuItem label="New" shortcut="Ctrl+N" onClick={run(newProjectFile)} />
+          <MenuItem label="Open…" shortcut="Ctrl+O" onClick={run(openFile)} />
+          <div className="my-1 h-px bg-white/10" />
+          <MenuItem label="Save" shortcut="Ctrl+S" onClick={run(save)} />
+          <MenuItem label="Save As…" shortcut="Ctrl+Shift+S" onClick={run(saveAs)} />
+        </div>
+      )}
+    </div>
+  )
+}

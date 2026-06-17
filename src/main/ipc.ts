@@ -1,5 +1,5 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { join } from 'node:path'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { join, parse } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -7,7 +7,13 @@ import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
 import { ensureProxy, getAsset, importFile, listLibrary, removeMedia } from './services/mediaStore'
-import { loadProject, saveProject } from './services/projectStore'
+import {
+  loadProject,
+  readProjectFile,
+  REEL_EXT,
+  saveProject,
+  writeProjectFile
+} from './services/projectStore'
 import { exportProject, suggestedExportName } from './services/exporter'
 import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
@@ -66,6 +72,52 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.loadProject, () => loadProject())
   ipcMain.handle(IPC.saveProject, (_event, project: Project) => saveProject(project))
+
+  // Open a portable .reel file via a native dialog. The on-disk filename becomes
+  // the project's name (so exports and the title bar stay in sync with the file).
+  ipcMain.handle(IPC.openProjectFile, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Open project',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Reel Project', extensions: [REEL_EXT] },
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    const path = result.filePaths[0]
+    const project = await readProjectFile(path)
+    return { path, project: { ...project, name: parse(path).name } }
+  })
+
+  // Save As… — native Save dialog, then write. Returns the chosen path + the
+  // saved doc (its name/updatedAt updated to match the file).
+  ipcMain.handle(IPC.saveProjectAs, async (event, project: Project) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const base = (project.name || '').trim() || 'Untitled Reel'
+    const options: Electron.SaveDialogOptions = {
+      title: 'Save project as',
+      defaultPath: join(app.getPath('documents'), `${base}.${REEL_EXT}`),
+      filters: [{ name: 'Reel Project', extensions: [REEL_EXT] }]
+    }
+    const result = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return null
+    const path = result.filePath
+    const saved = await writeProjectFile(path, { ...project, name: parse(path).name })
+    return { path, project: saved }
+  })
+
+  // Save to an already-bound path (no dialog). Returns the saved doc.
+  ipcMain.handle(IPC.writeProjectFile, (_event, project: Project, path: string) =>
+    writeProjectFile(path, project)
+  )
 
   ipcMain.handle(
     IPC.exportProject,

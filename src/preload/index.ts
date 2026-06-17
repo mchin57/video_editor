@@ -21,9 +21,16 @@ const api = {
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
   removeMedia: (id: string): Promise<void> => ipcRenderer.invoke(IPC.removeMedia, id),
 
-  // Project (M2)
+  // Project (M2). loadProject/saveProject persist the working copy; the *File*
+  // methods read/write user-chosen portable .reel files.
   loadProject: (): Promise<Project> => ipcRenderer.invoke(IPC.loadProject),
   saveProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.saveProject, project),
+  openProjectFile: (): Promise<{ path: string; project: Project } | null> =>
+    ipcRenderer.invoke(IPC.openProjectFile),
+  saveProjectAs: (project: Project): Promise<{ path: string; project: Project } | null> =>
+    ipcRenderer.invoke(IPC.saveProjectAs, project),
+  writeProjectFile: (project: Project, path: string): Promise<Project> =>
+    ipcRenderer.invoke(IPC.writeProjectFile, project, path),
 
   // Export (M3) — returns the output path, or null if the Save dialog was canceled.
   exportProject: (
