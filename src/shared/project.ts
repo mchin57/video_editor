@@ -107,6 +107,8 @@ export interface AudioClip {
   fadeOutSec: number
   /** Duck under dialogue/other audio on export (typical for a music bed). */
   duck: boolean
+  /** Apply FFT noise reduction on export. */
+  denoise?: boolean
   kind: AudioKind
 }
 

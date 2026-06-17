@@ -45,6 +45,8 @@ export interface AudioGraphItem {
   fadeOutSec: number
   /** Duck under the non-ducked sources (dialogue + non-duck clips). */
   duck: boolean
+  /** Apply FFT noise reduction. */
+  denoise?: boolean
 }
 
 /**
@@ -68,10 +70,10 @@ export function buildAudioGraph(
     const clipEnd = it.startSec + Math.max(0.01, it.outSec - it.inSec)
     const parts = [
       `[${it.inputLabel}]atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`,
-      'asetpts=N/SR/TB',
-      `adelay=${startMs}|${startMs}`,
-      `volume=${gain}`
+      'asetpts=N/SR/TB'
     ]
+    if (it.denoise) parts.push('afftdn=nf=-25')
+    parts.push(`adelay=${startMs}|${startMs}`, `volume=${gain}`)
     if (it.fadeInSec > 0)
       parts.push(`afade=t=in:st=${it.startSec.toFixed(2)}:d=${it.fadeInSec.toFixed(2)}`)
     if (it.fadeOutSec > 0)

@@ -6,12 +6,13 @@ import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
-import { ensureProxy, importFile, listLibrary, removeMedia } from './services/mediaStore'
+import { ensureProxy, getAsset, importFile, listLibrary, removeMedia } from './services/mediaStore'
 import { loadProject, saveProject } from './services/projectStore'
 import { exportProject, suggestedExportName } from './services/exporter'
 import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
+import { detectSilence, type Interval } from './services/silence'
 
 const VIDEO_EXTS = [
   'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
@@ -92,6 +93,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.whisperAvailable, () => whisperAvailable())
   ipcMain.handle(IPC.transcribeMedia, (_event, mediaId: string) => transcribeMedia(mediaId))
   ipcMain.handle(IPC.getTranscript, (_event, mediaId: string) => getTranscript(mediaId))
+
+  ipcMain.handle(IPC.detectSilence, async (_event, mediaId: string): Promise<Interval[]> => {
+    const asset = await getAsset(mediaId)
+    if (!asset) return []
+    return detectSilence(asset.originalPath, asset.probe.durationSec)
+  })
 
   ipcMain.handle(IPC.getSettings, () => getSettings())
   ipcMain.handle(IPC.updateSettings, (_event, patch: Partial<Settings>) => updateSettings(patch))

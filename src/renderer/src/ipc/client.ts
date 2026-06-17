@@ -35,6 +35,8 @@ export const transcribeMedia = (mediaId: string): Promise<Transcript> =>
   window.api.transcribeMedia(mediaId)
 export const getTranscript = (mediaId: string): Promise<Transcript | null> =>
   window.api.getTranscript(mediaId)
+export const detectSilence = (mediaId: string): Promise<{ start: number; end: number }[]> =>
+  window.api.detectSilence(mediaId)
 export const pathForFile = (file: File): string => window.api.pathForFile(file)
 export const onJobProgress = (cb: (ev: JobProgressEvent) => void): (() => void) =>
   window.api.onJobProgress(cb)

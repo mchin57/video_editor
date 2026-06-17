@@ -121,7 +121,8 @@ async function runExport(
       gainDb: a.gainDb,
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
-      duck: a.duck
+      duck: a.duck,
+      denoise: a.denoise
     })
     inputPaths.push(path)
   }

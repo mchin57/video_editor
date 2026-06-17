@@ -44,6 +44,8 @@ const api = {
     ipcRenderer.invoke(IPC.transcribeMedia, mediaId),
   getTranscript: (mediaId: string): Promise<Transcript | null> =>
     ipcRenderer.invoke(IPC.getTranscript, mediaId),
+  detectSilence: (mediaId: string): Promise<{ start: number; end: number }[]> =>
+    ipcRenderer.invoke(IPC.detectSilence, mediaId),
 
   /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

@@ -1,7 +1,9 @@
-import { useRef, type JSX, type ReactNode } from 'react'
+import { useRef, useState, type JSX, type ReactNode } from 'react'
 import type { Project } from '@shared/project'
-import { NEUTRAL_COLOR, isNeutralColor } from '@shared/project'
+import { NEUTRAL_COLOR, effectiveOut, isNeutralColor } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
+import { detectSilence } from '@/ipc/client'
+import { speechSegments } from '@/lib/silence'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { useEditor } from '@/state/store'
@@ -323,10 +325,28 @@ function AudioClipEditor(): JSX.Element | null {
   const clip = useProject((s) => s.project?.audioClips.find((a) => a.id === selectedAudioId) ?? null)
   const update = useProject((s) => s.updateAudioClip)
   const remove = useProject((s) => s.removeAudioClip)
+  const splitOnSilence = useProject((s) => s.splitAudioOnSilence)
   const selectAudio = useUi((s) => s.selectAudio)
   const { data: assets = [] } = useLibrary()
+  const [splitting, setSplitting] = useState(false)
+  const [splitNote, setSplitNote] = useState<string | null>(null)
   if (!clip) return null
   const asset = assets.find((a) => a.id === clip.mediaId)
+
+  const runSplitOnSilence = async (): Promise<void> => {
+    if (splitting) return
+    setSplitting(true)
+    setSplitNote(null)
+    try {
+      const dur = asset?.probe.durationSec ?? clip.outSec
+      const silences = await detectSilence(clip.mediaId)
+      const ranges = speechSegments(silences, clip.inSec, effectiveOut(clip, dur), 0.4)
+      if (ranges.length > 1) splitOnSilence(clip.id, ranges)
+      else setSplitNote('No silence gaps found to split on.')
+    } finally {
+      setSplitting(false)
+    }
+  }
 
   return (
     <div>
@@ -377,7 +397,7 @@ function AudioClipEditor(): JSX.Element | null {
           />
         </Field>
       </div>
-      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
         <input
           type="checkbox"
           checked={clip.duck}
@@ -385,12 +405,31 @@ function AudioClipEditor(): JSX.Element | null {
         />
         Duck under other audio (music bed)
       </label>
+      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={!!clip.denoise}
+          onChange={(e) => update(clip.id, { denoise: e.target.checked })}
+        />
+        Reduce noise (on export)
+      </label>
+
+      <button
+        onClick={() => void runSplitOnSilence()}
+        disabled={splitting}
+        className="mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
+        title="Detect silence and split this clip into its speech segments"
+      >
+        {splitting ? 'Detecting…' : '✂ Split on silence'}
+      </button>
+      {splitNote && <p className="mb-2 text-[11px] text-zinc-500">{splitNote}</p>}
+
       <button
         onClick={() => {
           remove(clip.id)
           selectAudio(null)
         }}
-        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+        className="mt-2 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
       >
         Remove audio clip
       </button>

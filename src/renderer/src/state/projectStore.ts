@@ -56,6 +56,8 @@ interface ProjectState {
   removeAudioClip: (id: string) => void
   /** Pull a video clip's audio onto the audio track and mute the clip. */
   extractClipAudio: (clipId: string) => void
+  /** Replace an audio clip with one clip per speech segment (source-time ranges). */
+  splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[]) => void
   undo: () => void
   redo: () => void
 }
@@ -211,6 +213,25 @@ export const useProject = create<ProjectState>((set, get) => {
 
     removeAudioClip: (id) =>
       commit((p) => ({ ...p, audioClips: p.audioClips.filter((a) => a.id !== id) })),
+
+    splitAudioOnSilence: (audioId, ranges) =>
+      commit((p) => {
+        const idx = p.audioClips.findIndex((a) => a.id === audioId)
+        if (idx < 0 || ranges.length === 0) return p
+        const orig = p.audioClips[idx]
+        const pieces: AudioClip[] = ranges.map((r) => ({
+          ...orig,
+          id: newId(),
+          inSec: r.start,
+          outSec: r.end,
+          startSec: orig.startSec + (r.start - orig.inSec),
+          fadeInSec: 0,
+          fadeOutSec: 0
+        }))
+        const audioClips = p.audioClips.slice()
+        audioClips.splice(idx, 1, ...pieces)
+        return { ...p, audioClips }
+      }),
 
     extractClipAudio: (clipId) =>
       commit((p) => {

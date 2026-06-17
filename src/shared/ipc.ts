@@ -22,7 +22,9 @@ export const IPC = {
   // Captions (M4)
   whisperAvailable: 'whisper:available',
   transcribeMedia: 'whisper:transcribe',
-  getTranscript: 'whisper:getTranscript'
+  getTranscript: 'whisper:getTranscript',
+  // Audio editing
+  detectSilence: 'audio:detectSilence'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
