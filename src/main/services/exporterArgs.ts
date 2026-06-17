@@ -10,6 +10,7 @@
  */
 
 import type { Clip } from '@shared/project'
+import { isNeutralColor } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EXPORT_PRESETS, type PresetId } from '@shared/export'
@@ -53,6 +54,10 @@ export function buildNormalizeArgs(
       `scale=${target.width}:${target.height}:force_original_aspect_ratio=decrease:flags=bicubic`,
       `pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2:color=black`
     )
+  }
+  if (!isNeutralColor(clip.color)) {
+    const c = clip.color!
+    filters.push(`eq=brightness=${c.brightness}:contrast=${c.contrast}:saturation=${c.saturation}`)
   }
   filters.push('setsar=1', 'format=yuv420p')
 

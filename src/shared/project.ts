@@ -14,6 +14,19 @@ export interface CropRect {
   h: number
 }
 
+/** Per-clip color correction. Neutral = brightness 0, contrast 1, saturation 1. */
+export interface ColorAdjust {
+  brightness: number // -1..1
+  contrast: number // 0..2
+  saturation: number // 0..2
+}
+
+export const NEUTRAL_COLOR: ColorAdjust = { brightness: 0, contrast: 1, saturation: 1 }
+
+export function isNeutralColor(c: ColorAdjust | null | undefined): boolean {
+  return !c || (c.brightness === 0 && c.contrast === 1 && c.saturation === 1)
+}
+
 export interface Clip {
   id: string
   mediaId: string
@@ -23,6 +36,8 @@ export interface Clip {
   crop: CropRect | null
   mute: boolean
   gainDb: number
+  /** Optional color correction (absent = none). */
+  color?: ColorAdjust
 }
 
 export type OverlayAnchor = 'center' | 'topLeft'

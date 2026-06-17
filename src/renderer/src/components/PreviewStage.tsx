@@ -234,6 +234,11 @@ export function PreviewStage(): JSX.Element {
   const videoStyle: CSSProperties = useMemo(() => {
     const crop = activeClip?.crop
     const v = activeAsset?.probe.video
+    const col = activeClip?.color
+    // Mirror the export eq() filter so preview color matches output.
+    const filter = col
+      ? `brightness(${1 + col.brightness}) contrast(${col.contrast}) saturate(${col.saturation})`
+      : undefined
     if (crop && v) {
       return {
         position: 'absolute',
@@ -243,11 +248,12 @@ export function PreviewStage(): JSX.Element {
         top: `${-(crop.y / crop.h) * 100}%`,
         objectFit: 'fill',
         maxWidth: 'none',
-        background: 'black'
+        background: 'black',
+        filter
       }
     }
-    return { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: 'black' }
-  }, [activeClip?.crop, activeAsset?.probe.video])
+    return { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: 'black', filter }
+  }, [activeClip?.crop, activeClip?.color, activeAsset?.probe.video])
 
   const startOverlayDrag = (e: ReactPointerEvent, o: TextOverlay): void => {
     e.stopPropagation()

@@ -1,4 +1,6 @@
-import type { JSX, ReactNode } from 'react'
+import { useRef, type JSX, type ReactNode } from 'react'
+import type { Project } from '@shared/project'
+import { NEUTRAL_COLOR, isNeutralColor } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
@@ -27,6 +29,44 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
 
 const inputCls =
   'w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-sky-400/60'
+
+/** Color slider: live updates during drag, one undo step on release. */
+function ColorSlider({
+  clipId,
+  prop,
+  min,
+  max,
+  value
+}: {
+  clipId: string
+  prop: 'brightness' | 'contrast' | 'saturation'
+  min: number
+  max: number
+  value: number
+}): JSX.Element {
+  const before = useRef<Project | null>(null)
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={0.02}
+      value={value}
+      onPointerDown={() => (before.current = useProject.getState().project)}
+      onChange={(e) => {
+        const v = Number(e.target.value)
+        useProject.getState().liveUpdate((p) => ({
+          ...p,
+          clips: p.clips.map((c) =>
+            c.id === clipId ? { ...c, color: { ...(c.color ?? NEUTRAL_COLOR), [prop]: v } } : c
+          )
+        }))
+      }}
+      onPointerUp={() => before.current && useProject.getState().commitLive(before.current)}
+      className="w-full accent-sky-400"
+    />
+  )
+}
 
 function OverlayEditor(): JSX.Element | null {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
@@ -115,6 +155,7 @@ function ClipDetails(): JSX.Element {
   const selectedClipId = useProject((s) => s.selectedClipId)
   const clip = useProject((s) => s.project?.clips.find((c) => c.id === selectedClipId) ?? null)
   const setClipCrop = useProject((s) => s.setClipCrop)
+  const setClipColor = useProject((s) => s.setClipColor)
   const extractClipAudio = useProject((s) => s.extractClipAudio)
   const setCropEditing = useUi((s) => s.setCropEditing)
   const { data: assets = [] } = useLibrary()
@@ -174,6 +215,38 @@ function ClipDetails(): JSX.Element {
               ♪ Extract audio
             </button>
           )}
+        </div>
+      )}
+
+      {clip && (
+        <div className="mt-3 border-t border-white/5 pt-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wide text-zinc-500">Color</span>
+            {!isNeutralColor(clip.color) && (
+              <button
+                onClick={() => setClipColor(clip.id, null)}
+                className="text-[10px] text-zinc-400 hover:text-zinc-200"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          {(() => {
+            const col = clip.color ?? NEUTRAL_COLOR
+            return (
+              <>
+                <Field label={`Exposure  ${col.brightness >= 0 ? '+' : ''}${col.brightness.toFixed(2)}`}>
+                  <ColorSlider clipId={clip.id} prop="brightness" min={-0.5} max={0.5} value={col.brightness} />
+                </Field>
+                <Field label={`Contrast  ${col.contrast.toFixed(2)}`}>
+                  <ColorSlider clipId={clip.id} prop="contrast" min={0.5} max={1.8} value={col.contrast} />
+                </Field>
+                <Field label={`Saturation  ${col.saturation.toFixed(2)}`}>
+                  <ColorSlider clipId={clip.id} prop="saturation" min={0} max={2} value={col.saturation} />
+                </Field>
+              </>
+            )
+          })()}
         </div>
       )}
     </>

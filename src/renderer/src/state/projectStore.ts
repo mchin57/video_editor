@@ -3,6 +3,7 @@ import type {
   AudioClip,
   CaptionSegment,
   CaptionsConfig,
+  ColorAdjust,
   CropRect,
   Project,
   TextOverlay
@@ -43,6 +44,7 @@ interface ProjectState {
   splitClipAt: (clipId: string, localTime: number) => void
   toggleMute: (clipId: string) => void
   setClipCrop: (clipId: string, crop: CropRect | null) => void
+  setClipColor: (clipId: string, color: ColorAdjust | null) => void
   addOverlay: (overlay: TextOverlay) => void
   updateOverlay: (id: string, patch: Partial<TextOverlay>) => void
   removeOverlay: (id: string) => void
@@ -164,6 +166,12 @@ export const useProject = create<ProjectState>((set, get) => {
       commit((p) => ({
         ...p,
         clips: p.clips.map((c) => (c.id === clipId ? { ...c, crop } : c))
+      })),
+
+    setClipColor: (clipId, color) =>
+      commit((p) => ({
+        ...p,
+        clips: p.clips.map((c) => (c.id === clipId ? { ...c, color: color ?? undefined } : c))
       })),
 
     addOverlay: (overlay) => commit((p) => ({ ...p, overlays: [...p.overlays, overlay] })),
