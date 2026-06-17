@@ -9,6 +9,7 @@ import { clipDuration, clipStartTimes, locate, timelineDuration } from '@/lib/ti
 import { makeOverlay } from '@/lib/overlays'
 import { packRows, rowCount } from '@/lib/lanes'
 import { snap } from '@/lib/snap'
+import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
 
 const DEFAULT_PPS = 48 // default pixels per second (horizontal zoom)
@@ -162,10 +163,13 @@ export function Timeline(): JSX.Element {
     const capH = capRows * laneH.caption
     const audTop = capTop + capH + gap
     const audH = audRows * laneH.audio
+    const scaleTop = audTop + audH + gap
+    const scaleH = 18
     return {
       clipsTop, clipsH, textTop, textH, capTop, capH, audTop, audH,
       textRows, capRows, audRows,
-      totalH: audTop + audH + gap
+      scaleTop, scaleH,
+      totalH: scaleTop + scaleH
     }
   }, [overlayRows, captionRows, audioRows, laneH])
 
@@ -735,6 +739,22 @@ export function Timeline(): JSX.Element {
                 <div className="h-full w-full transition-colors group-hover/lh:bg-sky-400/50" />
               </div>
             ))}
+
+            {/* Bottom time scale (ticks + labels) */}
+            <div
+              className="pointer-events-none absolute inset-x-0 border-t border-white/10"
+              style={{ top: layout.scaleTop, height: layout.scaleH }}
+            >
+              {(() => {
+                const step = niceTimeStep(pxPerSec)
+                return scaleTicks(total, step).map((t) => (
+                  <div key={t} className="absolute top-0 h-full" style={{ left: t * pxPerSec }}>
+                    <div className="h-2 w-px bg-white/25" />
+                    <span className="ml-1 font-mono text-[9px] text-zinc-500">{formatTick(t, step)}</span>
+                  </div>
+                ))
+              })()}
+            </div>
 
             {/* Playhead */}
             <div
