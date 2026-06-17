@@ -45,6 +45,30 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     Apply the same helper to both lanes (and reflect the taller lanes in the
     `top-[…]` offsets / overall track height).
 
+### Packaging / distribution
+
+- [ ] **Bundle (or fetch) ffmpeg + whisper.cpp for distribution.** The NSIS
+  installer ships the Electron app but not the ffmpeg/ffprobe binaries or the
+  whisper.cpp binary + model — these are discovered at runtime and currently only
+  exist on the dev machine (installed via winget / downloaded to
+  `Documents\VideoEditor\bin\whisper`). On a clean machine the app would have no
+  engine. Options: bundle the Gyan ffmpeg build + whisper binary as
+  `extraResources` (watch licensing/size — the small.en model is ~465 MB), or add
+  a guided first-run downloader that fetches them into the data dir.
+
+- [ ] **Custom app icon.** electron-builder logs "default Electron icon is used —
+  application icon is not set". Add `resources/icon.ico` (256px) and reference it
+  in `electron-builder.yml` (`win.icon`) so the installer, taskbar, and window use
+  a real icon.
+
+- [ ] **Code-sign the installer (Norton/SmartScreen false positives).** The
+  unsigned `.exe` gets quarantined by Norton Cyber Capture / Windows SmartScreen
+  because it has no signature and no download reputation. Fix: buy an Authenticode
+  code-signing certificate (an **EV cert** earns SmartScreen reputation
+  immediately; a standard OV cert builds reputation over downloads) and configure
+  electron-builder signing. Interim: submit a false-positive dispute to Norton, or
+  "Allow"/whitelist locally for personal use.
+
 ## Done
 
 (empty)
