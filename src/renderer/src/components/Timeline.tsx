@@ -113,6 +113,9 @@ export function Timeline(): JSX.Element {
   useEffect(() => {
     localStorage.setItem('timelineView', JSON.stringify({ pxPerSec, laneH }))
   }, [pxPerSec, laneH])
+  const pxPerSecRef = useRef(pxPerSec)
+  pxPerSecRef.current = pxPerSec
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const total = useMemo(() => {
     const videoTotal = timelineDuration(clips)
@@ -181,6 +184,29 @@ export function Timeline(): JSX.Element {
     return [...t]
   }, [clips, audioClips, assetById, total])
   const snapSec = (v: number): number => snap(v, snapTargets, SNAP_PX / pxPerSec)
+
+  // Ctrl/Cmd + scroll = horizontal zoom, anchored at the cursor. Native listener
+  // (passive:false) so we can preventDefault the browser's ctrl-wheel page zoom.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return undefined
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const cursorX = e.clientX - rect.left // px within the viewport
+      const cur = pxPerSecRef.current
+      const timeAtCursor = (el.scrollLeft + cursorX) / cur
+      const next = clamp(cur * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 8, 240)
+      if (next === cur) return
+      setPxPerSec(next)
+      requestAnimationFrame(() => {
+        el.scrollLeft = Math.max(0, timeAtCursor * next - cursorX)
+      })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   // Drag a lane's bottom edge to resize just that lane (per-row height).
   const startLaneResize = (e: ReactPointerEvent, lane: LaneKey, rows: number): void => {
@@ -474,7 +500,7 @@ export function Timeline(): JSX.Element {
       </div>
 
       {/* Track */}
-      <div className="relative min-h-0 flex-1 overflow-auto">
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
         {clips.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-zinc-600">
             Add clips from the Library (＋ on a clip) to build your reel.
