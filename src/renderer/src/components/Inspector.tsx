@@ -10,6 +10,7 @@ import { useEditor } from '@/state/store'
 import { formatDuration, formatFps } from '@/lib/format'
 import { clipDuration } from '@/lib/timeline'
 import { hookCovered } from '@/lib/overlays'
+import { LOGICAL } from '@/lib/coords'
 
 function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -148,6 +149,87 @@ function OverlayEditor(): JSX.Element | null {
         className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
       >
         Delete overlay
+      </button>
+    </div>
+  )
+}
+
+function ImageOverlayEditor(): JSX.Element | null {
+  const selectedImageId = useUi((s) => s.selectedImageId)
+  const overlay = useProject(
+    (s) => s.project?.imageOverlays.find((o) => o.id === selectedImageId) ?? null
+  )
+  const update = useProject((s) => s.updateImageOverlay)
+  const remove = useProject((s) => s.removeImageOverlay)
+  const selectImage = useUi((s) => s.selectImage)
+  const { data: assets = [] } = useLibrary()
+  if (!overlay) return null
+  const asset = assets.find((a) => a.id === overlay.mediaId)
+  const widthPct = Math.round((overlay.w / LOGICAL.width) * 100)
+  const aspect = overlay.h > 0 ? overlay.w / overlay.h : 1
+
+  return (
+    <div>
+      <div className="mb-1 text-sm font-medium text-zinc-200">Image overlay</div>
+      <div className="mb-3 truncate text-xs text-zinc-400" title={asset?.fileName}>
+        {asset?.fileName ?? overlay.mediaId}
+      </div>
+      <div className="flex gap-2">
+        <Field label="Start (s)">
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            value={overlay.startSec.toFixed(1)}
+            onChange={(e) => update(overlay.id, { startSec: Math.max(0, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="End (s)">
+          <input
+            type="number"
+            step="0.1"
+            value={overlay.endSec.toFixed(1)}
+            onChange={(e) =>
+              update(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, Number(e.target.value)) })
+            }
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      <Field label={`Size · ${widthPct}% width`}>
+        <input
+          type="range"
+          min={5}
+          max={120}
+          step={1}
+          value={widthPct}
+          onChange={(e) => {
+            const w = (Number(e.target.value) / 100) * LOGICAL.width
+            update(overlay.id, { w, h: w / aspect })
+          }}
+          className="w-full accent-sky-400"
+        />
+      </Field>
+      <Field label={`Opacity · ${Math.round(overlay.opacity * 100)}%`}>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={overlay.opacity}
+          onChange={(e) => update(overlay.id, { opacity: Number(e.target.value) })}
+          className="w-full accent-sky-400"
+        />
+      </Field>
+      <button
+        onClick={() => {
+          remove(overlay.id)
+          selectImage(null)
+        }}
+        className="mt-1 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+      >
+        Delete image
       </button>
     </div>
   )
@@ -439,6 +521,7 @@ function AudioClipEditor(): JSX.Element | null {
 
 export function Inspector(): JSX.Element {
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
+  const selectedImageId = useUi((s) => s.selectedImageId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectedAudioId = useUi((s) => s.selectedAudioId)
   const overlays = useProject((s) => s.project?.overlays)
@@ -464,6 +547,8 @@ export function Inspector(): JSX.Element {
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {selectedOverlayId ? (
           <OverlayEditor />
+        ) : selectedImageId ? (
+          <ImageOverlayEditor />
         ) : selectedCaptionId ? (
           <CaptionEditor />
         ) : selectedAudioId ? (

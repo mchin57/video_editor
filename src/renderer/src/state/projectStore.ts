@@ -5,6 +5,7 @@ import type {
   CaptionsConfig,
   ColorAdjust,
   CropRect,
+  ImageOverlay,
   Project,
   ScriptLine,
   TextOverlay
@@ -95,6 +96,9 @@ interface ProjectState {
   addOverlay: (overlay: TextOverlay) => void
   updateOverlay: (id: string, patch: Partial<TextOverlay>) => void
   removeOverlay: (id: string) => void
+  addImageOverlay: (overlay: ImageOverlay) => void
+  updateImageOverlay: (id: string, patch: Partial<ImageOverlay>) => void
+  removeImageOverlay: (id: string) => void
   setCaptions: (captions: CaptionsConfig) => void
   addScriptLine: (atSec: number | null) => void
   updateScriptLine: (id: string, patch: Partial<ScriptLine>) => void
@@ -285,6 +289,18 @@ export const useProject = create<ProjectState>((set, get) => {
       })),
 
     removeOverlay: (id) => commit((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) })),
+
+    addImageOverlay: (overlay) =>
+      commit((p) => ({ ...p, imageOverlays: [...p.imageOverlays, overlay] })),
+
+    updateImageOverlay: (id, patch) =>
+      commit((p) => ({
+        ...p,
+        imageOverlays: p.imageOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
+      })),
+
+    removeImageOverlay: (id) =>
+      commit((p) => ({ ...p, imageOverlays: p.imageOverlays.filter((o) => o.id !== id) })),
 
     setCaptions: (captions) => commit((p) => ({ ...p, captions })),
 

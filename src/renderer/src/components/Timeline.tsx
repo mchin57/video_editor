@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { AudioClip, CaptionSegment, Clip, ScriptLine, TextOverlay } from '@shared/project'
+import type { AudioClip, CaptionSegment, Clip, ImageOverlay, ScriptLine, TextOverlay } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
+import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { clipDuration, clipStartTimes, locate, timelineDuration } from '@/lib/timeline'
@@ -18,9 +19,9 @@ const SNAP_PX = 7 // magnetic snap threshold (px)
 const LANE_MIN = 16 // min per-row lane height
 const LANE_MAX = 160 // max per-row lane height
 
-type LaneKey = 'clips' | 'text' | 'caption' | 'audio'
+type LaneKey = 'clips' | 'text' | 'image' | 'caption' | 'audio'
 type LaneHeights = Record<LaneKey, number>
-const DEFAULT_LANES: LaneHeights = { clips: 48, text: 22, caption: 22, audio: 30 }
+const DEFAULT_LANES: LaneHeights = { clips: 48, text: 22, image: 30, caption: 22, audio: 30 }
 
 interface TimelineView {
   pxPerSec: number
@@ -38,6 +39,7 @@ function loadView(): TimelineView {
 // Stable empty references (see PreviewStage note) to avoid re-render loops.
 const EMPTY_CLIPS: Clip[] = []
 const EMPTY_OVERLAYS: TextOverlay[] = []
+const EMPTY_IMAGES: ImageOverlay[] = []
 const EMPTY_CAPTIONS: CaptionSegment[] = []
 const EMPTY_SCRIPT: ScriptLine[] = []
 const EMPTY_AUDIO: AudioClip[] = []
@@ -78,9 +80,12 @@ export function Timeline(): JSX.Element {
   const project = useProject((s) => s.project)
   const clips = project?.clips ?? EMPTY_CLIPS
   const overlays = project?.overlays ?? EMPTY_OVERLAYS
+  const imageOverlays = project?.imageOverlays ?? EMPTY_IMAGES
   const captionSegs = project?.captions.enabled ? project.captions.segments : EMPTY_CAPTIONS
   const selectedClipId = useProject((s) => s.selectedClipId)
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
+  const selectedImageId = useUi((s) => s.selectedImageId)
+  const selectImage = useUi((s) => s.selectImage)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectCaption = useUi((s) => s.selectCaption)
   const selectedAudioId = useUi((s) => s.selectedAudioId)
@@ -108,6 +113,14 @@ export function Timeline(): JSX.Element {
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
+  // With an empty timeline, the preview falls back to the selected library clip
+  // (see PreviewStage). Mirror that here so transport reflects what's on screen:
+  // a ready, selected clip is playable even before it's added to the timeline.
+  const selectedLibId = useEditor((s) => s.selectedId)
+  const previewAsset = clips.length === 0 && selectedLibId ? assetById.get(selectedLibId) : undefined
+  const previewDur = previewAsset?.proxyReady ? previewAsset.probe.durationSec : 0
+  const canPlay = clips.length > 0 || previewDur > 0
+
   // Timeline view (persisted): horizontal zoom + per-lane heights.
   const [pxPerSec, setPxPerSec] = useState(() => loadView().pxPerSec)
   const [laneH, setLaneH] = useState<LaneHeights>(() => loadView().laneH)
@@ -134,6 +147,10 @@ export function Timeline(): JSX.Element {
     () => packRows(overlays.map((o) => ({ id: o.id, startSec: o.startSec, endSec: o.endSec }))),
     [overlays]
   )
+  const imageRows = useMemo(
+    () => packRows(imageOverlays.map((o) => ({ id: o.id, startSec: o.startSec, endSec: o.endSec }))),
+    [imageOverlays]
+  )
   const captionRows = useMemo(
     () => packRows(captionSegs.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec }))),
     [captionSegs]
@@ -155,23 +172,26 @@ export function Timeline(): JSX.Element {
     const clipsTop = ruler
     const clipsH = laneH.clips
     const textRows = rowCount(overlayRows)
+    const imgRows = rowCount(imageRows)
     const capRows = rowCount(captionRows)
     const audRows = rowCount(audioRows, 1)
     const textTop = clipsTop + clipsH + gap
     const textH = textRows * laneH.text
-    const capTop = textTop + textH + gap
+    const imgTop = textTop + textH + gap
+    const imgH = imgRows * laneH.image
+    const capTop = imgTop + imgH + gap
     const capH = capRows * laneH.caption
     const audTop = capTop + capH + gap
     const audH = audRows * laneH.audio
     const scaleTop = audTop + audH + gap
     const scaleH = 18
     return {
-      clipsTop, clipsH, textTop, textH, capTop, capH, audTop, audH,
-      textRows, capRows, audRows,
+      clipsTop, clipsH, textTop, textH, imgTop, imgH, capTop, capH, audTop, audH,
+      textRows, imgRows, capRows, audRows,
       scaleTop, scaleH,
       totalH: scaleTop + scaleH
     }
-  }, [overlayRows, captionRows, audioRows, laneH])
+  }, [overlayRows, imageRows, captionRows, audioRows, laneH])
 
   // Magnetic snap targets: clip boundaries, audio-clip boundaries, playhead, 0.
   const snapTargets = useMemo(() => {
@@ -303,6 +323,7 @@ export function Timeline(): JSX.Element {
     e.stopPropagation()
     e.preventDefault()
     selectOverlay(o.id)
+    selectImage(null)
     selectCaption(null)
     selectAudio(null)
     selectClip(null)
@@ -335,6 +356,48 @@ export function Timeline(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
+  // Drag an image overlay's time window (or its edges) on the timeline.
+  const startImageOverlayDrag = (
+    e: ReactPointerEvent,
+    o: ImageOverlay,
+    mode: 'move' | 'start' | 'end'
+  ): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    selectImage(o.id)
+    selectOverlay(null)
+    selectCaption(null)
+    selectAudio(null)
+    selectClip(null)
+    const before = useProject.getState().project
+    if (!before) return
+    const startX = e.clientX
+    const { startSec, endSec } = o
+    const dur = endSec - startSec
+    const onMove = (ev: PointerEvent): void => {
+      const d = (ev.clientX - startX) / pxPerSec
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        imageOverlays: p.imageOverlays.map((x) => {
+          if (x.id !== o.id) return x
+          if (mode === 'move') {
+            const ns = Math.max(0, snapSec(startSec + d))
+            return { ...x, startSec: ns, endSec: ns + dur }
+          }
+          if (mode === 'start') return { ...x, startSec: clamp(snapSec(startSec + d), 0, x.endSec - 0.2) }
+          return { ...x, endSec: Math.max(x.startSec + 0.2, snapSec(endSec + d)) }
+        })
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   // Drag a caption segment's time window (or its edges) on the timeline.
   const startCaptionDrag = (
     e: ReactPointerEvent,
@@ -345,6 +408,7 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     selectCaption(seg.id)
     selectOverlay(null)
+    selectImage(null)
     selectAudio(null)
     selectClip(null)
     const before = useProject.getState().project
@@ -391,6 +455,7 @@ export function Timeline(): JSX.Element {
     selectAudio(clip.id)
     selectClip(null)
     selectOverlay(null)
+    selectImage(null)
     selectCaption(null)
     const before = useProject.getState().project
     if (!before) return
@@ -433,14 +498,14 @@ export function Timeline(): JSX.Element {
       <div className="flex items-center gap-1 border-b border-white/10 px-3 py-1.5">
         <button
           onClick={togglePlay}
-          disabled={clips.length === 0}
+          disabled={!canPlay}
           className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-zinc-100 hover:bg-white/20 disabled:opacity-30"
           title={playing ? 'Pause (space)' : 'Play (space)'}
         >
           {playing ? '❚❚' : '▶'}
         </button>
         <span className="ml-1 w-24 font-mono text-[11px] text-zinc-400">
-          {tc(time)} / {tc(total)}
+          {tc(time)} / {tc(Math.max(total, previewDur))}
         </span>
         <div className="mx-1 h-4 w-px bg-white/10" />
         <ToolbarButton title="Split selected clip at playhead (S)" onClick={splitSelected} disabled={selectedIndex < 0}>
@@ -564,6 +629,7 @@ export function Timeline(): JSX.Element {
                     onClick={() => {
                       selectClip(clip.id)
                       selectOverlay(null)
+                      selectImage(null)
                       selectCaption(null)
                       selectAudio(null)
                     }}
@@ -626,6 +692,47 @@ export function Timeline(): JSX.Element {
                     <div
                       onPointerDown={(e) => startOverlayDrag(e, o, 'end')}
                       className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-200/70"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Image overlay lane */}
+            <div className="absolute inset-x-0" style={{ top: layout.imgTop, height: layout.imgH }}>
+              {imageOverlays.map((o) => {
+                const asset = assetById.get(o.mediaId)
+                const left = o.startSec * pxPerSec
+                const width = Math.max(10, (o.endSec - o.startSec) * pxPerSec)
+                const selected = o.id === selectedImageId
+                return (
+                  <div
+                    key={o.id}
+                    onPointerDown={(e) => startImageOverlayDrag(e, o, 'move')}
+                    title={asset?.fileName}
+                    className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
+                      selected ? 'border-orange-300 ring-1 ring-orange-300/50' : 'border-orange-400/40'
+                    } bg-orange-500/20`}
+                    style={{ left, width, top: (imageRows.get(o.id) ?? 0) * laneH.image, height: laneH.image - 2 }}
+                  >
+                    {asset && (
+                      <img
+                        src={thumbUrl(asset.id)}
+                        alt=""
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                        className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"
+                      />
+                    )}
+                    <span className="truncate text-[9px] font-medium text-orange-100">
+                      🖼&nbsp;{asset?.fileName ?? o.mediaId}
+                    </span>
+                    <div
+                      onPointerDown={(e) => startImageOverlayDrag(e, o, 'start')}
+                      className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-orange-200/70"
+                    />
+                    <div
+                      onPointerDown={(e) => startImageOverlayDrag(e, o, 'end')}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-orange-200/70"
                     />
                   </div>
                 )
@@ -725,6 +832,7 @@ export function Timeline(): JSX.Element {
               [
                 { key: 'clips', bottom: layout.clipsTop + layout.clipsH, rows: 1 },
                 { key: 'text', bottom: layout.textTop + layout.textH, rows: layout.textRows },
+                { key: 'image', bottom: layout.imgTop + layout.imgH, rows: layout.imgRows },
                 { key: 'caption', bottom: layout.capTop + layout.capH, rows: layout.capRows },
                 { key: 'audio', bottom: layout.audTop + layout.audH, rows: layout.audRows }
               ] as { key: LaneKey; bottom: number; rows: number }[]

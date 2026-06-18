@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { AudioClip, Clip, TextOverlay } from '@shared/project'
+import type { AudioClip, Clip, ImageOverlay, TextOverlay } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
-import { overlaysAtTime } from '@/lib/overlays'
-import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
+import { imageOverlaysAtTime, overlaysAtTime } from '@/lib/overlays'
+import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
@@ -18,6 +18,7 @@ const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.m
 // Stable empty references so zustand selectors don't return new arrays each render.
 const EMPTY_CLIPS: Clip[] = []
 const EMPTY_OVERLAYS: TextOverlay[] = []
+const EMPTY_IMAGES: ImageOverlay[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 
 /** A hidden <audio> that follows the timeline clock for one audio clip. Several
@@ -70,8 +71,10 @@ export function PreviewStage(): JSX.Element {
   const project = useProject((s) => s.project)
   const projectClips = project?.clips ?? EMPTY_CLIPS
   const overlays = project?.overlays ?? EMPTY_OVERLAYS
+  const imageOverlays = project?.imageOverlays ?? EMPTY_IMAGES
   const selectedLibId = useEditor((s) => s.selectedId)
   const selectedOverlayId = useUi((s) => s.selectedOverlayId)
+  const selectedImageId = useUi((s) => s.selectedImageId)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
@@ -282,7 +285,64 @@ export function PreviewStage(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
+  // Drag an image overlay to move it (logical coords), one undo step on release.
+  const startImageDrag = (e: ReactPointerEvent, o: ImageOverlay): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    useUi.getState().selectImage(o.id)
+    const stage = stageRef.current
+    const before = useProject.getState().project
+    if (!stage || !before) return
+    const scale = LOGICAL.width / stage.getBoundingClientRect().width
+    const startX = e.clientX
+    const startY = e.clientY
+    const onMove = (ev: PointerEvent): void => {
+      const nx = clamp(o.x + (ev.clientX - startX) * scale, 0, LOGICAL.width)
+      const ny = clamp(o.y + (ev.clientY - startY) * scale, 0, LOGICAL.height)
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        imageOverlays: p.imageOverlays.map((x) => (x.id === o.id ? { ...x, x: nx, y: ny } : x))
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // Drag the corner handle to resize an image overlay, keeping its aspect ratio.
+  const startImageResize = (e: ReactPointerEvent, o: ImageOverlay): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    useUi.getState().selectImage(o.id)
+    const stage = stageRef.current
+    const before = useProject.getState().project
+    if (!stage || !before) return
+    const scale = LOGICAL.width / stage.getBoundingClientRect().width
+    const startX = e.clientX
+    const w0 = o.w
+    const aspect = o.h > 0 ? o.w / o.h : 1
+    const onMove = (ev: PointerEvent): void => {
+      const nw = clamp(w0 + (ev.clientX - startX) * scale, 40, LOGICAL.width * 1.5)
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        imageOverlays: p.imageOverlays.map((x) => (x.id === o.id ? { ...x, w: nw, h: nw / aspect } : x))
+      }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   const visibleOverlays = overlaysAtTime(overlays, time)
+  const visibleImages = imageOverlaysAtTime(imageOverlays, time)
   const captions = project?.captions
   const activeCaption = captions?.enabled
     ? captions.segments.find((s) => s.enabled && time >= s.startSec && time < s.endSec)
@@ -332,6 +392,44 @@ export function PreviewStage(): JSX.Element {
           )}
         </div>
       )}
+
+      {/* Image overlays (logos/graphics) — under the text layer */}
+      {visibleImages.map((o) => {
+        if (!assetById.get(o.mediaId)) return null
+        const selected = selectedImageId === o.id
+        return (
+          <div
+            key={o.id}
+            onPointerDown={(e) => startImageDrag(e, o)}
+            style={{
+              position: 'absolute',
+              left: pct(o.x, LOGICAL.width),
+              top: pct(o.y, LOGICAL.height),
+              width: pct(o.w, LOGICAL.width),
+              height: pct(o.h, LOGICAL.height),
+              transform: o.anchor === 'center' ? 'translate(-50%, -50%)' : 'none'
+            }}
+            className={`z-20 cursor-move select-none ${
+              selected ? 'outline-dashed outline-2 outline-sky-400' : ''
+            }`}
+          >
+            <img
+              src={imageUrl(o.mediaId)}
+              alt=""
+              draggable={false}
+              style={{ opacity: o.opacity }}
+              className="h-full w-full object-contain"
+            />
+            {selected && (
+              <span
+                onPointerDown={(e) => startImageResize(e, o)}
+                title="Drag to resize"
+                className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize rounded-sm border border-white bg-sky-400"
+              />
+            )}
+          </div>
+        )
+      })}
 
       {/* Text overlays (only those visible at the current time) */}
       {visibleOverlays.map((o) => (

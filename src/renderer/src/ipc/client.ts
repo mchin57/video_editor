@@ -57,6 +57,9 @@ export const proxyUrl = (id: string): string => `reelmedia://${id}/proxy.mp4`
 /** URL for a media asset's first-frame thumbnail. */
 export const thumbUrl = (id: string): string => `reelmedia://${id}/thumb.jpg`
 
+/** URL for an image asset's full display PNG (alpha preserved) — for overlays. */
+export const imageUrl = (id: string): string => `reelmedia://${id}/image.png`
+
 /** Stream URL for an audio-only asset's AAC proxy (music bed). */
 export const audioUrl = (id: string): string => `reelmedia://${id}/audio.m4a`
 

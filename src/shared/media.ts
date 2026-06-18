@@ -37,6 +37,8 @@ export interface ProbeInfo {
   audio: AudioStreamInfo | null
 }
 
+export type MediaKind = 'video' | 'audio' | 'image'
+
 export interface MediaAsset {
   /** Content hash (first 12 hex of sha1) — also the media folder name. */
   id: string
@@ -47,4 +49,39 @@ export interface MediaAsset {
   proxyReady: boolean
   /** Whether a transcript.json has been generated. */
   transcribed: boolean
+  /** Coarse media class. Optional for assets imported before this field existed
+   * (derived from the probe via {@link assetKind} as a fallback). */
+  kind?: MediaKind
 }
+
+/** Source extensions we recognise, by class. Drive the import dialog + kind. */
+export const VIDEO_EXTS = [
+  'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
+]
+export const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'wma']
+export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif']
+
+/** Classify a path by extension (null when unrecognised). */
+export function kindFromExt(path: string): MediaKind | null {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  if (IMAGE_EXTS.includes(ext)) return 'image'
+  if (AUDIO_EXTS.includes(ext)) return 'audio'
+  if (VIDEO_EXTS.includes(ext)) return 'video'
+  return null
+}
+
+/** Best-effort class from the probe alone (for assets without a stored kind). */
+export function deriveKind(probe: ProbeInfo): MediaKind {
+  if (!probe.video && probe.audio) return 'audio'
+  if (probe.video && probe.durationSec === 0) return 'image'
+  return 'video'
+}
+
+/** The asset's class, using the stored kind when present, else derived. */
+export function assetKind(a: MediaAsset): MediaKind {
+  return a.kind ?? deriveKind(a.probe)
+}
+
+export const isImageAsset = (a: MediaAsset): boolean => assetKind(a) === 'image'
+export const isAudioAsset = (a: MediaAsset): boolean => assetKind(a) === 'audio'
+export const isVideoAsset = (a: MediaAsset): boolean => assetKind(a) === 'video'

@@ -21,6 +21,21 @@ export interface Target {
   height: number
 }
 
+/** A resolved image overlay for the final encode (geometry in output px). */
+export interface ImageOverlayArg {
+  /** Source PNG path (an extra ffmpeg input). */
+  path: string
+  x: number
+  y: number
+  w: number
+  h: number
+  startSec: number
+  endSec: number
+  /** 0..1 */
+  opacity: number
+  anchor: 'center' | 'topLeft'
+}
+
 export function targetForPreset(preset: PresetId): Target {
   const p = EXPORT_PRESETS[preset]
   return { width: p.width, height: p.height }
@@ -128,6 +143,7 @@ export function buildFinalArgs(
   opts: {
     preferNvenc: boolean
     assFile?: string
+    images?: ImageOverlayArg[]
     audio?: { inputPaths: string[]; filter: string; outLabel: string }
   }
 ): string[] {
@@ -136,19 +152,56 @@ export function buildFinalArgs(
     ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0']
     : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20']
 
+  // Input order: concat (0), then audio inputs, then image inputs. Image input
+  // indices therefore start after the audio inputs.
+  const audioCount = opts.audio?.inputPaths.length ?? 0
+  const images = opts.images ?? []
   const inputs = ['-f', 'concat', '-safe', '0', '-i', listPath]
   for (const p of opts.audio?.inputPaths ?? []) inputs.push('-i', p)
+  for (const im of images) inputs.push('-i', im.path)
 
   let filterArgs: string[] = []
   let mapArgs: string[] = []
 
-  if (opts.audio) {
-    // Audio mix present → everything goes through filter_complex (can't mix -vf).
+  // Any image overlay or audio mix forces filter_complex (can't combine with -vf).
+  if (images.length > 0 || opts.audio) {
     const chains: string[] = []
-    if (opts.assFile) chains.push(`[0:v]ass=${opts.assFile}[v]`)
-    chains.push(opts.audio.filter)
+    let vlabel = '0:v'
+
+    // Composite each image (scale → alpha → opacity → overlay), gated by time.
+    images.forEach((im, k) => {
+      const inputIdx = 1 + audioCount + k
+      const w = Math.round(im.w)
+      const h = Math.round(im.h)
+      const x = Math.round(im.anchor === 'center' ? im.x - im.w / 2 : im.x)
+      const y = Math.round(im.anchor === 'center' ? im.y - im.h / 2 : im.y)
+      const op = Math.max(0, Math.min(1, im.opacity))
+      const prep =
+        `[${inputIdx}:v]scale=${w}:${h},format=rgba` +
+        (op < 0.999 ? `,colorchannelmixer=aa=${op.toFixed(3)}` : '')
+      chains.push(`${prep}[oimg${k}]`)
+      const out = `vi${k}`
+      chains.push(
+        `[${vlabel}][oimg${k}]overlay=${x}:${y}:enable='between(t,${im.startSec.toFixed(3)},${im.endSec.toFixed(3)})'[${out}]`
+      )
+      vlabel = out
+    })
+
+    // Burn text overlays / captions on top of the images.
+    if (opts.assFile) {
+      chains.push(`[${vlabel}]ass=${opts.assFile}[v]`)
+      vlabel = 'v'
+    }
+
+    const videoMap = vlabel === '0:v' ? '0:v' : `[${vlabel}]`
+    if (opts.audio) {
+      chains.push(opts.audio.filter)
+      mapArgs = ['-map', videoMap, '-map', `[${opts.audio.outLabel}]`]
+    } else {
+      // No custom audio graph → keep the concat's own audio track.
+      mapArgs = ['-map', videoMap, '-map', '0:a?']
+    }
     filterArgs = ['-filter_complex', chains.join(';')]
-    mapArgs = ['-map', opts.assFile ? '[v]' : '0:v', '-map', `[${opts.audio.outLabel}]`]
   } else if (opts.assFile) {
     // Burn overlays/captions via the ass video filter.
     filterArgs = ['-vf', `ass=${opts.assFile}`]

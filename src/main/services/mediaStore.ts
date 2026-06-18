@@ -8,11 +8,13 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, promises as fsp } from 'node:fs'
 import { basename, join } from 'node:path'
-import type { MediaAsset } from '@shared/media'
+import type { MediaAsset, MediaKind } from '@shared/media'
+import { assetKind, deriveKind, isAudioAsset, isImageAsset, kindFromExt } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
+import { generateDisplayImage } from './image'
 import { generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
 
@@ -29,15 +31,17 @@ function hashFile(path: string): Promise<string> {
 const mediaDir = (id: string): string => join(getSubdir('media'), id)
 const proxyPath = (id: string): string => join(mediaDir(id), 'proxy.mp4')
 const audioProxyPath = (id: string): string => join(mediaDir(id), 'audio.m4a')
+const imagePath = (id: string): string => join(mediaDir(id), 'image.png')
 const waveformPath = (id: string): string => join(mediaDir(id), 'waveform.png')
 const thumbPath = (id: string): string => join(mediaDir(id), 'thumb.jpg')
 const assetJsonPath = (id: string): string => join(mediaDir(id), 'asset.json')
 
-/** Audio-only asset: has audio but no video stream. */
-export const isAudioAsset = (a: MediaAsset): boolean => !a.probe.video && !!a.probe.audio
-/** The playable proxy path for an asset (audio bed vs video proxy). */
+/** Absolute path to an image asset's display PNG (used by preview + export). */
+export const imageAssetPath = (id: string): string => imagePath(id)
+
+/** The "ready to use" artifact for an asset: image PNG, audio bed, or video proxy. */
 const playableProxyPath = (a: MediaAsset): string =>
-  isAudioAsset(a) ? audioProxyPath(a.id) : proxyPath(a.id)
+  isImageAsset(a) ? imagePath(a.id) : isAudioAsset(a) ? audioProxyPath(a.id) : proxyPath(a.id)
 
 /** Best-effort first-frame thumbnail; never fails the import if it errors. */
 async function makeThumb(asset: MediaAsset): Promise<void> {
@@ -60,9 +64,21 @@ async function makeWaveform(asset: MediaAsset): Promise<void> {
   }
 }
 
+/** Best-effort display PNG (alpha-preserving) for an imported image. */
+async function makeImage(asset: MediaAsset): Promise<void> {
+  if (!isImageAsset(asset) || existsSync(imagePath(asset.id))) return
+  try {
+    await generateDisplayImage(asset.originalPath, imagePath(asset.id))
+  } catch (error) {
+    console.error('display image failed for', asset.id, error)
+  }
+}
+
 async function readAsset(id: string): Promise<MediaAsset | null> {
   try {
-    return JSON.parse(await fsp.readFile(assetJsonPath(id), 'utf8')) as MediaAsset
+    const asset = JSON.parse(await fsp.readFile(assetJsonPath(id), 'utf8')) as MediaAsset
+    if (!asset.kind) asset.kind = assetKind(asset) // backfill records imported pre-kind
+    return asset
   } catch {
     return null
   }
@@ -82,13 +98,15 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
 
   const existing = await readAsset(id)
   if (existing) {
-    existing.proxyReady = existsSync(playableProxyPath(existing))
     await makeThumb(existing) // backfill for assets imported before thumbnails
+    await makeImage(existing) // backfill display PNG for images
     await makeWaveform(existing) // backfill waveform (e.g. video whose audio is extracted)
+    existing.proxyReady = existsSync(playableProxyPath(existing))
     return existing
   }
 
   const probe = await probeFile(srcPath)
+  const kind: MediaKind = kindFromExt(srcPath) ?? deriveKind(probe)
   const asset: MediaAsset = {
     id,
     fileName: basename(srcPath),
@@ -96,11 +114,13 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
     importedAt: new Date().toISOString(),
     probe,
     proxyReady: false,
-    transcribed: existsSync(join(mediaDir(id), 'transcript.json'))
+    transcribed: existsSync(join(mediaDir(id), 'transcript.json')),
+    kind
   }
+  await makeThumb(asset)
+  await makeImage(asset) // images: build the display PNG now (it is their "proxy")
   asset.proxyReady = existsSync(playableProxyPath(asset))
   await writeAsset(asset)
-  await makeThumb(asset)
   return asset
 }
 
@@ -109,6 +129,14 @@ export async function ensureProxy(id: string): Promise<void> {
   const asset = await readAsset(id)
   if (!asset) throw new Error(`unknown media ${id}`)
   if (existsSync(playableProxyPath(asset))) return
+
+  // Images need no transcode — just the display PNG (built best-effort at import).
+  if (isImageAsset(asset)) {
+    await makeImage(asset)
+    asset.proxyReady = existsSync(imagePath(id))
+    await writeAsset(asset)
+    return
+  }
 
   // Audio-only: small AAC proxy + a waveform for the music lane.
   if (isAudioAsset(asset)) {
@@ -152,9 +180,10 @@ export async function listLibrary(): Promise<MediaAsset[]> {
   for (const id of ids) {
     const asset = await readAsset(id)
     if (asset) {
-      asset.proxyReady = existsSync(playableProxyPath(asset))
       await makeThumb(asset) // backfill thumbnails for assets imported pre-feature
+      await makeImage(asset) // backfill display PNGs for images
       await makeWaveform(asset) // backfill waveforms (incl. video assets)
+      asset.proxyReady = existsSync(playableProxyPath(asset))
       assets.push(asset)
     }
   }

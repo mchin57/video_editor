@@ -64,6 +64,23 @@ export interface TextOverlay {
   pill: PillStyle
 }
 
+/** An image (logo, sticker, graphic) composited over the video for a time span. */
+export interface ImageOverlay {
+  id: string
+  mediaId: string
+  startSec: number
+  endSec: number
+  /** Position in logical 1080x1920 px (meaning depends on anchor). */
+  x: number
+  y: number
+  /** Rendered size in logical px (aspect kept by the UI). */
+  w: number
+  h: number
+  anchor: OverlayAnchor
+  /** 0..1 */
+  opacity: number
+}
+
 export interface CaptionWord {
   text: string
   startSec: number
@@ -128,6 +145,7 @@ export interface Project {
   preset: PresetId
   clips: Clip[]
   overlays: TextOverlay[]
+  imageOverlays: ImageOverlay[]
   captions: CaptionsConfig
   audioClips: AudioClip[]
   script: ScriptLine[]
@@ -154,6 +172,7 @@ export function createEmptyProject(id: string, name: string): Project {
     preset: 'reel',
     clips: [],
     overlays: [],
+    imageOverlays: [],
     captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
     audioClips: [],
     script: [],
@@ -189,6 +208,7 @@ export function migrateProject(raw: unknown): Project {
   }
   delete (p as { music?: unknown }).music
   if (!Array.isArray(p.overlays)) p.overlays = []
+  if (!Array.isArray(p.imageOverlays)) p.imageOverlays = []
   if (!Array.isArray(p.clips)) p.clips = []
   if (!Array.isArray(p.script)) p.script = []
   return p as Project

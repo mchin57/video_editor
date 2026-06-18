@@ -26,14 +26,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 - [ ] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline labeling each lane (Clips / Text / Captions / Audio) with per-lane controls (e.g. mute, solo, height presets), like Premiere/Resolve. The track content scrolls horizontally beside it. Pairs with the existing per-lane resize handles (`Timeline.tsx`); would replace the unlabeled lanes with a clearer, more pro layout. Doesn't change the data model — purely a timeline layout/UI change.
-
-### Distribution & auto-update pipeline
-
-- [ ] **Distributable installer + auto-update** — package the app for sharing with friends and deliver updates automatically without requiring manual reinstalls.
-  - **Installer:** electron-builder NSIS is already planned for M6. Extend it to produce a shareable `.exe` setup file and a delta-update feed.
-  - **Update server:** host a simple release feed (e.g. a GitHub Releases page or a static JSON manifest on a private server) that electron-updater (`autoUpdater` from `electron-updater` package) polls on launch. Users get a "Update available — restart to install" prompt rather than needing to do anything manually.
-  - **Code signing:** unsigned installers trigger Windows SmartScreen warnings for recipients. Either self-sign with a free cert (suppresses some warnings) or purchase an EV code-signing cert to fully clear SmartScreen. Worth deciding before distributing widely.
-  - **Private vs. public:** if this stays friend-only, a private GitHub repo's Releases tab is the simplest update host — no server to run. If it eventually goes wider, consider a proper release channel (stable / beta).
+	- [ ] Also allows for minimizing the lane on double click
 
 ### Explicitly out of scope for v1 (revisit post-launch)
 
@@ -46,7 +39,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   greedy interval packing (`lib/lanes.ts` `packRows`) for the text, caption, and
   audio lanes; lanes lay out vertically by row count and the track grows to fit.
 
-### Packaging / distribution
+### Packaging & distribution
 
 - [ ] **Bundle (or fetch) ffmpeg + whisper.cpp for distribution.** The NSIS
   installer ships the Electron app but not the ffmpeg/ffprobe binaries or the
@@ -56,6 +49,8 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   engine. Options: bundle the Gyan ffmpeg build + whisper binary as
   `extraResources` (watch licensing/size — the small.en model is ~465 MB), or add
   a guided first-run downloader that fetches them into the data dir.
+
+- [ ] **Auto-update** — so recipients get new versions without manually reinstalling. Use `electron-updater` (`autoUpdater`) which polls a release feed on launch and shows a "Update available — restart to install" prompt. Simplest host: a private GitHub repo's Releases tab (free, no server to run). If distribution goes wider, add stable/beta channels. Wire into the existing electron-builder config via `publish` field in `electron-builder.yml`.
 
 - [ ] **Custom app icon.** electron-builder logs "default Electron icon is used —
   application icon is not set". Add `resources/icon.ico` (256px) and reference it
@@ -69,7 +64,8 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   immediately; a standard OV cert builds reputation over downloads) and configure
   electron-builder signing. Interim: submit a false-positive dispute to Norton, or
   "Allow"/whitelist locally for personal use.
-
+## MSC other todo
+- [ ] 
 ## Done
 
 (empty)

@@ -11,6 +11,9 @@ interface UiState {
   /** Currently selected audio clip (shows its controls in the Inspector). */
   selectedAudioId: string | null
   selectAudio: (id: string | null) => void
+  /** Currently selected image overlay (for editing/dragging). */
+  selectedImageId: string | null
+  selectImage: (id: string | null) => void
   /** Whether the crop editor modal is open. */
   cropEditing: boolean
   setCropEditing: (v: boolean) => void
@@ -32,6 +35,8 @@ export const useUi = create<UiState>((set) => ({
   selectCaption: (id) => set({ selectedCaptionId: id }),
   selectedAudioId: null,
   selectAudio: (id) => set({ selectedAudioId: id }),
+  selectedImageId: null,
+  selectImage: (id) => set({ selectedImageId: id }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   settingsOpen: false,

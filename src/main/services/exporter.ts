@@ -12,9 +12,9 @@ import { effectiveOut } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
-import { getAsset } from './mediaStore'
+import { getAsset, imageAssetPath } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
-import { buildFinalArgs, buildNormalizeArgs, targetForPreset } from './exporterArgs'
+import { buildFinalArgs, buildNormalizeArgs, targetForPreset, type ImageOverlayArg } from './exporterArgs'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
 import { buildAss } from './assBuilder'
 import { runFfmpeg } from './ffmpegRun'
@@ -129,10 +129,31 @@ async function runExport(
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, '0:a') : null
   const audio = graph ? { inputPaths, filter: graph.filter, outLabel: graph.outLabel } : undefined
 
+  // Image overlays → extra inputs composited via the overlay filter. Geometry is
+  // in logical px (== target px for the 9:16 presets). Skip any whose display
+  // PNG is missing (generation failed) so the encode still succeeds.
+  const images: ImageOverlayArg[] = []
+  for (const o of project.imageOverlays) {
+    const imgPath = imageAssetPath(o.mediaId)
+    if (!existsSync(imgPath)) continue
+    images.push({
+      path: imgPath,
+      x: o.x,
+      y: o.y,
+      w: o.w,
+      h: o.h,
+      startSec: o.startSec,
+      endSec: o.endSec,
+      opacity: o.opacity,
+      anchor: o.anchor
+    })
+  }
+
   await fsp.mkdir(dirname(output), { recursive: true })
   const finalArgs = buildFinalArgs(listPath, output, caps, {
     preferNvenc: opts.preferNvenc,
     assFile,
+    images: images.length ? images : undefined,
     audio
   })
   await runFfmpeg(

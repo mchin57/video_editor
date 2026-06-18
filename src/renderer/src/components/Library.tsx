@@ -1,11 +1,13 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
+import { isImageAsset } from '@shared/media'
 import { useLibrary, useImportMedia, useRemoveMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration } from '@/lib/format'
+import { makeImageOverlay } from '@/lib/overlays'
 import { thumbUrl } from '@/ipc/client'
 
 /** First-frame thumbnail with a ▶ fallback until/if the jpg is available. */
@@ -48,11 +50,14 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const job = useEditor((s) => (asset.id in s.proxyJobs ? s.proxyJobs[asset.id] : undefined))
   const addClip = useProject((s) => s.addClip)
   const addAudioClip = useProject((s) => s.addAudioClip)
+  const addImageOverlay = useProject((s) => s.addImageOverlay)
   const selectAudio = useUi((s) => s.selectAudio)
+  const selectImage = useUi((s) => s.selectImage)
   const onTrack = useProject((s) => s.project?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const remove = useRemoveMedia()
 
   const v = asset.probe.video
+  const isImage = isImageAsset(asset)
   const isAudio = !v && !!asset.probe.audio
   const selected = selectedId === asset.id
   const pct = Math.round((job?.progress ?? 0) * 100)
@@ -81,7 +86,8 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           {asset.fileName}
         </div>
         <div className="mt-0.5 text-[10px] text-zinc-500">
-          {v ? `${v.displayWidth}×${v.displayHeight}` : 'no video'} · {formatDuration(asset.probe.durationSec)}
+          {v ? `${v.displayWidth}×${v.displayHeight}` : 'no video'} ·{' '}
+          {isImage ? 'image' : formatDuration(asset.probe.durationSec)}
         </div>
         <div className="mt-1">
           {asset.proxyReady ? (
@@ -95,7 +101,27 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
       </div>
 
       <div className="flex flex-col items-center gap-1">
-        {isAudio ? (
+        {isImage ? (
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!asset.proxyReady) return
+              const id = crypto.randomUUID()
+              const t = usePlayback.getState().time
+              const aspect = v ? v.displayWidth / v.displayHeight : 1
+              addImageOverlay(makeImageOverlay(id, asset.id, t, t + 3, aspect))
+              selectImage(id)
+            }}
+            className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
+              asset.proxyReady ? '' : 'pointer-events-none opacity-30'
+            }`}
+            title="Add image overlay at the playhead"
+          >
+            🖼
+          </span>
+        ) : isAudio ? (
           <span
             role="button"
             tabIndex={-1}

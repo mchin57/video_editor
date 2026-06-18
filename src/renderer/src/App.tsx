@@ -109,6 +109,10 @@ export default function App(): JSX.Element {
           e.preventDefault()
           project.removeOverlay(ui.selectedOverlayId)
           ui.selectOverlay(null)
+        } else if (ui.selectedImageId) {
+          e.preventDefault()
+          project.removeImageOverlay(ui.selectedImageId)
+          ui.selectImage(null)
         } else if (ui.selectedCaptionId) {
           e.preventDefault()
           project.removeCaption(ui.selectedCaptionId)
@@ -141,6 +145,7 @@ export default function App(): JSX.Element {
         useUi.getState().selectOverlay(null)
         useUi.getState().selectCaption(null)
         useUi.getState().selectAudio(null)
+        useUi.getState().selectImage(null)
       }
     }
     window.addEventListener('keydown', onKey)
