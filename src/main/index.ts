@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaProtocol'
+import { initAutoUpdate } from './services/updater'
 
 // Must be declared before app 'ready'.
 registerMediaSchemePrivileges()
@@ -59,6 +60,7 @@ app.whenReady().then(() => {
   registerMediaProtocol()
   registerIpcHandlers()
   createWindow()
+  initAutoUpdate()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

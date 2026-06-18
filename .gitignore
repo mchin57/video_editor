@@ -26,6 +26,9 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 .idea/
+# Obsidian volatile UI state (open panes/cursor) — keep app/appearance/core-plugins config
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
@@ -38,6 +41,11 @@ Thumbs.db
 # App data / bundled binaries that are downloaded on first run, not committed
 resources/bin/
 resources/whisper-models/
+
+# Code-signing certificates / keys — never commit
+certs/
+*.pfx
+*.p12
 
 # Test coverage
 coverage/

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EMPTY_CAPABILITIES } from '@shared/ffmpeg'
-import { FFMPEG_PATH_OVERRIDE, FFPROBE_PATH_OVERRIDE } from '../config'
+import { FFMPEG_PATH_OVERRIDE, FFPROBE_PATH_OVERRIDE, getBundledBinDir } from '../config'
 
 const execFileAsync = promisify(execFile)
 
@@ -47,6 +47,10 @@ function findInWingetPackages(exe: string): string | null {
 function candidates(name: 'ffmpeg' | 'ffprobe', override: string | null): string[] {
   const list: string[] = []
   if (override) list.push(override)
+  // Binaries bundled into the installer (resources/bin/ffmpeg) — used on clean
+  // machines that have no system ffmpeg. Absent in dev unless staged.
+  const bundled = getBundledBinDir()
+  if (bundled) list.push(join(bundled, 'ffmpeg', process.platform === 'win32' ? `${name}.exe` : name))
   // Bare name resolves via PATH when the app is launched from a shell that has it.
   list.push(name)
   if (process.platform === 'win32') {

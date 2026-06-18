@@ -50,29 +50,40 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ### Packaging & distribution
 
-- [ ] **Bundle (or fetch) ffmpeg + whisper.cpp for distribution.** The NSIS
-  installer ships the Electron app but not the ffmpeg/ffprobe binaries or the
-  whisper.cpp binary + model — these are discovered at runtime and currently only
-  exist on the dev machine (installed via winget / downloaded to
-  `Documents\VideoEditor\bin\whisper`). On a clean machine the app would have no
-  engine. Options: bundle the Gyan ffmpeg build + whisper binary as
-  `extraResources` (watch licensing/size — the small.en model is ~465 MB), or add
-  a guided first-run downloader that fetches them into the data dir.
+- [x] **Bundle ffmpeg + whisper.cpp for distribution.** Chose the bundle route
+  (over a first-run downloader) so a clean machine needs zero setup. Engines ship
+  as electron-builder `extraResources` under `<resources>/bin/{ffmpeg,whisper}`:
+  ffmpeg.exe + ffprobe.exe (Gyan full build), whisper-cli.exe + DLLs, and the
+  `ggml-small.en.bin` model (~1 GB installer total). `scripts/collect-binaries.mjs`
+  (run by `build:win`, also `npm run collect-binaries`) stages them from the dev
+  machine into the gitignored `resources/bin/`. Runtime discovery prefers the
+  bundle: `getBundledBinDir()` in `config.ts`, wired into `ffmpeg.ts` candidates
+  and `whisper.ts` `discoverWhisper`, falling back to the system install in dev.
+  _GPL ffmpeg / MIT whisper notices called out in the README._
 
-- [ ] **Auto-update** — so recipients get new versions without manually reinstalling. Use `electron-updater` (`autoUpdater`) which polls a release feed on launch and shows a "Update available — restart to install" prompt. Simplest host: a private GitHub repo's Releases tab (free, no server to run). If distribution goes wider, add stable/beta channels. Wire into the existing electron-builder config via `publish` field in `electron-builder.yml`.
+- [x] **Auto-update** — `electron-updater` wired in `src/main/services/updater.ts`
+  (called from `index.ts` `whenReady`, packaged-only). Polls the `publish` feed on
+  launch, auto-downloads, and prompts "Restart now / Later" on
+  `update-downloaded`; errors are logged and swallowed. Feed configured as GitHub
+  Releases (`publish:` in `electron-builder.yml`). _Action needed before first
+  release: confirm `publish.owner`/`repo` (defaults `mchin57/reel-editor`), create
+  the repo, and publish with `build:win -- --publish always` + a `GH_TOKEN`._
+  Stable/beta channels deferred.
 
 - [ ] **Custom app icon.** electron-builder logs "default Electron icon is used —
   application icon is not set". Add `resources/icon.ico` (256px) and reference it
   in `electron-builder.yml` (`win.icon`) so the installer, taskbar, and window use
   a real icon.
 
-- [ ] **Code-sign the installer (Norton/SmartScreen false positives).** The
-  unsigned `.exe` gets quarantined by Norton Cyber Capture / Windows SmartScreen
-  because it has no signature and no download reputation. Fix: buy an Authenticode
-  code-signing certificate (an **EV cert** earns SmartScreen reputation
-  immediately; a standard OV cert builds reputation over downloads) and configure
-  electron-builder signing. Interim: submit a false-positive dispute to Norton, or
-  "Allow"/whitelist locally for personal use.
+- [~] **Code-sign the installer (Norton/SmartScreen false positives).** Signing
+  pipeline is wired and **env-var driven**: electron-builder signs when `CSC_LINK`
+  + `CSC_KEY_PASSWORD` are set, unsigned otherwise. `scripts/make-selfsigned-cert.ps1`
+  (`npm run make-cert`) generates a throwaway self-signed `.pfx` so signed builds
+  work today — but a self-signed cert does **not** clear SmartScreen/Norton
+  (untrusted publisher). _Remaining for real trust: buy an OV/EV cert or set up
+  **Azure Trusted Signing** (recommended — new OV/EV certs ship on hardware tokens
+  that can't export a `.pfx`), then point `CSC_LINK` at it or add
+  `win.azureSignOptions`. No code change needed._ See README → Code-signing.
 ## MSC other todo
 - [ ] 
 ## Done

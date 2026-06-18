@@ -10,36 +10,46 @@ import { spawn } from 'node:child_process'
 import { existsSync, promises as fsp, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { Transcript } from '@shared/transcript'
-import { getSubdir } from '../config'
+import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { getAsset } from './mediaStore'
 import { parseWhisperJson, type WhisperJson } from './whisperParse'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 
-const whisperDir = (): string => join(getSubdir('bin'), 'whisper')
 const transcriptPath = (id: string): string => join(getSubdir('media'), id, 'transcript.json')
 
+/** Whisper search roots, bundled (installer) first, then the user data dir. */
+function whisperDirs(): string[] {
+  const dirs: string[] = []
+  const bundled = getBundledBinDir()
+  if (bundled) dirs.push(join(bundled, 'whisper'))
+  dirs.push(join(getSubdir('bin'), 'whisper'))
+  return dirs
+}
+
 export function discoverWhisper(): { cli: string; model: string } | null {
-  const dir = whisperDir()
   const exe = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
-  // Build layouts vary: MSVC emits Release\, the cmake/Unix default emits
-  // build\bin\ (or bin\), and some users drop the binary straight in the dir.
-  const cli = [
-    join(dir, 'Release', exe),
-    join(dir, 'bin', exe),
-    join(dir, 'build', 'bin', exe),
-    join(dir, exe)
-  ].find((p) => existsSync(p))
-  if (!cli) return null
-  let model: string | null = null
-  try {
-    const bin = readdirSync(dir).find((f) => f.toLowerCase().endsWith('.bin'))
-    if (bin) model = join(dir, bin)
-  } catch {
-    return null
+  for (const dir of whisperDirs()) {
+    // Build layouts vary: MSVC emits Release\, the cmake/Unix default emits
+    // build\bin\ (or bin\), and the bundled/flat layout drops it straight in dir.
+    const cli = [
+      join(dir, 'Release', exe),
+      join(dir, 'bin', exe),
+      join(dir, 'build', 'bin', exe),
+      join(dir, exe)
+    ].find((p) => existsSync(p))
+    if (!cli) continue
+    let model: string | null = null
+    try {
+      const bin = readdirSync(dir).find((f) => f.toLowerCase().endsWith('.bin'))
+      if (bin) model = join(dir, bin)
+    } catch {
+      continue
+    }
+    if (model && existsSync(model)) return { cli, model }
   }
-  return model && existsSync(model) ? { cli, model } : null
+  return null
 }
 
 export function whisperAvailable(): boolean {

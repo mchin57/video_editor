@@ -6,8 +6,14 @@ directories:
 files:
   - out/**/*
   - package.json
-asarUnpack:
-  - resources/**
+# Engine binaries (ffmpeg/ffprobe + whisper.cpp cli/dlls/model) staged by
+# `npm run collect-binaries`. Shipped outside the asar so they're directly
+# executable at runtime under <resources>/bin. ~1 GB — gitignored, not committed.
+extraResources:
+  - from: resources/bin
+    to: bin
+    filter:
+      - "**/*"
 win:
   target: nsis
   artifactName: ${productName}-${version}-setup.${ext}
@@ -19,4 +25,13 @@ mac:
   target: dmg
   artifactName: ${productName}-${version}.${ext}
   category: public.app-category.video
+# Auto-update feed. electron-builder bakes an app-update.yml pointing here into
+# the build; electron-updater polls it on launch. TODO: confirm owner/repo — set
+# to the actual GitHub repo before cutting a release. Uploading happens only with
+# `electron-builder --publish` (or a GH_TOKEN in CI); a plain build just embeds
+# the feed URL and never pushes anything.
+publish:
+  provider: github
+  owner: mchin57
+  repo: reel-editor
 
