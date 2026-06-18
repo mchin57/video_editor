@@ -18,21 +18,69 @@ const HOOK_SEC = 3
 const SNAP_PX = 7 // magnetic snap threshold (px)
 const LANE_MIN = 16 // min per-row lane height
 const LANE_MAX = 160 // max per-row lane height
+const GUTTER = 96 // fixed left track-header column width (px)
+const COLLAPSED_H = 16 // lane height when minimized
 
 type LaneKey = 'clips' | 'text' | 'image' | 'caption' | 'audio'
 type LaneHeights = Record<LaneKey, number>
+type Collapsed = Record<LaneKey, boolean>
 const DEFAULT_LANES: LaneHeights = { clips: 48, text: 22, image: 30, caption: 22, audio: 30 }
+const DEFAULT_COLLAPSED: Collapsed = { clips: false, text: false, image: false, caption: false, audio: false }
 
 interface TimelineView {
   pxPerSec: number
   laneH: LaneHeights
+  collapsed: Collapsed
 }
 function loadView(): TimelineView {
   try {
     const v = JSON.parse(localStorage.getItem('timelineView') ?? '{}')
-    return { pxPerSec: v.pxPerSec ?? DEFAULT_PPS, laneH: { ...DEFAULT_LANES, ...(v.laneH ?? {}) } }
+    return {
+      pxPerSec: v.pxPerSec ?? DEFAULT_PPS,
+      laneH: { ...DEFAULT_LANES, ...(v.laneH ?? {}) },
+      collapsed: { ...DEFAULT_COLLAPSED, ...(v.collapsed ?? {}) }
+    }
   } catch {
-    return { pxPerSec: DEFAULT_PPS, laneH: DEFAULT_LANES }
+    return { pxPerSec: DEFAULT_PPS, laneH: DEFAULT_LANES, collapsed: DEFAULT_COLLAPSED }
+  }
+}
+
+// Vertical geometry of the track: each lane's top + height, plus the bottom
+// time scale and overall content height. Computed from lane heights + row counts.
+interface Layout {
+  clipsTop: number
+  clipsH: number
+  textTop: number
+  textH: number
+  imgTop: number
+  imgH: number
+  capTop: number
+  capH: number
+  audTop: number
+  audH: number
+  textRows: number
+  imgRows: number
+  capRows: number
+  audRows: number
+  scaleTop: number
+  scaleH: number
+  totalH: number
+}
+
+// Return `snap` with only the given lane's height replaced by the live value —
+// used to hold everything below a shrinking lane in place during a resize drag.
+function freezeBelow(snap: Layout, live: Layout, lane: LaneKey): Layout {
+  switch (lane) {
+    case 'clips':
+      return { ...snap, clipsH: live.clipsH }
+    case 'text':
+      return { ...snap, textH: live.textH }
+    case 'image':
+      return { ...snap, imgH: live.imgH }
+    case 'caption':
+      return { ...snap, capH: live.capH }
+    case 'audio':
+      return { ...snap, audH: live.audH }
   }
 }
 
@@ -121,15 +169,21 @@ export function Timeline(): JSX.Element {
   const previewDur = previewAsset?.proxyReady ? previewAsset.probe.durationSec : 0
   const canPlay = clips.length > 0 || previewDur > 0
 
-  // Timeline view (persisted): horizontal zoom + per-lane heights.
+  // Timeline view (persisted): horizontal zoom + per-lane heights + collapsed lanes.
   const [pxPerSec, setPxPerSec] = useState(() => loadView().pxPerSec)
   const [laneH, setLaneH] = useState<LaneHeights>(() => loadView().laneH)
+  const [collapsed, setCollapsed] = useState<Collapsed>(() => loadView().collapsed)
   useEffect(() => {
-    localStorage.setItem('timelineView', JSON.stringify({ pxPerSec, laneH }))
-  }, [pxPerSec, laneH])
+    localStorage.setItem('timelineView', JSON.stringify({ pxPerSec, laneH, collapsed }))
+  }, [pxPerSec, laneH, collapsed])
+  const toggleCollapse = (lane: LaneKey): void =>
+    setCollapsed((prev) => ({ ...prev, [lane]: !prev[lane] }))
+  // Active lane resize, with a snapshot of the layout when the drag began.
+  const [resize, setResize] = useState<{ lane: LaneKey; snap: Layout } | null>(null)
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
   const scrollRef = useRef<HTMLDivElement>(null)
+  const gutterInnerRef = useRef<HTMLDivElement>(null)
 
   const total = useMemo(() => {
     const videoTotal = timelineDuration(clips)
@@ -166,23 +220,23 @@ export function Timeline(): JSX.Element {
       ),
     [audioClips, assetById]
   )
-  const layout = useMemo(() => {
+  const liveLayout = useMemo<Layout>(() => {
     const ruler = 20
     const gap = 6 // also the resize-handle strip below each lane
     const clipsTop = ruler
-    const clipsH = laneH.clips
+    const clipsH = collapsed.clips ? COLLAPSED_H : laneH.clips
     const textRows = rowCount(overlayRows)
     const imgRows = rowCount(imageRows)
     const capRows = rowCount(captionRows)
     const audRows = rowCount(audioRows, 1)
     const textTop = clipsTop + clipsH + gap
-    const textH = textRows * laneH.text
+    const textH = collapsed.text ? COLLAPSED_H : textRows * laneH.text
     const imgTop = textTop + textH + gap
-    const imgH = imgRows * laneH.image
+    const imgH = collapsed.image ? COLLAPSED_H : imgRows * laneH.image
     const capTop = imgTop + imgH + gap
-    const capH = capRows * laneH.caption
+    const capH = collapsed.caption ? COLLAPSED_H : capRows * laneH.caption
     const audTop = capTop + capH + gap
-    const audH = audRows * laneH.audio
+    const audH = collapsed.audio ? COLLAPSED_H : audRows * laneH.audio
     const scaleTop = audTop + audH + gap
     const scaleH = 18
     return {
@@ -191,7 +245,17 @@ export function Timeline(): JSX.Element {
       scaleTop, scaleH,
       totalH: scaleTop + scaleH
     }
-  }, [overlayRows, imageRows, captionRows, audioRows, laneH])
+  }, [overlayRows, imageRows, captionRows, audioRows, laneH, collapsed])
+
+  // While dragging a lane *shorter*, freeze the lanes below it (and the total
+  // scroll height) at their pre-drag positions: black space opens under the lane
+  // and nothing below moves until release. Without this, the shrinking content
+  // clamps the scrollbar, which fed back into the drag and made it accelerate.
+  // Expanding still reflows normally so there's room to grow into.
+  const layout: Layout =
+    resize && liveLayout.totalH < resize.snap.totalH
+      ? freezeBelow(resize.snap, liveLayout, resize.lane)
+      : liveLayout
 
   // Magnetic snap targets: clip boundaries, audio-clip boundaries, playhead, 0.
   const snapTargets = useMemo(() => {
@@ -232,23 +296,75 @@ export function Timeline(): JSX.Element {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // Drag a lane's bottom edge to resize just that lane (per-row height).
+  // Keep the fixed left gutter aligned as the track scrolls vertically. Updated
+  // imperatively so we don't re-render every lane on each scroll tick.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return undefined
+    const sync = (): void => {
+      const g = gutterInnerRef.current
+      if (g) g.style.transform = `translateY(${-el.scrollTop}px)`
+    }
+    sync()
+    el.addEventListener('scroll', sync, { passive: true })
+    return () => el.removeEventListener('scroll', sync)
+  }, [clips.length])
+
+  // Drag a lane's header bubble (or its bottom-edge handle) to resize just that
+  // lane (per-row height). Height tracks the pointer in *content* space so that
+  // when the drag reaches a viewport edge we can keep growing/shrinking the lane
+  // while auto-scrolling the track to follow.
   const startLaneResize = (e: ReactPointerEvent, lane: LaneKey, rows: number): void => {
     e.stopPropagation()
     e.preventDefault()
+    setResize({ lane, snap: liveLayout })
+    const el = scrollRef.current
     const startY = e.clientY
     const startH = laneH[lane]
+    const startScroll = el?.scrollTop ?? 0
     const r = Math.max(1, rows)
-    const onMove = (ev: PointerEvent): void => {
-      const nh = clamp(startH + (ev.clientY - startY) / r, LANE_MIN, LANE_MAX)
+    let lastY = startY
+    let raf = 0
+
+    const apply = (): void => {
+      const scrolled = (el?.scrollTop ?? 0) - startScroll
+      const nh = clamp(startH + (lastY - startY + scrolled) / r, LANE_MIN, LANE_MAX)
       setLaneH((prev) => ({ ...prev, [lane]: nh }))
     }
+
+    // Auto-scroll while the pointer sits inside the top/bottom edge band.
+    const EDGE = 28 // px
+    const tick = (): void => {
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        let v = 0
+        if (lastY > rect.bottom - EDGE) v = Math.min(16, (lastY - (rect.bottom - EDGE)) / 2)
+        else if (lastY < rect.top + EDGE) v = -Math.min(16, (rect.top + EDGE - lastY) / 2)
+        if (v !== 0) {
+          const max = el.scrollHeight - el.clientHeight
+          const next = clamp(el.scrollTop + v, 0, max)
+          if (next !== el.scrollTop) {
+            el.scrollTop = next
+            apply()
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+
+    const onMove = (ev: PointerEvent): void => {
+      lastY = ev.clientY
+      apply()
+    }
     const onUp = (): void => {
+      cancelAnimationFrame(raf)
+      setResize(null)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    raf = requestAnimationFrame(tick)
   }
 
   const selectedIndex = clips.findIndex((c) => c.id === selectedClipId)
@@ -492,6 +608,23 @@ export function Timeline(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
+  // Track-header bubbles for the fixed left gutter, aligned to each lane's band.
+  const laneMeta: {
+    key: LaneKey
+    label: string
+    top: number
+    height: number
+    rows: number
+    dot: string
+    tint: string
+  }[] = [
+    { key: 'clips', label: 'Clips', top: layout.clipsTop, height: layout.clipsH, rows: 1, dot: 'bg-sky-400', tint: 'border-sky-400/30 bg-sky-500/10' },
+    { key: 'text', label: 'Text', top: layout.textTop, height: layout.textH, rows: layout.textRows, dot: 'bg-violet-400', tint: 'border-violet-400/30 bg-violet-500/10' },
+    { key: 'image', label: 'Image', top: layout.imgTop, height: layout.imgH, rows: layout.imgRows, dot: 'bg-orange-400', tint: 'border-orange-400/30 bg-orange-500/10' },
+    { key: 'caption', label: 'Captions', top: layout.capTop, height: layout.capH, rows: layout.capRows, dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10' },
+    { key: 'audio', label: 'Audio', top: layout.audTop, height: layout.audH, rows: layout.audRows, dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10' }
+  ]
+
   return (
     <div className="flex h-full flex-col">
       {/* Transport / edit toolbar */}
@@ -568,7 +701,60 @@ export function Timeline(): JSX.Element {
         </ToolbarButton>
       </div>
 
-      {/* Track */}
+      {/* Track body: fixed left gutter + horizontally-scrolling track */}
+      <div className="flex min-h-0 flex-1">
+        {clips.length > 0 && (
+          <div
+            className="relative shrink-0 overflow-hidden border-r border-white/10 bg-zinc-900/50"
+            style={{ width: GUTTER }}
+          >
+            <div
+              ref={gutterInnerRef}
+              className="absolute inset-x-0 top-0 will-change-transform"
+              style={{ height: layout.totalH }}
+            >
+              {/* Corner above the lanes, aligned with the ruler strip */}
+              <div
+                className="absolute inset-x-0 top-0 flex items-center border-b border-white/10 px-2"
+                style={{ height: layout.clipsTop }}
+              >
+                <span className="text-[8px] font-semibold uppercase tracking-wider text-zinc-600">
+                  Tracks
+                </span>
+              </div>
+              {laneMeta.map(({ key, label, top, height, rows, dot, tint }) => (
+                <div
+                  key={key}
+                  onPointerDown={collapsed[key] ? undefined : (e) => startLaneResize(e, key, rows)}
+                  onDoubleClick={() => toggleCollapse(key)}
+                  title={`${label} lane${collapsed[key] ? '' : ' — drag to resize'} · double-click to ${collapsed[key] ? 'expand' : 'minimize'}`}
+                  className={`absolute inset-x-1 flex select-none items-center gap-1.5 overflow-hidden rounded-md border px-1.5 ${tint} ${
+                    collapsed[key] ? '' : 'cursor-row-resize'
+                  }`}
+                  style={{ top: top + 1, height: Math.max(0, height - 2) }}
+                >
+                  <button
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleCollapse(key)
+                    }}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    title={collapsed[key] ? 'Expand lane' : 'Minimize lane'}
+                    className="shrink-0 text-[10px] leading-none text-zinc-400 hover:text-zinc-100"
+                  >
+                    {collapsed[key] ? '▸' : '▾'}
+                  </button>
+                  <span className={`h-2 w-2 shrink-0 rounded-sm ${dot}`} />
+                  <span className="truncate text-[10px] font-medium leading-none text-zinc-200">
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
         {clips.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-zinc-600">
@@ -618,7 +804,10 @@ export function Timeline(): JSX.Element {
               className="absolute inset-x-0 flex"
               style={{ top: layout.clipsTop, height: layout.clipsH }}
             >
-              {clips.map((clip, i) => {
+              {collapsed.clips ? (
+                <div className="h-full w-full bg-zinc-700/40" />
+              ) : (
+                clips.map((clip, i) => {
                 const asset = assetById.get(clip.mediaId)
                 const maxOut = asset?.probe.durationSec ?? clip.outSec
                 const width = clipDuration(clip) * pxPerSec
@@ -661,12 +850,16 @@ export function Timeline(): JSX.Element {
                     {i < clips.length - 1 && <span className="sr-only">clip {i + 1}</span>}
                   </div>
                 )
-              })}
+                })
+              )}
             </div>
 
             {/* Text overlay lane */}
             <div className="absolute inset-x-0" style={{ top: layout.textTop, height: layout.textH }}>
-              {overlays.map((o) => {
+              {collapsed.text ? (
+                overlays.length > 0 && <div className="absolute inset-0 bg-violet-500/15" />
+              ) : (
+                overlays.map((o) => {
                 const left = o.startSec * pxPerSec
                 const width = Math.max(10, (o.endSec - o.startSec) * pxPerSec)
                 const selected = o.id === selectedOverlayId
@@ -695,12 +888,16 @@ export function Timeline(): JSX.Element {
                     />
                   </div>
                 )
-              })}
+                })
+              )}
             </div>
 
             {/* Image overlay lane */}
             <div className="absolute inset-x-0" style={{ top: layout.imgTop, height: layout.imgH }}>
-              {imageOverlays.map((o) => {
+              {collapsed.image ? (
+                imageOverlays.length > 0 && <div className="absolute inset-0 bg-orange-500/15" />
+              ) : (
+                imageOverlays.map((o) => {
                 const asset = assetById.get(o.mediaId)
                 const left = o.startSec * pxPerSec
                 const width = Math.max(10, (o.endSec - o.startSec) * pxPerSec)
@@ -736,12 +933,16 @@ export function Timeline(): JSX.Element {
                     />
                   </div>
                 )
-              })}
+                })
+              )}
             </div>
 
             {/* Caption lane */}
             <div className="absolute inset-x-0" style={{ top: layout.capTop, height: layout.capH }}>
-              {captionSegs.map((seg) => {
+              {collapsed.caption ? (
+                captionSegs.length > 0 && <div className="absolute inset-0 bg-emerald-500/15" />
+              ) : (
+                captionSegs.map((seg) => {
                 const left = seg.startSec * pxPerSec
                 const width = Math.max(10, (seg.endSec - seg.startSec) * pxPerSec)
                 const selected = seg.id === selectedCaptionId
@@ -768,11 +969,16 @@ export function Timeline(): JSX.Element {
                     />
                   </div>
                 )
-              })}
+                })
+              )}
             </div>
 
             {/* Audio track lane (music / voiceover / extracted clip audio) */}
             <div className="absolute inset-x-0" style={{ top: layout.audTop, height: layout.audH }}>
+              {collapsed.audio ? (
+                audioClips.length > 0 && <div className="absolute inset-0 bg-sky-500/15" />
+              ) : (
+                <>
               {audioClips.length === 0 && (
                 <div className="flex h-6 items-center pl-1 text-[9px] text-zinc-600">
                   ♪ No audio — add an audio file (♪ in Library) or Extract a clip&apos;s audio
@@ -825,6 +1031,8 @@ export function Timeline(): JSX.Element {
                   </div>
                 )
               })}
+                </>
+              )}
             </div>
 
             {/* Per-lane resize handles — drag the gap below a lane to resize it */}
@@ -836,7 +1044,9 @@ export function Timeline(): JSX.Element {
                 { key: 'caption', bottom: layout.capTop + layout.capH, rows: layout.capRows },
                 { key: 'audio', bottom: layout.audTop + layout.audH, rows: layout.audRows }
               ] as { key: LaneKey; bottom: number; rows: number }[]
-            ).map((h) => (
+            )
+              .filter((h) => !collapsed[h.key])
+              .map((h) => (
               <div
                 key={h.key}
                 onPointerDown={(e) => startLaneResize(e, h.key, h.rows)}
@@ -873,6 +1083,7 @@ export function Timeline(): JSX.Element {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   )
