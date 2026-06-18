@@ -2,7 +2,8 @@
  * whisper.cpp transcription. Extracts 16k mono audio from a media's original,
  * runs whisper-cli word-level (-ml 1 -sow -oj), parses to a Transcript (source
  * time), and caches it as media/<id>/transcript.json. Discovery looks under
- * <dataDir>/bin/whisper (binary in Release/, a .bin model alongside).
+ * <dataDir>/bin/whisper (whisper-cli in Release/, bin/ or build/bin/, with a
+ * .bin model alongside).
  */
 
 import { spawn } from 'node:child_process'
@@ -21,8 +22,16 @@ const transcriptPath = (id: string): string => join(getSubdir('media'), id, 'tra
 
 export function discoverWhisper(): { cli: string; model: string } | null {
   const dir = whisperDir()
-  const cli = join(dir, 'Release', 'whisper-cli.exe')
-  if (!existsSync(cli)) return null
+  const exe = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
+  // Build layouts vary: MSVC emits Release\, the cmake/Unix default emits
+  // build\bin\ (or bin\), and some users drop the binary straight in the dir.
+  const cli = [
+    join(dir, 'Release', exe),
+    join(dir, 'bin', exe),
+    join(dir, 'build', 'bin', exe),
+    join(dir, exe)
+  ].find((p) => existsSync(p))
+  if (!cli) return null
   let model: string | null = null
   try {
     const bin = readdirSync(dir).find((f) => f.toLowerCase().endsWith('.bin'))

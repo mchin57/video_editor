@@ -11,6 +11,10 @@ const execFileAsync = promisify(execFile)
 
 const LOCALAPPDATA = process.env.LOCALAPPDATA ?? ''
 
+// Homebrew (Apple Silicon + Intel) and MacPorts bin dirs. A .app launched from
+// Finder does not inherit the shell PATH, so these are probed explicitly on macOS.
+const MAC_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin']
+
 /** Find <exe> inside the winget Packages tree: Gyan.FFmpeg... > ffmpeg-... > bin > exe. */
 function findInWingetPackages(exe: string): string | null {
   if (!LOCALAPPDATA) return null
@@ -40,14 +44,19 @@ function findInWingetPackages(exe: string): string | null {
 }
 
 /** Ordered discovery candidates for a binary, most-explicit first. */
-function candidates(exe: 'ffmpeg.exe' | 'ffprobe.exe', override: string | null): string[] {
+function candidates(name: 'ffmpeg' | 'ffprobe', override: string | null): string[] {
   const list: string[] = []
   if (override) list.push(override)
-  // Bare name resolves via PATH when the app is launched normally (winget Links).
-  list.push(exe.replace('.exe', ''))
-  if (LOCALAPPDATA) list.push(join(LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', exe))
-  const pkg = findInWingetPackages(exe)
-  if (pkg) list.push(pkg)
+  // Bare name resolves via PATH when the app is launched from a shell that has it.
+  list.push(name)
+  if (process.platform === 'win32') {
+    const exe = `${name}.exe`
+    if (LOCALAPPDATA) list.push(join(LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', exe))
+    const pkg = findInWingetPackages(exe)
+    if (pkg) list.push(pkg)
+  } else if (process.platform === 'darwin') {
+    for (const dir of MAC_BIN_DIRS) list.push(join(dir, name))
+  }
   return list
 }
 
@@ -68,12 +77,12 @@ let cached: FfmpegCapabilities | null = null
 export async function getCapabilities(force = false): Promise<FfmpegCapabilities> {
   if (cached && !force) return cached
 
-  const ffmpegPath = await firstRunnable(candidates('ffmpeg.exe', FFMPEG_PATH_OVERRIDE))
+  const ffmpegPath = await firstRunnable(candidates('ffmpeg', FFMPEG_PATH_OVERRIDE))
   if (!ffmpegPath) {
     cached = { ...EMPTY_CAPABILITIES }
     return cached
   }
-  const ffprobePath = await firstRunnable(candidates('ffprobe.exe', FFPROBE_PATH_OVERRIDE))
+  const ffprobePath = await firstRunnable(candidates('ffprobe', FFPROBE_PATH_OVERRIDE))
 
   const [versionOut, encodersOut, filtersOut] = await Promise.all([
     execFileAsync(ffmpegPath, ['-hide_banner', '-version'], { windowsHide: true }).then((r) => r.stdout),

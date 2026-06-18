@@ -7,7 +7,7 @@ import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
-import { ensureProxy, getAsset, importFile, listLibrary, removeMedia } from './services/mediaStore'
+import { ensureProxy, getAsset, getProjectMedia, importFile } from './services/mediaStore'
 import {
   loadProject,
   readProjectFile,
@@ -63,9 +63,8 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.importPaths, (_event, paths: string[]) => importMany(paths))
-  ipcMain.handle(IPC.listLibrary, () => listLibrary())
+  ipcMain.handle(IPC.listProjectMedia, (_event, ids: string[]) => getProjectMedia(ids))
   ipcMain.handle(IPC.ensureProxy, (_event, id: string) => ensureProxy(id))
-  ipcMain.handle(IPC.removeMedia, (_event, id: string) => removeMedia(id))
 
   ipcMain.handle(IPC.loadProject, () => loadProject())
   ipcMain.handle(IPC.saveProject, (_event, project: Project) => saveProject(project))

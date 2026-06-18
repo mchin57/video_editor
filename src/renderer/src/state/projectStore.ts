@@ -81,6 +81,10 @@ interface ProjectState {
   saveAs: () => Promise<void>
   selectClip: (id: string | null) => void
   setPreset: (preset: PresetId) => void
+  /** Add imported media to this project's library (deduped, recorded for undo). */
+  addMedia: (ids: string[]) => void
+  /** Remove media from this project's library. Does NOT delete it from disk. */
+  removeMedia: (id: string) => void
   /** Update the project without recording history (for live drag previews). */
   liveUpdate: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
@@ -191,6 +195,17 @@ export const useProject = create<ProjectState>((set, get) => {
     selectClip: (id) => set({ selectedClipId: id }),
 
     setPreset: (preset) => commit((p) => ({ ...p, preset })),
+
+    addMedia: (ids) =>
+      commit((p) => {
+        const add = ids.filter((id) => !p.mediaIds.includes(id))
+        return add.length ? { ...p, mediaIds: [...p.mediaIds, ...add] } : p
+      }),
+
+    removeMedia: (id) =>
+      commit((p) =>
+        p.mediaIds.includes(id) ? { ...p, mediaIds: p.mediaIds.filter((m) => m !== id) } : p
+      ),
 
     liveUpdate: (transform) => {
       const current = get().project

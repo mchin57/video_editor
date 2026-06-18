@@ -9,7 +9,7 @@ import { join } from 'node:path'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 import { readProjectFile, writeProjectFile } from './projectStore'
-import { createEmptyProject } from '@shared/project'
+import { createEmptyProject, migrateProject } from '@shared/project'
 
 let dir: string
 beforeAll(() => {
@@ -22,6 +22,7 @@ afterAll(() => {
 describe('portable .reel files', () => {
   it('round-trips a project through write + read', async () => {
     const p = createEmptyProject('abc', 'My Reel')
+    p.mediaIds.push('m1')
     p.clips.push({ id: 'c1', mediaId: 'm1', inSec: 0, outSec: 3, crop: null, mute: false, gainDb: 0 })
     const path = join(dir, 'my-reel.reel')
 
@@ -33,6 +34,7 @@ describe('portable .reel files', () => {
     expect(loaded.name).toBe('My Reel')
     expect(loaded.clips).toHaveLength(1)
     expect(loaded.clips[0].mediaId).toBe('m1')
+    expect(loaded.mediaIds).toEqual(['m1']) // project-scoped library survives the round-trip
   })
 
   it('writes atomically — no leftover .tmp file', async () => {
@@ -62,5 +64,38 @@ describe('portable .reel files', () => {
     expect(loaded.audioClips).toHaveLength(1)
     expect(loaded.audioClips[0].mediaId).toBe('song')
     expect((loaded as unknown as Record<string, unknown>).music).toBeUndefined()
+    // No mediaIds on a pre-scoping file → derive from the media it references.
+    expect(loaded.mediaIds).toEqual(['song'])
+  })
+})
+
+describe('project-scoped media migration', () => {
+  it('seeds mediaIds from referenced clips, images, and audio when absent', () => {
+    const migrated = migrateProject({
+      id: 'p',
+      name: 'P',
+      version: 2,
+      preset: 'reel',
+      clips: [
+        { id: 'c1', mediaId: 'vid', inSec: 0, outSec: 3, crop: null, mute: false, gainDb: 0 },
+        { id: 'c2', mediaId: 'vid', inSec: 3, outSec: 6, crop: null, mute: false, gainDb: 0 } // dupe id
+      ],
+      overlays: [],
+      imageOverlays: [{ id: 'o1', mediaId: 'logo', startSec: 0, endSec: 3, x: 0, y: 0, w: 1, h: 1, anchor: 'center', opacity: 1 }],
+      audioClips: [
+        { id: 'a1', mediaId: 'song', startSec: 0, inSec: 0, outSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music' }
+      ],
+      captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
+      script: [],
+      createdAt: 'x',
+      updatedAt: 'y'
+    })
+    // Deduped across all three media-bearing collections.
+    expect(migrated.mediaIds).toEqual(['vid', 'logo', 'song'])
+  })
+
+  it('leaves an existing mediaIds list untouched', () => {
+    const migrated = migrateProject({ ...createEmptyProject('p', 'P'), mediaIds: ['kept'] })
+    expect(migrated.mediaIds).toEqual(['kept'])
   })
 })

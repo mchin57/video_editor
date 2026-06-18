@@ -12,9 +12,10 @@ export const getDataDir = (): Promise<string> => window.api.getDataDir()
 
 export const importDialog = (): Promise<MediaAsset[]> => window.api.importDialog()
 export const importPaths = (paths: string[]): Promise<MediaAsset[]> => window.api.importPaths(paths)
-export const listLibrary = (): Promise<MediaAsset[]> => window.api.listLibrary()
+/** The current project's library: asset records for the given media ids. */
+export const listProjectMedia = (ids: string[]): Promise<MediaAsset[]> =>
+  window.api.listProjectMedia(ids)
 export const ensureProxy = (id: string): Promise<void> => window.api.ensureProxy(id)
-export const removeMedia = (id: string): Promise<void> => window.api.removeMedia(id)
 
 export const loadProject = (): Promise<Project> => window.api.loadProject()
 export const saveProject = (project: Project): Promise<void> => window.api.saveProject(project)

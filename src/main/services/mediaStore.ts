@@ -168,28 +168,25 @@ export async function ensureProxy(id: string): Promise<void> {
   }
 }
 
-export async function listLibrary(): Promise<MediaAsset[]> {
-  const root = getSubdir('media')
-  let ids: string[]
-  try {
-    ids = await fsp.readdir(root)
-  } catch {
-    return []
-  }
+/** Backfill derived artifacts (thumb/image/waveform) and refresh proxyReady. */
+async function hydrate(asset: MediaAsset): Promise<MediaAsset> {
+  await makeThumb(asset) // backfill thumbnails for assets imported pre-feature
+  await makeImage(asset) // backfill display PNGs for images
+  await makeWaveform(asset) // backfill waveforms (incl. video assets)
+  asset.proxyReady = existsSync(playableProxyPath(asset))
+  return asset
+}
+
+/**
+ * The library for one project: the asset records for the given ids (the
+ * project's `mediaIds`). Unknown ids are skipped. Sorted newest-import first.
+ * The on-disk store stays global — this only scopes *which* assets are shown.
+ */
+export async function getProjectMedia(ids: string[]): Promise<MediaAsset[]> {
   const assets: MediaAsset[] = []
   for (const id of ids) {
     const asset = await readAsset(id)
-    if (asset) {
-      await makeThumb(asset) // backfill thumbnails for assets imported pre-feature
-      await makeImage(asset) // backfill display PNGs for images
-      await makeWaveform(asset) // backfill waveforms (incl. video assets)
-      asset.proxyReady = existsSync(playableProxyPath(asset))
-      assets.push(asset)
-    }
+    if (asset) assets.push(await hydrate(asset))
   }
   return assets.sort((a, b) => b.importedAt.localeCompare(a.importedAt))
-}
-
-export async function removeMedia(id: string): Promise<void> {
-  await fsp.rm(mediaDir(id), { recursive: true, force: true })
 }

@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { isImageAsset } from '@shared/media'
-import { useLibrary, useImportMedia, useRemoveMedia } from '@/hooks/useMedia'
+import { useLibrary, useImportMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
@@ -54,7 +54,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const selectAudio = useUi((s) => s.selectAudio)
   const selectImage = useUi((s) => s.selectImage)
   const onTrack = useProject((s) => s.project?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
-  const remove = useRemoveMedia()
+  const removeMedia = useProject((s) => s.removeMedia)
 
   const v = asset.probe.video
   const isImage = isImageAsset(asset)
@@ -174,10 +174,10 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           onClick={(e) => {
             e.stopPropagation()
             if (selected) select(null)
-            remove.mutate(asset.id)
+            removeMedia(asset.id)
           }}
           className="rounded px-1 text-zinc-600 opacity-0 transition hover:text-rose-400 group-hover:opacity-100"
-          title="Remove from library"
+          title="Remove from this project (kept on disk)"
         >
           ×
         </span>

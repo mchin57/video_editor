@@ -17,9 +17,9 @@ const api = {
   // Media library (M1)
   importDialog: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importDialog),
   importPaths: (paths: string[]): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importPaths, paths),
-  listLibrary: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.listLibrary),
+  listProjectMedia: (ids: string[]): Promise<MediaAsset[]> =>
+    ipcRenderer.invoke(IPC.listProjectMedia, ids),
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
-  removeMedia: (id: string): Promise<void> => ipcRenderer.invoke(IPC.removeMedia, id),
 
   // Project (M2). loadProject/saveProject persist the working copy; the *File*
   // methods read/write user-chosen portable .reel files.

@@ -149,8 +149,25 @@ export interface Project {
   captions: CaptionsConfig
   audioClips: AudioClip[]
   script: ScriptLine[]
+  /**
+   * Ids of the media assets that belong to this project (the library panel).
+   * The asset *records* live globally on disk (so the same clip imported into
+   * two projects isn't duplicated); this list scopes which of them this project
+   * shows. Import order, deduped.
+   */
+  mediaIds: string[]
   createdAt: string
   updatedAt: string
+}
+
+/** Every media id this project references through its clips/overlays/audio. */
+export function referencedMediaIds(p: Pick<Project, 'clips' | 'imageOverlays' | 'audioClips'>): string[] {
+  const ids = [
+    ...p.clips.map((c) => c.mediaId),
+    ...p.imageOverlays.map((o) => o.mediaId),
+    ...p.audioClips.map((a) => a.mediaId)
+  ]
+  return [...new Set(ids)]
 }
 
 /** Effective source out-point (outSec<=0 means "to the source end"). */
@@ -168,7 +185,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 2,
+    version: 3,
     preset: 'reel',
     clips: [],
     overlays: [],
@@ -176,6 +193,7 @@ export function createEmptyProject(id: string, name: string): Project {
     captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
     audioClips: [],
     script: [],
+    mediaIds: [],
     createdAt: now,
     updatedAt: now
   }
@@ -211,5 +229,10 @@ export function migrateProject(raw: unknown): Project {
   if (!Array.isArray(p.imageOverlays)) p.imageOverlays = []
   if (!Array.isArray(p.clips)) p.clips = []
   if (!Array.isArray(p.script)) p.script = []
+  // Projects saved before the library was project-scoped have no mediaIds; seed
+  // the list from whatever media they already reference so their library isn't
+  // empty on open. (Audio-only/extra imports that were never placed are lost to
+  // this best-effort backfill, which is acceptable for pre-scoping files.)
+  if (!Array.isArray(p.mediaIds)) p.mediaIds = referencedMediaIds(p as Project)
   return p as Project
 }

@@ -6,9 +6,8 @@ export const IPC = {
   // Media library (M1)
   importDialog: 'media:importDialog',
   importPaths: 'media:importPaths',
-  listLibrary: 'media:list',
+  listProjectMedia: 'media:listForProject',
   ensureProxy: 'media:ensureProxy',
-  removeMedia: 'media:remove',
   // Project (M2)
   // loadProject/saveProject persist the working copy (crash recovery + restore on
   // launch). The *File ▸* actions below read/write user-chosen portable .reel files.

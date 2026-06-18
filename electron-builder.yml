@@ -15,3 +15,8 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+mac:
+  target: dmg
+  artifactName: ${productName}-${version}.${ext}
+  category: public.app-category.video
+
