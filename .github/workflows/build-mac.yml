@@ -1,0 +1,50 @@
+# Builds the macOS app on a real cloud Mac (no local Mac hardware needed) and
+# uploads the .dmg as a downloadable artifact.
+#
+# The build is UNSIGNED and ships NO engines: collect-binaries.mjs is Windows-
+# only (ffmpeg.exe / *.dll / whisper-cli.exe), so build:mac skips it. The Mac app
+# therefore discovers a system ffmpeg at runtime — the end user runs
+# `brew install ffmpeg`. See docs/TODO.md "Manual TODO" for the handoff steps.
+name: Build macOS
+
+on:
+  # Remove `prototype` here to stop building a DMG on every dev push (macOS CI
+  # minutes bill at 10x on private repos). workflow_dispatch always works.
+  push:
+    branches: [main, prototype]
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Cross-platform guarantee: fail the build if the app doesn't compile or
+      # the suite regresses on macOS.
+      - run: npm run typecheck
+      - run: npm test
+
+      # extraResources points at resources/bin; create it (empty) so electron-
+      # builder has a dir to copy. No engines are bundled on macOS.
+      - run: mkdir -p resources/bin
+
+      - name: Build unsigned DMG
+        run: npm run build:mac
+        env:
+          # No signing identity on CI — produce an unsigned (ad-hoc) build. The
+          # user clears the Gatekeeper quarantine on first launch.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReelEditor-macOS-dmg
+          path: release/*.dmg
+          if-no-files-found: error

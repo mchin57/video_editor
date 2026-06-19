@@ -86,6 +86,17 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   `win.azureSignOptions`. No code change needed._ See README → Code-signing.
 ## MSC other todo
 - [ ] 
+## Manual TODO
+
+Hands-on steps that can't be done in code — needed to actually ship the macOS build and hand it to a friend.
+
+- [ ] **Push the repo to GitHub** so the macOS CI build can run. The `Build macOS` workflow (`.github/workflows/build-mac.yml`) runs on pushes to `main`/`prototype` and on demand via Actions → "Run workflow". Confirm the `mchin57/reel-editor` repo exists (it's also the auto-update `publish:` target).
+- [ ] **Grab the DMG from the workflow artifacts** (Actions → the run → Artifacts → `ReelEditor-macOS-dmg`) and send it over. The build is **unsigned** and ships **no** ffmpeg.
+- [ ] **(Friend, on the Mac) `brew install ffmpeg`** — required. The Mac build bundles no engines, so without it the app reports no encoder. Homebrew installs to `/opt/homebrew/bin`, which runtime discovery probes directly even for a Finder-launched `.app`.
+- [ ] **(Friend, on the Mac) Clear the Gatekeeper quarantine** on the unsigned app — right-click → **Open** the first time, or `xattr -dr com.apple.quarantine "/Applications/Reel Editor.app"`.
+- [ ] **(Optional) Captions on the Mac** — drop a `whisper-cli` binary + a `ggml-*.bin` model into `~/Documents/VideoEditor/bin/whisper/` (under `Release/`, `bin/`, `build/bin/`, or the folder root). Skip if captions aren't needed. Bundling it instead would need a macOS port of `scripts/collect-binaries.mjs`.
+- [ ] **(Optional) Sign + notarize the Mac build** for a no-prompt install — needs an Apple Developer account ($99/yr); add the cert + notarization creds as GitHub secrets and remove `CSC_IDENTITY_AUTO_DISCOVERY: false` from the workflow. Until then the right-click-Open step is the workaround.
+
 ## Done
 
 (empty)
