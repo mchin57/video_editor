@@ -168,6 +168,9 @@ export default function App(): JSX.Element {
     <div
       className="relative flex h-full select-none flex-col bg-[#0b0b0f]"
       onDragOver={(e) => {
+        // Only react to OS file drags (import); library-item drags onto the
+        // timeline carry a custom type and are handled by the Timeline itself.
+        if (!e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
         if (!dragging) setDragging(true)
       }}

@@ -1,10 +1,11 @@
-import { useRef, useState, type JSX, type ReactNode } from 'react'
-import type { Layer, Project } from '@shared/project'
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
+import type { Layer, Project, VideoContent } from '@shared/project'
 import { NEUTRAL_COLOR, effectiveOut, isNeutralColor } from '@shared/project'
 import { hookCovered } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { detectSilence } from '@/ipc/client'
+import { detectSilence, transcribeMedia, whisperAvailable } from '@/ipc/client'
 import { speechSegments } from '@/lib/silence'
+import { buildTimelineCaptions, type CaptionSource } from '@/lib/captions'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { formatDuration, formatFps } from '@/lib/format'
@@ -68,6 +69,74 @@ const setLayer = (id: string) => (p: Project, fn: (l: Layer) => Layer): Project 
   ...p,
   layers: p.layers.map((l) => (l.id === id ? fn(l) : l))
 })
+
+/**
+ * Per-clip auto-captioning: transcribes this video layer's media (cached) and
+ * projects the words to timeline time using the layer's position + trim. The
+ * resulting segments are id-tagged with the layer so re-captioning is idempotent
+ * and other clips' captions are preserved.
+ */
+function ClipCaptions({ layer, content }: { layer: Layer; content: VideoContent }): JSX.Element | null {
+  const captions = useProject((s) => s.project?.captions)
+  const setCaptions = useProject((s) => s.setCaptions)
+  const [busy, setBusy] = useState(false)
+  const [available, setAvailable] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    void whisperAvailable().then(setAvailable)
+  }, [])
+  if (!captions) return null
+  const tag = `cap-${layer.id}-`
+  const count = captions.segments.filter((s) => s.id.startsWith(tag)).length
+
+  const generate = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const transcript = await transcribeMedia(content.mediaId)
+      const source: CaptionSource = {
+        mediaId: content.mediaId,
+        startSec: layer.startSec,
+        inSec: content.inSec,
+        outSec: content.outSec
+      }
+      const segs = buildTimelineCaptions([source], { [content.mediaId]: transcript.words }).map((s, i) => ({
+        ...s,
+        id: `${tag}${i}`
+      }))
+      const others = captions.segments.filter((s) => !s.id.startsWith(tag))
+      setCaptions({
+        ...captions,
+        enabled: true,
+        segments: [...others, ...segs].sort((a, b) => a.startSec - b.startSec)
+      })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-white/5 pt-3">
+      <div className="mb-2 text-[10px] uppercase tracking-wide text-zinc-500">Captions</div>
+      {available ? (
+        <button
+          onClick={() => void generate()}
+          disabled={busy}
+          className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
+          title="Transcribe this clip with whisper.cpp and add captions for it"
+        >
+          {busy ? 'Transcribing…' : count > 0 ? `↻ Re-caption this clip (${count})` : '✨ Caption this clip'}
+        </button>
+      ) : (
+        <p className="text-[11px] text-zinc-600">Captions need whisper.cpp installed (bin/whisper).</p>
+      )}
+      {err && <p className="mt-1 text-[11px] text-rose-400">{err}</p>}
+    </div>
+  )
+}
 
 function LayerEditor(): JSX.Element | null {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
@@ -250,6 +319,8 @@ function LayerEditor(): JSX.Element | null {
               )
             })()}
           </div>
+
+          {asset?.probe.audio && <ClipCaptions layer={layer} content={c} />}
         </div>
       )}
 

@@ -7,7 +7,7 @@ import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration } from '@/lib/format'
-import { makeImageLayer } from '@shared/layers'
+import { makeImageLayer, visualDuration } from '@shared/layers'
 import { thumbUrl } from '@/ipc/client'
 
 /** First-frame thumbnail with a ▶ fallback until/if the jpg is available. */
@@ -62,9 +62,38 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const selected = selectedId === asset.id
   const pct = Math.round((job?.progress ?? 0) * 100)
 
+  // Where to drop a new layer: the playhead, or the end of the current timeline.
+  const playhead = (): number => usePlayback.getState().time
+  const endOfTimeline = (): number => visualDuration(useProject.getState().project?.layers ?? [])
+  const addVideoAt = (startSec: number): void => {
+    if (!asset.proxyReady) return
+    const id = crypto.randomUUID()
+    addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio)
+    selectLayer(id)
+  }
+  const addImageAt = (startSec: number): void => {
+    if (!asset.proxyReady) return
+    const id = crypto.randomUUID()
+    addLayer(makeImageLayer(id, asset.id, startSec, startSec + 3))
+    selectLayer(id)
+  }
+  const addBtn = `rounded bg-sky-500/20 px-1 py-0.5 text-center text-[10px] font-semibold text-sky-300 transition hover:bg-sky-500/40 whitespace-nowrap ${
+    asset.proxyReady ? '' : 'pointer-events-none opacity-30'
+  }`
+
   return (
     <button
       onClick={() => select(asset.id)}
+      draggable={asset.proxyReady}
+      onDragStart={(e) => {
+        if (!asset.proxyReady) {
+          e.preventDefault()
+          return
+        }
+        // Drag onto the timeline to place a layer at the drop position.
+        e.dataTransfer.setData('application/x-reel-asset', asset.id)
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
       className={`group flex w-full gap-2 rounded-lg border p-2 text-left transition ${
         selected
           ? 'border-sky-400/50 bg-sky-400/10'
@@ -100,26 +129,34 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
         </div>
       </div>
 
-      <div className="flex flex-col items-center gap-1">
+      <div className="flex w-12 shrink-0 flex-col items-stretch gap-1">
         {isImage ? (
-          <span
-            role="button"
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (!asset.proxyReady) return
-              const id = crypto.randomUUID()
-              const t = usePlayback.getState().time
-              addLayer(makeImageLayer(id, asset.id, t, t + 3))
-              selectLayer(id)
-            }}
-            className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
-              asset.proxyReady ? '' : 'pointer-events-none opacity-30'
-            }`}
-            title="Add image overlay at the playhead"
-          >
-            🖼
-          </span>
+          <>
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation()
+                addImageAt(playhead())
+              }}
+              className={addBtn}
+              title="Add image at the playhead"
+            >
+              ＋ PH
+            </span>
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation()
+                addImageAt(endOfTimeline())
+              }}
+              className={addBtn}
+              title="Add image to the end of the timeline"
+            >
+              ＋ End
+            </span>
+          </>
         ) : isAudio ? (
           <span
             role="button"
@@ -142,34 +179,42 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
               })
               selectAudio(id)
             }}
-            className={`rounded px-1.5 text-xs font-semibold transition ${
+            className={`rounded px-1 py-0.5 text-center text-[10px] font-semibold whitespace-nowrap transition ${
               onTrack
                 ? 'bg-emerald-500/30 text-emerald-200'
                 : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'
             } ${asset.proxyReady ? '' : 'pointer-events-none opacity-30'}`}
             title="Add to audio track at the playhead"
           >
-            ♪
+            ♪ PH
           </span>
         ) : (
-          <span
-            role="button"
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (!asset.proxyReady) return
-              const id = crypto.randomUUID()
-              const t = usePlayback.getState().time
-              addVideoLayer(id, asset.id, t, asset.probe.durationSec, !!asset.probe.audio)
-              selectLayer(id)
-            }}
-            className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
-              asset.proxyReady ? '' : 'pointer-events-none opacity-30'
-            }`}
-            title="Add to timeline"
-          >
-            ＋
-          </span>
+          <>
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation()
+                addVideoAt(playhead())
+              }}
+              className={addBtn}
+              title="Add clip at the playhead"
+            >
+              ＋ PH
+            </span>
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation()
+                addVideoAt(endOfTimeline())
+              }}
+              className={addBtn}
+              title="Add clip to the end of the timeline"
+            >
+              ＋ End
+            </span>
+          </>
         )}
         <span
           role="button"

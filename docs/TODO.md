@@ -22,6 +22,16 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     checkbox; drag the ⠿ handle to restack; Background pinned at the bottom.
   - **Move/zoom** any layer on the canvas (drag to move, corner handle/Inspector
     slider to zoom); out-of-frame is cropped by the stage.
+  - **Timeline lanes** (`components/Timeline.tsx`): the blocks are grouped into
+    labeled lanes (Clips / Text / Image, then Captions / Audio) with a fixed left
+    gutter — a purely visual grouping over the unified stack (z-order lives in the
+    Layers menu). Overlapping same-type blocks pack into rows (`lib/lanes.ts`).
+  - **Drag-and-drop from the Library** onto the timeline drops a layer (or audio
+    clip) at the cursor position; clips/images also have **＋ PH** (add at
+    playhead) and **＋ End** (add to end) buttons in the Library.
+  - **Per-clip captions**: a video layer's Inspector has "Caption this clip"
+    (transcribes that clip, id-tagged segments, idempotent re-caption). The header
+    `CaptionsButton` is now just a global show/hide toggle.
   - Audio clips and auto-captions stay on their own (non-visual) tracks.
 - [ ] **Export: composite the full layer stack.** `exporter.ts` currently
   ADAPTS layers back to the old model for ffmpeg — it concatenates the video

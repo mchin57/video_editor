@@ -1,12 +1,22 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type JSX,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 import type { AudioClip, CaptionSegment, Layer, ScriptLine } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
-import { layerLabel, makeTextLayer, visualDuration } from '@shared/layers'
+import { assetKind } from '@shared/media'
+import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
+import { packRows, rowCount, type Span } from '@/lib/lanes'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
@@ -14,12 +24,12 @@ import { thumbUrl, waveformUrl } from '@/ipc/client'
 const DEFAULT_PPS = 48
 const HOOK_SEC = 3
 const SNAP_PX = 7
+const GUTTER = 84
 const RULER_H = 20
-const LAYER_H = 28
-const CAP_H = 22
-const AUD_H = 30
-const GAP = 3
+const ROW_H = 26
+const GAP = 4
 const SCALE_H = 18
+const DND_MIME = 'application/x-reel-asset'
 
 const EMPTY_LAYERS: Layer[] = []
 const EMPTY_CAPTIONS: CaptionSegment[] = []
@@ -27,6 +37,11 @@ const EMPTY_SCRIPT: ScriptLine[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
+const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
+  id: l.id,
+  startSec: l.startSec,
+  endSec: l.endSec
+})
 
 function tc(sec: number): string {
   const s = Math.max(0, sec)
@@ -58,19 +73,15 @@ function ToolbarButton({
   )
 }
 
-const layerTint = (l: Layer): string =>
-  l.content.kind === 'video'
-    ? 'border-sky-400/40 bg-sky-500/20'
-    : l.content.kind === 'image'
-      ? 'border-orange-400/40 bg-orange-500/20'
-      : 'border-violet-400/40 bg-violet-500/20'
-
-const layerTintSel = (l: Layer): string =>
-  l.content.kind === 'video'
-    ? 'border-sky-300 ring-1 ring-sky-300/50'
-    : l.content.kind === 'image'
-      ? 'border-orange-300 ring-1 ring-orange-300/50'
-      : 'border-violet-300 ring-1 ring-violet-300/50'
+// Lane visual identity (the labeled bands the user likes — now purely a visual
+// grouping over the unified layer stack).
+const LANE_STYLE = {
+  clips: { dot: 'bg-sky-400', tint: 'border-sky-400/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/20', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
+  text: { dot: 'bg-violet-400', tint: 'border-violet-400/30 bg-violet-500/10', block: 'border-violet-400/40 bg-violet-500/20', sel: 'border-violet-300 ring-1 ring-violet-300/50' },
+  image: { dot: 'bg-orange-400', tint: 'border-orange-400/30 bg-orange-500/10', block: 'border-orange-400/40 bg-orange-500/20', sel: 'border-orange-300 ring-1 ring-orange-300/50' },
+  caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
+  audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' }
+} as const
 
 export function Timeline(): JSX.Element {
   const project = useProject((s) => s.project)
@@ -87,6 +98,8 @@ export function Timeline(): JSX.Element {
   const selectAudio = useUi((s) => s.selectAudio)
 
   const addLayer = useProject((s) => s.addLayer)
+  const addVideoLayer = useProject((s) => s.addVideoLayer)
+  const addAudioClip = useProject((s) => s.addAudioClip)
   const removeLayer = useProject((s) => s.removeLayer)
   const splitLayerAt = useProject((s) => s.splitLayerAt)
   const splitAudioAt = useProject((s) => s.splitAudioAt)
@@ -121,6 +134,8 @@ export function Timeline(): JSX.Element {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
+  const gutterInnerRef = useRef<HTMLDivElement>(null)
+  const [dropActive, setDropActive] = useState(false)
 
   const audioEnd = useMemo(
     () =>
@@ -132,18 +147,52 @@ export function Timeline(): JSX.Element {
   )
   const total = Math.max(visualDuration(layers), audioEnd)
 
-  // Rows: front layer on top → background at the bottom of the layer band.
-  const rows = useMemo(() => layers.slice().reverse(), [layers])
+  // Group the unified stack into typed lanes (a visual grouping only).
+  const grouped = useMemo(() => {
+    const video = layers.filter((l) => l.content.kind === 'video')
+    const text = layers.filter((l) => l.content.kind === 'text')
+    const image = layers.filter((l) => l.content.kind === 'image')
+    return {
+      video,
+      text,
+      image,
+      vRows: packRows(video.map(spanOf)),
+      tRows: packRows(text.map(spanOf)),
+      iRows: packRows(image.map(spanOf))
+    }
+  }, [layers])
+  const capRows = useMemo(() => packRows(captionSegs.map(spanOf)), [captionSegs])
+  const audRows = useMemo(
+    () =>
+      packRows(
+        audioClips.map((a) => ({
+          id: a.id,
+          startSec: a.startSec,
+          endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
+        }))
+      ),
+    [audioClips, assetById]
+  )
 
-  // Vertical geometry.
-  const layersTop = RULER_H
-  const layersH = rows.length * (LAYER_H + GAP)
-  const capTop = layersTop + layersH + GAP
-  const capH = captionSegs.length > 0 ? CAP_H + GAP : 0
-  const audTop = capTop + capH
-  const audH = audioClips.length * (AUD_H + GAP)
-  const scaleTop = audTop + audH + GAP
+  // Lane layout: Clips / Text / Image always show (≥1 row as drop targets),
+  // Captions only when present, Audio always.
+  const laneDefs = [
+    { key: 'clips' as const, label: 'Clips', rows: rowCount(grouped.vRows) },
+    { key: 'text' as const, label: 'Text', rows: rowCount(grouped.tRows) },
+    { key: 'image' as const, label: 'Image', rows: rowCount(grouped.iRows) },
+    ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
+    { key: 'audio' as const, label: 'Audio', rows: rowCount(audRows) }
+  ]
+  let acc = RULER_H
+  const lanes = laneDefs.map((l) => {
+    const top = acc
+    const height = l.rows * ROW_H
+    acc += height + GAP
+    return { ...l, top, height }
+  })
+  const scaleTop = acc
   const totalH = scaleTop + SCALE_H
+  const laneTop = (key: string): number => lanes.find((l) => l.key === key)?.top ?? RULER_H
 
   // Snap targets: layer + audio boundaries, playhead, 0, end.
   const snapTargets = useMemo(() => {
@@ -182,23 +231,76 @@ export function Timeline(): JSX.Element {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  const scrubToClientX = (clientX: number): void => {
+  // Keep the fixed gutter aligned as the track scrolls vertically.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return undefined
+    const sync = (): void => {
+      const g = gutterInnerRef.current
+      if (g) g.style.transform = `translateY(${-el.scrollTop}px)`
+    }
+    sync()
+    el.addEventListener('scroll', sync, { passive: true })
+    return () => el.removeEventListener('scroll', sync)
+  }, [])
+
+  const xToSec = (clientX: number): number => {
     const inner = trackInnerRef.current
-    if (!inner) return
-    const x = clientX - inner.getBoundingClientRect().left
-    setTime(clamp(x / pxPerSec, 0, Math.max(total, previewDur)))
+    if (!inner) return 0
+    return Math.max(0, (clientX - inner.getBoundingClientRect().left) / pxPerSec)
   }
   const onTrackDown = (e: ReactPointerEvent): void => {
     e.preventDefault()
     setPlaying(false)
-    scrubToClientX(e.clientX)
-    const onMove = (ev: PointerEvent): void => scrubToClientX(ev.clientX)
+    setTime(clamp(xToSec(e.clientX), 0, Math.max(total, previewDur)))
+    const onMove = (ev: PointerEvent): void => setTime(clamp(xToSec(ev.clientX), 0, Math.max(total, previewDur)))
     const onUp = (): void => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+  }
+
+  // Drop a library asset onto the timeline → a layer (or audio clip) at the drop.
+  const onDrop = (e: ReactDragEvent): void => {
+    const id = e.dataTransfer.getData(DND_MIME)
+    if (!id) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropActive(false)
+    const asset = assetById.get(id)
+    if (!asset || !asset.proxyReady) return
+    const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
+    const nid = crypto.randomUUID()
+    const kind = assetKind(asset)
+    if (kind === 'image') {
+      addLayer(makeImageLayer(nid, id, startSec, startSec + 3))
+      selectLayer(nid)
+    } else if (kind === 'audio') {
+      addAudioClip({
+        id: nid,
+        mediaId: id,
+        startSec,
+        inSec: 0,
+        outSec: asset.probe.durationSec,
+        gainDb: 0,
+        fadeInSec: 0,
+        fadeOutSec: 0,
+        duck: false,
+        kind: 'audio'
+      })
+      selectAudio(nid)
+    } else {
+      addVideoLayer(nid, id, startSec, asset.probe.durationSec, !!asset.probe.audio)
+      selectLayer(nid)
+    }
+  }
+  const onDragOver = (e: ReactDragEvent): void => {
+    if (!e.dataTransfer.types.includes(DND_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    if (!dropActive) setDropActive(true)
   }
 
   // Drag a layer block: move in time, or trim its left/right edge.
@@ -227,8 +329,8 @@ export function Timeline(): JSX.Element {
             return { ...l, startSec: ns, endSec: ns + dur }
           }
           if (mode === 'start') {
-            if (l.content.kind === 'video') {
-              const c = layer.content.kind === 'video' ? layer.content : l.content
+            if (l.content.kind === 'video' && layer.content.kind === 'video') {
+              const c = layer.content
               const ni = clamp(c.inSec + d, 0, c.outSec - 0.1)
               const ns = Math.max(0, startSec + (ni - c.inSec))
               return { ...l, startSec: ns, content: { ...l.content, inSec: ni } }
@@ -236,8 +338,8 @@ export function Timeline(): JSX.Element {
             return { ...l, startSec: clamp(snapSec(startSec + d), 0, l.endSec - 0.2) }
           }
           // end
-          if (l.content.kind === 'video') {
-            const c = layer.content.kind === 'video' ? layer.content : l.content
+          if (l.content.kind === 'video' && layer.content.kind === 'video') {
+            const c = layer.content
             const no = clamp(c.outSec + d, c.inSec + 0.1, srcDur)
             return { ...l, endSec: startSec + (no - c.inSec), content: { ...l.content, outSec: no } }
           }
@@ -254,7 +356,6 @@ export function Timeline(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  // Drag a caption segment's time window (or its edges).
   const startCaptionDrag = (e: ReactPointerEvent, seg: CaptionSegment, mode: 'move' | 'start' | 'end'): void => {
     e.stopPropagation()
     e.preventDefault()
@@ -291,7 +392,6 @@ export function Timeline(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  // Drag an audio clip's position (or its edges) on the audio track.
   const startAudioDrag = (e: ReactPointerEvent, clip: AudioClip, mode: 'move' | 'start' | 'end', maxOut: number): void => {
     e.stopPropagation()
     e.preventDefault()
@@ -328,7 +428,6 @@ export function Timeline(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  // Split: a selected video layer at the playhead, else a selected audio clip.
   const selectedLayer = layers.find((l) => l.id === selectedLayerId)
   const selectedAudio = audioClips.find((a) => a.id === selectedAudioId)
   const selectedAudioDur = selectedAudio
@@ -352,6 +451,43 @@ export function Timeline(): JSX.Element {
     selectLayer(id)
   }
 
+  // Render one layer block within its lane.
+  const layerBlock = (l: Layer, laneKey: 'clips' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
+    const left = l.startSec * pxPerSec
+    const width = Math.max(12, (l.endSec - l.startSec) * pxPerSec)
+    const selected = l.id === selectedLayerId
+    const asset = l.content.kind === 'video' || l.content.kind === 'image' ? assetById.get(l.content.mediaId) : undefined
+    const st = LANE_STYLE[laneKey]
+    return (
+      <div
+        key={l.id}
+        onPointerDown={(e) => startLayerDrag(e, l, 'move')}
+        title={layerLabel(l)}
+        className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
+          selected ? st.sel : st.block
+        } ${l.hidden ? 'opacity-40' : ''}`}
+        style={{ left, width, top: laneTop(laneKey) + (rows.get(l.id) ?? 0) * ROW_H, height: ROW_H - 2 }}
+      >
+        {asset && (
+          <img
+            src={thumbUrl(asset.id)}
+            alt=""
+            onError={(e) => (e.currentTarget.style.display = 'none')}
+            className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"
+          />
+        )}
+        <span className="truncate text-[9px] font-medium text-zinc-100">
+          {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : '🎬'}&nbsp;
+          {asset?.fileName ?? layerLabel(l)}
+        </span>
+        <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+        <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+      </div>
+    )
+  }
+
+  const isEmpty = layers.length === 0 && audioClips.length === 0
+
   return (
     <div className="flex h-full flex-col">
       {/* Transport / edit toolbar */}
@@ -374,11 +510,7 @@ export function Timeline(): JSX.Element {
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
         </ToolbarButton>
-        <ToolbarButton
-          title="Delete the selected layer (Del)"
-          onClick={() => selectedLayerId && removeLayer(selectedLayerId)}
-          disabled={!selectedLayerId}
-        >
+        <ToolbarButton title="Delete the selected layer (Del)" onClick={() => selectedLayerId && removeLayer(selectedLayerId)} disabled={!selectedLayerId}>
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />
@@ -398,32 +530,56 @@ export function Timeline(): JSX.Element {
         </ToolbarButton>
       </div>
 
-      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
-        {layers.length === 0 && audioClips.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-zinc-600">
-            Add media from the Library (＋ on a clip) to build your reel.
+      <div className="flex min-h-0 flex-1">
+        {/* Fixed left gutter with lane labels */}
+        <div className="relative shrink-0 overflow-hidden border-r border-white/10 bg-zinc-900/50" style={{ width: GUTTER }}>
+          <div ref={gutterInnerRef} className="absolute inset-x-0 top-0 will-change-transform" style={{ height: totalH }}>
+            <div className="absolute inset-x-0 top-0 flex items-center border-b border-white/10 px-2" style={{ height: RULER_H }}>
+              <span className="text-[8px] font-semibold uppercase tracking-wider text-zinc-600">Tracks</span>
+            </div>
+            {lanes.map((lane) => {
+              const st = LANE_STYLE[lane.key]
+              return (
+                <div
+                  key={lane.key}
+                  className={`absolute inset-x-1 flex select-none items-center gap-1.5 overflow-hidden rounded-md border px-1.5 ${st.tint}`}
+                  style={{ top: lane.top + 1, height: Math.max(0, lane.height - 2) }}
+                >
+                  <span className={`h-2 w-2 shrink-0 rounded-sm ${st.dot}`} />
+                  <span className="truncate text-[10px] font-medium leading-none text-zinc-200">{lane.label}</span>
+                </div>
+              )
+            })}
           </div>
-        ) : (
+        </div>
+
+        {/* Horizontally-scrolling track (also the library drop target) */}
+        <div
+          ref={scrollRef}
+          className={`relative min-h-0 flex-1 overflow-auto ${dropActive ? 'ring-2 ring-inset ring-sky-400/60' : ''}`}
+          onDragOver={onDragOver}
+          onDragLeave={(e) => {
+            if (e.currentTarget === e.target) setDropActive(false)
+          }}
+          onDrop={onDrop}
+        >
           <div
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
             className="relative h-full cursor-pointer"
-            style={{ width: Math.max(total * pxPerSec + 24, 200), minHeight: totalH }}
+            style={{ width: Math.max(total * pxPerSec + 24, 200), minWidth: '100%', minHeight: totalH }}
           >
             {/* Ruler */}
-            <div className="absolute inset-x-0 top-0 h-5 border-b border-white/10 bg-black/30" />
+            <div className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30" style={{ height: RULER_H }} />
 
             {/* 3-second hook marker */}
             {total >= HOOK_SEC && (
-              <div
-                className="pointer-events-none absolute top-0 bottom-0 z-10 border-l border-amber-400/70"
-                style={{ left: HOOK_SEC * pxPerSec }}
-              >
+              <div className="pointer-events-none absolute top-0 bottom-0 z-10 border-l border-amber-400/70" style={{ left: HOOK_SEC * pxPerSec }}>
                 <span className="ml-1 text-[9px] uppercase text-amber-300/90">3s hook</span>
               </div>
             )}
 
-            {/* Script markers (pinned lines) on the ruler */}
+            {/* Script markers */}
             {script.map((l) =>
               l.atSec == null ? null : (
                 <div
@@ -434,56 +590,18 @@ export function Timeline(): JSX.Element {
                     setTime(l.atSec!)
                   }}
                   title={l.text || 'Script marker'}
-                  className="absolute top-0 z-20 h-5 cursor-pointer border-l border-amber-300"
-                  style={{ left: l.atSec * pxPerSec }}
+                  className="absolute top-0 z-20 cursor-pointer border-l border-amber-300"
+                  style={{ left: l.atSec * pxPerSec, height: RULER_H }}
                 >
                   <div className="-ml-[3px] h-1.5 w-1.5 rounded-sm bg-amber-300" />
                 </div>
               )
             )}
 
-            {/* Layer rows (front on top → background at the bottom) */}
-            {rows.map((l, r) => {
-              const left = l.startSec * pxPerSec
-              const width = Math.max(12, (l.endSec - l.startSec) * pxPerSec)
-              const selected = l.id === selectedLayerId
-              const asset =
-                l.content.kind === 'video' || l.content.kind === 'image'
-                  ? assetById.get(l.content.mediaId)
-                  : undefined
-              return (
-                <div
-                  key={l.id}
-                  onPointerDown={(e) => startLayerDrag(e, l, 'move')}
-                  title={layerLabel(l)}
-                  className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
-                    selected ? layerTintSel(l) : layerTint(l)
-                  } ${l.hidden ? 'opacity-40' : ''}`}
-                  style={{ left, width, top: layersTop + r * (LAYER_H + GAP), height: LAYER_H }}
-                >
-                  {asset && (
-                    <img
-                      src={thumbUrl(asset.id)}
-                      alt=""
-                      onError={(e) => (e.currentTarget.style.display = 'none')}
-                      className="pointer-events-none h-full w-7 shrink-0 rounded-sm object-cover opacity-80"
-                    />
-                  )}
-                  <span className="truncate text-[9px] font-medium text-zinc-100">
-                    {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : '🎬'}&nbsp;
-                    {asset?.fileName ?? layerLabel(l)}
-                  </span>
-                  <div
-                    onPointerDown={(e) => startLayerDrag(e, l, 'start')}
-                    className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
-                  />
-                  <div
-                    onPointerDown={(e) => startLayerDrag(e, l, 'end')}
-                    className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
-                  />
-                </div>
-              )
-            })}
+            {/* Layer lanes */}
+            {grouped.video.map((l) => layerBlock(l, 'clips', grouped.vRows))}
+            {grouped.text.map((l) => layerBlock(l, 'text', grouped.tRows))}
+            {grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
 
             {/* Caption lane */}
             {captionSegs.map((seg) => {
@@ -496,25 +614,19 @@ export function Timeline(): JSX.Element {
                   onPointerDown={(e) => startCaptionDrag(e, seg, 'move')}
                   title={seg.text}
                   className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
-                    selected ? 'border-emerald-300 ring-1 ring-emerald-300/50' : 'border-emerald-400/40'
-                  } ${seg.enabled ? 'bg-emerald-500/25' : 'bg-zinc-600/30'}`}
-                  style={{ left, width, top: capTop, height: CAP_H }}
+                    selected ? LANE_STYLE.caption.sel : seg.enabled ? LANE_STYLE.caption.block : 'border-zinc-500/40 bg-zinc-600/30'
+                  }`}
+                  style={{ left, width, top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * ROW_H, height: ROW_H - 2 }}
                 >
                   <span className="truncate text-[9px] font-medium text-emerald-100">CC&nbsp;&nbsp;{seg.text}</span>
-                  <div
-                    onPointerDown={(e) => startCaptionDrag(e, seg, 'start')}
-                    className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70"
-                  />
-                  <div
-                    onPointerDown={(e) => startCaptionDrag(e, seg, 'end')}
-                    className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70"
-                  />
+                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
+                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
                 </div>
               )
             })}
 
-            {/* Audio track (one row per clip) */}
-            {audioClips.map((a, i) => {
+            {/* Audio lane */}
+            {audioClips.map((a) => {
               const asset = assetById.get(a.mediaId)
               const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
               const eo = effectiveOut(a, maxOut)
@@ -527,9 +639,9 @@ export function Timeline(): JSX.Element {
                   onPointerDown={(e) => startAudioDrag(e, a, 'move', maxOut)}
                   title={asset?.fileName}
                   className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
-                    selected ? 'border-sky-300 ring-1 ring-sky-300/50' : 'border-sky-400/40'
-                  } bg-sky-500/15`}
-                  style={{ left, width, top: audTop + i * (AUD_H + GAP), height: AUD_H }}
+                    selected ? LANE_STYLE.audio.sel : LANE_STYLE.audio.block
+                  }`}
+                  style={{ left, width, top: laneTop('audio') + (audRows.get(a.id) ?? 0) * ROW_H, height: ROW_H - 2 }}
                 >
                   {asset && (
                     <img
@@ -548,26 +660,17 @@ export function Timeline(): JSX.Element {
                   <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
                     {a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;{asset?.fileName ?? a.mediaId}
                   </span>
-                  <div
-                    onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)}
-                    className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"
-                  />
-                  <div
-                    onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)}
-                    className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"
-                  />
+                  <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+                  <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
                 </div>
               )
             })}
 
             {/* Bottom time scale */}
-            <div
-              className="pointer-events-none absolute inset-x-0 border-t border-white/10"
-              style={{ top: scaleTop, height: SCALE_H }}
-            >
+            <div className="pointer-events-none absolute inset-x-0 border-t border-white/10" style={{ top: scaleTop, height: SCALE_H }}>
               {(() => {
                 const step = niceTimeStep(pxPerSec)
-                return scaleTicks(total, step).map((t) => (
+                return scaleTicks(Math.max(total, 1), step).map((t) => (
                   <div key={t} className="absolute top-0 h-full" style={{ left: t * pxPerSec }}>
                     <div className="h-2 w-px bg-white/25" />
                     <span className="ml-1 font-mono text-[9px] text-zinc-500">{formatTick(t, step)}</span>
@@ -577,14 +680,18 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Playhead */}
-            <div
-              className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-rose-400"
-              style={{ left: time * pxPerSec }}
-            >
+            <div className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-rose-400" style={{ left: time * pxPerSec }}>
               <div className="absolute -left-1 top-0 h-2 w-2 rounded-full bg-rose-400" />
             </div>
+
+            {/* Empty-state hint */}
+            {isEmpty && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-zinc-600">
+                Drag media here, or use ＋ PH / ＋ End on a library clip.
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   )
