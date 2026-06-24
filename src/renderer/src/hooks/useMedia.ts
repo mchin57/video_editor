@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
-import { importDialog, importPaths, listProjectMedia } from '@/ipc/client'
+import { extractAudioDialog, importDialog, importPaths, listProjectMedia } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 
@@ -33,5 +33,25 @@ export function useImportMedia(): ReturnType<
       void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
       if (assets[0]) select(assets[0].id)
     }
+  })
+}
+
+/**
+ * File ▸ Extract audio from clip… — pick a video, pull its audio into the current
+ * project's library as a standalone audio asset (ready to drag onto the music
+ * track). Surfaces a "no audio track" error from the picked file.
+ */
+export function useExtractAudio(): ReturnType<
+  typeof useMutation<MediaAsset | null, Error, void>
+> {
+  const qc = useQueryClient()
+  return useMutation<MediaAsset | null, Error, void>({
+    mutationFn: () => extractAudioDialog(),
+    onSuccess: (asset) => {
+      if (!asset) return // dialog canceled
+      useProject.getState().addMedia([asset.id])
+      void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
+    },
+    onError: (err) => window.alert(err.message)
   })
 }

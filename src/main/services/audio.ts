@@ -17,6 +17,21 @@ export function buildAudioProxyArgs(input: string, output: string): string[] {
   ]
 }
 
+/**
+ * Pull a source file's audio into a standalone WAV (lossless PCM) — the "original"
+ * for an extracted-audio library asset. A small AAC proxy is generated separately
+ * by the normal import pipeline for playback.
+ */
+export function buildExtractAudioArgs(input: string, output: string): string[] {
+  return [
+    '-y', '-hide_banner', '-nostdin',
+    '-i', input,
+    '-vn',
+    '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2',
+    output
+  ]
+}
+
 export function buildWaveformArgs(input: string, output: string, durationSec = 0): string[] {
   // Scale the PNG width to the clip length (~120 px/s) so it stays crisp at
   // realistic zoom, clamped to a sane range. Still raster — for sample-level
@@ -121,4 +136,9 @@ export async function generateAudioProxy(input: string, output: string): Promise
 export async function generateWaveform(input: string, output: string, durationSec = 0): Promise<void> {
   const { ffmpeg } = await getBinaries()
   await run(ffmpeg, buildWaveformArgs(input, output, durationSec))
+}
+
+export async function extractAudio(input: string, output: string): Promise<void> {
+  const { ffmpeg } = await getBinaries()
+  await run(ffmpeg, buildExtractAudioArgs(input, output))
 }

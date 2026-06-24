@@ -12,6 +12,8 @@ export const getDataDir = (): Promise<string> => window.api.getDataDir()
 
 export const importDialog = (): Promise<MediaAsset[]> => window.api.importDialog()
 export const importPaths = (paths: string[]): Promise<MediaAsset[]> => window.api.importPaths(paths)
+/** Pick a video file and extract its audio into the library. null = canceled. */
+export const extractAudioDialog = (): Promise<MediaAsset | null> => window.api.extractAudioDialog()
 /** The current project's library: asset records for the given media ids. */
 export const listProjectMedia = (ids: string[]): Promise<MediaAsset[]> =>
   window.api.listProjectMedia(ids)

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { buildAudioProxyArgs, buildWaveformArgs, dbToGain, buildAudioGraph, type AudioGraphItem } from './audio'
+import {
+  buildAudioProxyArgs,
+  buildExtractAudioArgs,
+  buildWaveformArgs,
+  dbToGain,
+  buildAudioGraph,
+  type AudioGraphItem
+} from './audio'
 
 function item(over: Partial<AudioGraphItem> = {}): AudioGraphItem {
   return {
@@ -21,6 +28,15 @@ describe('buildAudioProxyArgs', () => {
     expect(a).toContain('-vn')
     expect(a).toContain('-c:a aac')
     expect(a.endsWith('out.m4a')).toBe(true)
+  })
+})
+
+describe('buildExtractAudioArgs', () => {
+  it('extracts a lossless WAV with no video', () => {
+    const a = buildExtractAudioArgs('clip.mp4', 'out.wav').join(' ')
+    expect(a).toContain('-vn')
+    expect(a).toContain('-c:a pcm_s16le')
+    expect(a.endsWith('out.wav')).toBe(true)
   })
 })
 

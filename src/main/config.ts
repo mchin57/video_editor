@@ -21,7 +21,9 @@ export function getDataDir(): string {
   return cachedRoot
 }
 
-export function getSubdir(name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin'): string {
+export function getSubdir(
+  name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin' | 'extracted'
+): string {
   const p = join(getDataDir(), name)
   mkdirSync(p, { recursive: true })
   return p

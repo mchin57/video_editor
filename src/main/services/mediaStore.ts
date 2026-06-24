@@ -7,7 +7,7 @@
 
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, promises as fsp } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, parse } from 'node:path'
 import type { MediaAsset, MediaKind } from '@shared/media'
 import { assetKind, deriveKind, isAudioAsset, isImageAsset, kindFromExt } from '@shared/media'
 import { getSubdir } from '../config'
@@ -15,7 +15,7 @@ import { probeFile } from './ffprobe'
 import { generateProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
-import { generateAudioProxy, generateWaveform } from './audio'
+import { extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
 
 function hashFile(path: string): Promise<string> {
@@ -91,8 +91,12 @@ async function writeAsset(asset: MediaAsset): Promise<void> {
   await fsp.writeFile(assetJsonPath(asset.id), JSON.stringify(asset, null, 2))
 }
 
-/** Hash + probe a source file, registering it in the library. Fast (no transcode). */
-export async function importFile(srcPath: string): Promise<MediaAsset> {
+/**
+ * Hash + probe a source file, registering it in the library. Fast (no transcode).
+ * `displayName` overrides the shown file name (e.g. for extracted-audio assets
+ * whose on-disk original is content-hashed rather than human-readable).
+ */
+export async function importFile(srcPath: string, displayName?: string): Promise<MediaAsset> {
   const id = await hashFile(srcPath)
   await fsp.mkdir(mediaDir(id), { recursive: true })
 
@@ -109,7 +113,7 @@ export async function importFile(srcPath: string): Promise<MediaAsset> {
   const kind: MediaKind = kindFromExt(srcPath) ?? deriveKind(probe)
   const asset: MediaAsset = {
     id,
-    fileName: basename(srcPath),
+    fileName: displayName ?? basename(srcPath),
     originalPath: srcPath,
     importedAt: new Date().toISOString(),
     probe,
@@ -189,4 +193,38 @@ export async function getProjectMedia(ids: string[]): Promise<MediaAsset[]> {
     if (asset) assets.push(await hydrate(asset))
   }
   return assets.sort((a, b) => b.importedAt.localeCompare(a.importedAt))
+}
+
+/**
+ * Pull a source file's audio into the library as a standalone audio asset (no
+ * timeline placement needed). The extracted WAV is content-addressed so its path
+ * is stable and re-extracting identical audio reuses the existing record; the
+ * normal import pipeline then builds the AAC proxy + waveform in the background.
+ * Throws if the source has no audio stream.
+ */
+export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset> {
+  const probe = await probeFile(srcPath)
+  if (!probe.audio) throw new Error('That file has no audio track to extract.')
+
+  const { name } = parse(srcPath)
+  const job = createJob('proxy', `Extract audio · ${name}`)
+  try {
+    const tmp = join(getSubdir('tmp'), `extract-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`)
+    await extractAudio(srcPath, tmp)
+    const hash = await hashFile(tmp)
+    const finalPath = join(getSubdir('extracted'), `${hash}.wav`)
+    if (existsSync(finalPath)) await fsp.rm(tmp, { force: true })
+    else await fsp.rename(tmp, finalPath)
+    const asset = await importFile(finalPath, `${name} (audio).wav`)
+    finishJob(job.id)
+    // Kick the AAC proxy + waveform in the background (its own job), so the
+    // library row flips to "ready to drag onto the music track" when done.
+    if (!asset.proxyReady) {
+      void ensureProxy(asset.id).catch((err) => console.error('audio proxy generation failed', err))
+    }
+    return asset
+  } catch (error) {
+    failJob(job.id, error instanceof Error ? error.message : String(error))
+    throw error
+  }
 }

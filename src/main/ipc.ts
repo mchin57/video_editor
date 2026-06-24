@@ -7,7 +7,13 @@ import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
-import { ensureProxy, getAsset, getProjectMedia, importFile } from './services/mediaStore'
+import {
+  ensureProxy,
+  extractAudioToLibrary,
+  getAsset,
+  getProjectMedia,
+  importFile
+} from './services/mediaStore'
 import {
   loadProject,
   readProjectFile,
@@ -63,6 +69,27 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.importPaths, (_event, paths: string[]) => importMany(paths))
+
+  // Pick a video (or any media) file and pull its audio track into the library as
+  // a standalone audio asset — no timeline placement required.
+  ipcMain.handle(IPC.extractAudioDialog, async (event): Promise<MediaAsset | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Extract audio from clip',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Video', extensions: VIDEO_EXTS },
+        { name: 'Media', extensions: [...VIDEO_EXTS, ...AUDIO_EXTS] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    return extractAudioToLibrary(result.filePaths[0])
+  })
+
   ipcMain.handle(IPC.listProjectMedia, (_event, ids: string[]) => getProjectMedia(ids))
   ipcMain.handle(IPC.ensureProxy, (_event, id: string) => ensureProxy(id))
 
