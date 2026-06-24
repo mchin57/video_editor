@@ -1,176 +1,109 @@
 import { describe, it, expect } from 'vitest'
-import {
-  buildNormalizeArgs,
-  buildFinalArgs,
-  targetForPreset,
-  type ImageOverlayArg,
-  type NormalizeClip
-} from './exporterArgs'
-import type { MediaAsset } from '@shared/media'
+import { buildExportArgs, targetForPreset, type ExportPlan, type ExportVideo } from './exporterArgs'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 
-function asset(over: Partial<MediaAsset['probe']['video']> & { hasAudio?: boolean } = {}): MediaAsset {
-  const { hasAudio = true, ...vid } = over
-  return {
-    id: 'abc',
-    fileName: 'clip.mov',
-    originalPath: 'C:/vids/clip.mov',
-    importedAt: '',
-    proxyReady: true,
-    transcribed: false,
-    probe: {
-      durationSec: 20,
-      container: 'mov',
-      video: {
-        codec: 'hevc',
-        width: 1920,
-        height: 1080,
-        displayWidth: 1920,
-        displayHeight: 1080,
-        rotationDeg: 0,
-        avgFps: 30,
-        rFps: 30,
-        isVfr: false,
-        pixFmt: 'yuv420p',
-        colorTransfer: 'bt709',
-        colorPrimaries: 'bt709',
-        colorSpace: 'bt709',
-        isHdr: false,
-        ...vid
-      },
-      audio: hasAudio ? { codec: 'aac', sampleRate: 48000, channels: 2 } : null
-    }
-  }
+const caps = (nvenc: boolean): FfmpegCapabilities =>
+  ({ encoders: { h264_nvenc: nvenc } }) as unknown as FfmpegCapabilities
+const target = targetForPreset('reel') // 1080x1920
+
+const vid: ExportVideo = {
+  path: 'C:/v/a.mov',
+  inSec: 2,
+  len: 5,
+  hdrChain: '',
+  crop: null,
+  colorEq: '',
+  boxW: 1080,
+  boxH: 1920,
+  x: 0,
+  y: 0,
+  startSec: 1,
+  endSec: 6
 }
 
-function clip(over: Partial<NormalizeClip> = {}): NormalizeClip {
-  return { inSec: 2, outSec: 7, crop: null, mute: false, gainDb: 0, ...over }
+function plan(over: Partial<ExportPlan> = {}): ExportPlan {
+  return { target, totalDur: 10, visuals: [], audio: [], caps: caps(false), preferNvenc: false, ...over }
 }
-
-const target = targetForPreset('reel')
 
 describe('targetForPreset', () => {
-  it('reel is 1080x1920', () => {
-    expect(target).toEqual({ width: 1080, height: 1920 })
+  it('maps presets to output sizes', () => {
+    expect(targetForPreset('reel')).toEqual({ width: 1080, height: 1920 })
+    expect(targetForPreset('square')).toEqual({ width: 1080, height: 1080 })
   })
 })
 
-describe('buildNormalizeArgs', () => {
-  it('trims with accurate seek + duration', () => {
-    const a = buildNormalizeArgs(clip(), asset(), target, 'seg.mov')
-    const s = a.join(' ')
-    expect(s).toContain('-ss 2.000')
-    expect(s).toContain('-t 5.000')
-    expect(a[a.length - 1]).toBe('seg.mov')
+describe('buildExportArgs', () => {
+  it('starts from a black base canvas the length of the project', () => {
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'out.mp4').join(' ')
+    expect(s).toContain('-f lavfi -i color=c=black:s=1080x1920:r=30:d=10.000')
   })
-  it('uncropped → fit + pad to target (letterbox), no crop filter', () => {
-    const s = buildNormalizeArgs(clip(), asset(), target, 'seg.mov').join(' ')
-    expect(s).toContain('force_original_aspect_ratio=decrease')
-    expect(s).toContain('pad=1080:1920')
-    expect(s).not.toContain('crop=')
+
+  it('composites a video: seeked input, scaled box, shifted pts, time-gated overlay', () => {
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'out.mp4').join(' ')
+    expect(s).toContain('-ss 2.000 -t 5.000 -i C:/v/a.mov') // input 1
+    expect(s).toContain('[1:v]scale=1080:1920:flags=bicubic,setsar=1,format=yuv420p,setpts=PTS-STARTPTS+1.000/TB[pv1]')
+    expect(s).toContain("[0:v][pv1]overlay=0:0:enable='between(t,1.000,6.000)':eof_action=pass[v0]")
+    expect(s).toContain('-map [v0]')
   })
-  it('cropped → crop then scale-fill', () => {
-    const s = buildNormalizeArgs(
-      clip({ crop: { x: 100, y: 0, w: 608, h: 1080 } }),
-      asset(),
-      target,
-      'seg.mov'
+
+  it('applies hdr tonemap, crop, and color eq in order when present', () => {
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: { ...vid, hdrChain: 'tonemapX', crop: { x: 10, y: 20, w: 600, h: 1000 }, colorEq: 'eq=brightness=0.1' } }
+        ]
+      }),
+      'o'
     ).join(' ')
-    expect(s).toContain('crop=608:1080:100:0')
-    expect(s).toContain('scale=1080:1920')
-    expect(s).not.toContain('pad=')
-  })
-  it('tonemaps HDR sources only', () => {
-    expect(buildNormalizeArgs(clip(), asset({ isHdr: false }), target, 's.mov').join(' ')).not.toContain('tonemap')
-    expect(
-      buildNormalizeArgs(clip(), asset({ isHdr: true, colorTransfer: 'smpte2084' }), target, 's.mov').join(' ')
-    ).toContain('tonemap=tonemap=hable')
-  })
-  it('maps real audio with gain when unmuted', () => {
-    const s = buildNormalizeArgs(clip({ gainDb: -6 }), asset(), target, 's.mov').join(' ')
-    expect(s).toContain('-map 0:a:0?')
-    expect(s).toContain('volume=-6dB')
-  })
-  it('uses synthesized silence when muted or no audio', () => {
-    const muted = buildNormalizeArgs(clip({ mute: true }), asset(), target, 's.mov').join(' ')
-    expect(muted).toContain('anullsrc')
-    expect(muted).toContain('-map 1:a:0')
-    const noAudio = buildNormalizeArgs(clip(), asset({ hasAudio: false }), target, 's.mov').join(' ')
-    expect(noAudio).toContain('-map 1:a:0')
-  })
-})
-
-describe('buildFinalArgs', () => {
-  const caps = (nvenc: boolean): FfmpegCapabilities =>
-    ({ encoders: { h264_nvenc: nvenc } } as unknown as FfmpegCapabilities)
-
-  it('uses NVENC when available and preferred', () => {
-    const s = buildFinalArgs('list.txt', 'out.mp4', caps(true), { preferNvenc: true }).join(' ')
-    expect(s).toContain('h264_nvenc')
-    expect(s).toContain('-f concat')
-    expect(s).toContain('aac')
-  })
-  it('falls back to libx264 when NVENC missing or not preferred', () => {
-    expect(buildFinalArgs('l', 'o', caps(false), { preferNvenc: true }).join(' ')).toContain('libx264')
-    expect(buildFinalArgs('l', 'o', caps(true), { preferNvenc: false }).join(' ')).toContain('libx264')
+    expect(s).toContain(
+      '[1:v]tonemapX,crop=600:1000:10:20,scale=1080:1920:flags=bicubic,eq=brightness=0.1,setsar=1,format=yuv420p,setpts=PTS-STARTPTS+1.000/TB[pv1]'
+    )
   })
 
-  const img = (over: Partial<ImageOverlayArg> = {}): ImageOverlayArg => ({
-    path: 'C:/m/logo/image.png',
-    x: 540,
-    y: 960,
-    w: 200,
-    h: 100,
-    startSec: 1,
-    endSec: 4,
-    opacity: 1,
-    anchor: 'center',
-    ...over
+  it('composites an image after the videos: scale, rgba, opacity, gated overlay', () => {
+    const img = { path: 'C:/i/logo.png', boxW: 300, boxH: 200, x: 100, y: 50, startSec: 0, endSec: 3, opacity: 0.5 }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')
+    expect(s).toContain('[2:v]scale=300:200,format=rgba,colorchannelmixer=aa=0.500[pi2]') // input 2 (after video 1)
+    expect(s).toContain("overlay=100:50:enable='between(t,0.000,3.000)'")
   })
 
-  it('composites an image overlay: input, scale, time-gated overlay, centered position', () => {
-    const args = buildFinalArgs('list.txt', 'out.mp4', caps(false), {
-      preferNvenc: false,
-      images: [img()]
-    })
-    const s = args.join(' ')
-    expect(s).toContain('-i C:/m/logo/image.png') // image added as an input
-    expect(s).toContain('-filter_complex')
-    expect(s).toContain('[1:v]scale=200:100,format=rgba[oimg0]') // index 1 (no audio inputs)
-    // center anchor → top-left = (540-100, 960-50) = (440, 910)
-    expect(s).toContain("[0:v][oimg0]overlay=440:910:enable='between(t,1.000,4.000)'[vi0]")
-    expect(s).toContain('-map [vi0]')
-    expect(s).toContain('-map 0:a?') // keep the concat's own audio
+  it('omits colorchannelmixer at full opacity', () => {
+    const img = { path: 'p.png', boxW: 1, boxH: 1, x: 0, y: 0, startSec: 0, endSec: 1, opacity: 1 }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')
+    expect(s).toContain('format=rgba[pi2]')
+    expect(s).not.toContain('colorchannelmixer')
   })
 
-  it('applies opacity via colorchannelmixer only when < 1', () => {
-    const faded = buildFinalArgs('l', 'o', caps(false), { preferNvenc: false, images: [img({ opacity: 0.5 })] }).join(' ')
-    expect(faded).toContain('colorchannelmixer=aa=0.500')
-    const solid = buildFinalArgs('l', 'o', caps(false), { preferNvenc: false, images: [img({ opacity: 1 })] }).join(' ')
-    expect(solid).not.toContain('colorchannelmixer')
+  it('burns text in z-order (below a later video) and captions on top', () => {
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'text', assFile: 'text_0.ass' }, { kind: 'video', video: vid }], captionsAss: 'captions.ass' }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('[0:v]ass=text_0.ass[v0]') // text first (bottom)
+    expect(s).toContain('[v0][pv1]overlay=') // then video over it
+    expect(s).toContain('ass=captions.ass') // captions burned last (top)
   })
 
-  it('places image inputs after audio inputs and burns text on top of images', () => {
-    const args = buildFinalArgs('list.txt', 'out.mp4', caps(false), {
-      preferNvenc: false,
-      assFile: 'overlays.ass',
-      images: [img()],
-      audio: { inputPaths: ['bed.m4a'], filter: '[1:a]anull[aout]', outLabel: 'aout' }
-    })
-    const s = args.join(' ')
-    // audio input is index 1, so the image is index 2
-    expect(s).toContain('[2:v]scale=200:100')
-    // ass runs after the image overlay (text above images)
-    expect(s).toContain('[vi0]ass=overlays.ass[v]')
-    expect(s).toContain('-map [v]')
-    expect(s).toContain('-map [aout]')
+  it('mixes audio and maps it; a video-only export maps no audio', () => {
+    const withAudio = buildExportArgs(
+      plan({
+        visuals: [{ kind: 'video', video: vid }],
+        audio: [{ path: 'm.m4a', inSec: 0, outSec: 8, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }]
+      }),
+      'o'
+    ).join(' ')
+    expect(withAudio).toContain('-i m.m4a')
+    expect(withAudio).toContain('[2:a]atrim=0.000:8.000') // audio input is index 2 (after the base + 1 video)
+    expect(withAudio).toContain('-map [aout]')
+    expect(withAudio).toContain('-c:a aac')
+
+    const noAudio = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
+    expect(noAudio).not.toContain('-map [aout]')
+    expect(noAudio).not.toContain('-c:a aac')
   })
 
-  it('honors top-left anchor (no centering offset)', () => {
-    const s = buildFinalArgs('l', 'o', caps(false), {
-      preferNvenc: false,
-      images: [img({ anchor: 'topLeft', x: 100, y: 200 })]
-    }).join(' ')
-    expect(s).toContain('overlay=100:200:')
+  it('uses NVENC when available + preferred, else libx264', () => {
+    expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: true }), 'o').join(' ')).toContain('h264_nvenc')
+    expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: false }), 'o').join(' ')).toContain('libx264')
   })
 })

@@ -33,13 +33,18 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     (transcribes that clip, id-tagged segments, idempotent re-caption). The header
     `CaptionsButton` is now just a global show/hide toggle.
   - Audio clips and auto-captions stay on their own (non-visual) tracks.
-- [ ] **Export: composite the full layer stack.** `exporter.ts` currently
-  ADAPTS layers back to the old model for ffmpeg — it concatenates the video
-  layers as a sequence (sorted by start) and ignores per-layer position/zoom and
-  simultaneous video compositing; image/text layers burn as overlays (respecting
-  `hidden` + z-order). Next step: build a real compositor (overlay-chain multiple
-  scaled/positioned/time-gated video + image inputs) so export is WYSIWYG with
-  the preview. See `TODO(layers)` in `src/main/services/exporter.ts`.
+- [x] **Export: composite the full layer stack.** `exporter.ts` now composites
+  in a SINGLE ffmpeg pass (no more normalize+concat): a black base canvas the
+  length of the project, then every visible layer overlaid back→front — videos
+  and images scaled to their display box, positioned at their center, and
+  time-gated to their window (`overlay …enable='between(t,…)'`, `setpts` shift
+  for video offset); text layers burn via per-layer ASS so the full z-order
+  (incl. text under video) is honored; captions burn on top. Audio mixes all
+  audio clips + any unmuted video-layer audio (`buildAudioGraph`, no concat
+  "dialogue" base). Pure builder `buildExportArgs` in `exporterArgs.ts`
+  (unit-tested). _Remaining: the non-9:16 `square` preset reframes best-effort
+  (linear logical→output map, fixed caption font); multi-HD-video passes can be
+  slow (expected for compositing)._
 
 ### Platform profiles system
 

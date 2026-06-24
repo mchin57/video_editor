@@ -1,33 +1,29 @@
 /**
- * Export orchestrator: normalize each clip → concat demuxer → single delivery
- * encode. Reports progress via the jobs channel (70% across the per-clip
- * normalize passes, 30% for the final encode). Exports from the ORIGINAL media,
- * not the proxy. Text overlays / captions are burned in a later milestone (M4).
+ * Export orchestrator: composites the unified layer stack in a SINGLE ffmpeg
+ * pass (black base canvas → overlay each visual layer in z-order → mix audio →
+ * encode). Several video layers play at once, each scaled/positioned to its
+ * layer transform and time-gated to its window; text layers burn via per-layer
+ * ASS so the full back-to-front order is honored. Exports from the ORIGINAL
+ * media. Progress is the single encode's progress over the project duration.
  */
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Layer, Project, TextContent, VideoContent } from '@shared/project'
-import { effectiveOut } from '@shared/project'
+import type { Project } from '@shared/project'
+import { effectiveOut, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
-import {
-  buildFinalArgs,
-  buildNormalizeArgs,
-  targetForPreset,
-  type ImageOverlayArg,
-  type NormalizeClip
-} from './exporterArgs'
-import { buildAudioGraph, type AudioGraphItem } from './audio'
+import { buildExportArgs, targetForPreset, type ExportAudio, type ExportVisual } from './exporterArgs'
 import { buildAss, type AssOverlay } from './assBuilder'
+import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
 
 const FRAME = { w: 1080, h: 1920 } as const
 
-/** Logical-px display box of a media layer (aspect-fit, scaled, centered). */
+/** Logical-px display box of a media layer (aspect-fit within the frame, scaled). */
 function layerBox(aspect: number, scale: number): { w: number; h: number } {
   const fa = FRAME.w / FRAME.h
   let w: number
@@ -46,8 +42,6 @@ export interface ExportOptions {
   preset: PresetId
   preferNvenc: boolean
 }
-
-const NORMALIZE_SHARE = 0.7
 
 function sanitize(name: string): string {
   return name.replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'reel'
@@ -81,147 +75,144 @@ async function runExport(
   jobId: string,
   output: string
 ): Promise<string> {
-  // TODO(layers): this still concatenates the video layers as a sequence (sorted
-  // by start time) and ignores per-layer position/zoom and simultaneous video
-  // compositing. Full layer-compositing export is the next step; for now it
-  // matches the previous single-track behaviour plus image/text overlays.
-  const videoLayers = project.layers
-    .filter((l): l is Layer & { content: VideoContent } => l.content.kind === 'video' && !l.hidden)
-    .sort((a, b) => a.startSec - b.startSec)
-  if (videoLayers.length === 0) throw new Error('Timeline has no video layer — add a clip first.')
-
   const target = targetForPreset(opts.preset)
   const caps = await getCapabilities()
   const { ffmpeg } = await getBinaries()
+  const sx = target.width / FRAME.w
+  const sy = target.height / FRAME.h
+  const r = (n: number): number => Math.round(n)
 
   const tmp = join(getSubdir('tmp'), jobId)
   await fsp.mkdir(tmp, { recursive: true })
 
-  // Resolve video layers → source assets first, so the global duration is known
-  // for accurate progress weighting across the normalize passes.
-  const resolved = await Promise.all(
-    videoLayers.map(async (layer) => {
-      const c = layer.content
+  // Walk the stack back→front, resolving each visible layer to a composite step.
+  // Geometry is mapped from the logical 1080x1920 space into output pixels.
+  const visuals: ExportVisual[] = []
+  const audio: ExportAudio[] = []
+  let textN = 0
+  for (const l of project.layers) {
+    if (l.hidden) continue
+    const c = l.content
+    if (c.kind === 'video') {
       const asset = await getAsset(c.mediaId)
       if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
-      const clip: NormalizeClip = {
-        inSec: c.inSec,
-        outSec: c.outSec,
-        crop: c.crop,
-        mute: c.mute,
-        gainDb: c.gainDb,
-        color: c.color
+      const v = asset.probe.video
+      const aspect = c.crop ? c.crop.w / c.crop.h : v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : FRAME.w / FRAME.h
+      const box = layerBox(aspect, l.scale)
+      const boxW = box.w * sx
+      const boxH = box.h * sy
+      visuals.push({
+        kind: 'video',
+        video: {
+          path: asset.originalPath,
+          inSec: c.inSec,
+          len: Math.max(0.01, c.outSec - c.inSec),
+          hdrChain: v?.isHdr ? hdrToSdrChain(v) : '',
+          crop: c.crop ?? null,
+          colorEq: isNeutralColor(c.color)
+            ? ''
+            : `eq=brightness=${c.color!.brightness}:contrast=${c.color!.contrast}:saturation=${c.color!.saturation}`,
+          boxW,
+          boxH,
+          x: r(l.x * sx - boxW / 2),
+          y: r(l.y * sy - boxH / 2),
+          startSec: l.startSec,
+          endSec: l.endSec
+        }
+      })
+      // An unmuted video layer's own audio joins the mix (placed at its start).
+      if (!c.mute && asset.probe.audio) {
+        audio.push({
+          path: asset.originalPath,
+          inSec: c.inSec,
+          outSec: c.outSec,
+          startSec: l.startSec,
+          gainDb: c.gainDb,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false
+        })
       }
-      return { clip, asset, durationSec: Math.max(0.01, c.outSec - c.inSec) }
-    })
-  )
-  const totalDur = resolved.reduce((sum, r) => sum + r.durationSec, 0)
-
-  const listLines: string[] = []
-  let doneDur = 0
-  for (let i = 0; i < resolved.length; i++) {
-    const { clip, asset, durationSec } = resolved[i]
-    const segPath = join(tmp, `seg_${i}.mov`)
-    const args = buildNormalizeArgs(clip, asset, target, segPath)
-    await runFfmpeg(ffmpeg, args, durationSec, (p) =>
-      setProgress(jobId, ((doneDur + p * durationSec) / totalDur) * NORMALIZE_SHARE)
-    )
-    doneDur += durationSec
-    listLines.push(`file '${segPath.replace(/\\/g, '/')}'`)
+    } else if (c.kind === 'image') {
+      const imgPath = imageAssetPath(c.mediaId)
+      if (!existsSync(imgPath)) continue // display PNG missing → skip rather than fail
+      const v = (await getAsset(c.mediaId))?.probe.video
+      const aspect = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+      const box = layerBox(aspect, l.scale)
+      const boxW = box.w * sx
+      const boxH = box.h * sy
+      visuals.push({
+        kind: 'image',
+        image: {
+          path: imgPath,
+          boxW,
+          boxH,
+          x: r(l.x * sx - boxW / 2),
+          y: r(l.y * sy - boxH / 2),
+          startSec: l.startSec,
+          endSec: l.endSec,
+          opacity: c.opacity
+        }
+      })
+    } else {
+      if (c.text.trim().length === 0) continue
+      const assName = `text_${textN++}.ass`
+      const overlay: AssOverlay = {
+        text: c.text,
+        startSec: l.startSec,
+        endSec: l.endSec,
+        x: r(l.x * sx),
+        y: r(l.y * sy),
+        anchor: 'center',
+        fontSizePx: c.fontSizePx * l.scale * sy,
+        color: c.color,
+        pill: c.pill
+      }
+      await fsp.writeFile(join(tmp, assName), buildAss([overlay], target), 'utf8')
+      visuals.push({ kind: 'text', assFile: assName })
+    }
   }
 
-  const listPath = join(tmp, 'concat.txt')
-  await fsp.writeFile(listPath, listLines.join('\n'), 'utf8')
-
-  // Burn text layers (if any) via an ASS pass in the final encode. The file is
-  // referenced by relative name (ffmpeg cwd = tmp) to avoid filter-path escaping.
-  let assFile: string | undefined
-  const overlays: AssOverlay[] = project.layers
-    .filter(
-      (l): l is Layer & { content: TextContent } =>
-        l.content.kind === 'text' && !l.hidden && l.content.text.trim().length > 0
-    )
-    .map((l) => ({
-      text: l.content.text,
-      startSec: l.startSec,
-      endSec: l.endSec,
-      x: l.x,
-      y: l.y,
-      anchor: 'center',
-      fontSizePx: l.content.fontSizePx * l.scale,
-      color: l.content.color,
-      pill: l.content.pill
-    }))
-  const hasCaptions = project.captions.enabled && project.captions.segments.some((s) => s.enabled)
-  if (overlays.length > 0 || hasCaptions) {
-    assFile = 'overlays.ass'
-    await fsp.writeFile(join(tmp, assFile), buildAss(overlays, target, project.captions), 'utf8')
+  if (!visuals.some((v) => v.kind !== 'text')) {
+    throw new Error('Timeline has no video or image layer — add one first.')
   }
 
-  // Audio track: each audio clip → an input + a node in the mix graph. The
-  // concat's audio (0:a, the clip dialogue) is the base non-ducked source.
-  const inputPaths: string[] = []
-  const audioItems: AudioGraphItem[] = []
+  // Audio clips (music / voiceover / extracted), trimmed + placed by the graph.
   for (const a of project.audioClips) {
     const asset = await getAsset(a.mediaId)
     if (!asset) continue
     const proxy = join(getSubdir('media'), a.mediaId, 'audio.m4a')
-    const path = existsSync(proxy) ? proxy : asset.originalPath
-    audioItems.push({
-      inputLabel: `${1 + inputPaths.length}:a`,
-      startSec: a.startSec,
+    audio.push({
+      path: existsSync(proxy) ? proxy : asset.originalPath,
       inSec: a.inSec,
       outSec: effectiveOut(a, asset.probe.durationSec),
+      startSec: a.startSec,
       gainDb: a.gainDb,
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
       duck: a.duck,
       denoise: a.denoise
     })
-    inputPaths.push(path)
   }
-  const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, '0:a') : null
-  const audio = graph ? { inputPaths, filter: graph.filter, outLabel: graph.outLabel } : undefined
 
-  // Image overlays → extra inputs composited via the overlay filter. Geometry is
-  // in logical px (== target px for the 9:16 presets). Skip any whose display
-  // PNG is missing (generation failed) so the encode still succeeds.
-  const images: ImageOverlayArg[] = []
-  for (const l of project.layers) {
-    if (l.content.kind !== 'image' || l.hidden) continue
-    const c = l.content
-    const imgPath = imageAssetPath(c.mediaId)
-    if (!existsSync(imgPath)) continue
-    const v = (await getAsset(c.mediaId))?.probe.video
-    const aspect = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
-    const box = layerBox(aspect, l.scale)
-    images.push({
-      path: imgPath,
-      x: l.x,
-      y: l.y,
-      w: box.w,
-      h: box.h,
-      startSec: l.startSec,
-      endSec: l.endSec,
-      opacity: c.opacity,
-      anchor: 'center'
-    })
+  // Captions (auto-generated) burn on top of everything.
+  let captionsAss: string | undefined
+  if (project.captions.enabled && project.captions.segments.some((s) => s.enabled)) {
+    captionsAss = 'captions.ass'
+    const scaled = { ...project.captions, yBaseline: project.captions.yBaseline * sy }
+    await fsp.writeFile(join(tmp, captionsAss), buildAss([], target, scaled), 'utf8')
   }
+
+  const visEnd = project.layers.reduce((m, l) => (l.hidden ? m : Math.max(m, l.endSec)), 0)
+  const audioEnd = audio.reduce((m, a) => Math.max(m, a.startSec + Math.max(0.01, a.outSec - a.inSec)), 0)
+  const totalDur = Math.max(visEnd, audioEnd, 0.1)
 
   await fsp.mkdir(dirname(output), { recursive: true })
-  const finalArgs = buildFinalArgs(listPath, output, caps, {
-    preferNvenc: opts.preferNvenc,
-    assFile,
-    images: images.length ? images : undefined,
-    audio
-  })
-  await runFfmpeg(
-    ffmpeg,
-    finalArgs,
-    totalDur,
-    (p) => setProgress(jobId, NORMALIZE_SHARE + p * (1 - NORMALIZE_SHARE)),
-    tmp
+  const args = buildExportArgs(
+    { target, totalDur, visuals, audio, captionsAss, caps, preferNvenc: opts.preferNvenc },
+    output
   )
+  await runFfmpeg(ffmpeg, args, totalDur, (p) => setProgress(jobId, p), tmp)
 
   await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {})
   return output
