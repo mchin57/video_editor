@@ -7,8 +7,21 @@
  * opaque box behind the text). Per-overlay position/size/colour are inline tags.
  */
 
-import type { CaptionsConfig, TextOverlay } from '@shared/project'
+import type { CaptionsConfig, PillStyle } from '@shared/project'
 import type { Target } from './exporterArgs'
+
+/** A resolved text overlay to burn (geometry in logical/output px). */
+export interface AssOverlay {
+  text: string
+  startSec: number
+  endSec: number
+  x: number
+  y: number
+  anchor: 'center' | 'topLeft'
+  fontSizePx: number
+  color: string
+  pill: PillStyle
+}
 
 function assTime(sec: number): string {
   const t = Math.max(0, sec)
@@ -39,7 +52,7 @@ function escapeText(text: string): string {
 }
 
 export function buildAss(
-  overlays: TextOverlay[],
+  overlays: AssOverlay[],
   target: Target,
   captions?: CaptionsConfig | null
 ): string {

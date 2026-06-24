@@ -1,21 +1,24 @@
 import { describe, it, expect } from 'vitest'
 import { buildChecklist } from './checklist'
-import { createEmptyProject, type Project, type TextOverlay, type CaptionSegment } from '@shared/project'
+import { createEmptyProject, type CaptionSegment, type Layer, type Project } from '@shared/project'
 
-function overlay(over: Partial<TextOverlay> = {}): TextOverlay {
+function textLayer(over: { startSec?: number; endSec?: number; y?: number; text?: string } = {}): Layer {
   return {
     id: 'o',
-    text: 'Hook',
-    startSec: 0,
-    endSec: 3,
+    hidden: false,
+    startSec: over.startSec ?? 0,
+    endSec: over.endSec ?? 3,
     x: 540,
-    y: 600,
-    anchor: 'center',
-    fontFamily: 'Inter',
-    fontSizePx: 76,
-    color: '#fff',
-    pill: { enabled: true, color: '#000c', padPx: 18 },
-    ...over
+    y: over.y ?? 600,
+    scale: 1,
+    content: {
+      kind: 'text',
+      text: over.text ?? 'Hook',
+      fontFamily: 'Inter',
+      fontSizePx: 76,
+      color: '#fff',
+      pill: { enabled: true, color: '#000c', padPx: 18 }
+    }
   }
 }
 function caption(text: string, startSec = 0, endSec = 2): CaptionSegment {
@@ -31,7 +34,7 @@ describe('buildChecklist', () => {
     const empty = createEmptyProject('p', 'P')
     expect(statusOf(buildChecklist(empty, baseInput), 'hook')).toBe('fail')
 
-    const withHook: Project = { ...empty, overlays: [overlay({ startSec: 0, endSec: 3 })] }
+    const withHook: Project = { ...empty, layers: [textLayer({ startSec: 0, endSec: 3 })] }
     expect(statusOf(buildChecklist(withHook, baseInput), 'hook')).toBe('pass')
   })
 
@@ -65,8 +68,8 @@ describe('buildChecklist', () => {
     expect(statusOf(buildChecklist(p, baseInput), 'keywords')).toBe('warn')
   })
 
-  it('flags overlays intruding the bottom safe zone', () => {
-    const p: Project = { ...createEmptyProject('p', 'P'), overlays: [overlay({ y: 1700 })] }
+  it('flags text layers intruding the bottom safe zone', () => {
+    const p: Project = { ...createEmptyProject('p', 'P'), layers: [textLayer({ y: 1700 })] }
     expect(statusOf(buildChecklist(p, baseInput), 'safezones')).toBe('warn')
   })
 

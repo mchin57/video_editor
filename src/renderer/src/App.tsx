@@ -1,8 +1,9 @@
-import { useEffect, useState, type DragEvent, type JSX } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Library } from '@/components/Library'
 import { PreviewStage } from '@/components/PreviewStage'
 import { Inspector } from '@/components/Inspector'
+import { LayersPanel } from '@/components/LayersPanel'
 import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
 import { Splitter } from '@/components/Splitter'
@@ -13,14 +14,13 @@ import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
 import { ScriptModal } from '@/components/ScriptModal'
 import { StatusFooter } from '@/components/StatusFooter'
-import { useImportMedia } from '@/hooks/useMedia'
+import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { onJobProgress, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
-import { locate } from '@/lib/timeline'
-import { makeOverlay } from '@/lib/overlays'
+import { makeTextLayer } from '@shared/layers'
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
@@ -42,6 +42,11 @@ function loadPanelSizes(): PanelSizes {
 export default function App(): JSX.Element {
   const queryClient = useQueryClient()
   const importMedia = useImportMedia()
+  // Library assets via a ref so the (deps-[]) key handler can resolve an audio
+  // clip's source duration without re-binding the listener on every refetch.
+  const { data: assets = [] } = useLibrary()
+  const assetsRef = useRef(assets)
+  assetsRef.current = assets
   const [dragging, setDragging] = useState(false)
   const [panels, setPanels] = useState<PanelSizes>(loadPanelSizes)
 
@@ -105,14 +110,9 @@ export default function App(): JSX.Element {
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Delete whatever is selected, matching the Inspector's priority.
         const ui = useUi.getState()
-        if (ui.selectedOverlayId) {
+        if (ui.selectedLayerId) {
           e.preventDefault()
-          project.removeOverlay(ui.selectedOverlayId)
-          ui.selectOverlay(null)
-        } else if (ui.selectedImageId) {
-          e.preventDefault()
-          project.removeImageOverlay(ui.selectedImageId)
-          ui.selectImage(null)
+          project.removeLayer(ui.selectedLayerId)
         } else if (ui.selectedCaptionId) {
           e.preventDefault()
           project.removeCaption(ui.selectedCaptionId)
@@ -121,31 +121,34 @@ export default function App(): JSX.Element {
           e.preventDefault()
           project.removeAudioClip(ui.selectedAudioId)
           ui.selectAudio(null)
-        } else if (project.selectedClipId) {
-          e.preventDefault()
-          project.removeClip(project.selectedClipId)
         }
       } else if (e.key.toLowerCase() === 's') {
-        const clips = project.project?.clips ?? []
-        const idx = clips.findIndex((c) => c.id === project.selectedClipId)
-        const pos = locate(clips, usePlayback.getState().time)
-        if (idx >= 0 && pos && pos.index === idx) project.splitClipAt(clips[idx].id, pos.localTime)
-      } else if (e.key.toLowerCase() === 't') {
-        if ((project.project?.clips.length ?? 0) > 0) {
-          const id = crypto.randomUUID()
-          const start = usePlayback.getState().time
-          project.addOverlay(makeOverlay(id, start, start + 3))
-          useUi.getState().selectOverlay(id)
+        const t = usePlayback.getState().time
+        const ui = useUi.getState()
+        if (ui.selectedAudioId) {
+          // An audio clip is selected — split it at the playhead.
+          const a = project.project?.audioClips.find((x) => x.id === ui.selectedAudioId)
+          if (a) {
+            const dur = assetsRef.current.find((m) => m.id === a.mediaId)?.probe.durationSec ?? a.outSec
+            project.splitAudioAt(a.id, t, dur)
+          }
+        } else if (ui.selectedLayerId) {
+          // A video layer is selected — split it at the playhead.
+          const l = project.project?.layers.find((x) => x.id === ui.selectedLayerId)
+          if (l && l.content.kind === 'video') project.splitLayerAt(l.id, t)
         }
+      } else if (e.key.toLowerCase() === 't') {
+        const id = crypto.randomUUID()
+        const start = usePlayback.getState().time
+        project.addLayer(makeTextLayer(id, start, start + 3))
+        useUi.getState().selectLayer(id)
       } else if (e.key === 'Escape') {
-        useUi.getState().setCropEditing(false)
-        useUi.getState().setSettingsOpen(false)
-        useUi.getState().setChecklistOpen(false)
-        useUi.getState().setScriptOpen(false)
-        useUi.getState().selectOverlay(null)
-        useUi.getState().selectCaption(null)
-        useUi.getState().selectAudio(null)
-        useUi.getState().selectImage(null)
+        const ui = useUi.getState()
+        ui.setCropEditing(false)
+        ui.setSettingsOpen(false)
+        ui.setChecklistOpen(false)
+        ui.setScriptOpen(false)
+        ui.clearSelection()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -230,7 +233,12 @@ export default function App(): JSX.Element {
           onDrag={(d) => setPanels((p) => ({ ...p, inspW: clamp(p.inspW - d, 180, 520) }))}
         />
         <aside style={{ width: panels.inspW }} className="shrink-0 border-l border-white/10">
-          <Inspector />
+          <div className="flex h-full flex-col">
+            <LayersPanel />
+            <div className="min-h-0 flex-1">
+              <Inspector />
+            </div>
+          </div>
         </aside>
       </div>
 

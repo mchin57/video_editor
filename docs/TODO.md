@@ -4,6 +4,33 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ## Open
 
+### Layer compositing (`feature/layers` branch)
+
+- [x] **Unified, type-agnostic layer stack.** Replaced the old sequential-clip
+  timeline + separate text/image overlay arrays with a single `project.layers`
+  array (`src/shared/project.ts`). Every visual — video, image, text, and any
+  future kind — is a `Layer` with a generic `content` payload, an ABSOLUTE
+  timeline window (`startSec`/`endSec`), a spatial transform (`x`/`y` center +
+  `scale` zoom), and a `hidden` flag. Stacking is array order: index 0 = the
+  Background (bottom), last = front; nothing renders behind the bottom layer and
+  uncovered areas are black. Multiple video layers composite and play at once via
+  a wall-clock master in `PreviewStage` (each `<video>` follows the clock like
+  the audio followers). Pure helpers + tests in `src/shared/layers.ts`.
+  - **Layers menu** (`components/LayersPanel.tsx`): lists the layers on screen at
+    the playhead, front→back; follows the timeline (a layer drops out the moment
+    the playhead leaves its span and the panel resizes); per-row visibility
+    checkbox; drag the ⠿ handle to restack; Background pinned at the bottom.
+  - **Move/zoom** any layer on the canvas (drag to move, corner handle/Inspector
+    slider to zoom); out-of-frame is cropped by the stage.
+  - Audio clips and auto-captions stay on their own (non-visual) tracks.
+- [ ] **Export: composite the full layer stack.** `exporter.ts` currently
+  ADAPTS layers back to the old model for ffmpeg — it concatenates the video
+  layers as a sequence (sorted by start) and ignores per-layer position/zoom and
+  simultaneous video compositing; image/text layers burn as overlays (respecting
+  `hidden` + z-order). Next step: build a real compositor (overlay-chain multiple
+  scaled/positioned/time-gated video + image inputs) so export is WYSIWYG with
+  the preview. See `TODO(layers)` in `src/main/services/exporter.ts`.
+
 ### Platform profiles system
 
 - [ ] **Platform profiles** — replace the hardcoded Instagram-specific UI with a profile system. Each profile bundles export presets, checklist rules, safe-zone guides, default overlay styles, and aspect ratio. Profiles can be toggled on/off; their features (checklist, safe-zone overlay, hook-zone marker, keyword bank) only appear in the UI when the profile is active.
@@ -16,12 +43,23 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ### Not planned / missing features
 
+- [ ] **Multi-clip layout formats (split screen, panels)** — place multiple clips side-by-side or in a grid within a single frame at a given timeline position. Built-in layout presets to ship:
+  - **Split screen (2-up):** left/right or top/bottom, each half fills its cell.
+  - **3-panel (landscape strip):** three equal columns.
+  - **3-panel (portrait stack):** three equal rows.
+  - **3-panel (1 large + 2 small):** large cell left, two stacked cells right (and mirrored variant).
+  - **4-panel grid:** 2×2 equal quadrants.
+  - Each layout is a named preset that defines N cells, each with a rect in logical 1080×1920 space. On export, each cell maps to an ffmpeg `crop+scale+overlay` chain composited onto a black (or custom color) background. Preview renders each cell as a positioned/sized `<video>` element within `PreviewStage`.
+  - Data model: a `LayoutClip` type in `shared/project.ts` — a timeline segment that holds an array of `{ mediaId, inSec, outSec, cell: CellRect }` entries plus a `layoutPresetId`. Layout clips sit in their own timeline lane.
+
+- [ ] **Custom layout editor** — a drag-and-drop canvas for creating and saving custom multi-clip layouts beyond the built-in presets. User can add cells, resize/reposition them freely within the 1080×1920 frame, set a background color or image, and save the result as a named preset that appears alongside the built-in ones. Saved presets stored in `settings.json` under `customLayouts[]`. Implementation: a `LayoutEditor` modal with a scaled-down 1080×1920 canvas; cells are resizable/draggable divs; outputs a `LayoutPreset` definition identical in shape to the built-ins so the rest of the pipeline is unaffected.
+
 - [ ] **Clip-audio locking** — allow a video clip to be locked to an audio clip so they move and split together. When locked, dragging either clip moves both by the same delta; splitting either at the playhead splits both at the same timeline position. UI: a small lock icon between the video and audio lanes on overlapping clips; click to toggle. Data model: add an optional `lockedAudioId` field on `Clip` (and `lockedClipId` on `MusicTrack`) referencing the paired asset. Logic lives in `timelineMath.ts` — move/split ops check for a lock and apply the same operation to the paired track before returning the new project state. Undo/redo snapshots capture both changes atomically.
   - **Open question:** when one locked clip is deleted, should the other be deleted automatically, or just unlocked and left in place? Could be a preference (always delete both / always just unlock / ask each time).
 
-- [ ] **Split audio clips on the timeline** — audio clips on the music track should support the same split-at-playhead operation as video clips. Each split produces two independent audio segments with their own `inSec`/`outSec` trim points, which can then be moved, trimmed, or deleted separately. Implementation: extend `timelineMath.ts` `splitClip` (or an equivalent `splitAudio`) to operate on `MusicTrack` entries; update `editorStore` undo snapshots; wire the existing split keybind/button to fire on whichever track is selected (video or audio).
+- [x] **Split audio clips on the timeline** — audio clips support split-at-playhead like video clips. Each split yields two independent segments with their own `inSec`/`outSec` (outer fades preserved, the seam is hard); they can then be moved/trimmed/deleted separately. Pure `splitAudioClip` in `lib/timeline.ts` (unit-tested) → `splitAudioAt` store action (undo-snapshotted via `commit`). Wired to both the ✂ Split button and the **S** keybind, which now act on whichever is selected (audio clip or video clip — selection is mutually exclusive). Whole-source clips (`outSec<=0`) resolve their end from the source duration; the keybind reads it from the library via a ref.
 
-- [ ] **"Extract audio from clip" via File menu** — a File → "Extract audio from clip…" action that lets the user pick any video file and pull its audio track directly into the project library as a standalone audio asset, without needing to place the clip on the timeline first. Implementation: file picker → `ffmpeg -i input -vn -c:a pcm_s16le extracted.wav` (or aac for smaller size) → hash + copy into `media/{hash}/` → add to project `mediaIds` → appears in the library's audio section ready to drag onto the music track. Should reuse the existing job pipeline for progress feedback.
+- [x] **"Extract audio from clip" via File menu** — File ▸ "Extract audio from clip…" picks any video and pulls its audio into the project library as a standalone audio asset (no timeline placement needed), ready to drag onto the music track. `media:extractAudioDialog` IPC → `extractAudioToLibrary` (`mediaStore.ts`): probe-guards "no audio track", extracts lossless WAV (`-vn -c:a pcm_s16le`, `buildExtractAudioArgs`), content-addresses it under `<data>/extracted/<hash>.wav` (idempotent re-extraction), then reuses `importFile` (new optional `displayName`) + background `ensureProxy` for the AAC proxy/waveform. Progress shows via the jobs pipeline; `useExtractAudio` adds the result to `mediaIds`.
 
 - [x] **Project-scoped media library** — the library now reflects only the current project's media, not a global pool. New project = empty library; opening a `.reel` auto-populates from its `mediaIds` (legacy files without one are backfilled from referenced clips/images/audio in `migrateProject`). The `media/{hash}/` store on disk stays global; each project's `mediaIds: string[]` scopes what the panel shows. The library's × removes from the project list only (kept on disk; other projects may reference it). Implemented via `Project.mediaIds` (`shared/project.ts`), `getProjectMedia(ids)` + `media:listForProject` IPC, `useProject.addMedia/removeMedia`, and `useLibrary` keyed on `project.mediaIds`.
 

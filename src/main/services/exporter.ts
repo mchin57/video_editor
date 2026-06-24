@@ -7,17 +7,40 @@
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Project } from '@shared/project'
+import type { Layer, Project, TextContent, VideoContent } from '@shared/project'
 import { effectiveOut } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
-import { buildFinalArgs, buildNormalizeArgs, targetForPreset, type ImageOverlayArg } from './exporterArgs'
+import {
+  buildFinalArgs,
+  buildNormalizeArgs,
+  targetForPreset,
+  type ImageOverlayArg,
+  type NormalizeClip
+} from './exporterArgs'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
-import { buildAss } from './assBuilder'
+import { buildAss, type AssOverlay } from './assBuilder'
 import { runFfmpeg } from './ffmpegRun'
+
+const FRAME = { w: 1080, h: 1920 } as const
+
+/** Logical-px display box of a media layer (aspect-fit, scaled, centered). */
+function layerBox(aspect: number, scale: number): { w: number; h: number } {
+  const fa = FRAME.w / FRAME.h
+  let w: number
+  let h: number
+  if (aspect >= fa) {
+    w = FRAME.w
+    h = FRAME.w / aspect
+  } else {
+    h = FRAME.h
+    w = FRAME.h * aspect
+  }
+  return { w: w * scale, h: h * scale }
+}
 
 export interface ExportOptions {
   preset: PresetId
@@ -58,7 +81,14 @@ async function runExport(
   jobId: string,
   output: string
 ): Promise<string> {
-  if (project.clips.length === 0) throw new Error('Timeline is empty — add a clip first.')
+  // TODO(layers): this still concatenates the video layers as a sequence (sorted
+  // by start time) and ignores per-layer position/zoom and simultaneous video
+  // compositing. Full layer-compositing export is the next step; for now it
+  // matches the previous single-track behaviour plus image/text overlays.
+  const videoLayers = project.layers
+    .filter((l): l is Layer & { content: VideoContent } => l.content.kind === 'video' && !l.hidden)
+    .sort((a, b) => a.startSec - b.startSec)
+  if (videoLayers.length === 0) throw new Error('Timeline has no video layer — add a clip first.')
 
   const target = targetForPreset(opts.preset)
   const caps = await getCapabilities()
@@ -67,13 +97,22 @@ async function runExport(
   const tmp = join(getSubdir('tmp'), jobId)
   await fsp.mkdir(tmp, { recursive: true })
 
-  // Resolve clips → source assets first, so the global duration is known for
-  // accurate progress weighting across the normalize passes.
+  // Resolve video layers → source assets first, so the global duration is known
+  // for accurate progress weighting across the normalize passes.
   const resolved = await Promise.all(
-    project.clips.map(async (clip) => {
-      const asset = await getAsset(clip.mediaId)
-      if (!asset) throw new Error(`Missing source media for a clip (${clip.mediaId}).`)
-      return { clip, asset, durationSec: Math.max(0.01, clip.outSec - clip.inSec) }
+    videoLayers.map(async (layer) => {
+      const c = layer.content
+      const asset = await getAsset(c.mediaId)
+      if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
+      const clip: NormalizeClip = {
+        inSec: c.inSec,
+        outSec: c.outSec,
+        crop: c.crop,
+        mute: c.mute,
+        gainDb: c.gainDb,
+        color: c.color
+      }
+      return { clip, asset, durationSec: Math.max(0.01, c.outSec - c.inSec) }
     })
   )
   const totalDur = resolved.reduce((sum, r) => sum + r.durationSec, 0)
@@ -94,10 +133,25 @@ async function runExport(
   const listPath = join(tmp, 'concat.txt')
   await fsp.writeFile(listPath, listLines.join('\n'), 'utf8')
 
-  // Burn text overlays (if any) via an ASS pass in the final encode. The file is
+  // Burn text layers (if any) via an ASS pass in the final encode. The file is
   // referenced by relative name (ffmpeg cwd = tmp) to avoid filter-path escaping.
   let assFile: string | undefined
-  const overlays = project.overlays.filter((o) => o.text.trim().length > 0)
+  const overlays: AssOverlay[] = project.layers
+    .filter(
+      (l): l is Layer & { content: TextContent } =>
+        l.content.kind === 'text' && !l.hidden && l.content.text.trim().length > 0
+    )
+    .map((l) => ({
+      text: l.content.text,
+      startSec: l.startSec,
+      endSec: l.endSec,
+      x: l.x,
+      y: l.y,
+      anchor: 'center',
+      fontSizePx: l.content.fontSizePx * l.scale,
+      color: l.content.color,
+      pill: l.content.pill
+    }))
   const hasCaptions = project.captions.enabled && project.captions.segments.some((s) => s.enabled)
   if (overlays.length > 0 || hasCaptions) {
     assFile = 'overlays.ass'
@@ -133,19 +187,24 @@ async function runExport(
   // in logical px (== target px for the 9:16 presets). Skip any whose display
   // PNG is missing (generation failed) so the encode still succeeds.
   const images: ImageOverlayArg[] = []
-  for (const o of project.imageOverlays) {
-    const imgPath = imageAssetPath(o.mediaId)
+  for (const l of project.layers) {
+    if (l.content.kind !== 'image' || l.hidden) continue
+    const c = l.content
+    const imgPath = imageAssetPath(c.mediaId)
     if (!existsSync(imgPath)) continue
+    const v = (await getAsset(c.mediaId))?.probe.video
+    const aspect = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+    const box = layerBox(aspect, l.scale)
     images.push({
       path: imgPath,
-      x: o.x,
-      y: o.y,
-      w: o.w,
-      h: o.h,
-      startSec: o.startSec,
-      endSec: o.endSec,
-      opacity: o.opacity,
-      anchor: o.anchor
+      x: l.x,
+      y: l.y,
+      w: box.w,
+      h: box.h,
+      startSec: l.startSec,
+      endSec: l.endSec,
+      opacity: c.opacity,
+      anchor: 'center'
     })
   }
 

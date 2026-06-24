@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { buildNormalizeArgs, buildFinalArgs, targetForPreset, type ImageOverlayArg } from './exporterArgs'
-import type { Clip } from '@shared/project'
+import {
+  buildNormalizeArgs,
+  buildFinalArgs,
+  targetForPreset,
+  type ImageOverlayArg,
+  type NormalizeClip
+} from './exporterArgs'
 import type { MediaAsset } from '@shared/media'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 
@@ -38,8 +43,8 @@ function asset(over: Partial<MediaAsset['probe']['video']> & { hasAudio?: boolea
   }
 }
 
-function clip(over: Partial<Clip> = {}): Clip {
-  return { id: 'c1', mediaId: 'abc', inSec: 2, outSec: 7, crop: null, mute: false, gainDb: 0, ...over }
+function clip(over: Partial<NormalizeClip> = {}): NormalizeClip {
+  return { inSec: 2, outSec: 7, crop: null, mute: false, gainDb: 0, ...over }
 }
 
 const target = targetForPreset('reel')

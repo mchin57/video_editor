@@ -1,17 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { buildAss, assColor } from './assBuilder'
-import type { TextOverlay } from '@shared/project'
+import { buildAss, assColor, type AssOverlay } from './assBuilder'
 
-function overlay(over: Partial<TextOverlay> = {}): TextOverlay {
+function overlay(over: Partial<AssOverlay> = {}): AssOverlay {
   return {
-    id: 'o1',
     text: 'Hook line',
     startSec: 1,
     endSec: 4,
     x: 540,
     y: 600,
     anchor: 'center',
-    fontFamily: 'Inter',
     fontSizePx: 80,
     color: '#ffffff',
     pill: { enabled: true, color: '#000000cc', padPx: 18 },

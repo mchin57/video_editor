@@ -2,18 +2,16 @@ import { create } from 'zustand'
 
 /** Transient editor UI selection that doesn't belong in the project document. */
 interface UiState {
-  /** Currently selected text overlay (for editing/dragging). */
-  selectedOverlayId: string | null
-  selectOverlay: (id: string | null) => void
+  /** Currently selected visual layer (video/image/text) — drives the inspector,
+   *  on-canvas handles, and the Layers menu highlight. */
+  selectedLayerId: string | null
+  selectLayer: (id: string | null) => void
   /** Currently selected caption segment (for editing/dragging). */
   selectedCaptionId: string | null
   selectCaption: (id: string | null) => void
   /** Currently selected audio clip (shows its controls in the Inspector). */
   selectedAudioId: string | null
   selectAudio: (id: string | null) => void
-  /** Currently selected image overlay (for editing/dragging). */
-  selectedImageId: string | null
-  selectImage: (id: string | null) => void
   /** Whether the crop editor modal is open. */
   cropEditing: boolean
   setCropEditing: (v: boolean) => void
@@ -26,17 +24,17 @@ interface UiState {
   /** Whether the script panel is open. */
   scriptOpen: boolean
   setScriptOpen: (v: boolean) => void
+  /** Clear every selection (clip/caption/audio). */
+  clearSelection: () => void
 }
 
 export const useUi = create<UiState>((set) => ({
-  selectedOverlayId: null,
-  selectOverlay: (id) => set({ selectedOverlayId: id }),
+  selectedLayerId: null,
+  selectLayer: (id) => set({ selectedLayerId: id, selectedCaptionId: null, selectedAudioId: null }),
   selectedCaptionId: null,
-  selectCaption: (id) => set({ selectedCaptionId: id }),
+  selectCaption: (id) => set({ selectedCaptionId: id, selectedLayerId: null, selectedAudioId: null }),
   selectedAudioId: null,
-  selectAudio: (id) => set({ selectedAudioId: id }),
-  selectedImageId: null,
-  selectImage: (id) => set({ selectedImageId: id }),
+  selectAudio: (id) => set({ selectedAudioId: id, selectedLayerId: null, selectedCaptionId: null }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   settingsOpen: false,
@@ -44,5 +42,6 @@ export const useUi = create<UiState>((set) => ({
   checklistOpen: false,
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,
-  setScriptOpen: (v) => set({ scriptOpen: v })
+  setScriptOpen: (v) => set({ scriptOpen: v }),
+  clearSelection: () => set({ selectedLayerId: null, selectedCaptionId: null, selectedAudioId: null })
 }))

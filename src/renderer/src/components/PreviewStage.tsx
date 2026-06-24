@@ -1,28 +1,84 @@
-import { useEffect, useMemo, useRef, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { AudioClip, Clip, ImageOverlay, TextOverlay } from '@shared/project'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type JSX,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
+import type { AudioClip, Layer, VideoContent } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
+import { layersAtTime, makeVideoLayer, videoSourceTime, visualDuration } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
-import { imageOverlaysAtTime, overlaysAtTime } from '@/lib/overlays'
 import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
-import { clipStartTimes, locate, timelineDuration } from '@/lib/timeline'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
+const FRAME_ASPECT = LOGICAL.width / LOGICAL.height
 
-// Stable empty references so zustand selectors don't return new arrays each render.
-const EMPTY_CLIPS: Clip[] = []
-const EMPTY_OVERLAYS: TextOverlay[] = []
-const EMPTY_IMAGES: ImageOverlay[] = []
+const EMPTY_LAYERS: Layer[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 
-/** A hidden <audio> that follows the timeline clock for one audio clip. Several
- * of these play at once; the browser mixes them (no Web Audio needed). */
+/** Absolute box (in %) for a media layer, sized to its aspect at the layer's
+ *  scale and centered on (x,y). Aspect-correct so there's no letterbox fill to
+ *  occlude the layers behind it; anything past the frame is cropped by the stage. */
+function mediaBox(layer: Layer, aspect: number): CSSProperties {
+  let w: number
+  let h: number
+  if (aspect >= FRAME_ASPECT) {
+    w = LOGICAL.width
+    h = LOGICAL.width / aspect
+  } else {
+    h = LOGICAL.height
+    w = LOGICAL.height * aspect
+  }
+  w *= layer.scale
+  h *= layer.scale
+  return {
+    position: 'absolute',
+    left: pct(layer.x - w / 2, LOGICAL.width),
+    top: pct(layer.y - h / 2, LOGICAL.height),
+    width: pct(w, LOGICAL.width),
+    height: pct(h, LOGICAL.height)
+  }
+}
+
+/** CSS for the <video>/<img> filling its layer box (crop/color aware). */
+function videoFillStyle(content: VideoContent, asset: MediaAsset | undefined): CSSProperties {
+  const crop = content.crop
+  const v = asset?.probe.video
+  const col = content.color
+  const filter = col
+    ? `brightness(${1 + col.brightness}) contrast(${col.contrast}) saturate(${col.saturation})`
+    : undefined
+  if (crop && v) {
+    return {
+      position: 'absolute',
+      width: `${(v.displayWidth / crop.w) * 100}%`,
+      height: `${(v.displayHeight / crop.h) * 100}%`,
+      left: `${-(crop.x / crop.w) * 100}%`,
+      top: `${-(crop.y / crop.h) * 100}%`,
+      objectFit: 'fill',
+      maxWidth: 'none',
+      filter
+    }
+  }
+  return { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', filter }
+}
+
+const mediaAspect = (asset: MediaAsset | undefined, content: VideoContent | { crop?: undefined }): number => {
+  if ('crop' in content && content.crop) return content.crop.w / content.crop.h
+  const v = asset?.probe.video
+  return v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+}
+
+/** A hidden <audio> that follows the timeline clock for one audio clip. */
 function AudioFollower({
   clip,
   asset,
@@ -61,54 +117,95 @@ function AudioFollower({
   return <audio ref={ref} src={src} preload="auto" />
 }
 
+/** One composited video layer: a <video> that follows the master clock. */
+function VideoLayerView({
+  layer,
+  content,
+  asset,
+  time,
+  playing,
+  selected,
+  boxStyle,
+  onMoveDown
+}: {
+  layer: Layer
+  content: VideoContent
+  asset: MediaAsset
+  time: number
+  playing: boolean
+  selected: boolean
+  boxStyle: CSSProperties
+  onMoveDown: (e: ReactPointerEvent) => void
+}): JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+  const target = videoSourceTime(content, layer, time)
+  const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
+
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    if (playing) {
+      if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
+      if (v.paused) void v.play().catch(() => {})
+    } else {
+      if (!v.paused) v.pause()
+      if (v.readyState >= 1 && Math.abs(v.currentTime - target) > 0.05) v.currentTime = target
+    }
+  }, [playing, target])
+
+  return (
+    <div
+      style={boxStyle}
+      onPointerDown={onMoveDown}
+      className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
+    >
+      <video
+        ref={ref}
+        src={proxyUrl(asset.id)}
+        muted={content.mute}
+        playsInline
+        style={fill}
+        onLoadedMetadata={() => {
+          const v = ref.current
+          if (v) {
+            v.currentTime = target
+            v.muted = content.mute
+          }
+        }}
+      />
+    </div>
+  )
+}
+
 /**
- * The 9:16 playback surface. Plays the timeline through a single <video> keyed
- * by the active media id; applies the active clip's crop with CSS; and renders
- * draggable text overlays positioned in the logical 1080x1920 space (cqw units
- * keep them sized exactly as they'll burn at export).
+ * The 9:16 playback surface. Composites the unified layer stack (multiple videos
+ * /images/text at once), driven by a single wall-clock master so several videos
+ * can play together. Layers move/zoom in the logical 1080x1920 space and are
+ * cropped by the stage; uncovered areas are black.
  */
 export function PreviewStage(): JSX.Element {
   const project = useProject((s) => s.project)
-  const projectClips = project?.clips ?? EMPTY_CLIPS
-  const overlays = project?.overlays ?? EMPTY_OVERLAYS
-  const imageOverlays = project?.imageOverlays ?? EMPTY_IMAGES
+  const layers = project?.layers ?? EMPTY_LAYERS
+  const audioClips = project?.audioClips ?? EMPTY_AUDIO
+  const captions = project?.captions
+  const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectedLibId = useEditor((s) => s.selectedId)
-  const selectedOverlayId = useUi((s) => s.selectedOverlayId)
-  const selectedImageId = useUi((s) => s.selectedImageId)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
   const time = usePlayback((s) => s.time)
   const playing = usePlayback((s) => s.playing)
 
+  // With an empty stack, fall back to previewing the selected library video.
   const selectedAsset = selectedLibId ? assetById.get(selectedLibId) : undefined
-  const previewClips: Clip[] = useMemo(() => {
-    if (projectClips.length) return projectClips
-    if (selectedAsset) {
-      return [
-        {
-          id: '__preview__',
-          mediaId: selectedAsset.id,
-          inSec: 0,
-          outSec: selectedAsset.probe.durationSec,
-          crop: null,
-          mute: false,
-          gainDb: 0
-        }
-      ]
+  const previewLayers: Layer[] = useMemo(() => {
+    if (layers.length) return layers
+    if (selectedAsset?.probe.video && selectedAsset.proxyReady) {
+      return [makeVideoLayer('__preview__', selectedAsset.id, 0, selectedAsset.probe.durationSec)]
     }
-    return []
-  }, [projectClips, selectedAsset])
+    return EMPTY_LAYERS
+  }, [layers, selectedAsset])
 
-  const starts = useMemo(() => clipStartTimes(previewClips), [previewClips])
-  const pos = locate(previewClips, time)
-  const activeClip = pos?.clip ?? null
-  const activeAsset = activeClip ? assetById.get(activeClip.mediaId) : undefined
-  const activeMediaId = activeAsset?.proxyReady ? activeAsset.id : null
-  const ready = activeMediaId != null
-
-  // Audio track: end of the furthest audio clip, and the overall project end.
-  const audioClips = project?.audioClips ?? EMPTY_AUDIO
   const audioEnd = useMemo(
     () =>
       audioClips.reduce(
@@ -117,179 +214,42 @@ export function PreviewStage(): JSX.Element {
       ),
     [audioClips, assetById]
   )
-  const audioEndRef = useRef(audioEnd)
-  audioEndRef.current = audioEnd
+  const duration = Math.max(visualDuration(previewLayers), audioEnd)
+  const durationRef = useRef(duration)
+  durationRef.current = duration
 
   const stageRef = useRef<HTMLDivElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Live refs so the rAF loop reads current values without re-subscribing.
-  const clipsRef = useRef(previewClips)
-  clipsRef.current = previewClips
-  const startsRef = useRef(starts)
-  startsRef.current = starts
-  const posRef = useRef(pos)
-  posRef.current = pos
-
-  const onLoadedMetadata = (): void => {
-    const v = videoRef.current
-    const p = posRef.current
-    if (!v || !p) return
-    v.currentTime = p.sourceTime
-    v.muted = p.clip.mute
-    if (usePlayback.getState().playing) void v.play().catch(() => {})
-  }
-
-  // Paused/scrubbing: keep the video parked at the playhead.
-  useEffect(() => {
-    if (playing) return
-    const v = videoRef.current
-    if (v && pos && v.readyState >= 1 && Math.abs(v.currentTime - pos.sourceTime) > 0.06) {
-      v.currentTime = pos.sourceTime
-    }
-  }, [playing, pos?.sourceTime])
-
-  // Play/pause (restart from 0 if parked at the very end of the project).
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v) return
-    if (!(playing && ready)) {
-      v.pause()
-      return
-    }
-    const projEnd = Math.max(timelineDuration(clipsRef.current), audioEndRef.current)
-    if (usePlayback.getState().time >= projEnd - 0.05) {
-      usePlayback.getState().setTime(0)
-      const first = locate(clipsRef.current, 0)
-      if (first && first.clip.mediaId === activeMediaId) v.currentTime = first.sourceTime
-    }
-    void v.play().catch(() => {})
-  }, [playing, ready, activeMediaId])
-
-  // The clock. The video drives time while it's the active source; past the last
-  // clip (audio-only tail) a wall clock takes over so audio keeps playing.
+  // Master clock: a wall clock advances `time` while playing (so any number of
+  // video layers can play at once); each video follows it independently.
   useEffect(() => {
     if (!playing) return undefined
+    if (usePlayback.getState().time >= durationRef.current - 0.05) usePlayback.getState().setTime(0)
     let raf = 0
-    let lastNow = performance.now()
+    let last = performance.now()
     const tick = (): void => {
       if (!usePlayback.getState().playing) return
-      const v = videoRef.current
-      const clips = clipsRef.current
-      const startsNow = startsRef.current
-      const { setTime, setPlaying } = usePlayback.getState()
-      const t = usePlayback.getState().time
-      const videoTotal = timelineDuration(clips)
-      const projTotal = Math.max(videoTotal, audioEndRef.current)
-      const inVideo = clips.length > 0 && t < videoTotal - 0.001
-
-      if (inVideo) {
-        if (v && ready && v.paused) void v.play().catch(() => {})
-        if (v && v.readyState >= 2) {
-          const p = locate(clips, t)
-          if (p) {
-            if (v.currentTime >= p.clip.outSec - 0.04) {
-              const nextIdx = p.index + 1
-              if (nextIdx < clips.length) {
-                const next = clips[nextIdx]
-                setTime(startsNow[nextIdx] ?? 0)
-                if (next.mediaId === p.clip.mediaId && Math.abs(v.currentTime - next.inSec) > 0.05) {
-                  v.currentTime = next.inSec
-                }
-              } else if (videoTotal < projTotal) {
-                setTime(videoTotal) // fall through to the audio-only tail
-              } else {
-                setPlaying(false)
-                setTime(projTotal)
-                return
-              }
-            } else {
-              setTime((startsNow[p.index] ?? 0) + Math.max(0, v.currentTime - p.clip.inSec))
-            }
-          }
-        }
-        lastNow = performance.now()
-      } else {
-        if (v && !v.paused) v.pause() // freeze the last frame while audio plays on
-        const now = performance.now()
-        const dt = (now - lastNow) / 1000
-        lastNow = now
-        const nt = t + dt
-        if (nt >= projTotal - 0.001) {
-          setPlaying(false)
-          setTime(projTotal)
-          return
-        }
-        setTime(nt)
+      const now = performance.now()
+      const dt = (now - last) / 1000
+      last = now
+      const nt = usePlayback.getState().time + dt
+      if (nt >= durationRef.current - 0.001) {
+        usePlayback.getState().setPlaying(false)
+        usePlayback.getState().setTime(Math.max(0, durationRef.current))
+        return
       }
+      usePlayback.getState().setTime(nt)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing, ready])
+  }, [playing])
 
-  useEffect(() => {
-    const v = videoRef.current
-    if (v && activeClip) v.muted = activeClip.mute
-  }, [activeClip])
-
-  // Crop: map the active clip's source-pixel crop into the 9:16 stage with CSS.
-  const videoStyle: CSSProperties = useMemo(() => {
-    const crop = activeClip?.crop
-    const v = activeAsset?.probe.video
-    const col = activeClip?.color
-    // Mirror the export eq() filter so preview color matches output.
-    const filter = col
-      ? `brightness(${1 + col.brightness}) contrast(${col.contrast}) saturate(${col.saturation})`
-      : undefined
-    if (crop && v) {
-      return {
-        position: 'absolute',
-        width: `${(v.displayWidth / crop.w) * 100}%`,
-        height: `${(v.displayHeight / crop.h) * 100}%`,
-        left: `${-(crop.x / crop.w) * 100}%`,
-        top: `${-(crop.y / crop.h) * 100}%`,
-        objectFit: 'fill',
-        maxWidth: 'none',
-        background: 'black',
-        filter
-      }
-    }
-    return { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: 'black', filter }
-  }, [activeClip?.crop, activeClip?.color, activeAsset?.probe.video])
-
-  const startOverlayDrag = (e: ReactPointerEvent, o: TextOverlay): void => {
+  // Drag a layer to move it (logical coords), one undo step on release.
+  const startLayerMove = (e: ReactPointerEvent, layer: Layer): void => {
     e.stopPropagation()
     e.preventDefault()
-    useUi.getState().selectOverlay(o.id)
-    const stage = stageRef.current
-    const before = useProject.getState().project
-    if (!stage || !before) return
-    const scale = LOGICAL.width / stage.getBoundingClientRect().width // logical px per screen px
-    const startX = e.clientX
-    const startY = e.clientY
-    const onMove = (ev: PointerEvent): void => {
-      const nx = clamp(o.x + (ev.clientX - startX) * scale, 0, LOGICAL.width)
-      const ny = clamp(o.y + (ev.clientY - startY) * scale, 0, LOGICAL.height)
-      useProject.getState().liveUpdate((p) => ({
-        ...p,
-        overlays: p.overlays.map((x) => (x.id === o.id ? { ...x, x: nx, y: ny } : x))
-      }))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
-  // Drag an image overlay to move it (logical coords), one undo step on release.
-  const startImageDrag = (e: ReactPointerEvent, o: ImageOverlay): void => {
-    e.stopPropagation()
-    e.preventDefault()
-    useUi.getState().selectImage(o.id)
+    useUi.getState().selectLayer(layer.id)
     const stage = stageRef.current
     const before = useProject.getState().project
     if (!stage || !before) return
@@ -297,11 +257,11 @@ export function PreviewStage(): JSX.Element {
     const startX = e.clientX
     const startY = e.clientY
     const onMove = (ev: PointerEvent): void => {
-      const nx = clamp(o.x + (ev.clientX - startX) * scale, 0, LOGICAL.width)
-      const ny = clamp(o.y + (ev.clientY - startY) * scale, 0, LOGICAL.height)
+      const nx = layer.x + (ev.clientX - startX) * scale
+      const ny = layer.y + (ev.clientY - startY) * scale
       useProject.getState().liveUpdate((p) => ({
         ...p,
-        imageOverlays: p.imageOverlays.map((x) => (x.id === o.id ? { ...x, x: nx, y: ny } : x))
+        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, x: nx, y: ny } : l))
       }))
     }
     const onUp = (): void => {
@@ -313,23 +273,19 @@ export function PreviewStage(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  // Drag the corner handle to resize an image overlay, keeping its aspect ratio.
-  const startImageResize = (e: ReactPointerEvent, o: ImageOverlay): void => {
+  // Drag the corner handle to zoom the selected layer.
+  const startLayerZoom = (e: ReactPointerEvent, layer: Layer): void => {
     e.stopPropagation()
     e.preventDefault()
-    useUi.getState().selectImage(o.id)
-    const stage = stageRef.current
     const before = useProject.getState().project
-    if (!stage || !before) return
-    const scale = LOGICAL.width / stage.getBoundingClientRect().width
+    if (!before) return
     const startX = e.clientX
-    const w0 = o.w
-    const aspect = o.h > 0 ? o.w / o.h : 1
+    const s0 = layer.scale
     const onMove = (ev: PointerEvent): void => {
-      const nw = clamp(w0 + (ev.clientX - startX) * scale, 40, LOGICAL.width * 1.5)
+      const ns = clamp(s0 + (ev.clientX - startX) * 0.004, 0.05, 8)
       useProject.getState().liveUpdate((p) => ({
         ...p,
-        imageOverlays: p.imageOverlays.map((x) => (x.id === o.id ? { ...x, w: nw, h: nw / aspect } : x))
+        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, scale: ns } : l))
       }))
     }
     const onUp = (): void => {
@@ -341,31 +297,22 @@ export function PreviewStage(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  const visibleOverlays = overlaysAtTime(overlays, time)
-  const visibleImages = imageOverlaysAtTime(imageOverlays, time)
-  const captions = project?.captions
+  const activeLayers = layersAtTime(previewLayers, time).filter((l) => !l.hidden)
+  const selectedLayer = activeLayers.find((l) => l.id === selectedLayerId) ?? null
   const activeCaption = captions?.enabled
     ? captions.segments.find((s) => s.enabled && time >= s.startSec && time < s.endSec)
     : undefined
-  const hasContent = previewClips.length > 0
+  const hasContent = previewLayers.length > 0
 
   return (
     <div
       ref={stageRef}
       style={{ containerType: 'size' }}
-      className="relative aspect-[9/16] h-full overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-white/10"
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) useUi.getState().selectLayer(null)
+      }}
+      className="relative aspect-[9/16] h-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10"
     >
-      <video
-        key={activeMediaId ?? 'empty'}
-        ref={videoRef}
-        src={activeMediaId ? proxyUrl(activeMediaId) : undefined}
-        playsInline
-        style={videoStyle}
-        onLoadedMetadata={onLoadedMetadata}
-        onClick={() => usePlayback.getState().toggle()}
-        className={ready ? '' : 'opacity-0'}
-      />
-
       {/* Audio track: one follower <audio> per clip (the browser mixes them) */}
       {audioClips.map((a) => {
         const asset = assetById.get(a.mediaId)
@@ -374,98 +321,126 @@ export function PreviewStage(): JSX.Element {
         return <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
       })}
 
+      {/* The composited layer stack, back (index 0) → front. */}
+      {activeLayers.map((layer, i) => {
+        const z = 10 + i
+        const selected = layer.id === selectedLayerId
+        const onMoveDown = (e: ReactPointerEvent): void => startLayerMove(e, layer)
 
-      {!ready && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-zinc-600">
-          {hasContent && activeAsset ? (
-            <>
+        if (layer.content.kind === 'video') {
+          const content = layer.content
+          const asset = assetById.get(content.mediaId)
+          const box = { ...mediaBox(layer, mediaAspect(asset, content)), zIndex: z }
+          if (!asset?.proxyReady || !asset.probe.video) {
+            return (
+              <div
+                key={layer.id}
+                style={box}
+                onPointerDown={onMoveDown}
+                className="flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500"
+              >
+                {asset ? (
+                  <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
+                ) : (
+                  'missing'
+                )}
+              </div>
+            )
+          }
+          return (
+            <VideoLayerView
+              key={layer.id}
+              layer={layer}
+              content={content}
+              asset={asset}
+              time={time}
+              playing={playing}
+              selected={selected}
+              boxStyle={box}
+              onMoveDown={onMoveDown}
+            />
+          )
+        }
+
+        if (layer.content.kind === 'image') {
+          const content = layer.content
+          const asset = assetById.get(content.mediaId)
+          const box = { ...mediaBox(layer, mediaAspect(asset, {})), zIndex: z }
+          return (
+            <div
+              key={layer.id}
+              style={box}
+              onPointerDown={onMoveDown}
+              className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
+            >
               <img
-                src={thumbUrl(activeAsset.id)}
+                src={imageUrl(content.mediaId)}
                 alt=""
-                onError={(e) => (e.currentTarget.style.display = 'none')}
-                className="absolute inset-0 h-full w-full object-contain opacity-40"
+                draggable={false}
+                style={{ width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }}
               />
-              <span className="z-10">Generating preview…</span>
-            </>
-          ) : (
-            'Add a clip to the timeline to begin'
-          )}
-        </div>
-      )}
+            </div>
+          )
+        }
 
-      {/* Image overlays (logos/graphics) — under the text layer */}
-      {visibleImages.map((o) => {
-        if (!assetById.get(o.mediaId)) return null
-        const selected = selectedImageId === o.id
+        // Text layer
+        const content = layer.content
         return (
           <div
-            key={o.id}
-            onPointerDown={(e) => startImageDrag(e, o)}
+            key={layer.id}
+            onPointerDown={onMoveDown}
             style={{
               position: 'absolute',
-              left: pct(o.x, LOGICAL.width),
-              top: pct(o.y, LOGICAL.height),
-              width: pct(o.w, LOGICAL.width),
-              height: pct(o.h, LOGICAL.height),
-              transform: o.anchor === 'center' ? 'translate(-50%, -50%)' : 'none'
+              left: pct(layer.x, LOGICAL.width),
+              top: pct(layer.y, LOGICAL.height),
+              transform: `translate(-50%, -50%) scale(${layer.scale})`,
+              transformOrigin: 'center',
+              fontSize: `${(content.fontSizePx / LOGICAL.width) * 100}cqw`,
+              color: content.color,
+              fontFamily: content.fontFamily,
+              maxWidth: '92%',
+              zIndex: z
             }}
-            className={`z-20 cursor-move select-none ${
+            className={`cursor-move select-none whitespace-pre-wrap text-center font-extrabold leading-tight ${
               selected ? 'outline-dashed outline-2 outline-sky-400' : ''
             }`}
           >
-            <img
-              src={imageUrl(o.mediaId)}
-              alt=""
-              draggable={false}
-              style={{ opacity: o.opacity }}
-              className="h-full w-full object-contain"
-            />
-            {selected && (
-              <span
-                onPointerDown={(e) => startImageResize(e, o)}
-                title="Drag to resize"
-                className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize rounded-sm border border-white bg-sky-400"
-              />
-            )}
+            <span
+              style={
+                content.pill.enabled
+                  ? {
+                      background: content.pill.color,
+                      padding: `${(content.pill.padPx / LOGICAL.width) * 100}cqw`,
+                      borderRadius: `${(10 / LOGICAL.width) * 100}cqw`,
+                      boxDecorationBreak: 'clone',
+                      WebkitBoxDecorationBreak: 'clone'
+                    }
+                  : { textShadow: '0 0.2cqw 0.8cqw rgba(0,0,0,0.85)' }
+              }
+            >
+              {content.text}
+            </span>
           </div>
         )
       })}
 
-      {/* Text overlays (only those visible at the current time) */}
-      {visibleOverlays.map((o) => (
-        <div
-          key={o.id}
-          onPointerDown={(e) => startOverlayDrag(e, o)}
-          style={{
-            position: 'absolute',
-            left: pct(o.x, LOGICAL.width),
-            top: pct(o.y, LOGICAL.height),
-            transform: o.anchor === 'center' ? 'translate(-50%, -50%)' : 'none',
-            fontSize: `${(o.fontSizePx / LOGICAL.width) * 100}cqw`,
-            color: o.color,
-            maxWidth: '92%'
-          }}
-          className={`z-30 cursor-move select-none whitespace-pre-wrap text-center font-extrabold leading-tight ${
-            selectedOverlayId === o.id ? 'outline-dashed outline-2 outline-sky-400' : ''
-          }`}
+      {/* Zoom handle for the selected layer (pinned to the stage corner so it's
+          always reachable regardless of where the layer sits). */}
+      {selectedLayer && (
+        <span
+          onPointerDown={(e) => startLayerZoom(e, selectedLayer)}
+          title="Drag to zoom the selected layer"
+          className="absolute bottom-2 right-2 z-[200] flex h-6 w-6 cursor-nwse-resize items-center justify-center rounded border border-white/70 bg-sky-500 text-[11px] text-white shadow"
         >
-          <span
-            style={
-              o.pill.enabled
-                ? {
-                    background: o.pill.color,
-                    padding: `${(o.pill.padPx / LOGICAL.width) * 100}cqw`,
-                    borderRadius: `${(10 / LOGICAL.width) * 100}cqw`,
-                    boxDecorationBreak: 'clone',
-                    WebkitBoxDecorationBreak: 'clone'
-                  }
-                : { textShadow: '0 0.2cqw 0.8cqw rgba(0,0,0,0.85)' }
-            }
-          >
-            {o.text}
-          </span>
+          ⤢
+        </span>
+      )}
+
+      {!hasContent && (
+        <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-600">
+          Add a clip to the timeline to begin
         </div>
-      ))}
+      )}
 
       {/* Active caption (auto-generated), at the configured baseline */}
       {activeCaption && captions && (
@@ -478,29 +453,30 @@ export function PreviewStage(): JSX.Element {
             fontSize: `${(64 / LOGICAL.width) * 100}cqw`,
             maxWidth: '88%',
             color: '#ffffff',
+            zIndex: 300,
             textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)'
           }}
-          className="z-30 text-center font-extrabold leading-tight"
+          className="text-center font-extrabold leading-tight"
         >
           {activeCaption.text}
         </div>
       )}
 
       {/* Hook zone (first 3 seconds) */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-[400] flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
         Hook zone · first 3s
       </div>
       {/* Bottom safe zone */}
       <div
-        className="pointer-events-none absolute left-0 z-40 w-full border-t border-rose-400/40 bg-rose-500/10"
+        className="pointer-events-none absolute left-0 z-[400] w-full border-t border-rose-400/40 bg-rose-500/10"
         style={{ top: pct(SAFE_ZONES.bottom.y, LOGICAL.height), height: pct(SAFE_ZONES.bottom.h, LOGICAL.height) }}
       />
       {/* Right action rail */}
       <div
-        className="pointer-events-none absolute top-0 z-40 h-full border-l border-rose-400/40 bg-rose-500/10"
+        className="pointer-events-none absolute top-0 z-[400] h-full border-l border-rose-400/40 bg-rose-500/10"
         style={{ left: pct(SAFE_ZONES.rightRail.x, LOGICAL.width), width: pct(SAFE_ZONES.rightRail.w, LOGICAL.width) }}
       />
-      <div className="pointer-events-none absolute left-2 top-2 z-40 text-[10px] uppercase tracking-wide text-zinc-500">
+      <div className="pointer-events-none absolute left-2 top-2 z-[400] text-[10px] uppercase tracking-wide text-zinc-500">
         {LOGICAL.width} × {LOGICAL.height}
       </div>
     </div>

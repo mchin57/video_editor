@@ -1,18 +1,10 @@
 import { create } from 'zustand'
-import type {
-  AudioClip,
-  CaptionSegment,
-  CaptionsConfig,
-  ColorAdjust,
-  CropRect,
-  ImageOverlay,
-  Project,
-  ScriptLine,
-  TextOverlay
-} from '@shared/project'
+import type { AudioClip, CaptionsConfig, Layer, Project, ScriptLine } from '@shared/project'
 import { createEmptyProject, migrateProject } from '@shared/project'
+import { applyVisibleOrder, makeVideoLayer } from '@shared/layers'
 import type { PresetId } from '@shared/export'
-import { clipStartTimes, reorder, splitClip, timelineDuration } from '@/lib/timeline'
+import { splitAudioClip, splitVideoLayer } from '@/lib/timeline'
+import { useUi } from '@/state/ui'
 import {
   loadProject,
   openProjectFile,
@@ -30,6 +22,9 @@ function scheduleSave(project: Project): void {
 }
 
 const newId = (): string => crypto.randomUUID()
+
+/** A partial patch over a layer's content (the caller guards the content kind). */
+type ContentPatch = Record<string, unknown>
 
 /**
  * The file binding (which .reel file, and whether there are unsaved changes)
@@ -63,7 +58,6 @@ interface ProjectState {
   project: Project | null
   past: Project[]
   future: Project[]
-  selectedClipId: string | null
   loaded: boolean
   /** Path of the bound .reel file, or null if this project was never saved to one. */
   filePath: string | null
@@ -71,57 +65,52 @@ interface ProjectState {
   dirty: boolean
 
   load: () => Promise<void>
-  /** File ▸ New — start a blank project (prompts if there are unsaved changes). */
   newProjectFile: () => void
-  /** File ▸ Open… — pick a .reel file (prompts if there are unsaved changes). */
   openFile: () => Promise<void>
-  /** File ▸ Save — write to the bound file, or fall back to Save As… if unbound. */
   save: () => Promise<void>
-  /** File ▸ Save As… — choose a new .reel file and bind to it. */
   saveAs: () => Promise<void>
-  selectClip: (id: string | null) => void
   setPreset: (preset: PresetId) => void
-  /** Add imported media to this project's library (deduped, recorded for undo). */
   addMedia: (ids: string[]) => void
-  /** Remove media from this project's library. Does NOT delete it from disk. */
   removeMedia: (id: string) => void
   /** Update the project without recording history (for live drag previews). */
   liveUpdate: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
   commitLive: (before: Project) => void
-  addClip: (mediaId: string, durationSec: number, hasAudio?: boolean) => void
-  removeClip: (clipId: string) => void
-  reorderClips: (from: number, to: number) => void
-  trimClip: (clipId: string, inSec: number, outSec: number) => void
-  splitClipAt: (clipId: string, localTime: number) => void
-  toggleMute: (clipId: string) => void
-  setClipCrop: (clipId: string, crop: CropRect | null) => void
-  setClipColor: (clipId: string, color: ColorAdjust | null) => void
-  addOverlay: (overlay: TextOverlay) => void
-  updateOverlay: (id: string, patch: Partial<TextOverlay>) => void
-  removeOverlay: (id: string) => void
-  addImageOverlay: (overlay: ImageOverlay) => void
-  updateImageOverlay: (id: string, patch: Partial<ImageOverlay>) => void
-  removeImageOverlay: (id: string) => void
+
+  // --- Layers ---
+  /** Append a layer to the FRONT of the stack (top). */
+  addLayer: (layer: Layer) => void
+  /** Add a video layer (front) at `startSec`; optionally extract its audio. */
+  addVideoLayer: (id: string, mediaId: string, startSec: number, durationSec: number, hasAudio?: boolean) => void
+  updateLayer: (id: string, patch: Partial<Layer>) => void
+  updateLayerContent: (id: string, patch: ContentPatch) => void
+  removeLayer: (id: string) => void
+  toggleLayerHidden: (id: string) => void
+  /** Reapply a new front→back order of the *visible* layers to the full stack. */
+  reorderLayers: (visibleFrontToBack: string[]) => void
+  /** Split a video layer at an absolute timeline time. */
+  splitLayerAt: (id: string, atSec: number) => void
+  /** Pull a video layer's audio onto the audio track and mute the layer. */
+  extractLayerAudio: (id: string) => void
+
+  // --- Captions / script / audio (unchanged tracks) ---
   setCaptions: (captions: CaptionsConfig) => void
   addScriptLine: (atSec: number | null) => void
   updateScriptLine: (id: string, patch: Partial<ScriptLine>) => void
   removeScriptLine: (id: string) => void
-  updateCaption: (id: string, patch: Partial<CaptionSegment>) => void
+  updateCaption: (id: string, patch: Partial<import('@shared/project').CaptionSegment>) => void
   removeCaption: (id: string) => void
   addAudioClip: (clip: AudioClip) => void
   updateAudioClip: (id: string, patch: Partial<AudioClip>) => void
   removeAudioClip: (id: string) => void
-  /** Pull a video clip's audio onto the audio track and mute the clip. */
-  extractClipAudio: (clipId: string) => void
-  /** Replace an audio clip with one clip per speech segment (source-time ranges). */
   splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[]) => void
+  splitAudioAt: (audioId: string, atSec: number, sourceDurationSec: number) => void
+
   undo: () => void
   redo: () => void
 }
 
 export const useProject = create<ProjectState>((set, get) => {
-  /** Flag the document as changed-since-last-file-save and persist the binding. */
   function markDirty(): void {
     if (!get().dirty) set({ dirty: true })
     saveSession(get().filePath, true)
@@ -140,16 +129,21 @@ export const useProject = create<ProjectState>((set, get) => {
 
   /** Switch to a different project document, resetting history and selection. */
   function adopt(project: Project, filePath: string | null): void {
-    set({ project, past: [], future: [], selectedClipId: null, filePath, dirty: false })
+    useUi.getState().clearSelection()
+    set({ project, past: [], future: [], filePath, dirty: false })
     saveSession(filePath, false)
-    scheduleSave(project) // keep the working copy in sync with what's on screen
+    scheduleSave(project)
   }
+
+  const mapLayer = (p: Project, id: string, fn: (l: Layer) => Layer): Project => ({
+    ...p,
+    layers: p.layers.map((l) => (l.id === id ? fn(l) : l))
+  })
 
   return {
     project: null,
     past: [],
     future: [],
-    selectedClipId: null,
     loaded: false,
     filePath: null,
     dirty: false,
@@ -186,13 +180,10 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!project) return
       const res = await saveProjectAs(project)
       if (!res) return
-      // The chosen filename becomes the project name; reflect it in the working copy.
       set({ project: res.project, filePath: res.path, dirty: false })
       saveSession(res.path, false)
       scheduleSave(res.project)
     },
-
-    selectClip: (id) => set({ selectedClipId: id }),
 
     setPreset: (preset) => commit((p) => ({ ...p, preset })),
 
@@ -221,13 +212,12 @@ export const useProject = create<ProjectState>((set, get) => {
       markDirty()
     },
 
-    addClip: (mediaId, durationSec, hasAudio = false) =>
+    // --- Layers ---
+    addLayer: (layer) => commit((p) => ({ ...p, layers: [...p.layers, layer] })),
+
+    addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false) =>
       commit((p) => {
-        const out = Math.max(0.1, durationSec)
-        const startSec = timelineDuration(p.clips) // appended at the current end
-        const clip = { id: newId(), mediaId, inSec: 0, outSec: out, crop: null, mute: hasAudio, gainDb: 0 }
-        // Auto-extract the clip's audio onto the audio track (and mute the clip),
-        // so dialogue can be mixed independently.
+        const layer = makeVideoLayer(id, mediaId, startSec, durationSec, { mute: hasAudio })
         const audioClips = hasAudio
           ? [
               ...p.audioClips,
@@ -236,7 +226,7 @@ export const useProject = create<ProjectState>((set, get) => {
                 mediaId,
                 startSec,
                 inSec: 0,
-                outSec: out,
+                outSec: Math.max(0.1, durationSec),
                 gainDb: 0,
                 fadeInSec: 0,
                 fadeOutSec: 0,
@@ -245,78 +235,61 @@ export const useProject = create<ProjectState>((set, get) => {
               }
             ]
           : p.audioClips
-        return { ...p, clips: [...p.clips, clip], audioClips }
+        return { ...p, layers: [...p.layers, layer], audioClips }
       }),
 
-    removeClip: (clipId) => {
-      commit((p) => ({ ...p, clips: p.clips.filter((c) => c.id !== clipId) }))
-      if (get().selectedClipId === clipId) set({ selectedClipId: null })
+    updateLayer: (id, patch) => commit((p) => mapLayer(p, id, (l) => ({ ...l, ...patch }))),
+
+    updateLayerContent: (id, patch) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))
+      ),
+
+    removeLayer: (id) => {
+      commit((p) => ({ ...p, layers: p.layers.filter((l) => l.id !== id) }))
+      if (useUi.getState().selectedLayerId === id) useUi.getState().selectLayer(null)
     },
 
-    reorderClips: (from, to) => commit((p) => ({ ...p, clips: reorder(p.clips, from, to) })),
+    toggleLayerHidden: (id) => commit((p) => mapLayer(p, id, (l) => ({ ...l, hidden: !l.hidden }))),
 
-    trimClip: (clipId, inSec, outSec) =>
-      commit((p) => ({
-        ...p,
-        clips: p.clips.map((c) => {
-          if (c.id !== clipId) return c
-          const i = Math.max(0, Math.min(inSec, outSec - 0.05))
-          const o = Math.max(i + 0.05, outSec)
-          return { ...c, inSec: i, outSec: o }
-        })
-      })),
+    reorderLayers: (visibleFrontToBack) =>
+      commit((p) => ({ ...p, layers: applyVisibleOrder(p.layers, [...visibleFrontToBack].reverse()) })),
 
-    splitClipAt: (clipId, localTime) =>
+    splitLayerAt: (id, atSec) =>
       commit((p) => {
-        const idx = p.clips.findIndex((c) => c.id === clipId)
+        const idx = p.layers.findIndex((l) => l.id === id)
         if (idx < 0) return p
-        const res = splitClip(p.clips[idx], localTime, newId)
+        const res = splitVideoLayer(p.layers[idx], atSec, newId)
         if (!res) return p
-        const clips = p.clips.slice()
-        clips.splice(idx, 1, res[0], res[1])
-        return { ...p, clips }
+        const layers = p.layers.slice()
+        layers.splice(idx, 1, res[0], res[1])
+        return { ...p, layers }
       }),
 
-    toggleMute: (clipId) =>
-      commit((p) => ({
-        ...p,
-        clips: p.clips.map((c) => (c.id === clipId ? { ...c, mute: !c.mute } : c))
-      })),
+    extractLayerAudio: (id) =>
+      commit((p) => {
+        const layer = p.layers.find((l) => l.id === id)
+        if (!layer || layer.content.kind !== 'video') return p
+        const c = layer.content
+        const audio: AudioClip = {
+          id: newId(),
+          mediaId: c.mediaId,
+          startSec: layer.startSec,
+          inSec: c.inSec,
+          outSec: c.outSec,
+          gainDb: 0,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false,
+          kind: 'extracted'
+        }
+        return {
+          ...mapLayer(p, id, (l) => ({ ...l, content: { ...c, mute: true } })),
+          audioClips: [...p.audioClips, audio]
+        }
+      }),
 
-    setClipCrop: (clipId, crop) =>
-      commit((p) => ({
-        ...p,
-        clips: p.clips.map((c) => (c.id === clipId ? { ...c, crop } : c))
-      })),
-
-    setClipColor: (clipId, color) =>
-      commit((p) => ({
-        ...p,
-        clips: p.clips.map((c) => (c.id === clipId ? { ...c, color: color ?? undefined } : c))
-      })),
-
-    addOverlay: (overlay) => commit((p) => ({ ...p, overlays: [...p.overlays, overlay] })),
-
-    updateOverlay: (id, patch) =>
-      commit((p) => ({
-        ...p,
-        overlays: p.overlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
-      })),
-
-    removeOverlay: (id) => commit((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) })),
-
-    addImageOverlay: (overlay) =>
-      commit((p) => ({ ...p, imageOverlays: [...p.imageOverlays, overlay] })),
-
-    updateImageOverlay: (id, patch) =>
-      commit((p) => ({
-        ...p,
-        imageOverlays: p.imageOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
-      })),
-
-    removeImageOverlay: (id) =>
-      commit((p) => ({ ...p, imageOverlays: p.imageOverlays.filter((o) => o.id !== id) })),
-
+    // --- Captions / script / audio ---
     setCaptions: (captions) => commit((p) => ({ ...p, captions })),
 
     addScriptLine: (atSec) =>
@@ -375,29 +348,15 @@ export const useProject = create<ProjectState>((set, get) => {
         return { ...p, audioClips }
       }),
 
-    extractClipAudio: (clipId) =>
+    splitAudioAt: (audioId, atSec, sourceDurationSec) =>
       commit((p) => {
-        const idx = p.clips.findIndex((c) => c.id === clipId)
+        const idx = p.audioClips.findIndex((a) => a.id === audioId)
         if (idx < 0) return p
-        const clip = p.clips[idx]
-        const startSec = clipStartTimes(p.clips)[idx]
-        const audio: AudioClip = {
-          id: newId(),
-          mediaId: clip.mediaId,
-          startSec,
-          inSec: clip.inSec,
-          outSec: clip.outSec,
-          gainDb: 0,
-          fadeInSec: 0,
-          fadeOutSec: 0,
-          duck: false,
-          kind: 'extracted'
-        }
-        return {
-          ...p,
-          clips: p.clips.map((c) => (c.id === clipId ? { ...c, mute: true } : c)),
-          audioClips: [...p.audioClips, audio]
-        }
+        const res = splitAudioClip(p.audioClips[idx], atSec, sourceDurationSec, newId)
+        if (!res) return p
+        const audioClips = p.audioClips.slice()
+        audioClips.splice(idx, 1, res[0], res[1])
+        return { ...p, audioClips }
       }),
 
     undo: () => {

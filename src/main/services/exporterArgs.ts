@@ -9,7 +9,7 @@
  * Kept dependency-light (only the shared HDR chain) so it's unit-testable.
  */
 
-import type { Clip } from '@shared/project'
+import type { ColorAdjust, CropRect } from '@shared/project'
 import { isNeutralColor } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
@@ -19,6 +19,16 @@ import { hdrToSdrChain } from './proxy'
 export interface Target {
   width: number
   height: number
+}
+
+/** The bits of a video layer the per-clip normalize pass needs. */
+export interface NormalizeClip {
+  inSec: number
+  outSec: number
+  crop?: CropRect | null
+  mute: boolean
+  gainDb: number
+  color?: ColorAdjust
 }
 
 /** A resolved image overlay for the final encode (geometry in output px). */
@@ -49,7 +59,7 @@ export function targetForPreset(preset: PresetId): Target {
  * identical stream layout for the concat demuxer.
  */
 export function buildNormalizeArgs(
-  clip: Clip,
+  clip: NormalizeClip,
   asset: MediaAsset,
   target: Target,
   output: string

@@ -5,7 +5,7 @@ import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { useLibrary } from '@/hooks/useMedia'
 import { getSettings } from '@/ipc/client'
-import { timelineDuration } from '@/lib/timeline'
+import { visualDuration } from '@shared/layers'
 import { buildChecklist, type CheckStatus } from '@/lib/checklist'
 
 const ICON: Record<CheckStatus, string> = { pass: '✓', warn: '⚠', fail: '✗' }
@@ -29,7 +29,7 @@ export function ChecklistModal(): JSX.Element | null {
   const result = useMemo(() => {
     if (!project) return null
     const assetDur = (id: string): number => assets.find((a) => a.id === id)?.probe.durationSec ?? 0
-    const videoDur = timelineDuration(project.clips)
+    const videoDur = visualDuration(project.layers)
     const audioDur = project.audioClips.reduce((m, a) => Math.max(m, audioClipEnd(a, assetDur(a.mediaId))), 0)
     const target = EXPORT_PRESETS[project.preset]
     const is916 = Math.abs(target.width / target.height - 9 / 16) < 0.01

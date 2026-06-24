@@ -4,8 +4,8 @@
  * keywords, text clear of UI safe zones, vertical 9:16). Pure + unit-tested.
  */
 
-import type { Project } from '@shared/project'
-import { hookCovered } from './overlays'
+import type { Layer, Project, TextContent } from '@shared/project'
+import { hookCovered } from '@shared/layers'
 import { LOGICAL, intrudesSafeZone, type Rect } from './coords'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
@@ -31,13 +31,18 @@ export interface ChecklistInput {
   is916: boolean
 }
 
-/** Rough bounding box for a text overlay in logical space (for safe-zone test). */
-function overlayBox(o: Project['overlays'][number]): Rect {
-  const w = Math.min(LOGICAL.width, Math.max(o.fontSizePx * 3, o.text.trim().length * o.fontSizePx * 0.55))
-  const h = o.fontSizePx * 1.3
-  const x = o.anchor === 'center' ? o.x - w / 2 : o.x
-  const y = o.anchor === 'center' ? o.y - h / 2 : o.y
-  return { x, y, w, h }
+/** Non-empty text layers (the "on-screen text" the checklist scores). */
+function textLayers(project: Project): { layer: Layer; text: TextContent }[] {
+  return project.layers
+    .filter((l): l is Layer & { content: TextContent } => l.content.kind === 'text' && l.content.text.trim().length > 0)
+    .map((l) => ({ layer: l, text: l.content }))
+}
+
+/** Rough bounding box for a (center-anchored) text layer in logical space. */
+function textBox(layer: Layer, text: TextContent): Rect {
+  const w = Math.min(LOGICAL.width, Math.max(text.fontSizePx * 3, text.text.trim().length * text.fontSizePx * 0.55))
+  const h = text.fontSizePx * 1.3
+  return { x: layer.x - w / 2, y: layer.y - h / 2, w, h }
 }
 
 const PASS = (id: string, label: string, detail: string): CheckItem => ({ id, label, status: 'pass', detail })
@@ -46,7 +51,7 @@ const FAIL = (id: string, label: string, detail: string): CheckItem => ({ id, la
 
 export function buildChecklist(project: Project, input: ChecklistInput): ChecklistResult {
   const items: CheckItem[] = []
-  const overlays = project.overlays.filter((o) => o.text.trim().length > 0)
+  const overlays = textLayers(project)
   const hasCaptions = project.captions.enabled && project.captions.segments.some((s) => s.enabled)
   const captionText = project.captions.segments
     .map((s) => s.text)
@@ -55,7 +60,7 @@ export function buildChecklist(project: Project, input: ChecklistInput): Checkli
 
   // 1. Hook in the first 3 seconds
   items.push(
-    hookCovered(project.overlays)
+    hookCovered(project.layers)
       ? PASS('hook', 'Hook text in first 3s', 'On-screen hook within 0–3s.')
       : FAIL('hook', 'Hook text in first 3s', 'Add a text overlay starting before 3s — the first 3s decide retention.')
   )
@@ -102,7 +107,7 @@ export function buildChecklist(project: Project, input: ChecklistInput): Checkli
   }
 
   // 6. Text clear of UI safe zones
-  const intruding = overlays.filter((o) => intrudesSafeZone(overlayBox(o)))
+  const intruding = overlays.filter((o) => intrudesSafeZone(textBox(o.layer, o.text)))
   items.push(
     intruding.length === 0
       ? PASS('safezones', 'Text clear of UI safe zones', 'No text under the caption bar or action rail.')

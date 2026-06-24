@@ -7,29 +7,30 @@ import { clampCrop, defaultCrop, isFullFrame, resizeCrop } from '@/lib/crop'
 import { thumbUrl } from '@/ipc/client'
 
 /**
- * Modal to set a clip's 9:16 crop. Shows the source frame (thumbnail) at its
- * native aspect with a draggable / corner-resizable crop box locked to 9:16.
+ * Modal to set a video layer's 9:16 crop. Shows the source frame (thumbnail) at
+ * its native aspect with a draggable / corner-resizable crop box locked to 9:16.
  * Edits are local until Save.
  */
 export function CropEditor(): JSX.Element | null {
   const cropEditing = useUi((s) => s.cropEditing)
   const setCropEditing = useUi((s) => s.setCropEditing)
-  const selectedClipId = useProject((s) => s.selectedClipId)
-  const clip = useProject((s) => s.project?.clips.find((c) => c.id === selectedClipId) ?? null)
-  const setClipCrop = useProject((s) => s.setClipCrop)
+  const selectedLayerId = useUi((s) => s.selectedLayerId)
+  const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
+  const updateLayerContent = useProject((s) => s.updateLayerContent)
+  const content = layer && layer.content.kind === 'video' ? layer.content : null
   const { data: assets = [] } = useLibrary()
-  const asset = clip ? assets.find((a) => a.id === clip.mediaId) : undefined
+  const asset = content ? assets.find((a) => a.id === content.mediaId) : undefined
   const v = asset?.probe.video
 
   const srcW = v?.displayWidth ?? 1080
   const srcH = v?.displayHeight ?? 1920
-  const [box, setBox] = useState<CropRect>(() => clip?.crop ?? defaultCrop(srcW, srcH))
+  const [box, setBox] = useState<CropRect>(() => content?.crop ?? defaultCrop(srcW, srcH))
   const [rendered, setRendered] = useState({ w: 0, h: 0 })
   const frameRef = useRef<HTMLDivElement>(null)
 
   const scale = useMemo(() => (rendered.w > 0 ? rendered.w / srcW : 0), [rendered.w, srcW])
 
-  if (!cropEditing || !clip || !v) return null
+  if (!cropEditing || !layer || !content || !v) return null
 
   const move = (e: ReactPointerEvent): void => {
     e.preventDefault()
@@ -67,7 +68,7 @@ export function CropEditor(): JSX.Element | null {
   }
 
   const save = (): void => {
-    setClipCrop(clip.id, isFullFrame(box, srcW, srcH) ? null : box)
+    updateLayerContent(layer.id, { crop: isFullFrame(box, srcW, srcH) ? null : box })
     setCropEditing(false)
   }
 
@@ -127,7 +128,7 @@ export function CropEditor(): JSX.Element | null {
         </button>
         <button
           onClick={() => {
-            setClipCrop(clip.id, null)
+            updateLayerContent(layer.id, { crop: null })
             setCropEditing(false)
           }}
           className="rounded bg-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-white/20"

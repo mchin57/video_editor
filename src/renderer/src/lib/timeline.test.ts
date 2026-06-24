@@ -1,75 +1,90 @@
 import { describe, it, expect } from 'vitest'
-import {
-  clipDuration,
-  timelineDuration,
-  clipStartTimes,
-  locate,
-  splitClip,
-  reorder
-} from './timeline'
-import type { Clip } from '@shared/project'
+import { reorder, splitAudioClip, splitVideoLayer } from './timeline'
+import { makeVideoLayer } from '@shared/layers'
+import type { AudioClip } from '@shared/project'
 
-function clip(id: string, inSec: number, outSec: number): Clip {
-  return { id, mediaId: id, inSec, outSec, crop: null, mute: false, gainDb: 0 }
+function audio(over: Partial<AudioClip> = {}): AudioClip {
+  return {
+    id: 'a',
+    mediaId: 'm',
+    startSec: 0,
+    inSec: 0,
+    outSec: 10,
+    gainDb: 0,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    duck: false,
+    kind: 'music',
+    ...over
+  }
 }
 
-const clips = [clip('a', 0, 4), clip('b', 10, 16), clip('c', 2, 5)] // durations 4, 6, 3 → total 13
-
-describe('durations', () => {
-  it('clipDuration is out - in (never negative)', () => {
-    expect(clipDuration(clip('x', 2, 5))).toBe(3)
-    expect(clipDuration(clip('x', 5, 2))).toBe(0)
-  })
-  it('timelineDuration sums clip durations', () => {
-    expect(timelineDuration(clips)).toBe(13)
-  })
-  it('clipStartTimes are cumulative offsets', () => {
-    expect(clipStartTimes(clips)).toEqual([0, 4, 10])
-  })
-})
-
-describe('locate', () => {
-  it('returns null for empty timeline', () => {
-    expect(locate([], 1)).toBeNull()
-  })
-  it('maps a time inside the first clip', () => {
-    const p = locate(clips, 1)
-    expect(p?.index).toBe(0)
-    expect(p?.sourceTime).toBe(1) // inSec 0 + 1
-    expect(p?.localTime).toBe(1)
-  })
-  it('maps a time inside the second clip to its source time', () => {
-    const p = locate(clips, 5) // 1s into clip b (starts at 4); b.inSec = 10
-    expect(p?.index).toBe(1)
-    expect(p?.sourceTime).toBe(11)
-  })
-  it('a boundary belongs to the later clip', () => {
-    const p = locate(clips, 4)
-    expect(p?.index).toBe(1)
-    expect(p?.sourceTime).toBe(10)
-  })
-  it('past the end clamps to the last clip end', () => {
-    const p = locate(clips, 999)
-    expect(p?.index).toBe(2)
-    expect(p?.sourceTime).toBe(5) // c.outSec
-  })
-})
-
-describe('splitClip', () => {
+describe('splitVideoLayer', () => {
   const makeId = (): string => 'new'
-  it('splits into two clips sharing the source', () => {
-    const res = splitClip(clip('a', 0, 4), 1.5, makeId)
+  it('splits a video layer at an absolute time, sharing the source', () => {
+    const layer = makeVideoLayer('a', 'm', 4, 6) // startSec 4 → endSec 10; in 0, out 6
+    const res = splitVideoLayer(layer, 7, makeId)
     expect(res).not.toBeNull()
     const [left, right] = res!
-    expect(left.outSec).toBe(1.5)
-    expect(right.inSec).toBe(1.5)
-    expect(right.outSec).toBe(4)
-    expect(right.id).toBe('new')
     expect(left.id).toBe('a')
+    expect(left.endSec).toBe(7)
+    expect((left.content as { outSec: number }).outSec).toBe(3) // in 0 + (7 - 4)
+    expect(right.id).toBe('new')
+    expect(right.startSec).toBe(7)
+    expect((right.content as { inSec: number }).inSec).toBe(3)
+    expect(right.endSec).toBe(10)
   })
-  it('refuses to split at an edge', () => {
-    expect(splitClip(clip('a', 0, 4), 0, makeId)).toBeNull()
-    expect(splitClip(clip('a', 0, 4), 4, makeId)).toBeNull()
+  it('refuses to split at/outside the span, or non-video layers', () => {
+    const layer = makeVideoLayer('a', 'm', 4, 6)
+    expect(splitVideoLayer(layer, 4, makeId)).toBeNull()
+    expect(splitVideoLayer(layer, 10, makeId)).toBeNull()
+    expect(splitVideoLayer(layer, 2, makeId)).toBeNull()
+    const text = { ...layer, content: { kind: 'text' as const, text: 'x', fontFamily: 'a', fontSizePx: 10, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } } }
+    expect(splitVideoLayer(text, 7, makeId)).toBeNull()
+  })
+})
+
+describe('splitAudioClip', () => {
+  const makeId = (): string => 'new'
+  it('splits a clip at a timeline time into two segments sharing the source', () => {
+    const res = splitAudioClip(audio({ outSec: 10, fadeInSec: 1, fadeOutSec: 2 }), 4, 10, makeId)
+    expect(res).not.toBeNull()
+    const [left, right] = res!
+    expect(left.id).toBe('a')
+    expect(left.outSec).toBe(4)
+    expect(left.fadeInSec).toBe(1) // outer fade-in kept
+    expect(left.fadeOutSec).toBe(0) // seam is hard
+    expect(right.id).toBe('new')
+    expect(right.inSec).toBe(4)
+    expect(right.outSec).toBe(10)
+    expect(right.startSec).toBe(4)
+    expect(right.fadeInSec).toBe(0) // seam is hard
+    expect(right.fadeOutSec).toBe(2) // outer fade-out kept
+  })
+  it('accounts for the clip start and in-point when computing the cut', () => {
+    const res = splitAudioClip(audio({ startSec: 5, inSec: 2, outSec: 12 }), 8, 0, makeId)
+    const [left, right] = res!
+    expect(left.outSec).toBe(5) // inSec 2 + (8 - 5)
+    expect(right.inSec).toBe(5)
+    expect(right.startSec).toBe(8)
+  })
+  it('keeps a whole-source clip whole on the right of the cut', () => {
+    const res = splitAudioClip(audio({ outSec: 0 }), 4, 10, makeId) // 10s source
+    const [left, right] = res!
+    expect(left.outSec).toBe(4)
+    expect(right.inSec).toBe(4)
+    expect(right.outSec).toBe(0) // still "to the source end"
+  })
+  it('refuses to split at or outside the clip span', () => {
+    expect(splitAudioClip(audio({ outSec: 10 }), 0, 10, makeId)).toBeNull()
+    expect(splitAudioClip(audio({ outSec: 10 }), 10, 10, makeId)).toBeNull()
+    expect(splitAudioClip(audio({ outSec: 10 }), 11, 10, makeId)).toBeNull()
+    expect(splitAudioClip(audio({ startSec: 5, outSec: 10 }), 3, 10, makeId)).toBeNull()
+  })
+  it('guards only the lower edge when the source duration is unknown', () => {
+    expect(splitAudioClip(audio({ outSec: 0 }), 0, 0, makeId)).toBeNull()
+    const res = splitAudioClip(audio({ outSec: 0 }), 4, 0, makeId)
+    expect(res?.[0].outSec).toBe(4)
   })
 })
 

@@ -1,16 +1,13 @@
 import { useRef, useState, type JSX, type ReactNode } from 'react'
-import type { Project } from '@shared/project'
+import type { Layer, Project } from '@shared/project'
 import { NEUTRAL_COLOR, effectiveOut, isNeutralColor } from '@shared/project'
+import { hookCovered } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence } from '@/ipc/client'
 import { speechSegments } from '@/lib/silence'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
-import { useEditor } from '@/state/store'
 import { formatDuration, formatFps } from '@/lib/format'
-import { clipDuration } from '@/lib/timeline'
-import { hookCovered } from '@/lib/overlays'
-import { LOGICAL } from '@/lib/coords'
 
 function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -33,19 +30,20 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
 const inputCls =
   'w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-sky-400/60'
 
-/** Color slider: live updates during drag, one undo step on release. */
-function ColorSlider({
-  clipId,
-  prop,
+/** A range slider that previews live during the drag and records one undo step
+ *  on release. `transform` maps (project, value) → next project. */
+function LiveRange({
   min,
   max,
-  value
+  step,
+  value,
+  transform
 }: {
-  clipId: string
-  prop: 'brightness' | 'contrast' | 'saturation'
   min: number
   max: number
+  step: number
   value: number
+  transform: (p: Project, v: number) => Project
 }): JSX.Element {
   const before = useRef<Project | null>(null)
   return (
@@ -53,17 +51,12 @@ function ColorSlider({
       type="range"
       min={min}
       max={max}
-      step={0.02}
+      step={step}
       value={value}
       onPointerDown={() => (before.current = useProject.getState().project)}
       onChange={(e) => {
         const v = Number(e.target.value)
-        useProject.getState().liveUpdate((p) => ({
-          ...p,
-          clips: p.clips.map((c) =>
-            c.id === clipId ? { ...c, color: { ...(c.color ?? NEUTRAL_COLOR), [prop]: v } } : c
-          )
-        }))
+        useProject.getState().liveUpdate((p) => transform(p, v))
       }}
       onPointerUp={() => before.current && useProject.getState().commitLive(before.current)}
       className="w-full accent-sky-400"
@@ -71,277 +64,260 @@ function ColorSlider({
   )
 }
 
-function OverlayEditor(): JSX.Element | null {
-  const selectedOverlayId = useUi((s) => s.selectedOverlayId)
-  const overlay = useProject((s) => s.project?.overlays.find((o) => o.id === selectedOverlayId) ?? null)
-  const update = useProject((s) => s.updateOverlay)
-  const remove = useProject((s) => s.removeOverlay)
-  const selectOverlay = useUi((s) => s.selectOverlay)
-  if (!overlay) return null
+const setLayer = (id: string) => (p: Project, fn: (l: Layer) => Layer): Project => ({
+  ...p,
+  layers: p.layers.map((l) => (l.id === id ? fn(l) : l))
+})
 
-  return (
-    <div>
-      <div className="mb-2 text-sm font-medium text-zinc-200">Text overlay</div>
-      <Field label="Text">
-        <textarea
-          value={overlay.text}
-          rows={2}
-          onChange={(e) => update(overlay.id, { text: e.target.value })}
-          className={inputCls}
-        />
-      </Field>
-      <div className="flex gap-2">
-        <Field label="Start (s)">
-          <input
-            type="number"
-            step="0.1"
-            min="0"
-            value={overlay.startSec.toFixed(1)}
-            onChange={(e) => update(overlay.id, { startSec: Math.max(0, Number(e.target.value)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="End (s)">
-          <input
-            type="number"
-            step="0.1"
-            value={overlay.endSec.toFixed(1)}
-            onChange={(e) =>
-              update(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, Number(e.target.value)) })
-            }
-            className={inputCls}
-          />
-        </Field>
-      </div>
-      <div className="flex items-end gap-2">
-        <Field label="Font size">
-          <input
-            type="number"
-            step="2"
-            min="12"
-            value={overlay.fontSizePx}
-            onChange={(e) => update(overlay.id, { fontSizePx: Math.max(12, Number(e.target.value)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Color">
-          <input
-            type="color"
-            value={overlay.color}
-            onChange={(e) => update(overlay.id, { color: e.target.value })}
-            className="h-7 w-full rounded border border-white/10 bg-black/40"
-          />
-        </Field>
-      </div>
-      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={overlay.pill.enabled}
-          onChange={(e) => update(overlay.id, { pill: { ...overlay.pill, enabled: e.target.checked } })}
-        />
-        Background pill
-      </label>
-      <button
-        onClick={() => {
-          remove(overlay.id)
-          selectOverlay(null)
-        }}
-        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
-      >
-        Delete overlay
-      </button>
-    </div>
-  )
-}
-
-function ImageOverlayEditor(): JSX.Element | null {
-  const selectedImageId = useUi((s) => s.selectedImageId)
-  const overlay = useProject(
-    (s) => s.project?.imageOverlays.find((o) => o.id === selectedImageId) ?? null
-  )
-  const update = useProject((s) => s.updateImageOverlay)
-  const remove = useProject((s) => s.removeImageOverlay)
-  const selectImage = useUi((s) => s.selectImage)
-  const { data: assets = [] } = useLibrary()
-  if (!overlay) return null
-  const asset = assets.find((a) => a.id === overlay.mediaId)
-  const widthPct = Math.round((overlay.w / LOGICAL.width) * 100)
-  const aspect = overlay.h > 0 ? overlay.w / overlay.h : 1
-
-  return (
-    <div>
-      <div className="mb-1 text-sm font-medium text-zinc-200">Image overlay</div>
-      <div className="mb-3 truncate text-xs text-zinc-400" title={asset?.fileName}>
-        {asset?.fileName ?? overlay.mediaId}
-      </div>
-      <div className="flex gap-2">
-        <Field label="Start (s)">
-          <input
-            type="number"
-            step="0.1"
-            min="0"
-            value={overlay.startSec.toFixed(1)}
-            onChange={(e) => update(overlay.id, { startSec: Math.max(0, Number(e.target.value)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="End (s)">
-          <input
-            type="number"
-            step="0.1"
-            value={overlay.endSec.toFixed(1)}
-            onChange={(e) =>
-              update(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, Number(e.target.value)) })
-            }
-            className={inputCls}
-          />
-        </Field>
-      </div>
-      <Field label={`Size · ${widthPct}% width`}>
-        <input
-          type="range"
-          min={5}
-          max={120}
-          step={1}
-          value={widthPct}
-          onChange={(e) => {
-            const w = (Number(e.target.value) / 100) * LOGICAL.width
-            update(overlay.id, { w, h: w / aspect })
-          }}
-          className="w-full accent-sky-400"
-        />
-      </Field>
-      <Field label={`Opacity · ${Math.round(overlay.opacity * 100)}%`}>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={overlay.opacity}
-          onChange={(e) => update(overlay.id, { opacity: Number(e.target.value) })}
-          className="w-full accent-sky-400"
-        />
-      </Field>
-      <button
-        onClick={() => {
-          remove(overlay.id)
-          selectImage(null)
-        }}
-        className="mt-1 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
-      >
-        Delete image
-      </button>
-    </div>
-  )
-}
-
-function ClipDetails(): JSX.Element {
-  const selectedClipId = useProject((s) => s.selectedClipId)
-  const clip = useProject((s) => s.project?.clips.find((c) => c.id === selectedClipId) ?? null)
-  const setClipCrop = useProject((s) => s.setClipCrop)
-  const setClipColor = useProject((s) => s.setClipColor)
-  const extractClipAudio = useProject((s) => s.extractClipAudio)
+function LayerEditor(): JSX.Element | null {
+  const selectedLayerId = useUi((s) => s.selectedLayerId)
+  const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
+  const update = useProject((s) => s.updateLayer)
+  const updateContent = useProject((s) => s.updateLayerContent)
+  const remove = useProject((s) => s.removeLayer)
+  const extractAudio = useProject((s) => s.extractLayerAudio)
   const setCropEditing = useUi((s) => s.setCropEditing)
   const { data: assets = [] } = useLibrary()
-  const libSelectedId = useEditor((s) => s.selectedId)
+  if (!layer) return null
+  const id = layer.id
+  const mut = setLayer(id)
+  const c = layer.content
+  const asset =
+    c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
+  const kindName = c.kind === 'video' ? 'Video layer' : c.kind === 'image' ? 'Image layer' : 'Text layer'
 
-  // Fall back to the library selection so importing still shows source info.
-  const asset = clip
-    ? assets.find((a) => a.id === clip.mediaId)
-    : assets.find((a) => a.id === libSelectedId)
-
-  if (!clip && !asset) {
-    return <p className="text-sm text-zinc-600">Select a timeline clip to edit it.</p>
-  }
-
-  const v = asset?.probe.video
   return (
-    <>
-      <div className="mb-2 truncate text-sm font-medium text-zinc-200" title={asset?.fileName}>
-        {asset?.fileName ?? 'Clip'}
-      </div>
-      <div className="divide-y divide-white/5">
-        {clip && <Row label="On timeline">{clipDuration(clip).toFixed(1)}s</Row>}
-        {clip && (
-          <Row label="Trim">
-            {clip.inSec.toFixed(1)}–{clip.outSec.toFixed(1)}s
-          </Row>
-        )}
-        {v && <Row label="Source">{`${v.codec} · ${v.displayWidth}×${v.displayHeight}`}</Row>}
-        {v && <Row label="Frame rate">{formatFps(v.avgFps)}</Row>}
-        {v && <Row label="HDR">{v.isHdr ? `yes (${v.colorTransfer})` : 'no'}</Row>}
-        {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
-        {clip && <Row label="Crop">{clip.crop ? '9:16 set' : 'full frame'}</Row>}
-      </div>
-
-      {clip && (
-        <div className="mt-3 flex flex-col gap-2">
-          <button
-            onClick={() => setCropEditing(true)}
-            className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-          >
-            {clip.crop ? 'Edit crop' : 'Crop to 9:16'}
-          </button>
-          {clip.crop && (
-            <button
-              onClick={() => setClipCrop(clip.id, null)}
-              className="rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-400 hover:bg-white/10"
-            >
-              Remove crop
-            </button>
-          )}
-          {asset?.probe.audio && (
-            <button
-              onClick={() => extractClipAudio(clip.id)}
-              className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-              title="Move this clip's audio onto the audio track and mute the clip"
-            >
-              ♪ Extract audio
-            </button>
-          )}
+    <div>
+      <div className="mb-1 text-sm font-medium text-zinc-200">{kindName}</div>
+      {asset && (
+        <div className="mb-2 truncate text-xs text-zinc-400" title={asset.fileName}>
+          {asset.fileName}
         </div>
       )}
 
-      {clip && (
-        <div className="mt-3 border-t border-white/5 pt-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wide text-zinc-500">Color</span>
-            {!isNeutralColor(clip.color) && (
+      <div className="flex gap-2">
+        <Field label="Start (s)">
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            value={layer.startSec.toFixed(1)}
+            onChange={(e) => update(id, { startSec: Math.max(0, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="End (s)">
+          <input
+            type="number"
+            step="0.1"
+            value={layer.endSec.toFixed(1)}
+            onChange={(e) => update(id, { endSec: Math.max(layer.startSec + 0.2, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+
+      <div className="flex gap-2">
+        <Field label="Position X">
+          <input
+            type="number"
+            step="5"
+            value={Math.round(layer.x)}
+            onChange={(e) => update(id, { x: Number(e.target.value) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Position Y">
+          <input
+            type="number"
+            step="5"
+            value={Math.round(layer.y)}
+            onChange={(e) => update(id, { y: Number(e.target.value) })}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+
+      <Field label={`Zoom · ${Math.round(layer.scale * 100)}%`}>
+        <LiveRange
+          min={0.05}
+          max={4}
+          step={0.01}
+          value={layer.scale}
+          transform={(p, v) => mut(p, (l) => ({ ...l, scale: v }))}
+        />
+      </Field>
+
+      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+        <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
+        Visible
+      </label>
+
+      {/* Video-specific controls */}
+      {c.kind === 'video' && (
+        <div className="mb-3 border-t border-white/5 pt-3">
+          <div className="flex gap-2">
+            <Field label="Trim in (s)">
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={c.inSec.toFixed(1)}
+                onChange={(e) =>
+                  updateContent(id, { inSec: Math.max(0, Math.min(Number(e.target.value), c.outSec - 0.05)) })
+                }
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Trim out (s)">
+              <input
+                type="number"
+                step="0.1"
+                value={c.outSec.toFixed(1)}
+                onChange={(e) => updateContent(id, { outSec: Math.max(c.inSec + 0.05, Number(e.target.value)) })}
+                className={inputCls}
+              />
+            </Field>
+          </div>
+          {asset?.probe.video && (
+            <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
+          )}
+          {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
+          <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
+            <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
+            Mute this layer
+          </label>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setCropEditing(true)}
+              className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+            >
+              {c.crop ? 'Edit crop' : 'Crop to 9:16'}
+            </button>
+            {c.crop && (
               <button
-                onClick={() => setClipColor(clip.id, null)}
-                className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                onClick={() => updateContent(id, { crop: null })}
+                className="rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-400 hover:bg-white/10"
               >
-                Reset
+                Remove crop
+              </button>
+            )}
+            {asset?.probe.audio && (
+              <button
+                onClick={() => extractAudio(id)}
+                className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+                title="Move this layer's audio onto the audio track and mute the layer"
+              >
+                ♪ Extract audio
               </button>
             )}
           </div>
-          {(() => {
-            const col = clip.color ?? NEUTRAL_COLOR
-            return (
-              <>
-                <Field label={`Exposure  ${col.brightness >= 0 ? '+' : ''}${col.brightness.toFixed(2)}`}>
-                  <ColorSlider clipId={clip.id} prop="brightness" min={-0.5} max={0.5} value={col.brightness} />
-                </Field>
-                <Field label={`Contrast  ${col.contrast.toFixed(2)}`}>
-                  <ColorSlider clipId={clip.id} prop="contrast" min={0.5} max={1.8} value={col.contrast} />
-                </Field>
-                <Field label={`Saturation  ${col.saturation.toFixed(2)}`}>
-                  <ColorSlider clipId={clip.id} prop="saturation" min={0} max={2} value={col.saturation} />
-                </Field>
-              </>
-            )
-          })()}
+
+          <div className="mt-3 border-t border-white/5 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Color</span>
+              {!isNeutralColor(c.color) && (
+                <button
+                  onClick={() => updateContent(id, { color: undefined })}
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            {(() => {
+              const col = c.color ?? NEUTRAL_COLOR
+              const setCol =
+                (prop: 'brightness' | 'contrast' | 'saturation') =>
+                (p: Project, v: number): Project =>
+                  mut(p, (l) =>
+                    l.content.kind === 'video'
+                      ? { ...l, content: { ...l.content, color: { ...(l.content.color ?? NEUTRAL_COLOR), [prop]: v } } }
+                      : l
+                  )
+              return (
+                <>
+                  <Field label={`Exposure  ${col.brightness >= 0 ? '+' : ''}${col.brightness.toFixed(2)}`}>
+                    <LiveRange min={-0.5} max={0.5} step={0.02} value={col.brightness} transform={setCol('brightness')} />
+                  </Field>
+                  <Field label={`Contrast  ${col.contrast.toFixed(2)}`}>
+                    <LiveRange min={0.5} max={1.8} step={0.02} value={col.contrast} transform={setCol('contrast')} />
+                  </Field>
+                  <Field label={`Saturation  ${col.saturation.toFixed(2)}`}>
+                    <LiveRange min={0} max={2} step={0.02} value={col.saturation} transform={setCol('saturation')} />
+                  </Field>
+                </>
+              )
+            })()}
+          </div>
         </div>
       )}
-    </>
+
+      {/* Image-specific controls */}
+      {c.kind === 'image' && (
+        <Field label={`Opacity · ${Math.round(c.opacity * 100)}%`}>
+          <LiveRange
+            min={0}
+            max={1}
+            step={0.05}
+            value={c.opacity}
+            transform={(p, v) =>
+              mut(p, (l) => (l.content.kind === 'image' ? { ...l, content: { ...l.content, opacity: v } } : l))
+            }
+          />
+        </Field>
+      )}
+
+      {/* Text-specific controls */}
+      {c.kind === 'text' && (
+        <div className="mb-2">
+          <Field label="Text">
+            <textarea value={c.text} rows={2} onChange={(e) => updateContent(id, { text: e.target.value })} className={inputCls} />
+          </Field>
+          <div className="flex items-end gap-2">
+            <Field label="Font size">
+              <input
+                type="number"
+                step="2"
+                min="12"
+                value={c.fontSizePx}
+                onChange={(e) => updateContent(id, { fontSizePx: Math.max(12, Number(e.target.value)) })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Color">
+              <input
+                type="color"
+                value={c.color}
+                onChange={(e) => updateContent(id, { color: e.target.value })}
+                className="h-7 w-full rounded border border-white/10 bg-black/40"
+              />
+            </Field>
+          </div>
+          <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={c.pill.enabled}
+              onChange={(e) => updateContent(id, { pill: { ...c.pill, enabled: e.target.checked } })}
+            />
+            Background pill
+          </label>
+        </div>
+      )}
+
+      <button
+        onClick={() => remove(id)}
+        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+      >
+        Delete layer
+      </button>
+    </div>
   )
 }
 
 function CaptionEditor(): JSX.Element | null {
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
-  const seg = useProject(
-    (s) => s.project?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null
-  )
+  const seg = useProject((s) => s.project?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null)
   const update = useProject((s) => s.updateCaption)
   const remove = useProject((s) => s.removeCaption)
   const selectCaption = useUi((s) => s.selectCaption)
@@ -351,12 +327,7 @@ function CaptionEditor(): JSX.Element | null {
     <div>
       <div className="mb-2 text-sm font-medium text-zinc-200">Caption</div>
       <Field label="Text">
-        <textarea
-          value={seg.text}
-          rows={2}
-          onChange={(e) => update(seg.id, { text: e.target.value })}
-          className={inputCls}
-        />
+        <textarea value={seg.text} rows={2} onChange={(e) => update(seg.id, { text: e.target.value })} className={inputCls} />
       </Field>
       <div className="flex gap-2">
         <Field label="Start (s)">
@@ -374,19 +345,13 @@ function CaptionEditor(): JSX.Element | null {
             type="number"
             step="0.1"
             value={seg.endSec.toFixed(1)}
-            onChange={(e) =>
-              update(seg.id, { endSec: Math.max(seg.startSec + 0.1, Number(e.target.value)) })
-            }
+            onChange={(e) => update(seg.id, { endSec: Math.max(seg.startSec + 0.1, Number(e.target.value)) })}
             className={inputCls}
           />
         </Field>
       </div>
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={seg.enabled}
-          onChange={(e) => update(seg.id, { enabled: e.target.checked })}
-        />
+        <input type="checkbox" checked={seg.enabled} onChange={(e) => update(seg.id, { enabled: e.target.checked })} />
         Show this caption
       </label>
       <button
@@ -480,19 +445,11 @@ function AudioClipEditor(): JSX.Element | null {
         </Field>
       </div>
       <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={clip.duck}
-          onChange={(e) => update(clip.id, { duck: e.target.checked })}
-        />
+        <input type="checkbox" checked={clip.duck} onChange={(e) => update(clip.id, { duck: e.target.checked })} />
         Duck under other audio (music bed)
       </label>
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={!!clip.denoise}
-          onChange={(e) => update(clip.id, { denoise: e.target.checked })}
-        />
+        <input type="checkbox" checked={!!clip.denoise} onChange={(e) => update(clip.id, { denoise: e.target.checked })} />
         Reduce noise (on export)
       </label>
 
@@ -520,12 +477,11 @@ function AudioClipEditor(): JSX.Element | null {
 }
 
 export function Inspector(): JSX.Element {
-  const selectedOverlayId = useUi((s) => s.selectedOverlayId)
-  const selectedImageId = useUi((s) => s.selectedImageId)
+  const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectedAudioId = useUi((s) => s.selectedAudioId)
-  const overlays = useProject((s) => s.project?.overlays)
-  const hookOk = hookCovered(overlays ?? [])
+  const layers = useProject((s) => s.project?.layers)
+  const hookOk = hookCovered(layers ?? [])
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -545,16 +501,14 @@ export function Inspector(): JSX.Element {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {selectedOverlayId ? (
-          <OverlayEditor />
-        ) : selectedImageId ? (
-          <ImageOverlayEditor />
+        {selectedLayerId ? (
+          <LayerEditor />
         ) : selectedCaptionId ? (
           <CaptionEditor />
         ) : selectedAudioId ? (
           <AudioClipEditor />
         ) : (
-          <ClipDetails />
+          <p className="text-sm text-zinc-600">Select a layer to edit it.</p>
         )}
       </div>
     </div>

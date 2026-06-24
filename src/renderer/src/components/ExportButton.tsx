@@ -11,7 +11,7 @@ import { exportProject, revealFile } from '@/ipc/client'
  */
 export function ExportButton(): JSX.Element {
   const project = useProject((s) => s.project)
-  const clipCount = project?.clips.length ?? 0
+  const clipCount = project?.layers.filter((l) => l.content.kind === 'video').length ?? 0
   const preset = project?.preset ?? 'reel'
   const setPreset = useProject((s) => s.setPreset)
   const exportJob = useEditor((s) => s.exportJob)

@@ -10,6 +10,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 import { readProjectFile, writeProjectFile } from './projectStore'
 import { createEmptyProject, migrateProject } from '@shared/project'
+import { makeVideoLayer } from '@shared/layers'
 
 let dir: string
 beforeAll(() => {
@@ -23,7 +24,7 @@ describe('portable .reel files', () => {
   it('round-trips a project through write + read', async () => {
     const p = createEmptyProject('abc', 'My Reel')
     p.mediaIds.push('m1')
-    p.clips.push({ id: 'c1', mediaId: 'm1', inSec: 0, outSec: 3, crop: null, mute: false, gainDb: 0 })
+    p.layers.push(makeVideoLayer('c1', 'm1', 0, 3))
     const path = join(dir, 'my-reel.reel')
 
     const saved = await writeProjectFile(path, p)
@@ -32,8 +33,9 @@ describe('portable .reel files', () => {
     const loaded = await readProjectFile(path)
     expect(loaded.id).toBe('abc')
     expect(loaded.name).toBe('My Reel')
-    expect(loaded.clips).toHaveLength(1)
-    expect(loaded.clips[0].mediaId).toBe('m1')
+    expect(loaded.layers).toHaveLength(1)
+    expect(loaded.layers[0].content.kind).toBe('video')
+    expect((loaded.layers[0].content as { mediaId: string }).mediaId).toBe('m1')
     expect(loaded.mediaIds).toEqual(['m1']) // project-scoped library survives the round-trip
   })
 

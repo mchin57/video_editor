@@ -7,7 +7,7 @@ import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration } from '@/lib/format'
-import { makeImageOverlay } from '@/lib/overlays'
+import { makeImageLayer } from '@shared/layers'
 import { thumbUrl } from '@/ipc/client'
 
 /** First-frame thumbnail with a ▶ fallback until/if the jpg is available. */
@@ -48,11 +48,11 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const selectedId = useEditor((s) => s.selectedId)
   const select = useEditor((s) => s.select)
   const job = useEditor((s) => (asset.id in s.proxyJobs ? s.proxyJobs[asset.id] : undefined))
-  const addClip = useProject((s) => s.addClip)
+  const addVideoLayer = useProject((s) => s.addVideoLayer)
   const addAudioClip = useProject((s) => s.addAudioClip)
-  const addImageOverlay = useProject((s) => s.addImageOverlay)
+  const addLayer = useProject((s) => s.addLayer)
   const selectAudio = useUi((s) => s.selectAudio)
-  const selectImage = useUi((s) => s.selectImage)
+  const selectLayer = useUi((s) => s.selectLayer)
   const onTrack = useProject((s) => s.project?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const removeMedia = useProject((s) => s.removeMedia)
 
@@ -110,9 +110,8 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
               if (!asset.proxyReady) return
               const id = crypto.randomUUID()
               const t = usePlayback.getState().time
-              const aspect = v ? v.displayWidth / v.displayHeight : 1
-              addImageOverlay(makeImageOverlay(id, asset.id, t, t + 3, aspect))
-              selectImage(id)
+              addLayer(makeImageLayer(id, asset.id, t, t + 3))
+              selectLayer(id)
             }}
             className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
               asset.proxyReady ? '' : 'pointer-events-none opacity-30'
@@ -158,7 +157,11 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
             tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation()
-              if (asset.proxyReady) addClip(asset.id, asset.probe.durationSec, !!asset.probe.audio)
+              if (!asset.proxyReady) return
+              const id = crypto.randomUUID()
+              const t = usePlayback.getState().time
+              addVideoLayer(id, asset.id, t, asset.probe.durationSec, !!asset.probe.audio)
+              selectLayer(id)
             }}
             className={`rounded bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/40 ${
               asset.proxyReady ? '' : 'pointer-events-none opacity-30'
