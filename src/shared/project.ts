@@ -143,6 +143,34 @@ export interface CaptionWord {
   endSec: number
 }
 
+/**
+ * Visual style for a caption — the same knobs a text layer has, so captions can
+ * be coloured, repositioned, sized and rotated. Position is the CENTER in logical
+ * 1080x1920 px (matching layers). Used both as the lane-wide default
+ * (`CaptionsConfig.style`) and as a per-segment override (`CaptionSegment.style`).
+ */
+export interface CaptionStyle {
+  /** Center position in logical px. */
+  x: number
+  y: number
+  fontFamily: string
+  fontSizePx: number
+  color: string
+  /** Clockwise rotation in degrees (0 = upright). */
+  rotationDeg: number
+  pill: PillStyle
+}
+
+export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
+  x: 540,
+  y: 1340,
+  fontFamily: 'Inter, system-ui, sans-serif',
+  fontSizePx: 64,
+  color: '#ffffff',
+  rotationDeg: 0,
+  pill: { enabled: false, color: '#000000cc', padPx: 18 }
+}
+
 export interface CaptionSegment {
   id: string
   startSec: number
@@ -150,14 +178,25 @@ export interface CaptionSegment {
   text: string
   words: CaptionWord[]
   enabled: boolean
+  /** Per-segment style override. When set, this block is exempt from the lane-wide
+   *  caption style and uses this instead; absent/null = follow the global style. */
+  style?: CaptionStyle | null
 }
 
 export interface CaptionsConfig {
   enabled: boolean
   stylePreset: string
-  /** Baseline Y in logical px; sits just above the bottom safe zone. */
+  /** Baseline Y in logical px; sits just above the bottom safe zone. Legacy seed
+   *  for `style.y`; the lane-wide `style` is now the source of truth. */
   yBaseline: number
+  /** Lane-wide caption style (the default for every segment without an override). */
+  style: CaptionStyle
   segments: CaptionSegment[]
+}
+
+/** The style actually used to render a caption: its override, else the lane style. */
+export function effectiveCaptionStyle(captions: CaptionsConfig, seg: CaptionSegment): CaptionStyle {
+  return seg.style ?? captions.style
 }
 
 export type AudioKind = 'music' | 'voice' | 'extracted' | 'audio'
@@ -242,10 +281,16 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 5,
+    version: 6,
     preset: 'reel',
     layers: [],
-    captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
+    captions: {
+      enabled: false,
+      stylePreset: 'reels-bold',
+      yBaseline: 1340,
+      style: { ...DEFAULT_CAPTION_STYLE },
+      segments: []
+    },
     audioClips: [],
     script: [],
     mediaIds: [],
@@ -423,9 +468,15 @@ export function migrateProject(raw: unknown): Project {
   delete (p as Record<string, unknown>).imageOverlays
 
   if (!Array.isArray(p.script)) p.script = []
-  // v5 only adds absence-tolerant optional fields (freezes, image crop/rotate/
-  // flip), so there's nothing to backfill — just mark the version forward.
-  if (typeof p.version !== 'number' || p.version < 5) p.version = 5
+  // Captions gained a lane-wide visual `style` (v6). Older projects only had a
+  // `yBaseline`; seed the style from it so they keep their bottom-baseline look.
+  if (p.captions && !p.captions.style) {
+    const yBaseline = typeof p.captions.yBaseline === 'number' ? p.captions.yBaseline : DEFAULT_CAPTION_STYLE.y
+    p.captions.style = { ...DEFAULT_CAPTION_STYLE, y: yBaseline }
+  }
+  // v5/v6 only add absence-tolerant optional fields (freezes, image crop/rotate/
+  // flip, caption style), so there's nothing else to backfill.
+  if (typeof p.version !== 'number' || p.version < 6) p.version = 6
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

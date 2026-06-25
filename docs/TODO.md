@@ -30,8 +30,20 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   transcribes every audio clip (except those flagged "Exclude from captions") and
   projects each one independently from its own placement — so freeze-split extracted
   pieces caption correctly across the hold, and overlapping audio yields two
-  overlapping captions (the preview stacks them). The old per-video-clip
-  "Caption this clip" is gone; the header CC On/Off toggle stays.
+  overlapping captions. The old per-video-clip "Caption this clip" is gone; the
+  header CC On/Off toggle stays.
+- [x] **Styleable captions (global + per-block override).** Captions carry a
+  `CaptionStyle` (color, font family, size, center position, rotation, pill —
+  `src/shared/project.ts`). `CaptionsConfig.style` is the lane-wide default; each
+  `CaptionSegment.style?` is an optional override that exempts that block.
+  `effectiveCaptionStyle()` resolves which to use; preview (`PreviewStage`) and
+  export (`assBuilder` `\pos/\fs/\c/\frz/pill`, scaled in `exporter.ts`) both honor
+  it. Clicking the **Captions** gutter label (`Timeline`) selects the lane-wide
+  style; selecting a caption block edits/creates its override (drag-to-move in the
+  preview too). Store: `setCaptionStyle` / `setCaptionSegmentStyle` /
+  `clearCaptionSegmentStyle`. _Migration v6 seeds `style` from the old `yBaseline`._
+  _Note: simultaneous (overlapping) captions still burn at their own positions; if
+  two share the global position they'll overlap in export — move/override one._
 
 ### Layer compositing (`feature/layers` branch)
 
@@ -145,7 +157,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 - [x] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline; each lane (Clips / Text / Image / Captions / Audio) gets a full-height tinted rounded "bubble" header, like Premiere/Resolve. The track content scrolls horizontally beside it (gutter stays pinned and is kept vertically in sync with the track scroll). Built in `Timeline.tsx`; persisted in the `timelineView` localStorage view.
-	- [x] Resize a lane by click-dragging its header bubble vertically (in addition to the bottom-edge handles); minimize/expand by double-clicking the bubble (or the ▾/▸ chevron). Collapsed lanes shrink to a thin tinted strip and hide their resize handle.
+	- [ ] Resize a lane by click-dragging its header bubble vertically (in addition to the bottom-edge handles); minimize/expand by double-clicking the bubble (or the ▾/▸ chevron). Collapsed lanes shrink to a thin tinted strip and hide their resize handle.
 - [ ] **Per-lane mute / solo** — the gutter header bubbles exist but have no mute or solo buttons yet. Would require adding a `mutedLanes` set to the project or view state, then skipping those layers during preview playback and export. Data-model change needed before the UI can wire up.
 
 ### Explicitly out of scope for v1 (revisit post-launch)

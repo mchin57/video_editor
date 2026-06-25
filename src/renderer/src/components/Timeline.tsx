@@ -96,6 +96,8 @@ export function Timeline(): JSX.Element {
   const selectCaption = useUi((s) => s.selectCaption)
   const selectedAudioId = useUi((s) => s.selectedAudioId)
   const selectAudio = useUi((s) => s.selectAudio)
+  const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
+  const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
 
   const addLayer = useProject((s) => s.addLayer)
   const addVideoLayer = useProject((s) => s.addVideoLayer)
@@ -539,14 +541,23 @@ export function Timeline(): JSX.Element {
             </div>
             {lanes.map((lane) => {
               const st = LANE_STYLE[lane.key]
+              // The Captions label is a control: click it to edit the lane-wide
+              // caption style (every caption without its own override).
+              const isCaption = lane.key === 'caption'
+              const selected = isCaption && captionsGlobalSelected
               return (
                 <div
                   key={lane.key}
-                  className={`absolute inset-x-1 flex select-none items-center gap-1.5 overflow-hidden rounded-md border px-1.5 ${st.tint}`}
+                  onPointerDown={isCaption ? () => selectCaptionsGlobal() : undefined}
+                  title={isCaption ? 'Edit the style of all captions' : undefined}
+                  className={`absolute inset-x-1 flex select-none items-center gap-1.5 overflow-hidden rounded-md border px-1.5 ${st.tint} ${
+                    isCaption ? 'cursor-pointer hover:brightness-125' : ''
+                  } ${selected ? st.sel : ''}`}
                   style={{ top: lane.top + 1, height: Math.max(0, lane.height - 2) }}
                 >
                   <span className={`h-2 w-2 shrink-0 rounded-sm ${st.dot}`} />
                   <span className="truncate text-[10px] font-medium leading-none text-zinc-200">{lane.label}</span>
+                  {isCaption && <span className="ml-auto text-[9px] text-emerald-300/80">✎</span>}
                 </div>
               )
             })}

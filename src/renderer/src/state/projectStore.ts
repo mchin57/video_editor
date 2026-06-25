@@ -104,6 +104,13 @@ interface ProjectState {
   removeScriptLine: (id: string) => void
   updateCaption: (id: string, patch: Partial<import('@shared/project').CaptionSegment>) => void
   removeCaption: (id: string) => void
+  /** Patch the lane-wide caption style (applies to every non-overridden segment). */
+  setCaptionStyle: (patch: Partial<import('@shared/project').CaptionStyle>) => void
+  /** Patch one segment's style override (seeded from the effective style), exempting
+   *  it from the lane-wide style. */
+  setCaptionSegmentStyle: (id: string, patch: Partial<import('@shared/project').CaptionStyle>) => void
+  /** Drop a segment's override so it follows the lane-wide style again. */
+  clearCaptionSegmentStyle: (id: string) => void
   addAudioClip: (clip: AudioClip) => void
   updateAudioClip: (id: string, patch: Partial<AudioClip>) => void
   removeAudioClip: (id: string) => void
@@ -339,6 +346,29 @@ export const useProject = create<ProjectState>((set, get) => {
       commit((p) => ({
         ...p,
         captions: { ...p.captions, segments: p.captions.segments.filter((s) => s.id !== id) }
+      })),
+
+    setCaptionStyle: (patch) =>
+      commit((p) => ({ ...p, captions: { ...p.captions, style: { ...p.captions.style, ...patch } } })),
+
+    setCaptionSegmentStyle: (id, patch) =>
+      commit((p) => ({
+        ...p,
+        captions: {
+          ...p.captions,
+          segments: p.captions.segments.map((s) =>
+            s.id === id ? { ...s, style: { ...(s.style ?? p.captions.style), ...patch } } : s
+          )
+        }
+      })),
+
+    clearCaptionSegmentStyle: (id) =>
+      commit((p) => ({
+        ...p,
+        captions: {
+          ...p.captions,
+          segments: p.captions.segments.map((s) => (s.id === id ? { ...s, style: null } : s))
+        }
       })),
 
     addAudioClip: (clip) => commit((p) => ({ ...p, audioClips: [...p.audioClips, clip] })),

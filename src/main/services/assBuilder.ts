@@ -74,13 +74,21 @@ export function buildAss(
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
   ]
 
-  // Captions (auto-generated) sit at the configured baseline, above the safe zone.
+  // Captions (auto-generated): each rendered with its effective style — the
+  // per-segment override if present, else the lane-wide style. Geometry arrives
+  // already scaled to output px (the exporter pre-scales).
   if (captions?.enabled) {
+    const r = (n: number): number => Math.round(n)
     for (const seg of captions.segments) {
       if (!seg.enabled || seg.text.trim().length === 0) continue
-      const tags = `{\\an5\\pos(${Math.round(target.width / 2)},${Math.round(captions.yBaseline)})}`
+      const st = seg.style ?? captions.style
+      const styleName = st.pill.enabled ? 'Pill' : 'Caption'
+      const tags = [`\\an5`, `\\pos(${r(st.x)},${r(st.y)})`, `\\fs${r(st.fontSizePx)}`, `\\c${assColor(st.color)}&`]
+      // ASS rotation is counter-clockwise positive; our rotationDeg is clockwise.
+      if (st.rotationDeg) tags.push(`\\frz${(-st.rotationDeg).toFixed(0)}`)
+      if (st.pill.enabled) tags.push(`\\3c${assColor(st.pill.color)}&`, `\\bord${r(st.pill.padPx)}`)
       lines.push(
-        `Dialogue: 0,${assTime(seg.startSec)},${assTime(seg.endSec)},Caption,,0,0,0,,${tags}${escapeText(seg.text)}`
+        `Dialogue: 0,${assTime(seg.startSec)},${assTime(seg.endSec)},${styleName},,0,0,0,,{${tags.join('')}}${escapeText(seg.text)}`
       )
     }
   }

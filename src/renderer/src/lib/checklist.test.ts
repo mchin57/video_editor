@@ -46,14 +46,10 @@ describe('buildChecklist', () => {
   })
 
   it('detects spoken keywords from captions', () => {
+    const base = createEmptyProject('p', 'P')
     const p: Project = {
-      ...createEmptyProject('p', 'P'),
-      captions: {
-        enabled: true,
-        stylePreset: 'reels-bold',
-        yBaseline: 1340,
-        segments: [caption('todays triathlon training session')]
-      }
+      ...base,
+      captions: { ...base.captions, enabled: true, segments: [caption('todays triathlon training session')] }
     }
     const r = buildChecklist(p, { ...baseInput, keywordBank: ['triathlon training', 'open water'] })
     expect(statusOf(r, 'keywords')).toBe('pass')
@@ -61,9 +57,10 @@ describe('buildChecklist', () => {
   })
 
   it('warns on keywords when captions exist but none match', () => {
+    const base = createEmptyProject('p', 'P')
     const p: Project = {
-      ...createEmptyProject('p', 'P'),
-      captions: { enabled: true, stylePreset: 'x', yBaseline: 1340, segments: [caption('hello world')] }
+      ...base,
+      captions: { ...base.captions, enabled: true, segments: [caption('hello world')] }
     }
     expect(statusOf(buildChecklist(p, baseInput), 'keywords')).toBe('warn')
   })

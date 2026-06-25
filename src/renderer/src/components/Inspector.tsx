@@ -1,6 +1,6 @@
 import { useRef, useState, type JSX, type ReactNode } from 'react'
-import type { Layer, Project, VideoContent } from '@shared/project'
-import { NEUTRAL_COLOR, effectiveOut, isNeutralColor } from '@shared/project'
+import type { CaptionStyle, Layer, Project, VideoContent } from '@shared/project'
+import { NEUTRAL_COLOR, effectiveCaptionStyle, effectiveOut, isNeutralColor } from '@shared/project'
 import { hookCovered, videoSourceTime } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence } from '@/ipc/client'
@@ -398,13 +398,125 @@ function LayerEditor(): JSX.Element | null {
   )
 }
 
+/** The shared style controls (color / font / position / rotation / pill) used by
+ *  both the lane-wide caption style and a per-caption override. */
+function CaptionStyleFields({
+  style,
+  onPatch
+}: {
+  style: CaptionStyle
+  onPatch: (patch: Partial<CaptionStyle>) => void
+}): JSX.Element {
+  return (
+    <>
+      <div className="flex items-end gap-2">
+        <Field label="Font size">
+          <input
+            type="number"
+            step="2"
+            min="12"
+            value={style.fontSizePx}
+            onChange={(e) => onPatch({ fontSizePx: Math.max(12, Number(e.target.value)) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Color">
+          <input
+            type="color"
+            value={style.color}
+            onChange={(e) => onPatch({ color: e.target.value })}
+            className="h-7 w-full rounded border border-white/10 bg-black/40"
+          />
+        </Field>
+      </div>
+      <Field label="Font family">
+        <input
+          type="text"
+          value={style.fontFamily}
+          onChange={(e) => onPatch({ fontFamily: e.target.value })}
+          className={inputCls}
+        />
+      </Field>
+      <div className="flex gap-2">
+        <Field label="Position X">
+          <input
+            type="number"
+            step="5"
+            value={Math.round(style.x)}
+            onChange={(e) => onPatch({ x: Number(e.target.value) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Position Y">
+          <input
+            type="number"
+            step="5"
+            value={Math.round(style.y)}
+            onChange={(e) => onPatch({ y: Number(e.target.value) })}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      <Field label={`Rotation · ${Math.round(style.rotationDeg)}°`}>
+        <input
+          type="range"
+          min={-180}
+          max={180}
+          step={1}
+          value={style.rotationDeg}
+          onChange={(e) => onPatch({ rotationDeg: Number(e.target.value) })}
+          className="w-full accent-sky-400"
+        />
+      </Field>
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={style.pill.enabled}
+          onChange={(e) => onPatch({ pill: { ...style.pill, enabled: e.target.checked } })}
+        />
+        Background pill
+      </label>
+    </>
+  )
+}
+
+/** Editing the lane-wide caption style (selected via the "Captions" gutter label):
+ *  every caption without its own override updates live. */
+function CaptionStyleEditor(): JSX.Element | null {
+  const captions = useProject((s) => s.project?.captions)
+  const setCaptionStyle = useProject((s) => s.setCaptionStyle)
+  if (!captions) return null
+  const overrides = captions.segments.filter((s) => s.style).length
+
+  return (
+    <div>
+      <div className="mb-1 text-sm font-medium text-zinc-200">All captions</div>
+      <p className="mb-3 text-[11px] text-zinc-500">
+        Style every caption at once. Select a single caption block to override it individually.
+      </p>
+      <CaptionStyleFields style={captions.style} onPatch={(patch) => setCaptionStyle(patch)} />
+      {overrides > 0 && (
+        <p className="mt-1 text-[11px] text-zinc-600">
+          {overrides} caption{overrides === 1 ? '' : 's'} use a custom style and ignore these settings.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function CaptionEditor(): JSX.Element | null {
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
+  const captions = useProject((s) => s.project?.captions)
   const seg = useProject((s) => s.project?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null)
   const update = useProject((s) => s.updateCaption)
   const remove = useProject((s) => s.removeCaption)
+  const setSegStyle = useProject((s) => s.setCaptionSegmentStyle)
+  const clearSegStyle = useProject((s) => s.clearCaptionSegmentStyle)
   const selectCaption = useUi((s) => s.selectCaption)
-  if (!seg) return null
+  const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
+  if (!seg || !captions) return null
+  const overridden = !!seg.style
+  const style = effectiveCaptionStyle(captions, seg)
 
   return (
     <div>
@@ -437,12 +549,36 @@ function CaptionEditor(): JSX.Element | null {
         <input type="checkbox" checked={seg.enabled} onChange={(e) => update(seg.id, { enabled: e.target.checked })} />
         Show this caption
       </label>
+
+      <CollapsibleSection
+        id="caption-style"
+        title={overridden ? 'Style · custom' : 'Style · follows all'}
+        right={
+          overridden ? (
+            <button onClick={() => clearSegStyle(seg.id)} className="text-[10px] text-zinc-400 hover:text-zinc-200">
+              Reset to global
+            </button>
+          ) : null
+        }
+      >
+        {!overridden && (
+          <p className="mb-2 text-[11px] text-zinc-500">
+            This caption follows the{' '}
+            <button onClick={selectCaptionsGlobal} className="text-sky-400 hover:underline">
+              lane-wide style
+            </button>
+            . Changing anything below makes it independent.
+          </p>
+        )}
+        <CaptionStyleFields style={style} onPatch={(patch) => setSegStyle(seg.id, patch)} />
+      </CollapsibleSection>
+
       <button
         onClick={() => {
           remove(seg.id)
           selectCaption(null)
         }}
-        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+        className="mt-3 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
       >
         Delete caption
       </button>
@@ -571,6 +707,7 @@ export function Inspector(): JSX.Element {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectedAudioId = useUi((s) => s.selectedAudioId)
+  const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
   const layers = useProject((s) => s.project?.layers)
   const hookOk = hookCovered(layers ?? [])
 
@@ -596,6 +733,8 @@ export function Inspector(): JSX.Element {
           <LayerEditor />
         ) : selectedCaptionId ? (
           <CaptionEditor />
+        ) : captionsGlobalSelected ? (
+          <CaptionStyleEditor />
         ) : selectedAudioId ? (
           <AudioClipEditor />
         ) : (

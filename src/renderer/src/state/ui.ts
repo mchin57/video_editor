@@ -12,6 +12,10 @@ interface UiState {
   /** Currently selected audio clip (shows its controls in the Inspector). */
   selectedAudioId: string | null
   selectAudio: (id: string | null) => void
+  /** Whether the lane-wide caption style is selected for editing (via the
+   *  "Captions" gutter label). Edits apply to every non-overridden caption. */
+  captionsGlobalSelected: boolean
+  selectCaptionsGlobal: () => void
   /** Whether the crop editor modal is open. */
   cropEditing: boolean
   setCropEditing: (v: boolean) => void
@@ -36,11 +40,17 @@ interface UiState {
 
 export const useUi = create<UiState>((set) => ({
   selectedLayerId: null,
-  selectLayer: (id) => set({ selectedLayerId: id, selectedCaptionId: null, selectedAudioId: null }),
+  selectLayer: (id) =>
+    set({ selectedLayerId: id, selectedCaptionId: null, selectedAudioId: null, captionsGlobalSelected: false }),
   selectedCaptionId: null,
-  selectCaption: (id) => set({ selectedCaptionId: id, selectedLayerId: null, selectedAudioId: null }),
+  selectCaption: (id) =>
+    set({ selectedCaptionId: id, selectedLayerId: null, selectedAudioId: null, captionsGlobalSelected: false }),
   selectedAudioId: null,
-  selectAudio: (id) => set({ selectedAudioId: id, selectedLayerId: null, selectedCaptionId: null }),
+  selectAudio: (id) =>
+    set({ selectedAudioId: id, selectedLayerId: null, selectedCaptionId: null, captionsGlobalSelected: false }),
+  captionsGlobalSelected: false,
+  selectCaptionsGlobal: () =>
+    set({ captionsGlobalSelected: true, selectedLayerId: null, selectedCaptionId: null, selectedAudioId: null }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   stillsOpen: false,
@@ -53,5 +63,6 @@ export const useUi = create<UiState>((set) => ({
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,
   setScriptOpen: (v) => set({ scriptOpen: v }),
-  clearSelection: () => set({ selectedLayerId: null, selectedCaptionId: null, selectedAudioId: null })
+  clearSelection: () =>
+    set({ selectedLayerId: null, selectedCaptionId: null, selectedAudioId: null, captionsGlobalSelected: false })
 }))

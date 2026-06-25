@@ -9,7 +9,7 @@
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Project } from '@shared/project'
+import type { CaptionStyle, Project } from '@shared/project'
 import { effectiveOut, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir } from '../config'
@@ -203,11 +203,23 @@ async function runExport(
     })
   }
 
-  // Captions (auto-generated) burn on top of everything.
+  // Captions (auto-generated) burn on top of everything. Scale each caption style
+  // (lane-wide + any per-segment overrides) from logical into output px.
   let captionsAss: string | undefined
   if (project.captions.enabled && project.captions.segments.some((s) => s.enabled)) {
     captionsAss = 'captions.ass'
-    const scaled = { ...project.captions, yBaseline: project.captions.yBaseline * sy }
+    const scaleStyle = (st: CaptionStyle): CaptionStyle => ({
+      ...st,
+      x: st.x * sx,
+      y: st.y * sy,
+      fontSizePx: st.fontSizePx * sy,
+      pill: { ...st.pill, padPx: st.pill.padPx * sy }
+    })
+    const scaled = {
+      ...project.captions,
+      style: scaleStyle(project.captions.style),
+      segments: project.captions.segments.map((s) => (s.style ? { ...s, style: scaleStyle(s.style) } : s))
+    }
     await fsp.writeFile(join(tmp, captionsAss), buildAss([], target, scaled), 'utf8')
   }
 

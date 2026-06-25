@@ -6,8 +6,8 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, Layer, VideoContent } from '@shared/project'
-import { audioClipEnd, effectiveOut } from '@shared/project'
+import type { AudioClip, CaptionSegment, Layer, VideoContent } from '@shared/project'
+import { audioClipEnd, effectiveCaptionStyle, effectiveOut } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { isFrozenAt, layersAtTime, makeVideoLayer, videoSourceTime, visualDuration } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
@@ -192,6 +192,7 @@ export function PreviewStage(): JSX.Element {
   const audioClips = project?.audioClips ?? EMPTY_AUDIO
   const captions = project?.captions
   const selectedLayerId = useUi((s) => s.selectedLayerId)
+  const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectedLibId = useEditor((s) => s.selectedId)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
@@ -290,6 +291,46 @@ export function PreviewStage(): JSX.Element {
         ...p,
         layers: p.layers.map((l) => (l.id === layer.id ? { ...l, scale: ns } : l))
       }))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      useProject.getState().commitLive(before)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // Drag a caption to move it. In lane-wide ("Captions" label) mode this moves the
+  // global style (all non-overridden captions); otherwise it moves just this
+  // caption, creating an override that exempts it from the lane style.
+  const startCaptionMove = (e: ReactPointerEvent, seg: CaptionSegment): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    const global = useUi.getState().captionsGlobalSelected
+    if (!global) useUi.getState().selectCaption(seg.id)
+    const stage = stageRef.current
+    const before = useProject.getState().project
+    if (!stage || !before) return
+    const base = effectiveCaptionStyle(before.captions, seg)
+    const scale = LOGICAL.width / stage.getBoundingClientRect().width
+    const startX = e.clientX
+    const startY = e.clientY
+    const onMove = (ev: PointerEvent): void => {
+      const nx = base.x + (ev.clientX - startX) * scale
+      const ny = base.y + (ev.clientY - startY) * scale
+      useProject.getState().liveUpdate((p) => {
+        if (global) return { ...p, captions: { ...p.captions, style: { ...p.captions.style, x: nx, y: ny } } }
+        return {
+          ...p,
+          captions: {
+            ...p.captions,
+            segments: p.captions.segments.map((s) =>
+              s.id === seg.id ? { ...s, style: { ...(s.style ?? p.captions.style), x: nx, y: ny } } : s
+            )
+          }
+        }
+      })
     }
     const onUp = (): void => {
       window.removeEventListener('pointermove', onMove)
@@ -476,35 +517,50 @@ export function PreviewStage(): JSX.Element {
         </div>
       )}
 
-      {/* Active captions (auto-generated), stacked upward from the baseline so
-          overlapping audio clips each show their own caption. */}
-      {activeCaptions.length > 0 && captions && (
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            bottom: pct(LOGICAL.height - captions.yBaseline, LOGICAL.height),
-            transform: 'translateX(-50%)',
-            width: '88%',
-            zIndex: 300
-          }}
-          className="flex flex-col items-center gap-[1cqw]"
-        >
-          {activeCaptions.map((s) => (
+      {/* Active captions: each rendered at its own effective style (lane-wide or
+          per-caption override), positioned by center, draggable to reposition. */}
+      {captions &&
+        activeCaptions.map((seg) => {
+          const st = effectiveCaptionStyle(captions, seg)
+          const selected = seg.id === selectedCaptionId
+          return (
             <div
-              key={s.id}
+              key={seg.id}
+              onPointerDown={(e) => startCaptionMove(e, seg)}
               style={{
-                fontSize: `${(64 / LOGICAL.width) * 100}cqw`,
-                color: '#ffffff',
-                textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)'
+                position: 'absolute',
+                left: pct(st.x, LOGICAL.width),
+                top: pct(st.y, LOGICAL.height),
+                transform: `translate(-50%, -50%) rotate(${st.rotationDeg}deg)`,
+                transformOrigin: 'center',
+                fontSize: `${(st.fontSizePx / LOGICAL.width) * 100}cqw`,
+                color: st.color,
+                fontFamily: st.fontFamily,
+                maxWidth: '88%',
+                zIndex: 300
               }}
-              className="text-center font-extrabold leading-tight"
+              className={`cursor-move select-none whitespace-pre-wrap text-center font-extrabold leading-tight ${
+                selected ? 'outline-dashed outline-2 outline-emerald-400' : ''
+              }`}
             >
-              {s.text}
+              <span
+                style={
+                  st.pill.enabled
+                    ? {
+                        background: st.pill.color,
+                        padding: `${(st.pill.padPx / LOGICAL.width) * 100}cqw`,
+                        borderRadius: `${(10 / LOGICAL.width) * 100}cqw`,
+                        boxDecorationBreak: 'clone',
+                        WebkitBoxDecorationBreak: 'clone'
+                      }
+                    : { textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)' }
+                }
+              >
+                {seg.text}
+              </span>
             </div>
-          ))}
-        </div>
-      )}
+          )
+        })}
 
       {/* Hook zone (first 3 seconds) */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[400] flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
