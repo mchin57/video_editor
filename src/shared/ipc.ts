@@ -29,8 +29,22 @@ export const IPC = {
   transcribeMedia: 'whisper:transcribe',
   getTranscript: 'whisper:getTranscript',
   // Audio editing
-  detectSilence: 'audio:detectSilence'
+  detectSilence: 'audio:detectSilence',
+  // Stills (capture a frame from a clip)
+  captureStillToLibrary: 'still:toLibrary',
+  captureStillToDisk: 'still:toDisk'
 } as const
+
+/** Payload describing which frame to grab and how to correct it. */
+export interface StillRequest {
+  mediaId: string
+  /** Source-media time (seconds) of the frame to capture. */
+  sourceSec: number
+  /** Source-pixel crop to apply (null = full frame). */
+  crop: { x: number; y: number; w: number; h: number } | null
+  /** Color correction to apply (null = none). */
+  color: { brightness: number; contrast: number; saturation: number } | null
+}
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
 

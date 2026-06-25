@@ -6,10 +6,13 @@ import { Inspector } from '@/components/Inspector'
 import { LayersPanel } from '@/components/LayersPanel'
 import { Timeline } from '@/components/Timeline'
 import { CropEditor } from '@/components/CropEditor'
+import { StillsPopout } from '@/components/StillsPopout'
+import { ImageEditPopout } from '@/components/ImageEditPopout'
 import { Splitter } from '@/components/Splitter'
 import { ExportButton } from '@/components/ExportButton'
 import { FileMenu } from '@/components/FileMenu'
 import { CaptionsButton } from '@/components/CaptionsButton'
+import { CaptionAudioButton } from '@/components/CaptionAudioButton'
 import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
 import { ScriptModal } from '@/components/ScriptModal'
@@ -148,6 +151,8 @@ export default function App(): JSX.Element {
         ui.setSettingsOpen(false)
         ui.setChecklistOpen(false)
         ui.setScriptOpen(false)
+        ui.setStillsOpen(false)
+        ui.setImageEditOpen(false)
         ui.clearSelection()
       }
     }
@@ -191,6 +196,7 @@ export default function App(): JSX.Element {
         >
           {importMedia.isPending ? 'Importing…' : 'Import video'}
         </button>
+        <CaptionAudioButton />
         <CaptionsButton />
         <button
           onClick={() => useUi.getState().setScriptOpen(!useUi.getState().scriptOpen)}
@@ -256,6 +262,8 @@ export default function App(): JSX.Element {
       <StatusFooter />
 
       <CropEditor />
+      <StillsPopout />
+      <ImageEditPopout />
       <SettingsModal />
       <ChecklistModal />
       <ScriptModal />

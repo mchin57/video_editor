@@ -46,6 +46,8 @@ export interface ExportVideo {
   /** Timeline window (seconds). */
   startSec: number
   endSec: number
+  /** Freeze holds, in trimmed-stream time (atLocal = source atSec − inSec). */
+  freezes: { atLocal: number; holdSec: number }[]
 }
 
 /** An image layer resolved for compositing (geometry in output px). */
@@ -59,6 +61,12 @@ export interface ExportImage {
   endSec: number
   /** 0..1 */
   opacity: number
+  /** Optional crop in 0..1 source fractions (applied before rotation/scale). */
+  crop?: { x: number; y: number; w: number; h: number } | null
+  /** 90° clockwise rotation steps (0..3). */
+  rotateQuarters?: number
+  flipH?: boolean
+  flipV?: boolean
 }
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
@@ -134,7 +142,18 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       if (v.crop) pre.push(`crop=${r(v.crop.w)}:${r(v.crop.h)}:${r(v.crop.x)}:${r(v.crop.y)}`)
       pre.push(`scale=${r(v.boxW)}:${r(v.boxH)}:flags=bicubic`)
       if (v.colorEq) pre.push(v.colorEq)
-      pre.push('setsar=1', 'format=yuv420p', `setpts=PTS-STARTPTS+${f3(v.startSec)}/TB`)
+      // Freeze holds stretch PTS: each pushes all frames at/after its source point
+      // forward by holdSec, so the held frame repeats (under -fps_mode cfr) instead
+      // of advancing. Commas inside gte() are escaped for the filtergraph parser.
+      // T-STARTT = seconds since this input's first frame, so the threshold is
+      // origin-independent (input -ss can start raw timestamps at inSec, not 0).
+      const freezeSum = v.freezes
+        .map((f) => `gte(T-STARTT\\,${f3(f.atLocal)})*${f3(f.holdSec)}`)
+        .join('+')
+      const setpts = freezeSum
+        ? `setpts=PTS-STARTPTS+(${freezeSum})/TB+${f3(v.startSec)}/TB`
+        : `setpts=PTS-STARTPTS+${f3(v.startSec)}/TB`
+      pre.push('setsar=1', 'format=yuv420p', setpts)
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
       chains.push(
         `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`
@@ -143,10 +162,21 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       const im = vis.image
       const i = imageIdx.get(im)!
       const op = Math.max(0, Math.min(1, im.opacity))
-      const prep =
-        `[${i}:v]scale=${r(im.boxW)}:${r(im.boxH)},format=rgba` +
-        (op < 0.999 ? `,colorchannelmixer=aa=${op.toFixed(3)}` : '')
-      chains.push(`${prep}[pi${i}]`)
+      // Order: crop (source fractions) → rotate (90° steps) → flip → scale to box.
+      const steps: string[] = []
+      if (im.crop) {
+        const c = im.crop
+        steps.push(`crop=iw*${f3(c.w)}:ih*${f3(c.h)}:iw*${f3(c.x)}:ih*${f3(c.y)}`)
+      }
+      const q = ((im.rotateQuarters ?? 0) % 4 + 4) % 4
+      if (q === 1) steps.push('transpose=1')
+      else if (q === 2) steps.push('transpose=1', 'transpose=1')
+      else if (q === 3) steps.push('transpose=2')
+      if (im.flipH) steps.push('hflip')
+      if (im.flipV) steps.push('vflip')
+      steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
+      if (op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+      chains.push(`[${i}:v]${steps.join(',')}[pi${i}]`)
       chains.push(
         `[${prev}][pi${i}]overlay=${r(im.x)}:${r(im.y)}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
       )

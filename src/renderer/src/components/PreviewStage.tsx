@@ -9,7 +9,7 @@ import {
 import type { AudioClip, Layer, VideoContent } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
-import { layersAtTime, makeVideoLayer, videoSourceTime, visualDuration } from '@shared/layers'
+import { isFrozenAt, layersAtTime, makeVideoLayer, videoSourceTime, visualDuration } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
@@ -139,19 +139,22 @@ function VideoLayerView({
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const target = videoSourceTime(content, layer, time)
+  // During a freeze hold, treat the element as paused on the held frame so it
+  // doesn't drift past it (and trigger reseek jitter).
+  const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
 
   useEffect(() => {
     const v = ref.current
     if (!v) return
-    if (playing) {
+    if (playing && !frozen) {
       if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
       if (v.paused) void v.play().catch(() => {})
     } else {
       if (!v.paused) v.pause()
       if (v.readyState >= 1 && Math.abs(v.currentTime - target) > 0.05) v.currentTime = target
     }
-  }, [playing, target])
+  }, [playing, frozen, target])
 
   return (
     <div
@@ -299,9 +302,11 @@ export function PreviewStage(): JSX.Element {
 
   const activeLayers = layersAtTime(previewLayers, time).filter((l) => !l.hidden)
   const selectedLayer = activeLayers.find((l) => l.id === selectedLayerId) ?? null
-  const activeCaption = captions?.enabled
-    ? captions.segments.find((s) => s.enabled && time >= s.startSec && time < s.endSec)
-    : undefined
+  // All captions on screen now (audio clips are captioned independently, so two
+  // overlapping clips can show two captions at once — stack them).
+  const activeCaptions = captions?.enabled
+    ? captions.segments.filter((s) => s.enabled && time >= s.startSec && time < s.endSec)
+    : []
   const hasContent = previewLayers.length > 0
 
   return (
@@ -365,7 +370,29 @@ export function PreviewStage(): JSX.Element {
         if (layer.content.kind === 'image') {
           const content = layer.content
           const asset = assetById.get(content.mediaId)
-          const box = { ...mediaBox(layer, mediaAspect(asset, {})), zIndex: z }
+          // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
+          const base = mediaAspect(asset, {})
+          const cr = content.crop
+          const cropped = cr && cr.h > 0 ? base * (cr.w / cr.h) : base
+          const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
+          const odd = q === 1 || q === 3
+          const box = { ...mediaBox(layer, odd ? 1 / cropped : cropped), zIndex: z, containerType: 'size' as const }
+          // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
+          // box, so swap its width/height (cqw/cqh resolve to the box via its
+          // container context) for odd quarter-turns.
+          const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
+          const imgStyle: CSSProperties = cr
+            ? {
+                position: 'absolute',
+                width: `${100 / cr.w}%`,
+                height: `${100 / cr.h}%`,
+                left: `${-(cr.x / cr.w) * 100}%`,
+                top: `${-(cr.y / cr.h) * 100}%`,
+                objectFit: 'fill',
+                maxWidth: 'none',
+                opacity: content.opacity
+              }
+            : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
           return (
             <div
               key={layer.id}
@@ -373,12 +400,19 @@ export function PreviewStage(): JSX.Element {
               onPointerDown={onMoveDown}
               className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
             >
-              <img
-                src={imageUrl(content.mediaId)}
-                alt=""
-                draggable={false}
-                style={{ width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }}
-              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: odd ? '100cqh' : '100cqw',
+                  height: odd ? '100cqw' : '100cqh',
+                  transform: `translate(-50%, -50%) rotate(${q * 90}deg) ${flip}`,
+                  overflow: 'hidden'
+                }}
+              >
+                <img src={imageUrl(content.mediaId)} alt="" draggable={false} style={imgStyle} />
+              </div>
             </div>
           )
         }
@@ -442,23 +476,33 @@ export function PreviewStage(): JSX.Element {
         </div>
       )}
 
-      {/* Active caption (auto-generated), at the configured baseline */}
-      {activeCaption && captions && (
+      {/* Active captions (auto-generated), stacked upward from the baseline so
+          overlapping audio clips each show their own caption. */}
+      {activeCaptions.length > 0 && captions && (
         <div
           style={{
             position: 'absolute',
             left: '50%',
-            top: pct(captions.yBaseline, LOGICAL.height),
-            transform: 'translate(-50%, -50%)',
-            fontSize: `${(64 / LOGICAL.width) * 100}cqw`,
-            maxWidth: '88%',
-            color: '#ffffff',
-            zIndex: 300,
-            textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)'
+            bottom: pct(LOGICAL.height - captions.yBaseline, LOGICAL.height),
+            transform: 'translateX(-50%)',
+            width: '88%',
+            zIndex: 300
           }}
-          className="text-center font-extrabold leading-tight"
+          className="flex flex-col items-center gap-[1cqw]"
         >
-          {activeCaption.text}
+          {activeCaptions.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                fontSize: `${(64 / LOGICAL.width) * 100}cqw`,
+                color: '#ffffff',
+                textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)'
+              }}
+              className="text-center font-extrabold leading-tight"
+            >
+              {s.text}
+            </div>
+          ))}
         </div>
       )}
 

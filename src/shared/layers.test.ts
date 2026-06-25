@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest'
 import type { Layer } from './project'
 import {
   applyVisibleOrder,
+  freezeExtraSec,
   hookCovered,
   isBackgroundId,
+  isFrozenAt,
   layersAtTime,
   makeImageLayer,
   makeTextLayer,
@@ -12,6 +14,7 @@ import {
   videoSourceTime,
   visualDuration
 } from './layers'
+import type { VideoContent } from './project'
 
 const vid = (id: string, start: number, end: number): Layer => ({
   ...makeVideoLayer(id, 'm', start, end - start)
@@ -50,6 +53,39 @@ describe('videoSourceTime', () => {
     expect(videoSourceTime(c, l, 6)).toBe(2)
     expect(videoSourceTime(c, l, 100)).toBe(10) // clamped to outSec
     expect(videoSourceTime(c, l, 0)).toBe(0) // clamped to inSec
+  })
+
+  it('holds the source frame across a freeze, then resumes', () => {
+    // startSec 0, in 0, out 10; freeze at source 3s for 2s.
+    const l = makeVideoLayer('a', 'm', 0, 10)
+    const c = { ...(l.content as VideoContent), freezes: [{ atSec: 3, holdSec: 2 }] }
+    expect(videoSourceTime(c, l, 2)).toBe(2) // before the freeze: linear
+    expect(videoSourceTime(c, l, 3)).toBe(3) // freeze begins
+    expect(videoSourceTime(c, l, 4)).toBe(3) // mid-hold: frozen
+    expect(videoSourceTime(c, l, 4.99)).toBe(3) // still held
+    expect(videoSourceTime(c, l, 5)).toBe(3) // hold ends; resumes at source 3
+    expect(videoSourceTime(c, l, 6)).toBe(4) // 1s after resume → source 4
+  })
+
+  it('chains multiple freezes', () => {
+    const l = makeVideoLayer('a', 'm', 0, 10)
+    const c = { ...(l.content as VideoContent), freezes: [{ atSec: 2, holdSec: 1 }, { atSec: 5, holdSec: 2 }] }
+    expect(videoSourceTime(c, l, 2.5)).toBe(2) // inside first hold
+    expect(videoSourceTime(c, l, 4)).toBe(3) // after first hold (1s dead time removed)
+    expect(videoSourceTime(c, l, 6)).toBe(5) // inside second hold (2+3 dead... at played 6: source 5)
+    expect(videoSourceTime(c, l, 9)).toBe(6) // both holds (3s) removed
+  })
+})
+
+describe('freezeExtraSec / isFrozenAt', () => {
+  const l = makeVideoLayer('a', 'm', 0, 10)
+  const c = { ...(l.content as VideoContent), freezes: [{ atSec: 3, holdSec: 2 }] }
+  it('sums holds and detects the hold window', () => {
+    expect(freezeExtraSec(c)).toBe(2)
+    expect(freezeExtraSec(l.content as VideoContent)).toBe(0)
+    expect(isFrozenAt(c, l, 2.9)).toBe(false)
+    expect(isFrozenAt(c, l, 3.5)).toBe(true)
+    expect(isFrozenAt(c, l, 5)).toBe(false)
   })
 })
 

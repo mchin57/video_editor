@@ -1,12 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join, parse } from 'node:path'
-import { IPC } from '@shared/ipc'
+import { IPC, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
+import { isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
-import { getDataDir } from './config'
+import { getDataDir, getSubdir } from './config'
+import { generateStill } from './services/still'
+import { hdrToSdrChain } from './services/proxy'
 import {
   ensureProxy,
   extractAudioToLibrary,
@@ -42,6 +45,22 @@ async function importMany(paths: string[]): Promise<MediaAsset[]> {
     }
   }
   return assets
+}
+
+/** ffmpeg -vf chain to make a still match the preview (HDR → SDR, crop, color). */
+function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
+  const chain: string[] = []
+  const v = asset.probe.video
+  if (v?.isHdr) chain.push(hdrToSdrChain(v))
+  if (req.crop) {
+    const c = req.crop
+    chain.push(`crop=${Math.round(c.w)}:${Math.round(c.h)}:${Math.round(c.x)}:${Math.round(c.y)}`)
+  }
+  if (req.color && !isNeutralColor(req.color)) {
+    const k = req.color
+    chain.push(`eq=brightness=${k.brightness}:contrast=${k.contrast}:saturation=${k.saturation}`)
+  }
+  return chain
 }
 
 export function registerIpcHandlers(): void {
@@ -174,6 +193,38 @@ export function registerIpcHandlers(): void {
     if (!asset) return []
     return detectSilence(asset.originalPath, asset.probe.durationSec)
   })
+
+  // Stills: capture an exact frame from a clip, matching the preview's HDR
+  // tonemap / crop / color, into the library or to a user-chosen file.
+  ipcMain.handle(IPC.captureStillToLibrary, async (_event, req: StillRequest): Promise<MediaAsset> => {
+    const asset = await getAsset(req.mediaId)
+    if (!asset) throw new Error('Source media not found for this still.')
+    const base = parse(asset.fileName).name
+    const out = join(getSubdir('stills'), `${base}-still-${Date.now().toString(36)}.png`)
+    await generateStill(asset.originalPath, out, req.sourceSec, stillVfChain(asset, req))
+    return importFile(out, `${base} (still).png`)
+  })
+
+  ipcMain.handle(
+    IPC.captureStillToDisk,
+    async (event, req: StillRequest, suggestedName: string): Promise<string | null> => {
+      const asset = await getAsset(req.mediaId)
+      if (!asset) throw new Error('Source media not found for this still.')
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: Electron.SaveDialogOptions = {
+        title: 'Save still frame',
+        defaultPath: join(app.getPath('pictures'), suggestedName || 'still.png'),
+        filters: [
+          { name: 'PNG image', extensions: ['png'] },
+          { name: 'JPEG image', extensions: ['jpg'] }
+        ]
+      }
+      const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return null
+      await generateStill(asset.originalPath, result.filePath, req.sourceSec, stillVfChain(asset, req))
+      return result.filePath
+    }
+  )
 
   ipcMain.handle(IPC.getSettings, () => getSettings())
   ipcMain.handle(IPC.updateSettings, (_event, patch: Partial<Settings>) => updateSettings(patch))

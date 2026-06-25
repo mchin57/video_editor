@@ -46,6 +46,45 @@ export function splitVideoLayer(
 }
 
 /**
+ * Build the extracted-audio clip(s) for a video layer, honoring its freeze holds:
+ * the audio is split at each freeze's source point and the later pieces are pushed
+ * back by the accumulated hold time, so the freeze windows fall silent (the dialogue
+ * cuts while the frame is held) and the audio stays in sync with the stretched video.
+ * With no freezes this is a single straight clip.
+ */
+export function extractAudioPieces(
+  layer: Layer,
+  content: VideoContent,
+  makeId: () => string
+): AudioClip[] {
+  const base = (from: number, to: number, holdBefore: number): AudioClip => ({
+    id: makeId(),
+    mediaId: content.mediaId,
+    startSec: layer.startSec + (from - content.inSec) + holdBefore,
+    inSec: from,
+    outSec: to,
+    gainDb: 0,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    duck: false,
+    kind: 'extracted'
+  })
+  const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
+  const pieces: AudioClip[] = []
+  let segStart = content.inSec
+  let holdAcc = 0
+  for (const f of freezes) {
+    const at = Math.min(content.outSec, Math.max(content.inSec, f.atSec))
+    if (at - segStart >= 0.02) pieces.push(base(segStart, at, holdAcc)) // skip slivers
+    segStart = at
+    holdAcc += Math.max(0, f.holdSec)
+  }
+  if (content.outSec - segStart >= 0.02) pieces.push(base(segStart, content.outSec, holdAcc))
+  // Degenerate guard (e.g. all slivers): fall back to one straight clip.
+  return pieces.length ? pieces : [base(content.inSec, content.outSec, 0)]
+}
+
+/**
  * Split an audio clip at a timeline time (seconds from 0). Returns [left, right]
  * sharing the same source, or null if the cut falls at/outside the clip's span.
  * The left piece keeps the original fade-in and drops its fade-out; the right

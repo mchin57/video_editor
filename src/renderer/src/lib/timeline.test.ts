@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { reorder, splitAudioClip, splitVideoLayer } from './timeline'
+import { extractAudioPieces, reorder, splitAudioClip, splitVideoLayer } from './timeline'
 import { makeVideoLayer } from '@shared/layers'
-import type { AudioClip } from '@shared/project'
+import type { AudioClip, VideoContent } from '@shared/project'
 
 function audio(over: Partial<AudioClip> = {}): AudioClip {
   return {
@@ -18,6 +18,35 @@ function audio(over: Partial<AudioClip> = {}): AudioClip {
     ...over
   }
 }
+
+describe('extractAudioPieces', () => {
+  const id = (() => {
+    let n = 0
+    return (): string => `p${n++}`
+  })()
+  it('returns one straight clip when there are no freezes', () => {
+    const layer = makeVideoLayer('a', 'm', 4, 6) // start 4, in 0, out 6
+    const pieces = extractAudioPieces(layer, layer.content as VideoContent, () => 'p')
+    expect(pieces).toHaveLength(1)
+    expect(pieces[0]).toMatchObject({ startSec: 4, inSec: 0, outSec: 6, kind: 'extracted' })
+  })
+  it('splits at the freeze with a silent gap and keeps later audio in sync', () => {
+    const layer = makeVideoLayer('a', 'm', 0, 10) // start 0, in 0, out 10
+    const c = { ...(layer.content as VideoContent), freezes: [{ atSec: 3, holdSec: 2 }] }
+    const pieces = extractAudioPieces(layer, c, id)
+    expect(pieces).toHaveLength(2)
+    expect(pieces[0]).toMatchObject({ startSec: 0, inSec: 0, outSec: 3 }) // plays 0→3
+    // second piece pushed back by the 2s hold → starts at 5 (gap 3→5 is silent)
+    expect(pieces[1]).toMatchObject({ startSec: 5, inSec: 3, outSec: 10 })
+  })
+  it('drops a zero-length sliver when a freeze sits at the clip start', () => {
+    const layer = makeVideoLayer('a', 'm', 0, 10)
+    const c = { ...(layer.content as VideoContent), freezes: [{ atSec: 0, holdSec: 2 }] }
+    const pieces = extractAudioPieces(layer, c, id)
+    expect(pieces).toHaveLength(1)
+    expect(pieces[0]).toMatchObject({ startSec: 2, inSec: 0, outSec: 10 }) // whole audio, delayed 2s
+  })
+})
 
 describe('splitVideoLayer', () => {
   const makeId = (): string => 'new'

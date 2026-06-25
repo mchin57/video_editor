@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
+import { useRef, useState, type JSX, type ReactNode } from 'react'
 import type { Layer, Project, VideoContent } from '@shared/project'
 import { NEUTRAL_COLOR, effectiveOut, isNeutralColor } from '@shared/project'
-import { hookCovered } from '@shared/layers'
+import { hookCovered, videoSourceTime } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { detectSilence, transcribeMedia, whisperAvailable } from '@/ipc/client'
+import { detectSilence } from '@/ipc/client'
 import { speechSegments } from '@/lib/silence'
-import { buildTimelineCaptions, type CaptionSource } from '@/lib/captions'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
+import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
+import { CollapsibleSection } from './CollapsibleSection'
 
 function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -70,70 +71,55 @@ const setLayer = (id: string) => (p: Project, fn: (l: Layer) => Layer): Project 
   layers: p.layers.map((l) => (l.id === id ? fn(l) : l))
 })
 
-/**
- * Per-clip auto-captioning: transcribes this video layer's media (cached) and
- * projects the words to timeline time using the layer's position + trim. The
- * resulting segments are id-tagged with the layer so re-captioning is idempotent
- * and other clips' captions are preserved.
- */
-function ClipCaptions({ layer, content }: { layer: Layer; content: VideoContent }): JSX.Element | null {
-  const captions = useProject((s) => s.project?.captions)
-  const setCaptions = useProject((s) => s.setCaptions)
-  const [busy, setBusy] = useState(false)
-  const [available, setAvailable] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
-  useEffect(() => {
-    void whisperAvailable().then(setAvailable)
-  }, [])
-  if (!captions) return null
-  const tag = `cap-${layer.id}-`
-  const count = captions.segments.filter((s) => s.id.startsWith(tag)).length
-
-  const generate = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    setErr(null)
-    try {
-      const transcript = await transcribeMedia(content.mediaId)
-      const source: CaptionSource = {
-        mediaId: content.mediaId,
-        startSec: layer.startSec,
-        inSec: content.inSec,
-        outSec: content.outSec
-      }
-      const segs = buildTimelineCaptions([source], { [content.mediaId]: transcript.words }).map((s, i) => ({
-        ...s,
-        id: `${tag}${i}`
-      }))
-      const others = captions.segments.filter((s) => !s.id.startsWith(tag))
-      setCaptions({
-        ...captions,
-        enabled: true,
-        segments: [...others, ...segs].sort((a, b) => a.startSec - b.startSec)
-      })
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
+/** Freeze-frame controls: hold the current frame for a chosen duration, and list
+ *  existing holds. Adding a freeze extends only this clip (no ripple). */
+function FreezeFrames({ layer, content }: { layer: Layer; content: VideoContent }): JSX.Element {
+  const addFreeze = useProject((s) => s.addFreeze)
+  const removeFreeze = useProject((s) => s.removeFreeze)
+  const [hold, setHold] = useState(2)
+  const freezes = content.freezes ?? []
 
   return (
-    <div className="mt-3 border-t border-white/5 pt-3">
-      <div className="mb-2 text-[10px] uppercase tracking-wide text-zinc-500">Captions</div>
-      {available ? (
+    <div>
+      <div className="mb-2 flex items-end gap-2">
+        <Field label="Hold (s)">
+          <input
+            type="number"
+            step="0.5"
+            min="0.1"
+            value={hold}
+            onChange={(e) => setHold(Math.max(0.1, Number(e.target.value)))}
+            className={inputCls}
+          />
+        </Field>
         <button
-          onClick={() => void generate()}
-          disabled={busy}
-          className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
-          title="Transcribe this clip with whisper.cpp and add captions for it"
+          onClick={() => addFreeze(layer.id, videoSourceTime(content, layer, usePlayback.getState().time), hold)}
+          className="mb-2 flex-1 rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+          title="Hold the frame at the playhead for the chosen duration"
         >
-          {busy ? 'Transcribing…' : count > 0 ? `↻ Re-caption this clip (${count})` : '✨ Caption this clip'}
+          ⏸ Pause clip here
         </button>
+      </div>
+      {freezes.length === 0 ? (
+        <p className="text-[11px] text-zinc-600">No freezes. Move the playhead and add one.</p>
       ) : (
-        <p className="text-[11px] text-zinc-600">Captions need whisper.cpp installed (bin/whisper).</p>
+        <ul className="flex flex-col gap-1">
+          {freezes.map((f, i) => (
+            <li key={i} className="flex items-center justify-between rounded bg-black/30 px-2 py-1 text-[11px] text-zinc-300">
+              <span>
+                @ {Math.max(0, f.atSec - content.inSec).toFixed(1)}s into clip · hold {f.holdSec.toFixed(1)}s
+              </span>
+              <button
+                onClick={() => removeFreeze(layer.id, i)}
+                className="rounded px-1 text-rose-300 hover:bg-rose-500/20"
+                title="Remove this freeze"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-      {err && <p className="mt-1 text-[11px] text-rose-400">{err}</p>}
     </div>
   )
 }
@@ -146,6 +132,8 @@ function LayerEditor(): JSX.Element | null {
   const remove = useProject((s) => s.removeLayer)
   const extractAudio = useProject((s) => s.extractLayerAudio)
   const setCropEditing = useUi((s) => s.setCropEditing)
+  const setStillsOpen = useUi((s) => s.setStillsOpen)
+  const setImageEditOpen = useUi((s) => s.setImageEditOpen)
   const { data: assets = [] } = useLibrary()
   if (!layer) return null
   const id = layer.id
@@ -164,6 +152,7 @@ function LayerEditor(): JSX.Element | null {
         </div>
       )}
 
+      <CollapsibleSection id="transform" title="Transform">
       <div className="flex gap-2">
         <Field label="Start (s)">
           <input
@@ -221,10 +210,12 @@ function LayerEditor(): JSX.Element | null {
         <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
         Visible
       </label>
+      </CollapsibleSection>
 
       {/* Video-specific controls */}
       {c.kind === 'video' && (
-        <div className="mb-3 border-t border-white/5 pt-3">
+        <>
+          <CollapsibleSection id="trim" title="Trim & audio">
           <div className="flex gap-2">
             <Field label="Trim in (s)">
               <input
@@ -281,19 +272,33 @@ function LayerEditor(): JSX.Element | null {
               </button>
             )}
           </div>
+          <button
+            onClick={() => setStillsOpen(true)}
+            className="mt-2 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+            title="Grab still frames from this clip"
+          >
+            📷 Stills…
+          </button>
+          </CollapsibleSection>
 
-          <div className="mt-3 border-t border-white/5 pt-3">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Color</span>
-              {!isNeutralColor(c.color) && (
+          <CollapsibleSection id="freeze" title="Freeze frames">
+            <FreezeFrames layer={layer} content={c} />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            id="color"
+            title="Color"
+            right={
+              !isNeutralColor(c.color) ? (
                 <button
                   onClick={() => updateContent(id, { color: undefined })}
                   className="text-[10px] text-zinc-400 hover:text-zinc-200"
                 >
                   Reset
                 </button>
-              )}
-            </div>
+              ) : null
+            }
+          >
             {(() => {
               const col = c.color ?? NEUTRAL_COLOR
               const setCol =
@@ -318,30 +323,37 @@ function LayerEditor(): JSX.Element | null {
                 </>
               )
             })()}
-          </div>
-
-          {asset?.probe.audio && <ClipCaptions layer={layer} content={c} />}
-        </div>
+          </CollapsibleSection>
+        </>
       )}
 
       {/* Image-specific controls */}
       {c.kind === 'image' && (
-        <Field label={`Opacity · ${Math.round(c.opacity * 100)}%`}>
-          <LiveRange
-            min={0}
-            max={1}
-            step={0.05}
-            value={c.opacity}
-            transform={(p, v) =>
-              mut(p, (l) => (l.content.kind === 'image' ? { ...l, content: { ...l.content, opacity: v } } : l))
-            }
-          />
-        </Field>
+        <CollapsibleSection id="image" title="Image">
+          <Field label={`Opacity · ${Math.round(c.opacity * 100)}%`}>
+            <LiveRange
+              min={0}
+              max={1}
+              step={0.05}
+              value={c.opacity}
+              transform={(p, v) =>
+                mut(p, (l) => (l.content.kind === 'image' ? { ...l, content: { ...l.content, opacity: v } } : l))
+              }
+            />
+          </Field>
+          <button
+            onClick={() => setImageEditOpen(true)}
+            className="mt-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+            title="Crop, rotate and flip this image"
+          >
+            ✏ Edit image…
+          </button>
+        </CollapsibleSection>
       )}
 
       {/* Text-specific controls */}
       {c.kind === 'text' && (
-        <div className="mb-2">
+        <CollapsibleSection id="text" title="Text">
           <Field label="Text">
             <textarea value={c.text} rows={2} onChange={(e) => updateContent(id, { text: e.target.value })} className={inputCls} />
           </Field>
@@ -373,12 +385,12 @@ function LayerEditor(): JSX.Element | null {
             />
             Background pill
           </label>
-        </div>
+        </CollapsibleSection>
       )}
 
       <button
         onClick={() => remove(id)}
-        className="w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+        className="mt-3 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
       >
         Delete layer
       </button>
@@ -519,9 +531,17 @@ function AudioClipEditor(): JSX.Element | null {
         <input type="checkbox" checked={clip.duck} onChange={(e) => update(clip.id, { duck: e.target.checked })} />
         Duck under other audio (music bed)
       </label>
-      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
         <input type="checkbox" checked={!!clip.denoise} onChange={(e) => update(clip.id, { denoise: e.target.checked })} />
         Reduce noise (on export)
+      </label>
+      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={!!clip.excludeFromCaptions}
+          onChange={(e) => update(clip.id, { excludeFromCaptions: e.target.checked })}
+        />
+        Exclude from captions
       </label>
 
       <button

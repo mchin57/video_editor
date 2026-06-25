@@ -3,7 +3,7 @@ import type { AudioClip, CaptionsConfig, Layer, Project, ScriptLine } from '@sha
 import { createEmptyProject, migrateProject } from '@shared/project'
 import { applyVisibleOrder, makeVideoLayer } from '@shared/layers'
 import type { PresetId } from '@shared/export'
-import { splitAudioClip, splitVideoLayer } from '@/lib/timeline'
+import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
 import { useUi } from '@/state/ui'
 import {
   loadProject,
@@ -92,6 +92,10 @@ interface ProjectState {
   splitLayerAt: (id: string, atSec: number) => void
   /** Pull a video layer's audio onto the audio track and mute the layer. */
   extractLayerAudio: (id: string) => void
+  /** Add a freeze hold at source time `atSrcSec`, extending the layer by `holdSec`. */
+  addFreeze: (id: string, atSrcSec: number, holdSec: number) => void
+  /** Remove the freeze at `index`, shrinking the layer by its hold. */
+  removeFreeze: (id: string, index: number) => void
 
   // --- Captions / script / audio (unchanged tracks) ---
   setCaptions: (captions: CaptionsConfig) => void
@@ -271,23 +275,42 @@ export const useProject = create<ProjectState>((set, get) => {
         const layer = p.layers.find((l) => l.id === id)
         if (!layer || layer.content.kind !== 'video') return p
         const c = layer.content
-        const audio: AudioClip = {
-          id: newId(),
-          mediaId: c.mediaId,
-          startSec: layer.startSec,
-          inSec: c.inSec,
-          outSec: c.outSec,
-          gainDb: 0,
-          fadeInSec: 0,
-          fadeOutSec: 0,
-          duck: false,
-          kind: 'extracted'
-        }
+        // Freeze holds split the audio into pieces with silent gaps so the dialogue
+        // cuts while a frame is held (and stays synced to the stretched video).
+        const pieces = extractAudioPieces(layer, c, newId)
         return {
           ...mapLayer(p, id, (l) => ({ ...l, content: { ...c, mute: true } })),
-          audioClips: [...p.audioClips, audio]
+          audioClips: [...p.audioClips, ...pieces]
         }
       }),
+
+    addFreeze: (id, atSrcSec, holdSec) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video' || holdSec <= 0) return l
+          const c = l.content
+          const at = Math.min(c.outSec, Math.max(c.inSec, atSrcSec))
+          const freezes = [...(c.freezes ?? []), { atSec: at, holdSec }].sort((a, b) => a.atSec - b.atSec)
+          return { ...l, endSec: l.endSec + holdSec, content: { ...c, freezes } }
+        })
+      ),
+
+    removeFreeze: (id, index) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video') return l
+          const c = l.content
+          const freezes = c.freezes ?? []
+          const f = freezes[index]
+          if (!f) return l
+          const next = freezes.filter((_, i) => i !== index)
+          return {
+            ...l,
+            endSec: Math.max(l.startSec + 0.2, l.endSec - f.holdSec),
+            content: { ...c, freezes: next.length ? next : undefined }
+          }
+        })
+      ),
 
     // --- Captions / script / audio ---
     setCaptions: (captions) => commit((p) => ({ ...p, captions })),

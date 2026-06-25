@@ -19,10 +19,46 @@ export function visualDuration(layers: Layer[]): number {
   return layers.reduce((max, l) => Math.max(max, l.endSec), 0)
 }
 
-/** Source-media time a video layer should show at timeline time `t`. */
+/** Total extra played time a video layer's freeze holds add (seconds). */
+export function freezeExtraSec(content: VideoContent): number {
+  return (content.freezes ?? []).reduce((sum, f) => sum + Math.max(0, f.holdSec), 0)
+}
+
+/**
+ * Source-media time a video layer should show at timeline time `t`, honoring any
+ * freeze holds. Played time runs `inSec → outSec` but pauses on each freeze's
+ * source frame for its `holdSec`, so the played window is longer than the source
+ * span by `freezeExtraSec`.
+ */
 export function videoSourceTime(content: VideoContent, layer: Layer, t: number): number {
-  const local = t - layer.startSec
-  return Math.min(content.outSec, Math.max(content.inSec, content.inSec + local))
+  let local = t - layer.startSec // played time within the (stretched) layer
+  const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
+  for (const f of freezes) {
+    // Earlier holds are already removed from `local`, so this freeze sits at its
+    // raw source distance from the in-point in the reduced timeline.
+    const atPlayed = f.atSec - content.inSec
+    if (local < atPlayed) break // freeze is still ahead — normal linear mapping
+    if (local < atPlayed + f.holdSec) return clampSrc(content, f.atSec) // inside the hold
+    local -= Math.max(0, f.holdSec) // passed it: drop its hold as dead played time
+  }
+  return clampSrc(content, content.inSec + local)
+}
+
+function clampSrc(content: VideoContent, s: number): number {
+  return Math.min(content.outSec, Math.max(content.inSec, s))
+}
+
+/** True if timeline time `t` falls inside one of the layer's freeze holds. */
+export function isFrozenAt(content: VideoContent, layer: Layer, t: number): boolean {
+  let local = t - layer.startSec
+  const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
+  for (const f of freezes) {
+    const atPlayed = f.atSec - content.inSec
+    if (local < atPlayed) return false
+    if (local < atPlayed + f.holdSec) return true
+    local -= Math.max(0, f.holdSec)
+  }
+  return false
 }
 
 /** The background is the bottom-most (index 0) layer. */

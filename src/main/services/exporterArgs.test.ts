@@ -18,7 +18,8 @@ const vid: ExportVideo = {
   x: 0,
   y: 0,
   startSec: 1,
-  endSec: 6
+  endSec: 6,
+  freezes: []
 }
 
 function plan(over: Partial<ExportPlan> = {}): ExportPlan {
@@ -58,6 +59,36 @@ describe('buildExportArgs', () => {
     expect(s).toContain(
       '[1:v]tonemapX,crop=600:1000:10:20,scale=1080:1920:flags=bicubic,eq=brightness=0.1,setsar=1,format=yuv420p,setpts=PTS-STARTPTS+1.000/TB[pv1]'
     )
+  })
+
+  it('stretches PTS for freeze holds (escaped commas), keeping the plain form with none', () => {
+    const none = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
+    expect(none).toContain('setpts=PTS-STARTPTS+1.000/TB[pv1]') // unchanged when no freezes
+
+    const frozen = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, freezes: [{ atLocal: 1.5, holdSec: 2 }] } }] }),
+      'o'
+    ).join(' ')
+    expect(frozen).toContain('setpts=PTS-STARTPTS+(gte(T-STARTT\\,1.500)*2.000)/TB+1.000/TB[pv1]')
+  })
+
+  it('applies image crop, 90° rotation and flips before scaling', () => {
+    const img = {
+      path: 'C:/i/p.png',
+      boxW: 300,
+      boxH: 200,
+      x: 0,
+      y: 0,
+      startSec: 0,
+      endSec: 3,
+      opacity: 1,
+      crop: { x: 0.1, y: 0.2, w: 0.5, h: 0.5 },
+      rotateQuarters: 1,
+      flipH: true,
+      flipV: false
+    }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')
+    expect(s).toContain('[2:v]crop=iw*0.500:ih*0.500:iw*0.100:ih*0.200,transpose=1,hflip,scale=300:200,format=rgba[pi2]')
   })
 
   it('composites an image after the videos: scale, rgba, opacity, gated overlay', () => {

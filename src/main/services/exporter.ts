@@ -117,7 +117,8 @@ async function runExport(
           x: r(l.x * sx - boxW / 2),
           y: r(l.y * sy - boxH / 2),
           startSec: l.startSec,
-          endSec: l.endSec
+          endSec: l.endSec,
+          freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec }))
         }
       })
       // An unmuted video layer's own audio joins the mix (placed at its start).
@@ -137,7 +138,10 @@ async function runExport(
       const imgPath = imageAssetPath(c.mediaId)
       if (!existsSync(imgPath)) continue // display PNG missing → skip rather than fail
       const v = (await getAsset(c.mediaId))?.probe.video
-      const aspect = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+      let aspect = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+      if (c.crop && c.crop.h > 0) aspect *= c.crop.w / c.crop.h // crop reshapes the box
+      const q = (((c.rotateQuarters ?? 0) % 4) + 4) % 4
+      if (q === 1 || q === 3) aspect = 1 / aspect // 90°/270° swap width and height
       const box = layerBox(aspect, l.scale)
       const boxW = box.w * sx
       const boxH = box.h * sy
@@ -151,7 +155,11 @@ async function runExport(
           y: r(l.y * sy - boxH / 2),
           startSec: l.startSec,
           endSec: l.endSec,
-          opacity: c.opacity
+          opacity: c.opacity,
+          crop: c.crop ?? null,
+          rotateQuarters: q,
+          flipH: c.flipH,
+          flipV: c.flipV
         }
       })
     } else {

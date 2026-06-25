@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT } from '@shared/ipc'
+import { IPC, IPC_EVENT, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
@@ -54,6 +54,12 @@ const api = {
     ipcRenderer.invoke(IPC.getTranscript, mediaId),
   detectSilence: (mediaId: string): Promise<{ start: number; end: number }[]> =>
     ipcRenderer.invoke(IPC.detectSilence, mediaId),
+
+  // Stills — capture a frame from a clip into the library, or save it to disk.
+  captureStillToLibrary: (req: StillRequest): Promise<MediaAsset> =>
+    ipcRenderer.invoke(IPC.captureStillToLibrary, req),
+  captureStillToDisk: (req: StillRequest, suggestedName: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.captureStillToDisk, req, suggestedName),
 
   /** Resolve a dropped File to its absolute path (Electron drag-and-drop). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

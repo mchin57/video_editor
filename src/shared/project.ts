@@ -25,6 +25,29 @@ export interface CropRect {
   h: number
 }
 
+/**
+ * A crop expressed as 0..1 fractions of the element it applies to (rather than
+ * source pixels). Used for image layers, where the on-disk display PNG is capped
+ * at 1920px so a pixel rect would be ambiguous; fractions stay correct in preview
+ * (via naturalWidth/Height) and export (via ffmpeg `iw`/`ih`).
+ */
+export interface NormCrop {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * A held ("frozen") frame inside a video layer: at source second `atSec`, the
+ * frame is held for `holdSec`, stretching the layer's played duration by that
+ * much. Stored sorted by `atSec`.
+ */
+export interface FreezeHold {
+  atSec: number
+  holdSec: number
+}
+
 /** Per-clip color correction. Neutral = brightness 0, contrast 1, saturation 1. */
 export interface ColorAdjust {
   brightness: number // -1..1
@@ -60,6 +83,8 @@ export interface VideoContent {
   crop?: CropRect | null
   /** Optional color correction (absent = none). */
   color?: ColorAdjust
+  /** Source-time freeze holds (absent/empty = none). Kept sorted by `atSec`. */
+  freezes?: FreezeHold[]
 }
 
 /** A still image (logo, photo, sticker, graphic) composited as a layer. */
@@ -68,6 +93,13 @@ export interface ImageContent {
   mediaId: string
   /** 0..1 */
   opacity: number
+  /** Optional crop in 0..1 fractions of the source image (absent/null = full). */
+  crop?: NormCrop | null
+  /** 90° clockwise rotation steps (0..3). Absent = 0. */
+  rotateQuarters?: number
+  /** Mirror horizontally / vertically. Absent = false. */
+  flipH?: boolean
+  flipV?: boolean
 }
 
 /** A text element composited as a layer. */
@@ -150,6 +182,8 @@ export interface AudioClip {
   duck: boolean
   /** Apply FFT noise reduction on export. */
   denoise?: boolean
+  /** Skip this clip when captioning the audio lane (e.g. a music bed). */
+  excludeFromCaptions?: boolean
   kind: AudioKind
 }
 
@@ -208,7 +242,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 4,
+    version: 5,
     preset: 'reel',
     layers: [],
     captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
@@ -389,7 +423,9 @@ export function migrateProject(raw: unknown): Project {
   delete (p as Record<string, unknown>).imageOverlays
 
   if (!Array.isArray(p.script)) p.script = []
-  if (typeof p.version !== 'number' || p.version < 4) p.version = 4
+  // v5 only adds absence-tolerant optional fields (freezes, image crop/rotate/
+  // flip), so there's nothing to backfill — just mark the version forward.
+  if (typeof p.version !== 'number' || p.version < 5) p.version = 5
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

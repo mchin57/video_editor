@@ -5,6 +5,7 @@ import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import type { Settings } from '@shared/settings'
 import type { Transcript } from '@shared/transcript'
+import type { StillRequest } from '@shared/ipc'
 
 /** Thin typed wrappers over the preload-exposed window.api. */
 export const getCapabilities = (): Promise<FfmpegCapabilities> => window.api.getCapabilities()
@@ -50,6 +51,13 @@ export const getTranscript = (mediaId: string): Promise<Transcript | null> =>
   window.api.getTranscript(mediaId)
 export const detectSilence = (mediaId: string): Promise<{ start: number; end: number }[]> =>
   window.api.detectSilence(mediaId)
+
+/** Capture a still from a clip into the library, returning the new image asset. */
+export const captureStillToLibrary = (req: StillRequest): Promise<MediaAsset> =>
+  window.api.captureStillToLibrary(req)
+/** Capture a still and save it to a user-chosen file. null = canceled. */
+export const captureStillToDisk = (req: StillRequest, suggestedName: string): Promise<string | null> =>
+  window.api.captureStillToDisk(req, suggestedName)
 export const pathForFile = (file: File): string => window.api.pathForFile(file)
 export const onJobProgress = (cb: (ev: JobProgressEvent) => void): (() => void) =>
   window.api.onJobProgress(cb)

@@ -4,6 +4,35 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ## Open
 
+### Freeze frames, stills & image editing (`feature/freeze-stills-image-edit` branch)
+
+- [x] **Freeze / pause a clip.** A video layer carries source-time `freezes`
+  (`VideoContent.freezes`, `src/shared/project.ts`): at source second `atSec` the
+  frame holds for `holdSec`, stretching only that clip (no ripple). `videoSourceTime`
+  / `isFrozenAt` / `freezeExtraSec` (`src/shared/layers.ts`) make preview honor it
+  (the `<video>` is treated as paused during a hold); export stretches PTS via
+  `setpts=…+(gte(T-STARTT,atLocal)*holdSec)/TB+…` so the held frame repeats under cfr
+  (`exporterArgs.ts`). Store actions `addFreeze`/`removeFreeze` extend `endSec`
+  additively; Inspector "Freeze frames" section adds/removes holds at the playhead.
+- [x] **Stills from a clip.** `src/main/services/still.ts` grabs the exact on-screen
+  frame (same HDR tonemap / crop / color as preview) via `captureStillToLibrary`
+  (imports a reusable image asset) or `captureStillToDisk` (Save dialog). UI is the
+  draggable `StillsPopout` (capture, gallery, add-as-layer, save-to-disk).
+- [x] **Basic image editing.** Image layers gain `crop` (0..1 fractions),
+  `rotateQuarters` (90° steps) and `flipH`/`flipV` (`ImageContent`). Preview composites
+  them (`PreviewStage`) and export mirrors them (`crop→transpose→flip→scale` in
+  `exporterArgs.ts`). UI is the draggable `ImageEditPopout` (free crop box, rotate,
+  flip, opacity).
+- [x] **Tidier Inspector.** Sub-sections are collapsible with persisted open/closed
+  state (`CollapsibleSection`); heavier tools (stills, image editing) live in
+  draggable `Popout` panels rather than crowding the panel.
+- [x] **Captions follow the audio lane.** "✨ Caption audio" (`CaptionAudioButton`)
+  transcribes every audio clip (except those flagged "Exclude from captions") and
+  projects each one independently from its own placement — so freeze-split extracted
+  pieces caption correctly across the hold, and overlapping audio yields two
+  overlapping captions (the preview stacks them). The old per-video-clip
+  "Caption this clip" is gone; the header CC On/Off toggle stays.
+
 ### Layer compositing (`feature/layers` branch)
 
 - [x] **Unified, type-agnostic layer stack.** Replaced the old sequential-clip
@@ -56,6 +85,33 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   - **UI:** add a menu bar (File / Edit / Profile / …) across the top of the app window — standard dropdown tabs. `Profile` menu lists available profiles with a checkmark on the active one, plus "New profile…" and "Manage profiles…" actions.
   - Where to start: `src/shared/export.ts` (profile type), `src/main/services/projectStore.ts` (persist active profile), `src/renderer/src/state/editorStore.ts` (active profile in store), new `ProfileMenu` component, conditionalize `ReelChecklist`, `SafeZoneOverlay`, `HookZoneMarker` on active profile's flags.
 
+### Text updates
+
+#### Fonts
+- [ ] **Expand bundled font library** — `resources/fonts/` is currently empty; `assBuilder.ts` defaults to Arial. The `TextContent` type already has a `fontFamily: string` field, so the data model is ready — it just needs actual font files dropped in and wired up. Priority picks: **Montserrat ExtraBold**, **Anton**, **League Spartan**, **Poppins Bold** (caption workhorses), **Bebas Neue** (hook titles), and a compressed/narrow sans (e.g. Barlow Condensed) for long single-line hooks. Fonts live in `resources/fonts/` and are passed to libass via `fontsdir`.
+- [ ] **Font picker UI** — no font selector exists in the Inspector yet. Add a scrollable picker showing a live preview of each font. Group fonts by category (Caption, Hook/Display, Stylized).
+
+#### Colors & styling
+- [ ] **Gradient text** — allow a linear gradient (2-stop, angle-configurable) on text overlay color instead of a flat fill. Preview via CSS `background-clip: text`; export requires rendering gradient text to a PNG frame sequence and overlaying via ffmpeg (ASS has no gradient support). High visual impact for hook titles.
+- [ ] **Brand color presets** — store a small palette of saved colors (per profile) in `settings.json` so the user can one-tap apply their brand colors to any overlay without re-entering hex values every time.
+- [ ] **Semi-transparent pill backgrounds** — `PillStyle` stores color as an 8-digit hex (alpha channel included) but the Inspector only exposes a color picker with no dedicated opacity slider. Add a separate opacity slider so users can set e.g. 70% black without editing hex manually.
+- [ ] **Stroke / outline control** — expose stroke width and color as Inspector fields. Currently hardcoded in `assBuilder.ts` as `Outline=4, Shadow=1` with no user control. Thick white stroke on dark text is the dominant muted-viewer readability pattern.
+- [ ] **Drop shadow control** — expose shadow offset, blur, and color per overlay. Currently `assBuilder.ts` fixes `Shadow=1` with no user adjustment.
+
+#### Text animation effects
+- [ ] **Per-overlay entrance animation** — add an `animation` field to text overlays with these presets (rendered in preview via CSS animation; burned to video on export by rendering the animated frames via a canvas/offscreen approach or an ffmpeg `fade`/`drawtext` trick):
+  - **Fade in** — opacity 0→1 over the first 0.3s. Universal default.
+  - **Slide in from bottom** — translates up into position. Most common caption entrance.
+  - **Typewriter** — characters reveal one-by-one. Popular for hook text.
+  - **Bounce** — overshoots position slightly then settles. Fun/casual tone.
+  - **Word-by-word highlight** — karaoke-style; each word lights up as it's spoken (driven by whisper word timestamps). High engagement for spoken-word content.
+- [ ] **Exit animation** — matching fade-out or slide-out at the end of the overlay's duration.
+
+#### Other
+- [ ] **Beat sync** — detect transients/beats in the music track and expose them as snap points on the timeline ruler, so cuts and text entrance animations can be snapped to the beat automatically.
+- [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls.
+- [ ] **Text-behind-subject effect** — composite a text layer between the subject and background using the auto background removal mask (see subject-aware crop item). Requires the segmentation feature to be built first.
+
 ### Not planned / missing features
 
 - [ ] **Multi-clip layout formats (split screen, panels)** — place multiple clips side-by-side or in a grid within a single frame at a given timeline position. Built-in layout presets to ship:
@@ -80,15 +136,17 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 - [ ] **Auto background removal (subject-aware crop)** — detect the primary subject (person) in a clip using a segmentation model and remove or replace the background automatically. Likely approach: run a lightweight portrait segmentation model (e.g. MediaPipe Selfie Segmentation or ONNX rembg) frame-by-frame as a job in the main process, output an alpha-masked overlay, then composite via ffmpeg `overlay` + `alphaextract`/`alphamerge`. User can choose to replace the background with a solid color, blur, or a custom image. Useful for creating clean talking-head Reels without needing a physical green screen.
 
-- [x] **Color correction controls** — per-clip exposure/contrast/saturation (Inspector sliders; preview CSS filter mirrors export `eq`). _LUT (.cube) support still TODO._
+- [x] **Color correction controls** — per-clip exposure/contrast/saturation (Inspector sliders; preview CSS filter mirrors export `eq`).
+- [ ] **LUT (.cube) support** — import a `.cube` LUT file and apply it per clip on export via ffmpeg `lut3d` filter. Preview approximation via CSS or a canvas-based LUT lookup. Useful for cinematic grades and consistent brand look across clips.
 - [ ] **Speed ramping** — no variable speed or slow-mo support. Common in short-form video; would require ffmpeg `setpts` + `atempo` per clip segment and timeline representation of speed curves. _(Large.)_
 - [ ] **Keyframe animation** — no way to animate overlay position, scale, or opacity over time. Would require a keyframe store per overlay property and interpolation in both preview and ASS export. _(Large.)_
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
-- [x] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline; each lane (Clips / Text / Image / Captions / Audio) gets a full-height tinted rounded "bubble" header, like Premiere/Resolve. The track content scrolls horizontally beside it (gutter stays pinned and is kept vertically in sync with the track scroll). Built in `Timeline.tsx`; persisted in the `timelineView` localStorage view. _Per-lane mute/solo deferred — they'd need a data-model change; the gutter is layout/UI only as scoped._
+- [x] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline; each lane (Clips / Text / Image / Captions / Audio) gets a full-height tinted rounded "bubble" header, like Premiere/Resolve. The track content scrolls horizontally beside it (gutter stays pinned and is kept vertically in sync with the track scroll). Built in `Timeline.tsx`; persisted in the `timelineView` localStorage view.
 	- [x] Resize a lane by click-dragging its header bubble vertically (in addition to the bottom-edge handles); minimize/expand by double-clicking the bubble (or the ▾/▸ chevron). Collapsed lanes shrink to a thin tinted strip and hide their resize handle.
+- [ ] **Per-lane mute / solo** — the gutter header bubbles exist but have no mute or solo buttons yet. Would require adding a `mutedLanes` set to the project or view state, then skipping those layers during preview playback and export. Data-model change needed before the UI can wire up.
 
 ### Explicitly out of scope for v1 (revisit post-launch)
 
@@ -137,8 +195,6 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   **Azure Trusted Signing** (recommended — new OV/EV certs ship on hardware tokens
   that can't export a `.pfx`), then point `CSC_LINK` at it or add
   `win.azureSignOptions`. No code change needed._ See README → Code-signing.
-## MSC other todo
-- [ ] 
 ## Manual TODO
 
 Hands-on steps that can't be done in code — needed to actually ship the macOS build and hand it to a friend.

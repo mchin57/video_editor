@@ -15,6 +15,12 @@ interface UiState {
   /** Whether the crop editor modal is open. */
   cropEditing: boolean
   setCropEditing: (v: boolean) => void
+  /** Whether the clip-stills popout is open. */
+  stillsOpen: boolean
+  setStillsOpen: (v: boolean) => void
+  /** Whether the image-edit popout is open. */
+  imageEditOpen: boolean
+  setImageEditOpen: (v: boolean) => void
   /** Whether the settings modal is open. */
   settingsOpen: boolean
   setSettingsOpen: (v: boolean) => void
@@ -37,6 +43,10 @@ export const useUi = create<UiState>((set) => ({
   selectAudio: (id) => set({ selectedAudioId: id, selectedLayerId: null, selectedCaptionId: null }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
+  stillsOpen: false,
+  setStillsOpen: (v) => set({ stillsOpen: v }),
+  imageEditOpen: false,
+  setImageEditOpen: (v) => set({ imageEditOpen: v }),
   settingsOpen: false,
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   checklistOpen: false,
