@@ -3,7 +3,7 @@
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import type { Settings } from '@shared/settings'
-import { DEFAULT_KEYWORD_BANK } from '@shared/settings'
+import { DEFAULT_BRAND_COLORS, DEFAULT_KEYWORD_BANK } from '@shared/settings'
 import { getDataDir, getSubdir } from '../config'
 
 let cache: Settings | null = null
@@ -20,7 +20,8 @@ export async function getSettings(): Promise<Settings> {
   }
   cache = {
     exportDir: loaded.exportDir || getSubdir('exports'),
-    keywordBank: Array.isArray(loaded.keywordBank) ? loaded.keywordBank : DEFAULT_KEYWORD_BANK
+    keywordBank: Array.isArray(loaded.keywordBank) ? loaded.keywordBank : DEFAULT_KEYWORD_BANK,
+    brandColors: Array.isArray(loaded.brandColors) ? loaded.brandColors : DEFAULT_BRAND_COLORS
   }
   return cache
 }

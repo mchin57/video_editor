@@ -6,9 +6,19 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, CaptionSegment, Layer, VideoContent } from '@shared/project'
+import type {
+  AudioClip,
+  CaptionSegment,
+  GradientStyle,
+  Layer,
+  PillStyle,
+  ShadowStyle,
+  StrokeStyle,
+  VideoContent
+} from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle, effectiveOut } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
+import { fontCssFamily } from '@shared/fonts'
 import { isFrozenAt, layersAtTime, makeVideoLayer, videoSourceTime, visualDuration } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
@@ -24,6 +34,64 @@ const FRAME_ASPECT = LOGICAL.width / LOGICAL.height
 
 const EMPTY_LAYERS: Layer[] = []
 const EMPTY_AUDIO: AudioClip[] = []
+
+/** A logical-px length expressed in the container-query unit text is sized in, so
+ *  fonts/strokes/shadows scale with the stage like the burned output does. */
+const cqw = (px: number): string => `${(px / LOGICAL.width) * 100}cqw`
+
+/** The decoration knobs shared by a text overlay and a caption. */
+interface TextDeco {
+  color: string
+  pill: PillStyle
+  stroke?: StrokeStyle | null
+  shadow?: ShadowStyle | null
+  gradient?: GradientStyle | null
+}
+
+/** Fill (flat color or gradient) + stroke + shadow for the text glyphs. Mirrors
+ *  the export: gradient via background-clip:text, stroke outside the glyph via
+ *  paint-order, shadow as a diagonal text-shadow. */
+function fillStyle(s: TextDeco): CSSProperties {
+  const css: CSSProperties = {}
+  if (s.gradient) {
+    css.backgroundImage = `linear-gradient(${s.gradient.angle}deg, ${s.gradient.from}, ${s.gradient.to})`
+    css.WebkitBackgroundClip = 'text'
+    css.backgroundClip = 'text'
+    css.color = 'transparent'
+    css.WebkitTextFillColor = 'transparent'
+  } else {
+    css.color = s.color
+  }
+  if (s.stroke && s.stroke.widthPx > 0) {
+    css.WebkitTextStroke = `${cqw(s.stroke.widthPx)} ${s.stroke.color}`
+    css.paintOrder = 'stroke fill'
+  }
+  if (s.shadow && (s.shadow.distancePx > 0 || s.shadow.blur > 0)) {
+    css.textShadow = `${cqw(s.shadow.distancePx)} ${cqw(s.shadow.distancePx)} ${cqw(s.shadow.blur)} ${s.shadow.color}`
+  } else if (!s.pill.enabled && !s.stroke) {
+    // Default legibility shadow when nothing else separates the text.
+    css.textShadow = '0 0.25cqw 0.6cqw rgba(0,0,0,0.9), 0 0 0.3cqw rgba(0,0,0,0.9)'
+  }
+  return css
+}
+
+/** The opaque pill behind the text (kept as a wrapper so it composes with a
+ *  background-clip:text gradient fill on the inner span). */
+function pillWrapStyle(pill: PillStyle): CSSProperties {
+  return {
+    background: pill.color,
+    padding: cqw(pill.padPx),
+    borderRadius: cqw(10),
+    boxDecorationBreak: 'clone',
+    WebkitBoxDecorationBreak: 'clone'
+  }
+}
+
+/** Text glyphs with their fill/stroke/shadow, wrapped in a pill if enabled. */
+function StyledText({ s, text }: { s: TextDeco; text: string }): JSX.Element {
+  const inner = <span style={fillStyle(s)}>{text}</span>
+  return s.pill.enabled ? <span style={pillWrapStyle(s.pill)}>{inner}</span> : inner
+}
 
 /** Absolute box (in %) for a media layer, sized to its aspect at the layer's
  *  scale and centered on (x,y). Aspect-correct so there's no letterbox fill to
@@ -470,31 +538,17 @@ export function PreviewStage(): JSX.Element {
               top: pct(layer.y, LOGICAL.height),
               transform: `translate(-50%, -50%) scale(${layer.scale})`,
               transformOrigin: 'center',
-              fontSize: `${(content.fontSizePx / LOGICAL.width) * 100}cqw`,
-              color: content.color,
-              fontFamily: content.fontFamily,
+              fontSize: cqw(content.fontSizePx),
+              fontFamily: fontCssFamily(content.fontFamily),
+              fontWeight: 'normal',
               maxWidth: '92%',
               zIndex: z
             }}
-            className={`cursor-move select-none whitespace-pre-wrap text-center font-extrabold leading-tight ${
+            className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
               selected ? 'outline-dashed outline-2 outline-sky-400' : ''
             }`}
           >
-            <span
-              style={
-                content.pill.enabled
-                  ? {
-                      background: content.pill.color,
-                      padding: `${(content.pill.padPx / LOGICAL.width) * 100}cqw`,
-                      borderRadius: `${(10 / LOGICAL.width) * 100}cqw`,
-                      boxDecorationBreak: 'clone',
-                      WebkitBoxDecorationBreak: 'clone'
-                    }
-                  : { textShadow: '0 0.2cqw 0.8cqw rgba(0,0,0,0.85)' }
-              }
-            >
-              {content.text}
-            </span>
+            <StyledText s={content} text={content.text} />
           </div>
         )
       })}
@@ -533,31 +587,17 @@ export function PreviewStage(): JSX.Element {
                 top: pct(st.y, LOGICAL.height),
                 transform: `translate(-50%, -50%) rotate(${st.rotationDeg}deg)`,
                 transformOrigin: 'center',
-                fontSize: `${(st.fontSizePx / LOGICAL.width) * 100}cqw`,
-                color: st.color,
-                fontFamily: st.fontFamily,
+                fontSize: cqw(st.fontSizePx),
+                fontFamily: fontCssFamily(st.fontFamily),
+                fontWeight: 'normal',
                 maxWidth: '88%',
                 zIndex: 300
               }}
-              className={`cursor-move select-none whitespace-pre-wrap text-center font-extrabold leading-tight ${
+              className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
                 selected ? 'outline-dashed outline-2 outline-emerald-400' : ''
               }`}
             >
-              <span
-                style={
-                  st.pill.enabled
-                    ? {
-                        background: st.pill.color,
-                        padding: `${(st.pill.padPx / LOGICAL.width) * 100}cqw`,
-                        borderRadius: `${(10 / LOGICAL.width) * 100}cqw`,
-                        boxDecorationBreak: 'clone',
-                        WebkitBoxDecorationBreak: 'clone'
-                      }
-                    : { textShadow: '0 0.25cqw 0.6cqw rgba(0,0,0,0.95), 0 0 0.3cqw rgba(0,0,0,0.95)' }
-                }
-              >
-                {seg.text}
-              </span>
+              <StyledText s={st} text={seg.text} />
             </div>
           )
         })}

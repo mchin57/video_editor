@@ -5,6 +5,7 @@
  */
 
 import type { Layer, LayerContent, PillStyle, VideoContent } from './project'
+import { DEFAULT_FONT_ID } from './fonts'
 
 export const FRAME = { width: 1080, height: 1920 } as const
 export const HOOK_WINDOW_SEC = 3
@@ -167,7 +168,7 @@ export function makeTextLayer(id: string, startSec: number, endSec: number): Lay
     content: {
       kind: 'text',
       text: 'Your hook here',
-      fontFamily: 'Inter, system-ui, sans-serif',
+      fontFamily: DEFAULT_FONT_ID,
       fontSizePx: 76,
       color: '#ffffff',
       pill: { ...DEFAULT_PILL }

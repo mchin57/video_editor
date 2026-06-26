@@ -99,16 +99,46 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ### Text updates
 
+> Research/spec for the Fonts + Colors sections: [`research-text-fonts-colors.md`](research-text-fonts-colors.md).
+> Implemented on the `feature/text-fonts-colors` branch (see notes below).
+
 #### Fonts
-- [ ] **Expand bundled font library** — `resources/fonts/` is currently empty; `assBuilder.ts` defaults to Arial. The `TextContent` type already has a `fontFamily: string` field, so the data model is ready — it just needs actual font files dropped in and wired up. Priority picks: **Montserrat ExtraBold**, **Anton**, **League Spartan**, **Poppins Bold** (caption workhorses), **Bebas Neue** (hook titles), and a compressed/narrow sans (e.g. Barlow Condensed) for long single-line hooks. Fonts live in `resources/fonts/` and are passed to libass via `fontsdir`.
-- [ ] **Font picker UI** — no font selector exists in the Inspector yet. Add a scrollable picker showing a live preview of each font. Group fonts by category (Caption, Hook/Display, Stylized).
+- [x] **Expand bundled font library** — 14 OFL/Apache fonts ship in `resources/fonts/`
+  (committed; added to `electron-builder.yml` `extraResources` and served to the
+  renderer via `reelmedia://fonts/<file>`). The catalog is `src/shared/fonts.ts`
+  (id → file → libass `assName`), the single source of truth for picker, preview
+  `@font-face`, and export. Caption: Montserrat ExtraBold/Black, Poppins
+  ExtraBold/Black, Barlow Semi Condensed. Hook/Display: Anton, Bebas Neue, Archivo
+  Black, Barlow Condensed. Stylized: Permanent Marker, Bangers, Pacifico,
+  Shrikhand, Abril Fatface. _Key fix: `assBuilder` previously ignored `fontFamily`
+  entirely (always Arial) — it now emits `\fn<assName>\b0` and the exporter passes
+  `fontsdir` to every `ass=` filter (Windows path-escaped). `fontFamily` now stores
+  a bundled-font **id**; migration v7 normalises legacy CSS-stack values._
+- [x] **Font picker UI** — `FontPicker.tsx`: scrollable, grouped by category, each
+  option previewed in its own font. Used by both text layers and captions (replaces
+  the old free-text caption "Font family" box). Preview drops the hardcoded
+  `font-extrabold` so each face renders at its real weight.
 
 #### Colors & styling
-- [ ] **Gradient text** — allow a linear gradient (2-stop, angle-configurable) on text overlay color instead of a flat fill. Preview via CSS `background-clip: text`; export requires rendering gradient text to a PNG frame sequence and overlaying via ffmpeg (ASS has no gradient support). High visual impact for hook titles.
-- [ ] **Brand color presets** — store a small palette of saved colors (per profile) in `settings.json` so the user can one-tap apply their brand colors to any overlay without re-entering hex values every time.
-- [ ] **Semi-transparent pill backgrounds** — `PillStyle` stores color as an 8-digit hex (alpha channel included) but the Inspector only exposes a color picker with no dedicated opacity slider. Add a separate opacity slider so users can set e.g. 70% black without editing hex manually.
-- [ ] **Stroke / outline control** — expose stroke width and color as Inspector fields. Currently hardcoded in `assBuilder.ts` as `Outline=4, Shadow=1` with no user control. Thick white stroke on dark text is the dominant muted-viewer readability pattern.
-- [ ] **Drop shadow control** — expose shadow offset, blur, and color per overlay. Currently `assBuilder.ts` fixes `Shadow=1` with no user adjustment.
+_All apply to **both** text overlays and captions via the shared
+`TextStyleControls` component + a shared `TextDecoration` on `TextContent` /
+`CaptionStyle`._
+- [x] **Gradient text** — 2-stop angle-configurable linear gradient (+7 presets).
+  Preview via `background-clip:text`; export rasterises the text to a transparent
+  full-frame PNG via an off-screen window (`textImage.ts`) and composites it
+  (gradient text layers keep z-order; gradient captions burn on top). Falls back to
+  a flat ASS burn if rasterising fails.
+- [x] **Brand color presets** — `Settings.brandColors` (seeded palette) persisted in
+  `settings.json`; swatch strip in the style controls (click to apply, ＋ to save,
+  right-click to remove). _Global for now; move under the active profile when the
+  Platform-profiles system lands._
+- [x] **Semi-transparent pill backgrounds** — pill control now splits into a 6-hex
+  color + a 0–100% opacity slider (recombined into the 8-hex `PillStyle.color`).
+- [x] **Stroke / outline control** — width + color fields → `\bord`/`\3c`
+  (suppressed while a pill is on, since BorderStyle=3 owns those tags). Default 8px
+  black; preview via `-webkit-text-stroke` + `paint-order`.
+- [x] **Drop shadow control** — distance + color + softness → `\shad`/`\4c`/`\blur`
+  (libass has no independent x/y offset). Preview via `text-shadow`.
 
 #### Text animation effects
 - [ ] **Per-overlay entrance animation** — add an `animation` field to text overlays with these presets (rendered in preview via CSS animation; burned to video on export by rendering the animated frames via a canvas/offscreen approach or an ffmpeg `fade`/`drawtext` trick):
@@ -125,6 +155,12 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Text-behind-subject effect** — composite a text layer between the subject and background using the auto background removal mask (see subject-aware crop item). Requires the segmentation feature to be built first.
 
 ### Not planned / missing features
+
+- [ ] **Delete button applies to all timeline objects** — the toolbar Delete button and the `Del` keybind currently only remove the selected video layer (`removeLayer(selectedLayerId)`). It should also handle whatever is selected: audio clips (`removeAudioClip`), caption segments (`removeCaption`), text layers, and image layers. The fix is to check `selectedLayerId`, `selectedAudioId`, and `selectedCaptionId` in priority order and dispatch the appropriate removal action. The disabled state on the button should also reflect any selection, not just a layer selection.
+
+- [ ] **Library clip preview** — allow the user to preview a clip directly from the library without placing it on the timeline. Options: hover to play a silent looping thumbnail preview (scrub-on-hover), or click a play button on the library card to open a small floating player. Implementation: on hover/click, load the asset's proxy URL into a hidden `<video>` element and play it; display duration progress on the thumbnail. A floating modal player with play/pause and scrub bar would cover audio clips too (which have no thumbnail to hover-preview).
+
+
 
 - [ ] **Multi-clip layout formats (split screen, panels)** — place multiple clips side-by-side or in a grid within a single frame at a given timeline position. Built-in layout presets to ship:
   - **Split screen (2-up):** left/right or top/bottom, each half fills its cell.
@@ -155,6 +191,8 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
+- [ ] **Edge-scroll during timeline drag** — when dragging a clip, caption, or audio block horizontally, the timeline should auto-scroll left or right when the cursor is near the edge of the scroll container. Currently the user must drop, scroll manually, then re-drag. Implementation: in `startLayerDrag`, `startCaptionDrag`, and `startAudioDrag` (`Timeline.tsx`), start a `requestAnimationFrame` loop on `pointermove` that checks the cursor's X position relative to `scrollRef`'s bounding rect; if within ~40px of the left or right edge, increment `scrollRef.current.scrollLeft` proportionally to proximity. Cancel the loop on `pointerup`.
+
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 - [x] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline; each lane (Clips / Text / Image / Captions / Audio) gets a full-height tinted rounded "bubble" header, like Premiere/Resolve. The track content scrolls horizontally beside it (gutter stays pinned and is kept vertically in sync with the track scroll). Built in `Timeline.tsx`; persisted in the `timelineView` localStorage view.
 	- [ ] Resize a lane by click-dragging its header bubble vertically (in addition to the bottom-edge handles); minimize/expand by double-clicking the bubble (or the ▾/▸ chevron). Collapsed lanes shrink to a thin tinted strip and hide their resize handle.

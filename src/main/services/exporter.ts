@@ -9,17 +9,37 @@
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { CaptionStyle, Project } from '@shared/project'
+import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle } from '@shared/project'
 import { effectiveOut, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
-import { getSubdir } from '../config'
+import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
-import { buildExportArgs, targetForPreset, type ExportAudio, type ExportVisual } from './exporterArgs'
+import {
+  buildExportArgs,
+  targetForPreset,
+  type ExportAudio,
+  type ExportImage,
+  type ExportVisual,
+  type Target
+} from './exporterArgs'
 import { buildAss, type AssOverlay } from './assBuilder'
+import { createTextRenderer, type TextRenderer } from './textImage'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
+
+/** Scale optional decorations from logical to output px (matching font scaling). */
+const scaledStroke = (s: StrokeStyle | null | undefined, k: number): StrokeStyle | null | undefined =>
+  s ? { widthPx: s.widthPx * k, color: s.color } : s
+const scaledShadow = (s: ShadowStyle | null | undefined, k: number): ShadowStyle | null | undefined =>
+  s ? { distancePx: s.distancePx * k, color: s.color, blur: s.blur * k } : s
+const scaledPill = (p: PillStyle, k: number): PillStyle => ({ ...p, padPx: p.padPx * k })
+
+/** A pre-rendered, output-sized PNG composited 1:1 over the frame (gradient text). */
+function fullFrameImage(path: string, startSec: number, endSec: number, t: Target): ExportImage {
+  return { path, boxW: t.width, boxH: t.height, x: 0, y: 0, startSec, endSec, opacity: 1 }
+}
 
 const FRAME = { w: 1080, h: 1920 } as const
 
@@ -90,6 +110,17 @@ async function runExport(
   const visuals: ExportVisual[] = []
   const audio: ExportAudio[] = []
   let textN = 0
+  // Gradient text/captions can't burn via libass — rasterise them to PNGs with
+  // a reused off-screen renderer (created lazily; disposed before encoding).
+  const fontsDir = getBundledFontsDir()
+  const rendererRef: { current: TextRenderer | null } = { current: null }
+  let gradN = 0
+  function ensureRenderer(): TextRenderer {
+    if (!rendererRef.current) {
+      rendererRef.current = createTextRenderer(target.width, target.height, tmp, fontsDir)
+    }
+    return rendererRef.current
+  }
   for (const l of project.layers) {
     if (l.hidden) continue
     const c = l.content
@@ -164,6 +195,33 @@ async function runExport(
       })
     } else {
       if (c.text.trim().length === 0) continue
+      const fontSizePx = c.fontSizePx * l.scale * sy
+      // Gradient text burns as a full-frame PNG overlay at this z-position.
+      if (c.gradient) {
+        try {
+          const pngPath = join(tmp, `gradtext_${gradN++}.png`)
+          await ensureRenderer().render(
+            {
+              text: c.text,
+              xCenter: l.x * sx,
+              yCenter: l.y * sy,
+              fontFamily: c.fontFamily,
+              fontSizePx,
+              color: c.color,
+              gradient: c.gradient,
+              pill: scaledPill(c.pill, sy),
+              stroke: scaledStroke(c.stroke, sy) ?? null,
+              shadow: scaledShadow(c.shadow, sy) ?? null
+            },
+            pngPath
+          )
+          visuals.push({ kind: 'image', image: fullFrameImage(pngPath, l.startSec, l.endSec, target) })
+          continue
+        } catch {
+          // Rasterising failed — fall through to a flat-colour ASS burn so the
+          // overlay still appears (using the gradient's start colour).
+        }
+      }
       const assName = `text_${textN++}.ass`
       const overlay: AssOverlay = {
         text: c.text,
@@ -172,9 +230,12 @@ async function runExport(
         x: r(l.x * sx),
         y: r(l.y * sy),
         anchor: 'center',
-        fontSizePx: c.fontSizePx * l.scale * sy,
-        color: c.color,
-        pill: c.pill
+        fontFamily: c.fontFamily,
+        fontSizePx,
+        color: c.gradient ? c.gradient.from : c.color,
+        pill: c.pill,
+        stroke: scaledStroke(c.stroke, sy),
+        shadow: scaledShadow(c.shadow, sy)
       }
       await fsp.writeFile(join(tmp, assName), buildAss([overlay], target), 'utf8')
       visuals.push({ kind: 'text', assFile: assName })
@@ -206,6 +267,7 @@ async function runExport(
   // Captions (auto-generated) burn on top of everything. Scale each caption style
   // (lane-wide + any per-segment overrides) from logical into output px.
   let captionsAss: string | undefined
+  const captionOverlays: ExportImage[] = []
   if (project.captions.enabled && project.captions.segments.some((s) => s.enabled)) {
     captionsAss = 'captions.ass'
     const scaleStyle = (st: CaptionStyle): CaptionStyle => ({
@@ -213,12 +275,53 @@ async function runExport(
       x: st.x * sx,
       y: st.y * sy,
       fontSizePx: st.fontSizePx * sy,
-      pill: { ...st.pill, padPx: st.pill.padPx * sy }
+      pill: { ...st.pill, padPx: st.pill.padPx * sy },
+      stroke: scaledStroke(st.stroke, sy),
+      shadow: scaledShadow(st.shadow, sy)
     })
+    // Gradient-styled captions can't burn via libass — rasterise each to a PNG
+    // composited ON TOP of the caption track. Track which rendered so the ASS
+    // builder skips them (and a failed render falls back to a flat burn).
+    const renderedGrad = new Set<string>()
+    for (const seg of project.captions.segments) {
+      if (!seg.enabled || seg.text.trim().length === 0) continue
+      const eff = seg.style ?? project.captions.style
+      if (!eff.gradient) continue
+      const st = scaleStyle(eff)
+      try {
+        const pngPath = join(tmp, `gradcap_${gradN++}.png`)
+        await ensureRenderer().render(
+          {
+            text: seg.text,
+            xCenter: st.x,
+            yCenter: st.y,
+            fontFamily: st.fontFamily,
+            fontSizePx: st.fontSizePx,
+            color: st.color,
+            gradient: st.gradient!,
+            pill: st.pill,
+            stroke: st.stroke ?? null,
+            shadow: st.shadow ?? null,
+            rotationDeg: st.rotationDeg
+          },
+          pngPath
+        )
+        captionOverlays.push(fullFrameImage(pngPath, seg.startSec, seg.endSec, target))
+        renderedGrad.add(seg.id)
+      } catch {
+        // leave un-rendered → flat fallback below
+      }
+    }
     const scaled = {
       ...project.captions,
       style: scaleStyle(project.captions.style),
-      segments: project.captions.segments.map((s) => (s.style ? { ...s, style: scaleStyle(s.style) } : s))
+      segments: project.captions.segments.map((s) => {
+        if (!s.style) return s
+        const sc = scaleStyle(s.style)
+        // Keep gradient only if rasterised (buildAss skips gradient segments);
+        // otherwise drop it so the caption still burns, flat.
+        return { ...s, style: { ...sc, gradient: renderedGrad.has(s.id) ? sc.gradient : null } }
+      })
     }
     await fsp.writeFile(join(tmp, captionsAss), buildAss([], target, scaled), 'utf8')
   }
@@ -227,9 +330,23 @@ async function runExport(
   const audioEnd = audio.reduce((m, a) => Math.max(m, a.startSec + Math.max(0.01, a.outSec - a.inSec)), 0)
   const totalDur = Math.max(visEnd, audioEnd, 0.1)
 
+  // The off-screen renderer has written all its PNGs to disk by now; free it
+  // before the (long) encode.
+  if (rendererRef.current) rendererRef.current.dispose()
+
   await fsp.mkdir(dirname(output), { recursive: true })
   const args = buildExportArgs(
-    { target, totalDur, visuals, audio, captionsAss, caps, preferNvenc: opts.preferNvenc },
+    {
+      target,
+      totalDur,
+      visuals,
+      audio,
+      captionsAss,
+      topOverlays: captionOverlays,
+      fontsDir: fontsDir ?? undefined,
+      caps,
+      preferNvenc: opts.preferNvenc
+    },
     output
   )
   await runFfmpeg(ffmpeg, args, totalDur, (p) => setProgress(jobId, p), tmp)

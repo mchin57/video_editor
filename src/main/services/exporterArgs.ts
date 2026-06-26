@@ -97,6 +97,12 @@ export interface ExportPlan {
   audio: ExportAudio[]
   /** Relative ASS filename for the caption track (burned on top), if any. */
   captionsAss?: string
+  /** Pre-rendered, output-sized PNGs composited ON TOP of the captions (e.g.
+   *  gradient-filled captions, which can't burn via libass). */
+  topOverlays?: ExportImage[]
+  /** Bundled-fonts directory passed to libass (`fontsdir`) so burned text uses
+   *  the same faces the preview shows. Absent = libass falls back to fontconfig. */
+  fontsDir?: string
   caps: FfmpegCapabilities
   preferNvenc: boolean
 }
@@ -105,27 +111,43 @@ const f3 = (n: number): string => n.toFixed(3)
 const r = (n: number): number => Math.round(n)
 
 /**
+ * Escape an absolute path for use as an ffmpeg filtergraph OPTION VALUE (e.g.
+ * the `ass` filter's `fontsdir`). Backslashes become forward slashes and the
+ * Windows drive colon is escaped so the option parser doesn't treat it as an
+ * option separator: `C:\fonts` → `C\:/fonts`.
+ */
+export function escapeFilterPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/:/g, '\\:')
+}
+
+/**
  * Assemble the full ffmpeg command for the compositor. `output` and any
  * `assFile` references are resolved relative to ffmpeg's cwd (the temp dir).
  */
 export function buildExportArgs(plan: ExportPlan, output: string): string[] {
-  const { target, totalDur, visuals, audio, captionsAss, caps, preferNvenc } = plan
+  const { target, totalDur, visuals, audio, captionsAss, fontsDir, caps, preferNvenc } = plan
   const W = target.width
   const H = target.height
+  // Appended to every `ass=` filter so libass finds the bundled faces.
+  const assOpts = fontsDir ? `:fontsdir=${escapeFilterPath(fontsDir)}` : ''
 
-  // Input indices: 0 = black base, then videos, then images, then audio.
+  // Input indices: 0 = black base, then videos, then images, then top overlays,
+  // then audio.
   const videos = visuals.flatMap((v) => (v.kind === 'video' ? [v.video] : []))
   const images = visuals.flatMap((v) => (v.kind === 'image' ? [v.image] : []))
+  const topImages = plan.topOverlays ?? []
   const videoIdx = new Map<ExportVideo, number>()
   const imageIdx = new Map<ExportImage, number>()
   let idx = 1
   for (const v of videos) videoIdx.set(v, idx++)
   for (const im of images) imageIdx.set(im, idx++)
+  for (const im of topImages) imageIdx.set(im, idx++)
   const audioBase = idx
 
   const inputs: string[] = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=${f3(totalDur)}`]
   for (const v of videos) inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
   for (const im of images) inputs.push('-i', im.path)
+  for (const im of topImages) inputs.push('-i', im.path)
   for (const a of audio) inputs.push('-i', a.path)
 
   // Video filtergraph: overlay/ass each visual onto the running composite.
@@ -181,13 +203,23 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         `[${prev}][pi${i}]overlay=${r(im.x)}:${r(im.y)}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
       )
     } else {
-      chains.push(`[${prev}]ass=${vis.assFile}[${out}]`)
+      chains.push(`[${prev}]ass=${vis.assFile}${assOpts}[${out}]`)
     }
     prev = out
   }
   if (captionsAss) {
     const out = `v${step++}`
-    chains.push(`[${prev}]ass=${captionsAss}[${out}]`)
+    chains.push(`[${prev}]ass=${captionsAss}${assOpts}[${out}]`)
+    prev = out
+  }
+  // Top overlays (pre-rendered, output-sized PNGs) composite above captions.
+  for (const im of topImages) {
+    const i = imageIdx.get(im)!
+    const out = `v${step++}`
+    chains.push(`[${i}:v]scale=${r(im.boxW)}:${r(im.boxH)},format=rgba[pt${i}]`)
+    chains.push(
+      `[${prev}][pt${i}]overlay=${r(im.x)}:${r(im.y)}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
+    )
     prev = out
   }
   const videoMap = `[${prev}]`

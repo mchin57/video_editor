@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_CAPTION_STYLE, effectiveCaptionStyle, migrateProject } from './project'
 import type { CaptionSegment, CaptionsConfig } from './project'
+import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 
 describe('migrateProject — caption style', () => {
   it('seeds a lane-wide caption style from a legacy yBaseline', () => {
@@ -11,11 +12,48 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(6)
+    expect(p.version).toBe(7)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
     expect(p.captions.style.color).toBe(DEFAULT_CAPTION_STYLE.color)
+  })
+
+  it('normalises legacy CSS-stack font values to a bundled-font id (v7)', () => {
+    const legacy = {
+      version: 6,
+      layers: [
+        {
+          id: 'l0', hidden: false, startSec: 0, endSec: 2, x: 540, y: 600, scale: 1,
+          content: { kind: 'text', text: 'hi', fontFamily: 'Inter, system-ui, sans-serif', fontSizePx: 76, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } }
+        }
+      ],
+      audioClips: [],
+      captions: {
+        enabled: true, stylePreset: 'reels-bold', yBaseline: 1340,
+        style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'Arial, sans-serif' },
+        segments: [
+          { id: 'c0', startSec: 0, endSec: 1, text: 'x', words: [], enabled: true, style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'whatever' } }
+        ]
+      }
+    }
+    const p = migrateProject(legacy)
+    const text = p.layers[0].content
+    expect(text.kind).toBe('text')
+    if (text.kind === 'text') expect(isKnownFont(text.fontFamily)).toBe(true)
+    expect(p.captions.style.fontFamily).toBe(DEFAULT_FONT_ID)
+    expect(p.captions.segments[0].style?.fontFamily).toBe(DEFAULT_FONT_ID)
+  })
+
+  it('keeps an already-valid bundled-font id', () => {
+    const legacy = {
+      version: 6, layers: [], audioClips: [],
+      captions: {
+        enabled: true, stylePreset: 'reels-bold', yBaseline: 1340,
+        style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'anton' }, segments: []
+      }
+    }
+    expect(migrateProject(legacy).captions.style.fontFamily).toBe('anton')
   })
 
   it('leaves an existing caption style untouched', () => {

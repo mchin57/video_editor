@@ -76,3 +76,6 @@ export const audioUrl = (id: string): string => `reelmedia://${id}/audio.m4a`
 
 /** URL for an audio asset's waveform image. */
 export const waveformUrl = (id: string): string => `reelmedia://${id}/waveform.png`
+
+/** URL for a bundled font file (resources/fonts/<file>) for `@font-face`. */
+export const fontUrl = (file: string): string => `reelmedia://fonts/${file}`

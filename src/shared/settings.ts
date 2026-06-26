@@ -4,7 +4,26 @@ export interface Settings {
   exportDir: string
   /** Niche keywords the checklist scores spoken audio against. */
   keywordBank: string[]
+  /** Saved brand colors (hex, 6- or 8-digit) for one-tap apply to overlays /
+   *  captions. Global for now; moves under the active profile when the
+   *  Platform-profiles system lands. */
+  brandColors: string[]
 }
+
+/** Starter brand palette — high-attention colors common in Reels captions.
+ *  White first (the default fill); the rest are accents/highlights. */
+export const DEFAULT_BRAND_COLORS: string[] = [
+  '#FFFFFF', // white — default fill
+  '#000000', // black — on light footage / stroke
+  '#FFE600', // IG yellow — keyword/last-word highlight
+  '#FF3B30', // punch red — urgency
+  '#FF9500', // energy orange
+  '#A8FF00', // lime — high-energy pop
+  '#00D1FF', // cyan — cool accent
+  '#0A84FF', // brand blue
+  '#FF2D95', // magenta pop
+  '#AF52DE' //  purple
+]
 
 /** Default niche keyword bank (triathlon coaching, from the strategy notes). */
 export const DEFAULT_KEYWORD_BANK: string[] = [

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildAss, assColor, type AssOverlay } from './assBuilder'
 import { DEFAULT_CAPTION_STYLE, type CaptionStyle } from '@shared/project'
+import { DEFAULT_FONT_ID, resolveFont } from '@shared/fonts'
 
 const capStyle = (over: Partial<CaptionStyle> = {}): CaptionStyle => ({ ...DEFAULT_CAPTION_STYLE, ...over })
 
@@ -12,6 +13,7 @@ function overlay(over: Partial<AssOverlay> = {}): AssOverlay {
     x: 540,
     y: 600,
     anchor: 'center',
+    fontFamily: DEFAULT_FONT_ID,
     fontSizePx: 80,
     color: '#ffffff',
     pill: { enabled: true, color: '#000000cc', padPx: 18 },
@@ -43,6 +45,23 @@ describe('buildAss', () => {
     expect(s).toContain('\\pos(540,600)')
     expect(s).toContain('\\fs80')
     expect(s).toContain('Hook line')
+  })
+  it('emits the resolved \\fn font name and \\b0 (no libass faux-bold)', () => {
+    const s = buildAss([overlay({ fontFamily: 'anton' })], target)
+    expect(s).toContain(`\\fn${resolveFont('anton').assName}`) // \fnAnton
+    expect(s).toContain('\\b0')
+  })
+  it('burns stroke via \\bord/\\3c only when the pill is off', () => {
+    const withStroke = (pill: boolean): string =>
+      buildAss([overlay({ pill: { enabled: pill, color: '#000000cc', padPx: 18 }, stroke: { widthPx: 8, color: '#000000' } })], target)
+    expect(withStroke(false)).toContain('\\bord8')
+    // pill on → stroke suppressed (the box owns \bord/\3c)
+    expect(withStroke(true)).not.toContain('\\bord8')
+  })
+  it('burns shadow via \\shad/\\4c (+\\blur)', () => {
+    const s = buildAss([overlay({ shadow: { distancePx: 3, color: '#000000', blur: 2 } })], target)
+    expect(s).toContain('\\shad3')
+    expect(s).toContain('\\blur2')
   })
   it('uses the Pill style + box color when pill enabled, Plain otherwise', () => {
     expect(buildAss([overlay({ pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)).toContain('Pill,,')

@@ -10,6 +10,7 @@ import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
+import { TextStyleControls } from './TextStyleControls'
 
 function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -357,34 +358,7 @@ function LayerEditor(): JSX.Element | null {
           <Field label="Text">
             <textarea value={c.text} rows={2} onChange={(e) => updateContent(id, { text: e.target.value })} className={inputCls} />
           </Field>
-          <div className="flex items-end gap-2">
-            <Field label="Font size">
-              <input
-                type="number"
-                step="2"
-                min="12"
-                value={c.fontSizePx}
-                onChange={(e) => updateContent(id, { fontSizePx: Math.max(12, Number(e.target.value)) })}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Color">
-              <input
-                type="color"
-                value={c.color}
-                onChange={(e) => updateContent(id, { color: e.target.value })}
-                className="h-7 w-full rounded border border-white/10 bg-black/40"
-              />
-            </Field>
-          </div>
-          <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
-              checked={c.pill.enabled}
-              onChange={(e) => updateContent(id, { pill: { ...c.pill, enabled: e.target.checked } })}
-            />
-            Background pill
-          </label>
+          <TextStyleControls style={c} onPatch={(patch) => updateContent(id, patch)} />
         </CollapsibleSection>
       )}
 
@@ -409,34 +383,7 @@ function CaptionStyleFields({
 }): JSX.Element {
   return (
     <>
-      <div className="flex items-end gap-2">
-        <Field label="Font size">
-          <input
-            type="number"
-            step="2"
-            min="12"
-            value={style.fontSizePx}
-            onChange={(e) => onPatch({ fontSizePx: Math.max(12, Number(e.target.value)) })}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Color">
-          <input
-            type="color"
-            value={style.color}
-            onChange={(e) => onPatch({ color: e.target.value })}
-            className="h-7 w-full rounded border border-white/10 bg-black/40"
-          />
-        </Field>
-      </div>
-      <Field label="Font family">
-        <input
-          type="text"
-          value={style.fontFamily}
-          onChange={(e) => onPatch({ fontFamily: e.target.value })}
-          className={inputCls}
-        />
-      </Field>
+      <TextStyleControls style={style} onPatch={onPatch} />
       <div className="flex gap-2">
         <Field label="Position X">
           <input
@@ -468,14 +415,6 @@ function CaptionStyleFields({
           className="w-full accent-sky-400"
         />
       </Field>
-      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={style.pill.enabled}
-          onChange={(e) => onPatch({ pill: { ...style.pill, enabled: e.target.checked } })}
-        />
-        Background pill
-      </label>
     </>
   )
 }

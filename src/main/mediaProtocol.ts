@@ -12,9 +12,13 @@ import { protocol } from 'electron'
 import { createReadStream, promises as fsp } from 'node:fs'
 import { join, normalize, sep, extname } from 'node:path'
 import { Readable } from 'node:stream'
-import { getSubdir } from './config'
+import { getSubdir, getBundledFontsDir } from './config'
 
 export const MEDIA_SCHEME = 'reelmedia'
+
+/** Reserved hostname that serves bundled font files (resources/fonts) for the
+ *  renderer's `@font-face` rules. Media ids are hex hashes, so it never collides. */
+export const FONTS_HOST = 'fonts'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -27,7 +31,11 @@ const MIME: Record<string, string> = {
   '.wav': 'audio/wav',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.png': 'image/png'
+  '.png': 'image/png',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2'
 }
 
 /** Must run before app 'ready'. */
@@ -51,8 +59,11 @@ export function registerMediaProtocol(): void {
     const url = new URL(request.url)
     const id = url.hostname
     const file = decodeURIComponent(url.pathname).replace(/^\/+/, '')
-    const root = getSubdir('media')
-    const assetRoot = normalize(join(root, id))
+    // Bundled fonts live outside the per-media store; serve them from their dir.
+    const assetRoot =
+      id === FONTS_HOST
+        ? normalize(getBundledFontsDir() ?? join(getSubdir('media'), id))
+        : normalize(join(getSubdir('media'), id))
     const target = normalize(join(assetRoot, file))
 
     // Path-traversal guard: target must stay within this asset's folder.

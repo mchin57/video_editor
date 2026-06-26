@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { buildExportArgs, targetForPreset, type ExportPlan, type ExportVideo } from './exporterArgs'
+import {
+  buildExportArgs,
+  escapeFilterPath,
+  targetForPreset,
+  type ExportPlan,
+  type ExportVideo
+} from './exporterArgs'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 
 const caps = (nvenc: boolean): FfmpegCapabilities =>
@@ -113,6 +119,36 @@ describe('buildExportArgs', () => {
     expect(s).toContain('[0:v]ass=text_0.ass[v0]') // text first (bottom)
     expect(s).toContain('[v0][pv1]overlay=') // then video over it
     expect(s).toContain('ass=captions.ass') // captions burned last (top)
+  })
+
+  it('passes fontsdir (escaped) to every ass= filter when set', () => {
+    const s = buildExportArgs(
+      plan({
+        visuals: [{ kind: 'text', assFile: 'text_0.ass' }],
+        captionsAss: 'captions.ass',
+        fontsDir: 'C:\\app\\resources\\fonts'
+      }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('ass=text_0.ass:fontsdir=C\\:/app/resources/fonts')
+    expect(s).toContain('ass=captions.ass:fontsdir=C\\:/app/resources/fonts')
+  })
+
+  it('composites top overlays (gradient captions) above the caption track', () => {
+    const top = { path: 'g.png', boxW: 1080, boxH: 1920, x: 0, y: 0, startSec: 1, endSec: 2, opacity: 1 }
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: vid }], captionsAss: 'captions.ass', topOverlays: [top] }),
+      'o'
+    ).join(' ')
+    const capIdx = s.indexOf('ass=captions.ass')
+    const topIdx = s.indexOf("enable='between(t,1.000,2.000)'")
+    expect(capIdx).toBeGreaterThan(-1)
+    expect(topIdx).toBeGreaterThan(capIdx) // gradient caption overlaid after captions
+  })
+
+  it('escapeFilterPath escapes backslashes and the drive colon', () => {
+    expect(escapeFilterPath('C:\\a\\b')).toBe('C\\:/a/b')
+    expect(escapeFilterPath('/usr/share/fonts')).toBe('/usr/share/fonts')
   })
 
   it('mixes audio and maps it; a video-only export maps no audio', () => {

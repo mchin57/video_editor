@@ -16,6 +16,7 @@
  */
 
 import type { PresetId } from './export'
+import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 
 export interface CropRect {
   /** Source-pixel crop rectangle, aspect-locked to the output preset. */
@@ -68,6 +69,48 @@ export interface PillStyle {
   padPx: number
 }
 
+// --- Shared text decoration (used by BOTH text overlays and captions) -------
+
+/**
+ * Glyph outline. Burns via libass `\bord`/`\3c` (BorderStyle 1). Mutually
+ * exclusive with a pill (BorderStyle 3 repurposes the same tags for the box), so
+ * stroke is only applied when `pill.enabled` is false.
+ */
+export interface StrokeStyle {
+  /** Outline width in logical px (0 = none). */
+  widthPx: number
+  color: string
+}
+
+/**
+ * Drop shadow. Burns via libass `\shad` (a single diagonal offset; no
+ * independent x/y) + `\4c` (colour) + `\blur` (softness). Preview uses CSS
+ * `text-shadow`, clamped to a diagonal offset so it matches the burn.
+ */
+export interface ShadowStyle {
+  /** Diagonal offset distance in logical px (0 = none). */
+  distancePx: number
+  color: string
+  /** Edge softness (libass `\blur`); 0 = crisp. */
+  blur: number
+}
+
+/**
+ * 2-stop linear gradient fill. When present it OVERRIDES the flat `color`.
+ * Preview uses `background-clip: text`; export renders the text to a transparent
+ * PNG and composites it (ASS has no gradients).
+ */
+export interface GradientStyle {
+  from: string
+  to: string
+  /** Gradient angle in degrees (0 = →, 90 = ↓, CSS convention). */
+  angle: number
+}
+
+export const DEFAULT_STROKE: StrokeStyle = { widthPx: 8, color: '#000000' }
+export const DEFAULT_SHADOW: ShadowStyle = { distancePx: 2, color: '#000000d9', blur: 0 }
+export const DEFAULT_GRADIENT: GradientStyle = { from: '#FF512F', to: '#DD2476', angle: 90 }
+
 // --- Layer content (the polymorphic payload a layer carries) ----------------
 
 /** A trimmed slice of a video source, composited as a layer. */
@@ -106,10 +149,17 @@ export interface ImageContent {
 export interface TextContent {
   kind: 'text'
   text: string
+  /** Bundled-font id (see `shared/fonts.ts`); resolved for preview + export. */
   fontFamily: string
   fontSizePx: number
   color: string
   pill: PillStyle
+  /** Glyph outline (absent/null = none). Ignored when `pill.enabled`. */
+  stroke?: StrokeStyle | null
+  /** Drop shadow (absent/null = none). */
+  shadow?: ShadowStyle | null
+  /** Gradient fill; overrides `color` when present (absent/null = flat color). */
+  gradient?: GradientStyle | null
 }
 
 export type LayerContent = VideoContent | ImageContent | TextContent
@@ -153,18 +203,25 @@ export interface CaptionStyle {
   /** Center position in logical px. */
   x: number
   y: number
+  /** Bundled-font id (see `shared/fonts.ts`); resolved for preview + export. */
   fontFamily: string
   fontSizePx: number
   color: string
   /** Clockwise rotation in degrees (0 = upright). */
   rotationDeg: number
   pill: PillStyle
+  /** Glyph outline (absent/null = none). Ignored when `pill.enabled`. */
+  stroke?: StrokeStyle | null
+  /** Drop shadow (absent/null = none). */
+  shadow?: ShadowStyle | null
+  /** Gradient fill; overrides `color` when present (absent/null = flat color). */
+  gradient?: GradientStyle | null
 }
 
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   x: 540,
   y: 1340,
-  fontFamily: 'Inter, system-ui, sans-serif',
+  fontFamily: DEFAULT_FONT_ID,
   fontSizePx: 64,
   color: '#ffffff',
   rotationDeg: 0,
@@ -281,7 +338,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 6,
+    version: 7,
     preset: 'reel',
     layers: [],
     captions: {
@@ -418,7 +475,7 @@ function migrateLayers(raw: Record<string, unknown>): Layer[] {
       content: {
         kind: 'text',
         text: o.text,
-        fontFamily: o.fontFamily ?? 'Inter, system-ui, sans-serif',
+        fontFamily: isKnownFont(o.fontFamily) ? o.fontFamily! : DEFAULT_FONT_ID,
         fontSizePx: o.fontSizePx ?? 76,
         color: o.color ?? '#ffffff',
         pill: o.pill ?? { enabled: true, color: '#000000cc', padPx: 18 }
@@ -474,9 +531,26 @@ export function migrateProject(raw: unknown): Project {
     const yBaseline = typeof p.captions.yBaseline === 'number' ? p.captions.yBaseline : DEFAULT_CAPTION_STYLE.y
     p.captions.style = { ...DEFAULT_CAPTION_STYLE, y: yBaseline }
   }
+  // v7: `fontFamily` now stores a bundled-font id (shared/fonts.ts), not a CSS
+  // stack. Normalise any legacy/unknown value to a known id across text layers,
+  // the lane-wide caption style, and per-segment overrides. New optional
+  // decoration fields (stroke/shadow/gradient) are absence-tolerant.
+  const normFont = (id: unknown): string =>
+    typeof id === 'string' && isKnownFont(id) ? id : DEFAULT_FONT_ID
+  if (Array.isArray(p.layers)) {
+    for (const l of p.layers) {
+      if (l.content.kind === 'text') l.content.fontFamily = normFont(l.content.fontFamily)
+    }
+  }
+  if (p.captions) {
+    if (p.captions.style) p.captions.style.fontFamily = normFont(p.captions.style.fontFamily)
+    for (const s of p.captions.segments ?? []) {
+      if (s.style) s.style.fontFamily = normFont(s.style.fontFamily)
+    }
+  }
   // v5/v6 only add absence-tolerant optional fields (freezes, image crop/rotate/
-  // flip, caption style), so there's nothing else to backfill.
-  if (typeof p.version !== 'number' || p.version < 6) p.version = 6
+  // flip, caption style); v7 normalises font ids above.
+  if (typeof p.version !== 'number' || p.version < 7) p.version = 7
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

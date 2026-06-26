@@ -48,3 +48,18 @@ export function getBundledBinDir(): string | null {
   }
   return null
 }
+
+/**
+ * Directory holding the bundled text-overlay fonts (electron-builder
+ * `extraResources` → <resources>/fonts; the committed `resources/fonts` in dev).
+ * Passed to libass via `fontsdir` so the burned text uses the same faces the
+ * preview shows. Returns null only if the folder is somehow absent.
+ */
+export function getBundledFontsDir(): string | null {
+  if (app.isPackaged) return join(process.resourcesPath, 'fonts')
+  for (const base of [app.getAppPath(), process.cwd()]) {
+    const dir = join(base, 'resources', 'fonts')
+    if (existsSync(dir)) return dir
+  }
+  return null
+}
