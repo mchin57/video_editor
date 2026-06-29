@@ -156,11 +156,37 @@ _All apply to **both** text overlays and captions via the shared
 
 ### Not planned / missing features
 
-- [ ] **Delete button applies to all timeline objects** — the toolbar Delete button and the `Del` keybind currently only remove the selected video layer (`removeLayer(selectedLayerId)`). It should also handle whatever is selected: audio clips (`removeAudioClip`), caption segments (`removeCaption`), text layers, and image layers. The fix is to check `selectedLayerId`, `selectedAudioId`, and `selectedCaptionId` in priority order and dispatch the appropriate removal action. The disabled state on the button should also reflect any selection, not just a layer selection.
+- [x] **Delete button applies to all timeline objects** — both the `Del` keybind
+  (`App.tsx`) and the toolbar 🗑 button (`Timeline.tsx`) delete whatever is selected,
+  checking `selectedLayerId` → `selectedCaptionId` → `selectedAudioId` in priority
+  order (`deleteSelected`/`canDelete`). The button's disabled state reflects any
+  selection, not just a layer. (Layers cover both text and image content.)
 
-- [ ] **Library clip preview** — allow the user to preview a clip directly from the library without placing it on the timeline. Options: hover to play a silent looping thumbnail preview (scrub-on-hover), or click a play button on the library card to open a small floating player. Implementation: on hover/click, load the asset's proxy URL into a hidden `<video>` element and play it; display duration progress on the thumbnail. A floating modal player with play/pause and scrub bar would cover audio clips too (which have no thumbnail to hover-preview).
+- [x] **Library clip preview** — preview a clip from the library without placing it.
+  Hovering a video card pops out a large floating preview beside it (`PreviewPopout`,
+  `Library.tsx`): portaled to `<body>` so library/timeline overflow can't clip it,
+  anchored to the card's rect (flips to the other side near the viewport edge), sized
+  to the clip aspect (≤560px tall), looping **with sound**, and dismissed on mouse-leave.
+  `pointer-events-none` keeps the cursor "on" the card. Unmuted autoplay is enabled via
+  `autoplayPolicy: 'no-user-gesture-required'` (main-window `webPreferences`, `index.ts`).
+  Audio cards toggle inline play/pause on click (`AudioThumb` — ♪ shows ▶/⏸ on hover,
+  drives a hidden `<audio>`).
 
-
+- [ ] **Scrub bar on the library preview popout** — add a progress/scrub bar to the
+  hover `PreviewPopout` (`Library.tsx`) so a clip can be quickly moved through without
+  placing it on the timeline. Bar shows `currentTime/duration` (via the video's
+  `timeupdate`); click/drag to seek (`video.currentTime = frac * duration`), ideally
+  pausing the loop while scrubbing.
+  - **Key blocker (why it's not trivial):** the popout is currently
+    `pointer-events-none` and is dismissed by the card's `onMouseLeave`, so the cursor
+    can't enter the popout to grab the bar without instantly closing it. Need to make
+    the popout interactive and keep it open while the cursor is over *either* the card
+    *or* the popout — e.g. a shared hover group with a small close delay (timeout
+    cleared on re-enter) so moving from card→popout doesn't dismiss, plus an invisible
+    "bridge" over the gap. Watch for re-introducing the hover flicker the
+    `pointer-events-none` design was added to avoid.
+  - _Possible extra: scrub-on-hover (seek by horizontal cursor position over the bar)
+    and a current-time / duration readout._
 
 - [ ] **Multi-clip layout formats (split screen, panels)** — place multiple clips side-by-side or in a grid within a single frame at a given timeline position. Built-in layout presets to ship:
   - **Split screen (2-up):** left/right or top/bottom, each half fills its cell.
@@ -191,7 +217,13 @@ _All apply to **both** text overlays and captions via the shared
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
-- [ ] **Edge-scroll during timeline drag** — when dragging a clip, caption, or audio block horizontally, the timeline should auto-scroll left or right when the cursor is near the edge of the scroll container. Currently the user must drop, scroll manually, then re-drag. Implementation: in `startLayerDrag`, `startCaptionDrag`, and `startAudioDrag` (`Timeline.tsx`), start a `requestAnimationFrame` loop on `pointermove` that checks the cursor's X position relative to `scrollRef`'s bounding rect; if within ~40px of the left or right edge, increment `scrollRef.current.scrollLeft` proportionally to proximity. Cancel the loop on `pointerup`.
+- [x] **Edge-scroll during timeline drag** — dragging a clip, caption, or audio block
+  near the left/right edge of the track auto-scrolls the timeline (rAF loop, scroll
+  speed proportional to edge proximity within ~40px). Shared `edgeAutoScroll` helper
+  (`Timeline.tsx`) used by all three drag handlers; each now folds the live
+  `scrollLeft` delta into its time delta (`deltaFor`) so the dragged block keeps
+  tracking the cursor as the view scrolls, and re-applies position on each scroll
+  tick. Loop cancels on `pointerup`.
 
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 - [x] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline; each lane (Clips / Text / Image / Captions / Audio) gets a full-height tinted rounded "bubble" header, like Premiere/Resolve. The track content scrolls horizontally beside it (gutter stays pinned and is kept vertically in sync with the track scroll). Built in `Timeline.tsx`; persisted in the `timelineView` localStorage view.
