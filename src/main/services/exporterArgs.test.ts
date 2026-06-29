@@ -130,8 +130,8 @@ describe('buildExportArgs', () => {
       }),
       'o'
     ).join(' ')
-    expect(s).toContain('ass=text_0.ass:fontsdir=C\\:/app/resources/fonts')
-    expect(s).toContain('ass=captions.ass:fontsdir=C\\:/app/resources/fonts')
+    expect(s).toContain("ass=text_0.ass:fontsdir='C\\:/app/resources/fonts'")
+    expect(s).toContain("ass=captions.ass:fontsdir='C\\:/app/resources/fonts'")
   })
 
   it('composites top overlays (gradient captions) above the caption track', () => {

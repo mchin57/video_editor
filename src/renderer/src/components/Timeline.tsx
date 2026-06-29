@@ -37,6 +37,42 @@ const EMPTY_SCRIPT: ScriptLine[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
+
+/**
+ * Auto-scrolls a horizontal container while a drag hovers near its left/right
+ * edge. Feed the pointer's X on every move (`setX`); a rAF loop nudges
+ * `scrollLeft` proportional to edge proximity and calls `onScroll` after each
+ * real nudge, so the drag handler can re-apply the block's position (which reads
+ * the live `scrollLeft`). Returns `setX`/`stop`; the loop starts immediately.
+ */
+function edgeAutoScroll(
+  el: HTMLElement,
+  onScroll: () => void
+): { setX: (x: number) => void; stop: () => void } {
+  const EDGE = 40 // px from an edge where auto-scroll kicks in
+  const MAX = 20 // px/frame at the very edge
+  let x = -1
+  let raf = 0
+  const tick = (): void => {
+    raf = requestAnimationFrame(tick)
+    if (x < 0) return
+    const rect = el.getBoundingClientRect()
+    let v = 0
+    if (x < rect.left + EDGE) v = -Math.min(1, (rect.left + EDGE - x) / EDGE) * MAX
+    else if (x > rect.right - EDGE) v = Math.min(1, (x - (rect.right - EDGE)) / EDGE) * MAX
+    if (v === 0) return
+    const before = el.scrollLeft
+    el.scrollLeft = Math.max(0, before + v)
+    if (el.scrollLeft !== before) onScroll()
+  }
+  raf = requestAnimationFrame(tick)
+  return {
+    setX: (nx: number) => {
+      x = nx
+    },
+    stop: () => cancelAnimationFrame(raf)
+  }
+}
 const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
   id: l.id,
   startSec: l.startSec,
@@ -103,6 +139,8 @@ export function Timeline(): JSX.Element {
   const addVideoLayer = useProject((s) => s.addVideoLayer)
   const addAudioClip = useProject((s) => s.addAudioClip)
   const removeLayer = useProject((s) => s.removeLayer)
+  const removeCaption = useProject((s) => s.removeCaption)
+  const removeAudioClip = useProject((s) => s.removeAudioClip)
   const splitLayerAt = useProject((s) => s.splitLayerAt)
   const splitAudioAt = useProject((s) => s.splitAudioAt)
   const canUndo = useProject((s) => s.past.length > 0)
@@ -314,14 +352,22 @@ export function Timeline(): JSX.Element {
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
+    const sc = scrollRef.current
+    const startScroll = sc?.scrollLeft ?? 0
+    const deltaFor = (clientX: number): number =>
+      (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, endSec } = layer
     const dur = endSec - startSec
     const srcDur =
       layer.content.kind === 'video'
         ? assetById.get(layer.content.mediaId)?.probe.durationSec ?? layer.content.outSec
         : 0
+    let last: PointerEvent | null = null
+    let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
-      const d = (ev.clientX - startX) / pxPerSec
+      last = ev
+      scroller?.setX(ev.clientX)
+      const d = deltaFor(ev.clientX)
       useProject.getState().liveUpdate((p) => ({
         ...p,
         layers: p.layers.map((l) => {
@@ -349,7 +395,9 @@ export function Timeline(): JSX.Element {
         })
       }))
     }
+    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
     const onUp = (): void => {
+      scroller?.stop()
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       useProject.getState().commitLive(before)
@@ -365,10 +413,18 @@ export function Timeline(): JSX.Element {
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
+    const sc = scrollRef.current
+    const startScroll = sc?.scrollLeft ?? 0
+    const deltaFor = (clientX: number): number =>
+      (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, endSec } = seg
     const dur = endSec - startSec
+    let last: PointerEvent | null = null
+    let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
-      const d = (ev.clientX - startX) / pxPerSec
+      last = ev
+      scroller?.setX(ev.clientX)
+      const d = deltaFor(ev.clientX)
       useProject.getState().liveUpdate((p) => ({
         ...p,
         captions: {
@@ -385,7 +441,9 @@ export function Timeline(): JSX.Element {
         }
       }))
     }
+    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
     const onUp = (): void => {
+      scroller?.stop()
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       useProject.getState().commitLive(before)
@@ -401,13 +459,21 @@ export function Timeline(): JSX.Element {
     const before = useProject.getState().project
     if (!before) return
     const startX = e.clientX
+    const sc = scrollRef.current
+    const startScroll = sc?.scrollLeft ?? 0
+    const deltaFor = (clientX: number): number =>
+      (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, inSec } = clip
     const effOut = effectiveOut(clip, maxOut)
     const ownEnd = startSec + (effOut - inSec)
     const others = snapTargets.filter((t) => Math.abs(t - startSec) > 1e-6 && Math.abs(t - ownEnd) > 1e-6)
     const audioSnap = (v: number): number => snap(v, others, SNAP_PX / pxPerSec)
+    let last: PointerEvent | null = null
+    let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
-      const d = (ev.clientX - startX) / pxPerSec
+      last = ev
+      scroller?.setX(ev.clientX)
+      const d = deltaFor(ev.clientX)
       useProject.getState().liveUpdate((p) => ({
         ...p,
         audioClips: p.audioClips.map((a) => {
@@ -421,7 +487,9 @@ export function Timeline(): JSX.Element {
         })
       }))
     }
+    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
     const onUp = (): void => {
+      scroller?.stop()
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       useProject.getState().commitLive(before)
@@ -444,6 +512,20 @@ export function Timeline(): JSX.Element {
   const splitSelected = (): void => {
     if (selectedLayer && selectedLayer.content.kind === 'video') splitLayerAt(selectedLayer.id, time)
     else if (selectedAudio) splitAudioAt(selectedAudio.id, time, selectedAudioDur)
+  }
+
+  // Delete whatever is selected, mirroring the Del keybind's priority (App.tsx):
+  // layer → caption → audio.
+  const canDelete = !!(selectedLayerId || selectedCaptionId || selectedAudioId)
+  const deleteSelected = (): void => {
+    if (selectedLayerId) removeLayer(selectedLayerId)
+    else if (selectedCaptionId) {
+      removeCaption(selectedCaptionId)
+      selectCaption(null)
+    } else if (selectedAudioId) {
+      removeAudioClip(selectedAudioId)
+      selectAudio(null)
+    }
   }
 
   const addText = (): void => {
@@ -512,7 +594,7 @@ export function Timeline(): JSX.Element {
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
         </ToolbarButton>
-        <ToolbarButton title="Delete the selected layer (Del)" onClick={() => selectedLayerId && removeLayer(selectedLayerId)} disabled={!selectedLayerId}>
+        <ToolbarButton title="Delete the selected layer, caption, or audio clip (Del)" onClick={deleteSelected} disabled={!canDelete}>
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />

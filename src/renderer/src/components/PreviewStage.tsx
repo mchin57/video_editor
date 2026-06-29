@@ -425,7 +425,7 @@ export function PreviewStage(): JSX.Element {
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) useUi.getState().selectLayer(null)
       }}
-      className="relative aspect-[9/16] h-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10"
+      className="relative isolate aspect-[9/16] h-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10"
     >
       {/* Audio track: one follower <audio> per clip (the browser mixes them) */}
       {audioClips.map((a) => {

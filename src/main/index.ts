@@ -20,7 +20,9 @@ function createWindow(): void {
     title: 'Reel Editor',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // Let library hover-previews play with sound without a prior click gesture.
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
 

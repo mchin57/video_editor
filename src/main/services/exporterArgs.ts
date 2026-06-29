@@ -128,8 +128,10 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
   const { target, totalDur, visuals, audio, captionsAss, fontsDir, caps, preferNvenc } = plan
   const W = target.width
   const H = target.height
-  // Appended to every `ass=` filter so libass finds the bundled faces.
-  const assOpts = fontsDir ? `:fontsdir=${escapeFilterPath(fontsDir)}` : ''
+  // Appended to every `ass=` filter so libass finds the bundled faces. The value
+  // is single-quoted AND the drive colon escaped — ffmpeg's filtergraph parser
+  // rejects a bare/escaped-only Windows path here ("No option name near '/...'").
+  const assOpts = fontsDir ? `:fontsdir='${escapeFilterPath(fontsDir)}'` : ''
 
   // Input indices: 0 = black base, then videos, then images, then top overlays,
   // then audio.

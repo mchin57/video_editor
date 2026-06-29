@@ -1,4 +1,5 @@
-import { useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
+import { createPortal } from 'react-dom'
 import type { MediaAsset } from '@shared/media'
 import { isImageAsset } from '@shared/media'
 import { useLibrary, useImportMedia } from '@/hooks/useMedia'
@@ -8,19 +9,114 @@ import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration } from '@/lib/format'
 import { makeImageLayer, visualDuration } from '@shared/layers'
-import { thumbUrl } from '@/ipc/client'
+import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 
-/** First-frame thumbnail with a ▶ fallback until/if the jpg is available. */
+/**
+ * Large floating video preview, portaled to <body> so the timeline/library
+ * overflow can't clip it. Anchored beside the hovered card (flips to the other
+ * side near the viewport edge), sized to the clip's aspect, and plays with sound.
+ * `pointer-events-none` so the cursor stays "on" the card — moving onto the
+ * popout would otherwise end the hover and dismiss it.
+ */
+function PreviewPopout({ asset, anchor }: { asset: MediaAsset; anchor: HTMLElement }): JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.volume = 1
+    void el.play().catch(() => {})
+  }, [])
+
+  const v = asset.probe.video
+  const aspect = v && v.displayWidth > 0 && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 9 / 16
+  const margin = 12
+  const maxH = Math.min(560, window.innerHeight - 16)
+  let width = 300
+  let height = Math.round(width / aspect)
+  if (height > maxH) {
+    height = maxH
+    width = Math.round(height * aspect)
+  }
+  const rect = anchor.getBoundingClientRect()
+  let left = rect.right + margin
+  if (left + width > window.innerWidth - 8) left = rect.left - margin - width // flip to the left
+  left = Math.max(8, left)
+  const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, window.innerHeight - height - 8))
+
+  return createPortal(
+    <div
+      style={{ position: 'fixed', left, top, width, height }}
+      className="pointer-events-none z-[500] overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl"
+    >
+      <video ref={ref} src={proxyUrl(asset.id)} loop autoPlay playsInline className="h-full w-full object-contain" />
+    </div>,
+    document.body
+  )
+}
+
+/**
+ * First-frame thumbnail with a ▶ fallback until/if the jpg is available. Hovering
+ * a video clip pops out a large preview beside the card (with sound), so a clip
+ * can be reviewed without placing it on the timeline; it dismisses on mouse-leave.
+ */
 function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   const [failed, setFailed] = useState(false)
-  if (failed) return <span className="text-base text-zinc-600">▶</span>
+  const [hover, setHover] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const canPreview = asset.proxyReady && !!asset.probe.video && !isImageAsset(asset)
   return (
-    <img
-      src={thumbUrl(asset.id)}
-      alt=""
-      onError={() => setFailed(true)}
-      className="h-full w-full object-cover"
-    />
+    <div
+      ref={wrapRef}
+      className="relative h-full w-full"
+      onMouseEnter={() => canPreview && setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      {failed ? (
+        <span className="flex h-full w-full items-center justify-center text-base text-zinc-600">▶</span>
+      ) : (
+        <img
+          src={thumbUrl(asset.id)}
+          alt=""
+          onError={() => setFailed(true)}
+          className="h-full w-full object-cover"
+        />
+      )}
+      {hover && canPreview && wrapRef.current && <PreviewPopout asset={asset} anchor={wrapRef.current} />}
+    </div>
+  )
+}
+
+/** Audio library card: click the glyph to play/pause the proxy inline (▶/⏸ on hover). */
+function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [hover, setHover] = useState(false)
+  const glyph = !asset.proxyReady ? '♪' : playing ? '⏸' : hover ? '▶' : '♪'
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={(e) => {
+        e.stopPropagation()
+        const el = audioRef.current
+        if (!asset.proxyReady || !el) return
+        if (el.paused) void el.play()
+        else el.pause()
+      }}
+      className="flex h-full w-full items-center justify-center text-base text-sky-300"
+      title={asset.proxyReady ? (playing ? 'Pause preview' : 'Play preview') : undefined}
+    >
+      {glyph}
+      <audio
+        ref={audioRef}
+        src={audioUrl(asset.id)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+    </span>
   )
 }
 
@@ -102,7 +198,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
     >
       {/* 9:16 thumbnail (or a music glyph for audio) */}
       <div className="relative flex h-16 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-black/60 text-zinc-600">
-        {isAudio ? <span className="text-base text-sky-300">♪</span> : <ClipThumb asset={asset} />}
+        {isAudio ? <AudioThumb asset={asset} /> : <ClipThumb asset={asset} />}
         {!asset.proxyReady && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 bg-zinc-700">
             <div className="h-full bg-sky-400 transition-all" style={{ width: `${pct}%` }} />
