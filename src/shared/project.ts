@@ -17,6 +17,7 @@
 
 import type { PresetId } from './export'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
+import { FRAME } from './layers'
 
 export interface CropRect {
   /** Source-pixel crop rectangle, aspect-locked to the output preset. */
@@ -125,6 +126,27 @@ export const DEFAULT_STROKE: StrokeStyle = { widthPx: 8, color: '#000000' }
 export const DEFAULT_SHADOW: ShadowStyle = { distancePx: 2, color: '#000000d9', blur: 0 }
 export const DEFAULT_GRADIENT: GradientStyle = { from: '#FF512F', to: '#DD2476', angle: 90 }
 
+/**
+ * The visual styling shared by a text overlay (`TextContent`) and a caption
+ * (`CaptionStyle`): the bundled font, the fill (flat `color` or a `gradient` that
+ * overrides it), and the optional decorations (pill / stroke / shadow). Both
+ * extend this so the font picker, the shared `TextStyleControls`, the preview, and
+ * the export all drive off one shape and stay in lockstep. @see docs/SHARED.md
+ */
+export interface TextStyleBase {
+  /** Bundled-font id (see `shared/fonts.ts`); resolved for preview + export. */
+  fontFamily: string
+  fontSizePx: number
+  color: string
+  pill: PillStyle
+  /** Glyph outline (absent/null = none). Ignored when `pill.enabled`. */
+  stroke?: StrokeStyle | null
+  /** Drop shadow (absent/null = none). */
+  shadow?: ShadowStyle | null
+  /** Gradient fill; overrides `color` when present (absent/null = flat color). */
+  gradient?: GradientStyle | null
+}
+
 // --- Layer content (the polymorphic payload a layer carries) ----------------
 
 /** A trimmed slice of a video source, composited as a layer. */
@@ -168,20 +190,9 @@ export interface ImageContent {
 }
 
 /** A text element composited as a layer. */
-export interface TextContent {
+export interface TextContent extends TextStyleBase {
   kind: 'text'
   text: string
-  /** Bundled-font id (see `shared/fonts.ts`); resolved for preview + export. */
-  fontFamily: string
-  fontSizePx: number
-  color: string
-  pill: PillStyle
-  /** Glyph outline (absent/null = none). Ignored when `pill.enabled`. */
-  stroke?: StrokeStyle | null
-  /** Drop shadow (absent/null = none). */
-  shadow?: ShadowStyle | null
-  /** Gradient fill; overrides `color` when present (absent/null = flat color). */
-  gradient?: GradientStyle | null
 }
 
 export type LayerContent = VideoContent | ImageContent | TextContent
@@ -221,23 +232,12 @@ export interface CaptionWord {
  * 1080x1920 px (matching layers). Used both as the lane-wide default
  * (`CaptionsConfig.style`) and as a per-segment override (`CaptionSegment.style`).
  */
-export interface CaptionStyle {
+export interface CaptionStyle extends TextStyleBase {
   /** Center position in logical px. */
   x: number
   y: number
-  /** Bundled-font id (see `shared/fonts.ts`); resolved for preview + export. */
-  fontFamily: string
-  fontSizePx: number
-  color: string
   /** Clockwise rotation in degrees (0 = upright). */
   rotationDeg: number
-  pill: PillStyle
-  /** Glyph outline (absent/null = none). Ignored when `pill.enabled`. */
-  stroke?: StrokeStyle | null
-  /** Drop shadow (absent/null = none). */
-  shadow?: ShadowStyle | null
-  /** Gradient fill; overrides `color` when present (absent/null = flat color). */
-  gradient?: GradientStyle | null
 }
 
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
@@ -367,15 +367,30 @@ export function effectiveOut(c: AudioClip, sourceDurationSec: number): number {
   return c.outSec > 0 ? Math.min(c.outSec, sourceDurationSec) : sourceDurationSec
 }
 
+/**
+ * The shared tri-state override mechanism for a per-clip setting that can inherit
+ * a project-wide default: `undefined` inherits `projectDefault`; any other value
+ * (including `null`) is an explicit override. Used by denoise and stabilize today;
+ * reuse it for any future inherit / force-on / force-off knob. @see docs/SHARED.md
+ */
+export function resolveOverride<T>(value: T | undefined, projectDefault: T): T {
+  return value === undefined ? projectDefault : value
+}
+
+/** Whether a tri-state override is set (i.e. not inheriting the project default). */
+export function isOverridden(value: unknown): boolean {
+  return value !== undefined
+}
+
 /** Whether the noise filter actually runs for this clip on export (clip override
  *  wins, else the project-wide default). */
 export function effectiveDenoise(c: Pick<AudioClip, 'denoise'>, denoiseDefault: boolean): boolean {
-  return c.denoise ?? denoiseDefault
+  return resolveOverride(c.denoise, denoiseDefault)
 }
 
 /** Whether a clip overrides the project noise-filter default (gets an indicator). */
 export function denoiseOverridden(c: Pick<AudioClip, 'denoise'>): boolean {
-  return c.denoise !== undefined
+  return isOverridden(c.denoise)
 }
 
 /** The stabilization actually applied to a video clip on export (clip override
@@ -384,12 +399,12 @@ export function effectiveStabilize(
   c: Pick<VideoContent, 'stabilize'>,
   stabilizeDefault: Stabilize | null
 ): Stabilize | null {
-  return c.stabilize === undefined ? stabilizeDefault : c.stabilize
+  return resolveOverride(c.stabilize, stabilizeDefault)
 }
 
 /** Whether a clip overrides the project stabilization default (gets an indicator). */
 export function stabilizeOverridden(c: Pick<VideoContent, 'stabilize'>): boolean {
-  return c.stabilize !== undefined
+  return isOverridden(c.stabilize)
 }
 
 /** Timeline end of an audio clip, given its source duration. */
@@ -423,8 +438,6 @@ export function createEmptyProject(id: string, name: string): Project {
 }
 
 // --- Migration --------------------------------------------------------------
-
-const FRAME = { w: 1080, h: 1920 } as const
 
 // Old (pre-v4) shapes, read defensively from raw JSON for migration only.
 interface OldClip {
@@ -473,9 +486,9 @@ const fallbackId = (): string => `mig-${Date.now().toString(36)}-${migrateCounte
 /** Scale for an old image overlay's display width within the frame-contain box. */
 function imageScaleFromBox(w: number, h: number): number {
   if (w <= 0 || h <= 0) return 0.5
-  const frameAspect = FRAME.w / FRAME.h
+  const frameAspect = FRAME.width / FRAME.height
   // contain: wide-of-frame images fill width (1080); tall ones fill height (1920).
-  return w / h >= frameAspect ? w / FRAME.w : h / FRAME.h
+  return w / h >= frameAspect ? w / FRAME.width : h / FRAME.height
 }
 
 /** Build the layer stack from the legacy clips/overlays/imageOverlays arrays. */
@@ -493,8 +506,8 @@ function migrateLayers(raw: Record<string, unknown>): Layer[] {
       hidden: false,
       startSec: acc,
       endSec: acc + dur,
-      x: FRAME.w / 2,
-      y: FRAME.h / 2,
+      x: FRAME.width / 2,
+      y: FRAME.height / 2,
       scale: 1,
       content: {
         kind: 'video',

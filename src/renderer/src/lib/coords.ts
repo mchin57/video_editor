@@ -2,9 +2,14 @@
  * The logical output space. Everything spatial in the project (overlays,
  * captions, crops, safe zones) is expressed in these 1080x1920 px so the same
  * numbers drive both the CSS-scaled preview stage and the ASS PlayRes on export.
+ *
+ * This is an alias of the shared `FRAME` (the single source of truth, importable
+ * by main + renderer); kept under the `LOGICAL` name for the renderer call-sites.
  */
 
-export const LOGICAL = { width: 1080, height: 1920 } as const
+import { FRAME } from '@shared/layers'
+
+export const LOGICAL = FRAME
 
 export interface Rect {
   x: number

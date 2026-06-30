@@ -1,19 +1,12 @@
 import { useEffect, type JSX, type ReactNode } from 'react'
-import type { GradientStyle, PillStyle, ShadowStyle, StrokeStyle } from '@shared/project'
+import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
 import { useBrandColors } from '@/state/brandColors'
 import { FontPicker } from './FontPicker'
 
-/** The styling knobs shared by a text overlay and a caption. */
-export interface TextStyleLike {
-  fontFamily: string
-  fontSizePx: number
-  color: string
-  pill: PillStyle
-  stroke?: StrokeStyle | null
-  shadow?: ShadowStyle | null
-  gradient?: GradientStyle | null
-}
+/** The styling knobs shared by a text overlay and a caption — the shared
+ *  `TextStyleBase` that both `TextContent` and `CaptionStyle` extend. */
+export type TextStyleLike = TextStyleBase
 export type TextStylePatch = Partial<TextStyleLike>
 
 const inputCls =
