@@ -2,6 +2,22 @@
 
 Deferred polish and features, newest-first. Not blocking; pick up as time allows.
 
+## Codebase health
+
+- [x] **De-duplication refactor.** Consolidated the patterns that had drifted into
+  3–4 copies into shared homes — UI primitives (`components/ui.tsx`), a pointer-drag
+  helper (`lib/pointerDrag.ts`), store array helpers (`lib/arrays.ts`), a shared
+  text-style base + generic override resolver + unified `FRAME` (`shared/project.ts`,
+  `shared/layers.ts`), ffmpeg filter/geometry helpers (`services/ffmpegFilters.ts`,
+  `shared/layers.ts` `containBox`/`effectiveImageAspect`), and an IPC client that
+  destructures `window.api` instead of re-wrapping it. Catalog: [`SHARED.md`](SHARED.md);
+  guardrails for future work: root [`CLAUDE.md`](../CLAUDE.md). Behavior-preserving
+  (tests + typecheck green throughout).
+- [ ] **Convert `Timeline.tsx` drag handlers to `startPointerDrag`.** The 8 hand-rolled
+  pointermove/pointerup handlers were left out of the drag-helper sweep because they're
+  entangled with the `edgeAutoScroll` rAF loop (each folds the live `scrollLeft` delta
+  into its time delta). Convert carefully, preserving that, when next touching the timeline.
+
 ## Open
 
 ### Freeze frames, stills & image editing (`feature/freeze-stills-image-edit` branch)
@@ -95,7 +111,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     - `General` — no platform-specific rules; just timeline + export. Useful as a blank slate.
   - **Custom profiles** — user can create, name, duplicate, and delete profiles; each stores its own set of rules and presets in `settings.json`.
   - **UI:** add a menu bar (File / Edit / Profile / …) across the top of the app window — standard dropdown tabs. `Profile` menu lists available profiles with a checkmark on the active one, plus "New profile…" and "Manage profiles…" actions.
-  - Where to start: `src/shared/export.ts` (profile type), `src/main/services/projectStore.ts` (persist active profile), `src/renderer/src/state/editorStore.ts` (active profile in store), new `ProfileMenu` component, conditionalize `ReelChecklist`, `SafeZoneOverlay`, `HookZoneMarker` on active profile's flags.
+  - Where to start: `src/shared/export.ts` (profile type), `src/main/services/projectStore.ts` (persist active profile), `src/renderer/src/state/store.ts` (the `useEditor` store — add the active profile here; note there is no `editorStore.ts`), new `ProfileMenu` component. Conditionalize the checklist (`ChecklistModal.tsx` + `lib/checklist.ts`) and the safe-zone + hook-zone overlays (currently inline `<div>`s in `PreviewStage.tsx`, driven by `SAFE_ZONES`/`HOOK_WINDOW_SEC`) on the active profile's flags — there are no `ReelChecklist`/`SafeZoneOverlay`/`HookZoneMarker` components today. The shared `FRAME` (`shared/layers.ts`) and the `resolveOverride` tri-state pattern (`shared/project.ts`) make profile-scoped defaults straightforward.
 
 ### Text updates
 
@@ -151,7 +167,7 @@ _All apply to **both** text overlays and captions via the shared
 
 #### Other
 - [ ] **Beat sync** — detect transients/beats in the music track and expose them as snap points on the timeline ruler, so cuts and text entrance animations can be snapped to the beat automatically.
-- [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls.
+- [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls. _The natural unit to save/apply is `TextStyleBase` (`shared/project.ts`) — the shape `TextContent` and `CaptionStyle` already share via `TextStyleControls`._
 - [ ] **Text-behind-subject effect** — composite a text layer between the subject and background using the auto background removal mask (see subject-aware crop item). Requires the segmentation feature to be built first.
 
 ### Not planned / missing features

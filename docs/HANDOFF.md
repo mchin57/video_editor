@@ -129,3 +129,30 @@ M0 is done. Begin **M1** on the `prototype` branch:
 - Don't re-probe the environment (facts table above is current).
 - Don't reopen settled decisions (decision log) without a concrete reason.
 - Keep the tool single-purpose: a Reels factory, not a general NLE. Out-of-scope list is at the end of PLAN.md.
+
+---
+
+## Refactor — de-duplication (2026-06-30)
+
+Behavior-preserving consolidation of patterns that had drifted into 3–4 copies.
+On branch **`refactor`** (cut from `prototype`). Tests + typecheck green after each
+theme. Shared-homes catalog: [`SHARED.md`](SHARED.md); reuse guardrails: root
+[`CLAUDE.md`](../CLAUDE.md).
+
+- [x] **B — shared model** (`refactor(shared)` 9249d7a): `TextStyleBase`, generic
+  `resolveOverride`/`isOverridden`, single `FRAME` constant.
+- [x] **C — export/ffmpeg helpers** (`refactor(export)` ec4ea23): `ffmpegFilters.ts`
+  (`cropFilter`/`eqFilter`/`f3`/`r`), `containBox`/`effectiveImageAspect`,
+  `renderGradientImage`.
+- [x] **A — UI primitives** (`refactor(ui)` 46881eb): `components/ui.tsx`,
+  `lib/pointerDrag.ts`, `OverrideToggle`/`StabilizeSliders`.
+- [x] **E — store array helpers** (`refactor(store)` ab9efea): `lib/arrays.ts`
+  (`updateById`/`replaceAt`).
+- [x] **D — IPC collapse** (`refactor(ipc)` cfa70d0): `ipc/client.ts` destructures
+  `window.api`; `RendererApi` stays the single type source.
+- [x] **F — docs & durability**: this log + `SHARED.md` + `CLAUDE.md` + TODO
+  reconciliation.
+
+_Follow-up:_ `Timeline.tsx`'s 8 drag handlers weren't converted to
+`startPointerDrag` (entangled with the `edgeAutoScroll` loop) — see TODO ▸ Codebase
+health.
