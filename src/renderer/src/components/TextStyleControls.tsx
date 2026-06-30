@@ -1,16 +1,14 @@
-import { useEffect, type JSX, type ReactNode } from 'react'
+import { useEffect, type JSX } from 'react'
 import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
 import { useBrandColors } from '@/state/brandColors'
 import { FontPicker } from './FontPicker'
+import { Check, Field, colorCls, inputCls } from './ui'
 
 /** The styling knobs shared by a text overlay and a caption — the shared
  *  `TextStyleBase` that both `TextContent` and `CaptionStyle` extend. */
 export type TextStyleLike = TextStyleBase
 export type TextStylePatch = Partial<TextStyleLike>
-
-const inputCls =
-  'w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-sky-400/60'
 
 const GRADIENT_PRESETS: { name: string; from: string; to: string; angle: number }[] = [
   { name: 'Sunset', from: '#FF512F', to: '#DD2476', angle: 90 },
@@ -30,34 +28,6 @@ const getAlpha = (c: string): number => {
 }
 const withAlpha = (c: string, a: number): string =>
   hex6(c) + Math.max(0, Math.min(255, Math.round(a))).toString(16).padStart(2, '0')
-
-function Field({ label, children }: { label: ReactNode; children: ReactNode }): JSX.Element {
-  return (
-    <label className="mb-2 block">
-      <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
-      {children}
-    </label>
-  )
-}
-
-function Check({
-  checked,
-  onChange,
-  children
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  children: ReactNode
-}): JSX.Element {
-  return (
-    <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {children}
-    </label>
-  )
-}
-
-const colorCls = 'h-7 w-full rounded border border-white/10 bg-black/40'
 
 /** Saved-brand-color swatches: click to apply, ＋ saves the current color,
  *  right-click removes a swatch. */

@@ -20,6 +20,7 @@ import {
   visualDuration
 } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
+import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
@@ -306,50 +307,33 @@ export function PreviewStage(): JSX.Element {
     e.preventDefault()
     useUi.getState().selectLayer(layer.id)
     const stage = stageRef.current
-    const before = useProject.getState().project
-    if (!stage || !before) return
+    if (!stage) return
     const scale = LOGICAL.width / stage.getBoundingClientRect().width
     const startX = e.clientX
     const startY = e.clientY
-    const onMove = (ev: PointerEvent): void => {
+    startDragWithUndo((ev) => {
       const nx = layer.x + (ev.clientX - startX) * scale
       const ny = layer.y + (ev.clientY - startY) * scale
       useProject.getState().liveUpdate((p) => ({
         ...p,
         layers: p.layers.map((l) => (l.id === layer.id ? { ...l, x: nx, y: ny } : l))
       }))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   // Drag the corner handle to zoom the selected layer.
   const startLayerZoom = (e: ReactPointerEvent, layer: Layer): void => {
     e.stopPropagation()
     e.preventDefault()
-    const before = useProject.getState().project
-    if (!before) return
     const startX = e.clientX
     const s0 = layer.scale
-    const onMove = (ev: PointerEvent): void => {
+    startDragWithUndo((ev) => {
       const ns = clamp(s0 + (ev.clientX - startX) * 0.004, 0.05, 8)
       useProject.getState().liveUpdate((p) => ({
         ...p,
         layers: p.layers.map((l) => (l.id === layer.id ? { ...l, scale: ns } : l))
       }))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   // Drag a caption to move it. In lane-wide ("Captions" label) mode this moves the
@@ -361,13 +345,12 @@ export function PreviewStage(): JSX.Element {
     const global = useUi.getState().captionsGlobalSelected
     if (!global) useUi.getState().selectCaption(seg.id)
     const stage = stageRef.current
-    const before = useProject.getState().project
-    if (!stage || !before) return
-    const base = effectiveCaptionStyle(before.captions, seg)
+    if (!stage) return
     const scale = LOGICAL.width / stage.getBoundingClientRect().width
     const startX = e.clientX
     const startY = e.clientY
-    const onMove = (ev: PointerEvent): void => {
+    startDragWithUndo((ev, before) => {
+      const base = effectiveCaptionStyle(before.captions, seg)
       const nx = base.x + (ev.clientX - startX) * scale
       const ny = base.y + (ev.clientY - startY) * scale
       useProject.getState().liveUpdate((p) => {
@@ -382,14 +365,7 @@ export function PreviewStage(): JSX.Element {
           }
         }
       })
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   const activeLayers = layersAtTime(previewLayers, time).filter((l) => !l.hidden)

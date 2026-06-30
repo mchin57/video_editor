@@ -4,6 +4,7 @@ import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { clampCrop, defaultCrop, isFullFrame, resizeCrop } from '@/lib/crop'
+import { startPointerDrag } from '@/lib/pointerDrag'
 import { thumbUrl } from '@/ipc/client'
 
 /**
@@ -37,34 +38,22 @@ export function CropEditor(): JSX.Element | null {
     const startX = e.clientX
     const startY = e.clientY
     const start = box
-    const onMove = (ev: PointerEvent): void => {
+    startPointerDrag((ev) => {
       const dx = (ev.clientX - startX) / scale
       const dy = (ev.clientY - startY) / scale
       setBox(clampCrop({ ...start, x: start.x + dx, y: start.y + dy }, srcW, srcH))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   const resize = (e: ReactPointerEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    const onMove = (ev: PointerEvent): void => {
+    startPointerDrag((ev) => {
       const rect = frameRef.current?.getBoundingClientRect()
       if (!rect) return
       const newW = (ev.clientX - rect.left) / scale - box.x
       setBox(resizeCrop(box, newW, srcW, srcH))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   const save = (): void => {

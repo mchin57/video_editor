@@ -1,5 +1,5 @@
-import { useRef, useState, type JSX, type ReactNode } from 'react'
-import type { CaptionStyle, Layer, Project, VideoContent } from '@shared/project'
+import { useRef, useState, type JSX } from 'react'
+import type { CaptionStyle, Layer, Project, Stabilize, VideoContent } from '@shared/project'
 import {
   DEFAULT_STABILIZE,
   NEUTRAL_COLOR,
@@ -19,27 +19,92 @@ import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
+import { Field, Row, dangerBtnCls, inputCls } from './ui'
 
-function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+type TriMode = 'default' | 'on' | 'off'
+
+/** The shared Default / On / Off segmented control for a tri-state per-clip
+ *  override (noise reduction, stabilization). `mode` is the active segment;
+ *  `defaultOn` is what the project default currently resolves to. */
+function OverrideToggle({
+  label,
+  noun,
+  effectiveOn,
+  defaultOn,
+  mode,
+  onPick
+}: {
+  label: string
+  noun: string
+  effectiveOn: boolean
+  defaultOn: boolean
+  mode: TriMode
+  onPick: (mode: TriMode) => void
+}): JSX.Element {
   return (
-    <div className="flex justify-between gap-2 py-1 text-xs">
-      <span className="text-zinc-500">{label}</span>
-      <span className="text-right text-zinc-300">{children}</span>
+    <div className="mb-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-xs text-zinc-300">{label}</span>
+        <span className="text-[10px] text-zinc-500">→ {effectiveOn ? 'On' : 'Off'}</span>
+      </div>
+      <div className="flex gap-1">
+        {(['default', 'on', 'off'] as const).map((key) => (
+          <button
+            key={key}
+            onClick={() => onPick(key)}
+            title={
+              key === 'default'
+                ? `Follow the project default (${defaultOn ? 'On' : 'Off'})`
+                : `Force ${noun} ${key} for this clip`
+            }
+            className={`flex-1 rounded px-2 py-1 text-[11px] ${
+              mode === key ? 'bg-sky-500/30 text-sky-100' : 'bg-white/5 text-zinc-400 hover:bg-white/10'
+            }`}
+          >
+            {key === 'default' ? `Default (${defaultOn ? 'On' : 'Off'})` : key === 'on' ? 'On' : 'Off'}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+/** Shakiness + smoothing sliders for a `Stabilize` value — shared by the per-clip
+ *  override and the project default. */
+function StabilizeSliders({
+  value,
+  onChange
+}: {
+  value: Stabilize
+  onChange: (next: Stabilize) => void
+}): JSX.Element {
   return (
-    <label className="mb-2 block">
-      <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
-      {children}
-    </label>
+    <>
+      <Field label={`Shakiness · ${value.shakiness}`}>
+        <input
+          type="range"
+          min={1}
+          max={10}
+          step={1}
+          value={value.shakiness}
+          onChange={(e) => onChange({ ...value, shakiness: Number(e.target.value) })}
+          className="w-full accent-sky-400"
+        />
+      </Field>
+      <Field label={`Smoothing · ${value.smoothing} frames`}>
+        <input
+          type="range"
+          min={1}
+          max={40}
+          step={1}
+          value={value.smoothing}
+          onChange={(e) => onChange({ ...value, smoothing: Number(e.target.value) })}
+          className="w-full accent-sky-400"
+        />
+      </Field>
+    </>
   )
 }
-
-const inputCls =
-  'w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-sky-400/60'
 
 /** A range slider that previews live during the drag and records one undo step
  *  on release. `transform` maps (project, value) → next project. */
@@ -351,72 +416,27 @@ function LayerEditor(): JSX.Element | null {
           >
             {(() => {
               const eff = effectiveStabilize(c, stabilizeDefault)
-              const mode = c.stabilize === undefined ? 'default' : c.stabilize ? 'on' : 'off'
+              const mode: TriMode = c.stabilize === undefined ? 'default' : c.stabilize ? 'on' : 'off'
               return (
                 <>
-                  <div className="mb-2">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-xs text-zinc-300">Stabilize motion (on export)</span>
-                      <span className="text-[10px] text-zinc-500">→ {eff ? 'On' : 'Off'}</span>
-                    </div>
-                    <div className="flex gap-1">
-                      {([
-                        ['Default', 'default'],
-                        ['On', 'on'],
-                        ['Off', 'off']
-                      ] as const).map(([label, key]) => (
-                        <button
-                          key={key}
-                          onClick={() =>
-                            updateContent(id, {
-                              stabilize:
-                                key === 'default' ? undefined : key === 'off' ? null : { ...(eff ?? DEFAULT_STABILIZE) }
-                            })
-                          }
-                          title={
-                            key === 'default'
-                              ? `Follow the project default (${stabilizeDefault ? 'On' : 'Off'})`
-                              : `Force stabilization ${key} for this clip`
-                          }
-                          className={`flex-1 rounded px-2 py-1 text-[11px] ${
-                            mode === key ? 'bg-sky-500/30 text-sky-100' : 'bg-white/5 text-zinc-400 hover:bg-white/10'
-                          }`}
-                        >
-                          {label}
-                          {key === 'default' ? ` (${stabilizeDefault ? 'On' : 'Off'})` : ''}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <OverrideToggle
+                    label="Stabilize motion (on export)"
+                    noun="stabilization"
+                    effectiveOn={!!eff}
+                    defaultOn={!!stabilizeDefault}
+                    mode={mode}
+                    onPick={(key) =>
+                      updateContent(id, {
+                        stabilize:
+                          key === 'default' ? undefined : key === 'off' ? null : { ...(eff ?? DEFAULT_STABILIZE) }
+                      })
+                    }
+                  />
                   {c.stabilize && (
-                    <>
-                      <Field label={`Shakiness · ${c.stabilize.shakiness}`}>
-                        <input
-                          type="range"
-                          min={1}
-                          max={10}
-                          step={1}
-                          value={c.stabilize.shakiness}
-                          onChange={(e) =>
-                            updateContent(id, { stabilize: { ...c.stabilize!, shakiness: Number(e.target.value) } })
-                          }
-                          className="w-full accent-sky-400"
-                        />
-                      </Field>
-                      <Field label={`Smoothing · ${c.stabilize.smoothing} frames`}>
-                        <input
-                          type="range"
-                          min={1}
-                          max={40}
-                          step={1}
-                          value={c.stabilize.smoothing}
-                          onChange={(e) =>
-                            updateContent(id, { stabilize: { ...c.stabilize!, smoothing: Number(e.target.value) } })
-                          }
-                          className="w-full accent-sky-400"
-                        />
-                      </Field>
-                    </>
+                    <StabilizeSliders
+                      value={c.stabilize}
+                      onChange={(next) => updateContent(id, { stabilize: next })}
+                    />
                   )}
                   <p className="text-[10px] leading-snug text-zinc-500">
                     Analysed and rendered on export (a two-pass stabilize); higher smoothing is steadier but crops in more.
@@ -465,7 +485,7 @@ function LayerEditor(): JSX.Element | null {
 
       <button
         onClick={() => remove(id)}
-        className="mt-3 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+        className={`mt-3 w-full ${dangerBtnCls}`}
       >
         Delete layer
       </button>
@@ -618,7 +638,7 @@ function CaptionEditor(): JSX.Element | null {
           remove(seg.id)
           selectCaption(null)
         }}
-        className="mt-3 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+        className={`mt-3 w-full ${dangerBtnCls}`}
       >
         Delete caption
       </button>
@@ -708,38 +728,16 @@ function AudioClipEditor(): JSX.Element | null {
         <input type="checkbox" checked={clip.duck} onChange={(e) => update(clip.id, { duck: e.target.checked })} />
         Duck under other audio (music bed)
       </label>
-      <div className="mb-2">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-xs text-zinc-300">Reduce noise (on export)</span>
-          <span className="text-[10px] text-zinc-500">→ {effectiveDenoise(clip, denoiseDefault) ? 'On' : 'Off'}</span>
-        </div>
-        <div className="flex gap-1">
-          {([
-            ['Default', undefined],
-            ['On', true],
-            ['Off', false]
-          ] as const).map(([label, val]) => {
-            const active = clip.denoise === val
-            return (
-              <button
-                key={label}
-                onClick={() => update(clip.id, { denoise: val })}
-                title={
-                  val === undefined
-                    ? `Follow the project default (${denoiseDefault ? 'On' : 'Off'})`
-                    : `Force noise reduction ${label.toLowerCase()} for this clip`
-                }
-                className={`flex-1 rounded px-2 py-1 text-[11px] ${
-                  active ? 'bg-sky-500/30 text-sky-100' : 'bg-white/5 text-zinc-400 hover:bg-white/10'
-                }`}
-              >
-                {label}
-                {val === undefined ? ` (${denoiseDefault ? 'On' : 'Off'})` : ''}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      <OverrideToggle
+        label="Reduce noise (on export)"
+        noun="noise reduction"
+        effectiveOn={effectiveDenoise(clip, denoiseDefault)}
+        defaultOn={denoiseDefault}
+        mode={clip.denoise === undefined ? 'default' : clip.denoise ? 'on' : 'off'}
+        onPick={(key) =>
+          update(clip.id, { denoise: key === 'default' ? undefined : key === 'on' })
+        }
+      />
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
         <input
           type="checkbox"
@@ -764,7 +762,7 @@ function AudioClipEditor(): JSX.Element | null {
           remove(clip.id)
           selectAudio(null)
         }}
-        className="mt-2 w-full rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30"
+        className={`mt-2 w-full ${dangerBtnCls}`}
       >
         Remove audio clip
       </button>
@@ -805,30 +803,7 @@ function ProjectSettingsEditor(): JSX.Element {
         Stabilize by default (all video clips)
       </label>
       {stabilizeDefault && (
-        <>
-          <Field label={`Shakiness · ${stabilizeDefault.shakiness}`}>
-            <input
-              type="range"
-              min={1}
-              max={10}
-              step={1}
-              value={stabilizeDefault.shakiness}
-              onChange={(e) => setStabilizeDefault({ ...stabilizeDefault, shakiness: Number(e.target.value) })}
-              className="w-full accent-sky-400"
-            />
-          </Field>
-          <Field label={`Smoothing · ${stabilizeDefault.smoothing} frames`}>
-            <input
-              type="range"
-              min={1}
-              max={40}
-              step={1}
-              value={stabilizeDefault.smoothing}
-              onChange={(e) => setStabilizeDefault({ ...stabilizeDefault, smoothing: Number(e.target.value) })}
-              className="w-full accent-sky-400"
-            />
-          </Field>
-        </>
+        <StabilizeSliders value={stabilizeDefault} onChange={setStabilizeDefault} />
       )}
       <p className="text-[10px] leading-snug text-zinc-500">
         Runs a two-pass stabilize on every video clip on export. Individual clips can override this from their

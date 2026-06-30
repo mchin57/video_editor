@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { NormCrop } from '@shared/project'
 import { Popout } from './Popout'
+import { btnCls as btn, toggleCls as toggle } from './ui'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
+import { startPointerDrag } from '@/lib/pointerDrag'
 import { imageUrl } from '@/ipc/client'
 
 const FULL: NormCrop = { x: 0, y: 0, w: 1, h: 1 }
@@ -43,6 +45,8 @@ export function ImageEditPopout(): JSX.Element | null {
   const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
   const commitCrop = (c: NormCrop): void => updateContent(id, { crop: isFull(c) ? null : c })
 
+  const commitOnUp = (): void => void setBox((b) => (commitCrop(b), b))
+
   const move = (e: ReactPointerEvent): void => {
     e.preventDefault()
     const rect = wrapRef.current?.getBoundingClientRect()
@@ -50,18 +54,11 @@ export function ImageEditPopout(): JSX.Element | null {
     const sx = e.clientX
     const sy = e.clientY
     const start = box
-    const onMove = (ev: PointerEvent): void => {
+    startPointerDrag((ev) => {
       const nx = clamp01(start.x + (ev.clientX - sx) / rect.width)
       const ny = clamp01(start.y + (ev.clientY - sy) / rect.height)
       setBox({ ...start, x: Math.min(nx, 1 - start.w), y: Math.min(ny, 1 - start.h) })
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setBox((b) => (commitCrop(b), b))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    }, commitOnUp)
   }
 
   const resize = (e: ReactPointerEvent): void => {
@@ -69,23 +66,12 @@ export function ImageEditPopout(): JSX.Element | null {
     e.stopPropagation()
     const rect = wrapRef.current?.getBoundingClientRect()
     if (!rect) return
-    const onMove = (ev: PointerEvent): void => {
+    startPointerDrag((ev) => {
       const w = clamp01((ev.clientX - rect.left) / rect.width - box.x)
       const h = clamp01((ev.clientY - rect.top) / rect.height - box.y)
       setBox({ ...box, w: Math.max(0.05, Math.min(w, 1 - box.x)), h: Math.max(0.05, Math.min(h, 1 - box.y)) })
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setBox((b) => (commitCrop(b), b))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    }, commitOnUp)
   }
-
-  const btn = 'rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20'
-  const toggle = (on: boolean): string =>
-    `rounded px-2 py-1.5 text-xs ${on ? 'bg-sky-500 text-white' : 'bg-white/10 text-zinc-200 hover:bg-white/20'}`
 
   return (
     <Popout title="Edit image" onClose={() => setOpen(false)} width={320}>
