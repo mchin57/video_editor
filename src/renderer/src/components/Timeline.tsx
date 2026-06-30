@@ -17,6 +17,7 @@ import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { packRows, rowCount, type Span } from '@/lib/lanes'
+import { startPointerDrag } from '@/lib/pointerDrag'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
@@ -293,13 +294,7 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     setPlaying(false)
     setTime(clamp(xToSec(e.clientX), 0, Math.max(total, previewDur)))
-    const onMove = (ev: PointerEvent): void => setTime(clamp(xToSec(ev.clientX), 0, Math.max(total, previewDur)))
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    startPointerDrag((ev) => setTime(clamp(xToSec(ev.clientX), 0, Math.max(total, previewDur))))
   }
 
   // Drop a library asset onto the timeline → a layer (or audio clip) at the drop.
@@ -396,14 +391,10 @@ export function Timeline(): JSX.Element {
       }))
     }
     scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
-    const onUp = (): void => {
+    startPointerDrag(onMove, () => {
       scroller?.stop()
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
       useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   const startCaptionDrag = (e: ReactPointerEvent, seg: CaptionSegment, mode: 'move' | 'start' | 'end'): void => {
@@ -442,14 +433,10 @@ export function Timeline(): JSX.Element {
       }))
     }
     scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
-    const onUp = (): void => {
+    startPointerDrag(onMove, () => {
       scroller?.stop()
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
       useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   const startAudioDrag = (e: ReactPointerEvent, clip: AudioClip, mode: 'move' | 'start' | 'end', maxOut: number): void => {
@@ -488,14 +475,10 @@ export function Timeline(): JSX.Element {
       }))
     }
     scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
-    const onUp = (): void => {
+    startPointerDrag(onMove, () => {
       scroller?.stop()
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
       useProject.getState().commitLive(before)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    })
   }
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId)

@@ -30,9 +30,9 @@ Refactor for the per-theme history.)
 | `OverrideToggle`, `StabilizeSliders` | `components/Inspector.tsx` | re-rendering the Default/On/Off segmented control or the shakiness/smoothing sliders a second time |
 | `updateById(arr, id, fn)`, `replaceAt(arr, i, count, …items)` | `lib/arrays.ts` | `arr.map(x => x.id===id?…:x)` and `slice()`+`splice()` in store actions |
 
-_Not yet converted:_ `Timeline.tsx`'s drag handlers still hand-roll the listener
-dance because they're entangled with the `edgeAutoScroll` rAF loop — convert with
-care (keep the live `scrollLeft` folding) when next touched.
+`Timeline.tsx`'s block drags use `startPointerDrag` with the `edgeAutoScroll` rAF
+loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
+`LayersPanel.tsx`, `Splitter.tsx` (small, no edge-scroll) — fold in when next touched.
 
 ## Shared model — `src/shared/project.ts`, `src/shared/layers.ts`
 

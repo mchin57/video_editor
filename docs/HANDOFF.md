@@ -153,6 +153,9 @@ theme. Shared-homes catalog: [`SHARED.md`](SHARED.md); reuse guardrails: root
 - [x] **F — docs & durability**: this log + `SHARED.md` + `CLAUDE.md` + TODO
   reconciliation.
 
-_Follow-up:_ `Timeline.tsx`'s 8 drag handlers weren't converted to
-`startPointerDrag` (entangled with the `edgeAutoScroll` loop) — see TODO ▸ Codebase
-health.
+- [x] **A (cont.) — Timeline drags** (`refactor(ui)` follow-up): the playhead scrub +
+  layer/caption/audio block drags now use `startPointerDrag`, with `edgeAutoScroll`
+  stopped in the `onUp` callback.
+
+_Follow-up:_ `Popout.tsx`/`LayersPanel.tsx`/`Splitter.tsx` still hand-roll the drag
+listeners (small, no edge-scroll) — see TODO ▸ Codebase health.

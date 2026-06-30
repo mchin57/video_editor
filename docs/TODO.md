@@ -13,10 +13,12 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   destructures `window.api` instead of re-wrapping it. Catalog: [`SHARED.md`](SHARED.md);
   guardrails for future work: root [`CLAUDE.md`](../CLAUDE.md). Behavior-preserving
   (tests + typecheck green throughout).
-- [ ] **Convert `Timeline.tsx` drag handlers to `startPointerDrag`.** The 8 hand-rolled
-  pointermove/pointerup handlers were left out of the drag-helper sweep because they're
-  entangled with the `edgeAutoScroll` rAF loop (each folds the live `scrollLeft` delta
-  into its time delta). Convert carefully, preserving that, when next touching the timeline.
+- [x] **Convert `Timeline.tsx` drag handlers to `startPointerDrag`.** The playhead scrub
+  + the layer/caption/audio block drags now use the shared helper; the `edgeAutoScroll`
+  rAF loop is stopped in the `onUp` callback and the live `scrollLeft` folding is preserved.
+- [ ] **Finish the drag-helper sweep.** `Popout.tsx`, `LayersPanel.tsx`, and `Splitter.tsx`
+  still hand-roll the pointermove/pointerup dance (small, no edge-scroll) — convert to
+  `startPointerDrag` when next touched.
 
 ## Open
 
