@@ -10,6 +10,7 @@ import { getCapabilities } from './services/ffmpeg'
 import { getDataDir, getSubdir } from './config'
 import { generateStill } from './services/still'
 import { hdrToSdrChain } from './services/proxy'
+import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
   ensureProxy,
   extractAudioToLibrary,
@@ -52,14 +53,8 @@ function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
   const chain: string[] = []
   const v = asset.probe.video
   if (v?.isHdr) chain.push(hdrToSdrChain(v))
-  if (req.crop) {
-    const c = req.crop
-    chain.push(`crop=${Math.round(c.w)}:${Math.round(c.h)}:${Math.round(c.x)}:${Math.round(c.y)}`)
-  }
-  if (req.color && !isNeutralColor(req.color)) {
-    const k = req.color
-    chain.push(`eq=brightness=${k.brightness}:contrast=${k.contrast}:saturation=${k.saturation}`)
-  }
+  if (req.crop) chain.push(cropFilter(req.crop))
+  if (req.color && !isNeutralColor(req.color)) chain.push(eqFilter(req.color))
   return chain
 }
 

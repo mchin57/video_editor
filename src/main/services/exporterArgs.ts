@@ -14,6 +14,7 @@
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EXPORT_PRESETS, type PresetId } from '@shared/export'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
+import { cropFilter, f3, r } from './ffmpegFilters'
 
 export interface Target {
   width: number
@@ -106,9 +107,6 @@ export interface ExportPlan {
   caps: FfmpegCapabilities
   preferNvenc: boolean
 }
-
-const f3 = (n: number): string => n.toFixed(3)
-const r = (n: number): number => Math.round(n)
 
 /**
  * One clip's motion-stabilization pre-pass (ffmpeg vidstab, two passes). Pass 1
@@ -248,7 +246,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       const i = videoIdx.get(v)!
       const pre: string[] = []
       if (v.hdrChain) pre.push(v.hdrChain)
-      if (v.crop) pre.push(`crop=${r(v.crop.w)}:${r(v.crop.h)}:${r(v.crop.x)}:${r(v.crop.y)}`)
+      if (v.crop) pre.push(cropFilter(v.crop))
       pre.push(`scale=${r(v.boxW)}:${r(v.boxH)}:flags=bicubic`)
       if (v.colorEq) pre.push(v.colorEq)
       // Freeze holds stretch PTS: each pushes all frames at/after its source point

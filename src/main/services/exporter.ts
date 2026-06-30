@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
+import { containBox, effectiveImageAspect, FRAME } from '@shared/layers'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
@@ -31,6 +32,7 @@ import { buildAss, type AssOverlay } from './assBuilder'
 import { createTextRenderer, type TextRenderer } from './textImage'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
+import { eqFilter, r } from './ffmpegFilters'
 
 /** Scale optional decorations from logical to output px (matching font scaling). */
 const scaledStroke = (s: StrokeStyle | null | undefined, k: number): StrokeStyle | null | undefined =>
@@ -42,23 +44,6 @@ const scaledPill = (p: PillStyle, k: number): PillStyle => ({ ...p, padPx: p.pad
 /** A pre-rendered, output-sized PNG composited 1:1 over the frame (gradient text). */
 function fullFrameImage(path: string, startSec: number, endSec: number, t: Target): ExportImage {
   return { path, boxW: t.width, boxH: t.height, x: 0, y: 0, startSec, endSec, opacity: 1 }
-}
-
-const FRAME = { w: 1080, h: 1920 } as const
-
-/** Logical-px display box of a media layer (aspect-fit within the frame, scaled). */
-function layerBox(aspect: number, scale: number): { w: number; h: number } {
-  const fa = FRAME.w / FRAME.h
-  let w: number
-  let h: number
-  if (aspect >= fa) {
-    w = FRAME.w
-    h = FRAME.w / aspect
-  } else {
-    h = FRAME.h
-    w = FRAME.h * aspect
-  }
-  return { w: w * scale, h: h * scale }
 }
 
 export interface ExportOptions {
@@ -101,9 +86,8 @@ async function runExport(
   const target = targetForPreset(opts.preset)
   const caps = await getCapabilities()
   const { ffmpeg } = await getBinaries()
-  const sx = target.width / FRAME.w
-  const sy = target.height / FRAME.h
-  const r = (n: number): number => Math.round(n)
+  const sx = target.width / FRAME.width
+  const sy = target.height / FRAME.height
 
   const tmp = join(getSubdir('tmp'), jobId)
   await fsp.mkdir(tmp, { recursive: true })
@@ -123,6 +107,18 @@ async function runExport(
       rendererRef.current = createTextRenderer(target.width, target.height, tmp, fontsDir)
     }
     return rendererRef.current
+  }
+  // Rasterise one gradient text/caption spec (already scaled to output px) to a
+  // PNG and wrap it as a full-frame overlay. Shared by the text-layer and caption
+  // gradient paths (their only difference is how they build the spec).
+  async function renderGradientImage(
+    spec: Parameters<TextRenderer['render']>[0],
+    startSec: number,
+    endSec: number
+  ): Promise<ExportImage> {
+    const pngPath = join(tmp, `grad_${gradN++}.png`)
+    await ensureRenderer().render(spec, pngPath)
+    return fullFrameImage(pngPath, startSec, endSec, target)
   }
 
   // Motion stabilization runs as a per-clip two-pass (vidstab) BEFORE compositing,
@@ -160,8 +156,8 @@ async function runExport(
       const asset = await getAsset(c.mediaId)
       if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
       const v = asset.probe.video
-      const aspect = c.crop ? c.crop.w / c.crop.h : v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : FRAME.w / FRAME.h
-      const box = layerBox(aspect, l.scale)
+      const aspect = c.crop ? c.crop.w / c.crop.h : v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : FRAME.width / FRAME.height
+      const box = containBox(aspect, l.scale)
       const boxW = box.w * sx
       const boxH = box.h * sy
       const trimLen = Math.max(0.01, c.outSec - c.inSec)
@@ -185,9 +181,7 @@ async function runExport(
           len: trimLen,
           hdrChain,
           crop: c.crop ?? null,
-          colorEq: isNeutralColor(c.color)
-            ? ''
-            : `eq=brightness=${c.color!.brightness}:contrast=${c.color!.contrast}:saturation=${c.color!.saturation}`,
+          colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
           boxW,
           boxH,
           x: r(l.x * sx - boxW / 2),
@@ -214,11 +208,11 @@ async function runExport(
       const imgPath = imageAssetPath(c.mediaId)
       if (!existsSync(imgPath)) continue // display PNG missing → skip rather than fail
       const v = (await getAsset(c.mediaId))?.probe.video
-      let aspect = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
-      if (c.crop && c.crop.h > 0) aspect *= c.crop.w / c.crop.h // crop reshapes the box
+      const base = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+      // base aspect, reshaped by crop, swapped for 90°/270° rotation (shared helper).
+      const aspect = effectiveImageAspect(base, c.crop, c.rotateQuarters)
       const q = (((c.rotateQuarters ?? 0) % 4) + 4) % 4
-      if (q === 1 || q === 3) aspect = 1 / aspect // 90°/270° swap width and height
-      const box = layerBox(aspect, l.scale)
+      const box = containBox(aspect, l.scale)
       const boxW = box.w * sx
       const boxH = box.h * sy
       visuals.push({
@@ -244,8 +238,7 @@ async function runExport(
       // Gradient text burns as a full-frame PNG overlay at this z-position.
       if (c.gradient) {
         try {
-          const pngPath = join(tmp, `gradtext_${gradN++}.png`)
-          await ensureRenderer().render(
+          const image = await renderGradientImage(
             {
               text: c.text,
               xCenter: l.x * sx,
@@ -258,9 +251,10 @@ async function runExport(
               stroke: scaledStroke(c.stroke, sy) ?? null,
               shadow: scaledShadow(c.shadow, sy) ?? null
             },
-            pngPath
+            l.startSec,
+            l.endSec
           )
-          visuals.push({ kind: 'image', image: fullFrameImage(pngPath, l.startSec, l.endSec, target) })
+          visuals.push({ kind: 'image', image })
           continue
         } catch {
           // Rasterising failed — fall through to a flat-colour ASS burn so the
@@ -320,7 +314,7 @@ async function runExport(
       x: st.x * sx,
       y: st.y * sy,
       fontSizePx: st.fontSizePx * sy,
-      pill: { ...st.pill, padPx: st.pill.padPx * sy },
+      pill: scaledPill(st.pill, sy),
       stroke: scaledStroke(st.stroke, sy),
       shadow: scaledShadow(st.shadow, sy)
     })
@@ -334,8 +328,7 @@ async function runExport(
       if (!eff.gradient) continue
       const st = scaleStyle(eff)
       try {
-        const pngPath = join(tmp, `gradcap_${gradN++}.png`)
-        await ensureRenderer().render(
+        const image = await renderGradientImage(
           {
             text: seg.text,
             xCenter: st.x,
@@ -349,9 +342,10 @@ async function runExport(
             shadow: st.shadow ?? null,
             rotationDeg: st.rotationDeg
           },
-          pngPath
+          seg.startSec,
+          seg.endSec
         )
-        captionOverlays.push(fullFrameImage(pngPath, seg.startSec, seg.endSec, target))
+        captionOverlays.push(image)
         renderedGrad.add(seg.id)
       } catch {
         // leave un-rendered → flat fallback below

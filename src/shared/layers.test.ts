@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest'
 import type { Layer } from './project'
 import {
   applyVisibleOrder,
+  containBox,
+  effectiveImageAspect,
+  FRAME,
   freezeExtraSec,
   hookCovered,
   isBackgroundId,
@@ -22,6 +25,35 @@ const vid = (id: string, start: number, end: number): Layer => ({
 const txt = (id: string, start: number, end: number, text = 'hi'): Layer => ({
   ...makeTextLayer(id, start, end),
   content: { kind: 'text', text, fontFamily: 'x', fontSizePx: 40, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } }
+})
+
+describe('containBox', () => {
+  it('a tall (frame-aspect) source fills the whole frame at scale 1', () => {
+    expect(containBox(FRAME.width / FRAME.height, 1)).toEqual({ w: FRAME.width, h: FRAME.height })
+  })
+  it('a wide source fills the width and letterboxes the height', () => {
+    expect(containBox(2, 1)).toEqual({ w: 1080, h: 540 })
+  })
+  it('scale multiplies both dimensions', () => {
+    expect(containBox(2, 0.5)).toEqual({ w: 540, h: 270 })
+  })
+  it('honors a custom (output) frame', () => {
+    expect(containBox(1, 1, { width: 1080, height: 1080 })).toEqual({ w: 1080, h: 1080 })
+  })
+})
+
+describe('effectiveImageAspect', () => {
+  it('passes the base aspect through when no crop/rotation', () => {
+    expect(effectiveImageAspect(1.5, null, 0)).toBe(1.5)
+  })
+  it('reshapes by a 0..1 crop', () => {
+    expect(effectiveImageAspect(1, { w: 0.5, h: 1 }, 0)).toBe(0.5)
+  })
+  it('inverts the aspect for 90°/270° rotation', () => {
+    expect(effectiveImageAspect(2, null, 1)).toBe(0.5)
+    expect(effectiveImageAspect(2, null, 3)).toBe(0.5)
+    expect(effectiveImageAspect(2, null, 2)).toBe(2)
+  })
 })
 
 describe('layersAtTime', () => {

@@ -7,8 +7,53 @@
 import type { Layer, LayerContent, PillStyle, VideoContent } from './project'
 import { DEFAULT_FONT_ID } from './fonts'
 
+/** The single source of truth for the logical output space (1080x1920 px).
+ *  Renderer code imports this as `LOGICAL` (see `lib/coords.ts`). @see docs/SHARED.md */
 export const FRAME = { width: 1080, height: 1920 } as const
 export const HOOK_WINDOW_SEC = 3
+
+// --- Geometry (shared by preview + export) ----------------------------------
+
+/**
+ * Aspect-fit ("contain") box for a media layer inside the frame, at the layer's
+ * zoom: a wide-of-frame source fills the width, a tall one fills the height, then
+ * both dims scale by `scale`. Returned in the same units as `frame` — logical px
+ * for preview, output px when called with the output target. The identical math
+ * lived in `exporter.layerBox` and `PreviewStage.mediaBox`. @see docs/SHARED.md
+ */
+export function containBox(
+  aspect: number,
+  scale: number,
+  frame: { width: number; height: number } = FRAME
+): { w: number; h: number } {
+  const fa = frame.width / frame.height
+  let w: number
+  let h: number
+  if (aspect >= fa) {
+    w = frame.width
+    h = frame.width / aspect
+  } else {
+    h = frame.height
+    w = frame.height * aspect
+  }
+  return { w: w * scale, h: h * scale }
+}
+
+/**
+ * Effective on-screen aspect of an image layer: the base source aspect, reshaped
+ * by an optional 0..1 crop, then swapped for 90°/270° rotation. Used identically
+ * by preview and export so a rotated/cropped image fills its box the same way.
+ */
+export function effectiveImageAspect(
+  baseAspect: number,
+  crop: { w: number; h: number } | null | undefined,
+  rotateQuarters: number | undefined
+): number {
+  let aspect = baseAspect
+  if (crop && crop.h > 0) aspect *= crop.w / crop.h
+  const q = (((rotateQuarters ?? 0) % 4) + 4) % 4
+  return q === 1 || q === 3 ? 1 / aspect : aspect
+}
 
 /** Layers on screen at timeline time `t`, in stack order (back → front). */
 export function layersAtTime(layers: Layer[], t: number): Layer[] {

@@ -6,20 +6,19 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type {
-  AudioClip,
-  CaptionSegment,
-  GradientStyle,
-  Layer,
-  PillStyle,
-  ShadowStyle,
-  StrokeStyle,
-  VideoContent
-} from '@shared/project'
+import type { AudioClip, CaptionSegment, Layer, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle, effectiveOut } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
-import { isFrozenAt, layersAtTime, makeVideoLayer, videoSourceTime, visualDuration } from '@shared/layers'
+import {
+  containBox,
+  effectiveImageAspect,
+  isFrozenAt,
+  layersAtTime,
+  makeVideoLayer,
+  videoSourceTime,
+  visualDuration
+} from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
@@ -30,7 +29,6 @@ import { usePlayback } from '@/state/playback'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
-const FRAME_ASPECT = LOGICAL.width / LOGICAL.height
 
 const EMPTY_LAYERS: Layer[] = []
 const EMPTY_AUDIO: AudioClip[] = []
@@ -39,14 +37,9 @@ const EMPTY_AUDIO: AudioClip[] = []
  *  fonts/strokes/shadows scale with the stage like the burned output does. */
 const cqw = (px: number): string => `${(px / LOGICAL.width) * 100}cqw`
 
-/** The decoration knobs shared by a text overlay and a caption. */
-interface TextDeco {
-  color: string
-  pill: PillStyle
-  stroke?: StrokeStyle | null
-  shadow?: ShadowStyle | null
-  gradient?: GradientStyle | null
-}
+/** The decoration knobs shared by a text overlay and a caption (the fill +
+ *  pill/stroke/shadow subset of the shared `TextStyleBase`). */
+type TextDeco = Pick<TextStyleBase, 'color' | 'pill' | 'stroke' | 'shadow' | 'gradient'>
 
 /** Fill (flat color or gradient) + stroke + shadow for the text glyphs. Mirrors
  *  the export: gradient via background-clip:text, stroke outside the glyph via
@@ -97,17 +90,7 @@ function StyledText({ s, text }: { s: TextDeco; text: string }): JSX.Element {
  *  scale and centered on (x,y). Aspect-correct so there's no letterbox fill to
  *  occlude the layers behind it; anything past the frame is cropped by the stage. */
 function mediaBox(layer: Layer, aspect: number): CSSProperties {
-  let w: number
-  let h: number
-  if (aspect >= FRAME_ASPECT) {
-    w = LOGICAL.width
-    h = LOGICAL.width / aspect
-  } else {
-    h = LOGICAL.height
-    w = LOGICAL.height * aspect
-  }
-  w *= layer.scale
-  h *= layer.scale
+  const { w, h } = containBox(aspect, layer.scale, LOGICAL)
   return {
     position: 'absolute',
     left: pct(layer.x - w / 2, LOGICAL.width),
@@ -482,10 +465,10 @@ export function PreviewStage(): JSX.Element {
           // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
           const base = mediaAspect(asset, {})
           const cr = content.crop
-          const cropped = cr && cr.h > 0 ? base * (cr.w / cr.h) : base
+          const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
           const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
           const odd = q === 1 || q === 3
-          const box = { ...mediaBox(layer, odd ? 1 / cropped : cropped), zIndex: z, containerType: 'size' as const }
+          const box = { ...mediaBox(layer, aspect), zIndex: z, containerType: 'size' as const }
           // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
           // box, so swap its width/height (cqw/cqh resolve to the box via its
           // container context) for odd quarter-turns.
