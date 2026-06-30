@@ -4,6 +4,7 @@ import { createEmptyProject, migrateProject } from '@shared/project'
 import { applyVisibleOrder, makeVideoLayer } from '@shared/layers'
 import type { PresetId } from '@shared/export'
 import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
+import { replaceAt, updateById } from '@/lib/arrays'
 import { useUi } from '@/state/ui'
 import {
   loadProject,
@@ -152,7 +153,7 @@ export const useProject = create<ProjectState>((set, get) => {
 
   const mapLayer = (p: Project, id: string, fn: (l: Layer) => Layer): Project => ({
     ...p,
-    layers: p.layers.map((l) => (l.id === id ? fn(l) : l))
+    layers: updateById(p.layers, id, fn)
   })
 
   return {
@@ -276,9 +277,7 @@ export const useProject = create<ProjectState>((set, get) => {
         if (idx < 0) return p
         const res = splitVideoLayer(p.layers[idx], atSec, newId)
         if (!res) return p
-        const layers = p.layers.slice()
-        layers.splice(idx, 1, res[0], res[1])
-        return { ...p, layers }
+        return { ...p, layers: replaceAt(p.layers, idx, 1, res[0], res[1]) }
       }),
 
     extractLayerAudio: (id) =>
@@ -330,20 +329,14 @@ export const useProject = create<ProjectState>((set, get) => {
       commit((p) => ({ ...p, script: [...p.script, { id: newId(), text: '', atSec }] })),
 
     updateScriptLine: (id, patch) =>
-      commit((p) => ({
-        ...p,
-        script: p.script.map((l) => (l.id === id ? { ...l, ...patch } : l))
-      })),
+      commit((p) => ({ ...p, script: updateById(p.script, id, (l) => ({ ...l, ...patch })) })),
 
     removeScriptLine: (id) => commit((p) => ({ ...p, script: p.script.filter((l) => l.id !== id) })),
 
     updateCaption: (id, patch) =>
       commit((p) => ({
         ...p,
-        captions: {
-          ...p.captions,
-          segments: p.captions.segments.map((s) => (s.id === id ? { ...s, ...patch } : s))
-        }
+        captions: { ...p.captions, segments: updateById(p.captions.segments, id, (s) => ({ ...s, ...patch })) }
       })),
 
     removeCaption: (id) =>
@@ -360,9 +353,10 @@ export const useProject = create<ProjectState>((set, get) => {
         ...p,
         captions: {
           ...p.captions,
-          segments: p.captions.segments.map((s) =>
-            s.id === id ? { ...s, style: { ...(s.style ?? p.captions.style), ...patch } } : s
-          )
+          segments: updateById(p.captions.segments, id, (s) => ({
+            ...s,
+            style: { ...(s.style ?? p.captions.style), ...patch }
+          }))
         }
       })),
 
@@ -371,17 +365,14 @@ export const useProject = create<ProjectState>((set, get) => {
         ...p,
         captions: {
           ...p.captions,
-          segments: p.captions.segments.map((s) => (s.id === id ? { ...s, style: null } : s))
+          segments: updateById(p.captions.segments, id, (s) => ({ ...s, style: null }))
         }
       })),
 
     addAudioClip: (clip) => commit((p) => ({ ...p, audioClips: [...p.audioClips, clip] })),
 
     updateAudioClip: (id, patch) =>
-      commit((p) => ({
-        ...p,
-        audioClips: p.audioClips.map((a) => (a.id === id ? { ...a, ...patch } : a))
-      })),
+      commit((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => ({ ...a, ...patch })) })),
 
     removeAudioClip: (id) =>
       commit((p) => ({ ...p, audioClips: p.audioClips.filter((a) => a.id !== id) })),
@@ -404,9 +395,7 @@ export const useProject = create<ProjectState>((set, get) => {
           fadeInSec: 0,
           fadeOutSec: 0
         }))
-        const audioClips = p.audioClips.slice()
-        audioClips.splice(idx, 1, ...pieces)
-        return { ...p, audioClips }
+        return { ...p, audioClips: replaceAt(p.audioClips, idx, 1, ...pieces) }
       }),
 
     splitAudioAt: (audioId, atSec, sourceDurationSec) =>
@@ -415,9 +404,7 @@ export const useProject = create<ProjectState>((set, get) => {
         if (idx < 0) return p
         const res = splitAudioClip(p.audioClips[idx], atSec, sourceDurationSec, newId)
         if (!res) return p
-        const audioClips = p.audioClips.slice()
-        audioClips.splice(idx, 1, res[0], res[1])
-        return { ...p, audioClips }
+        return { ...p, audioClips: replaceAt(p.audioClips, idx, 1, res[0], res[1]) }
       }),
 
     undo: () => {
