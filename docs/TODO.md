@@ -211,11 +211,29 @@ _All apply to **both** text overlays and captions via the shared
 - [ ] **Auto background removal (subject-aware crop)** — detect the primary subject (person) in a clip using a segmentation model and remove or replace the background automatically. Likely approach: run a lightweight portrait segmentation model (e.g. MediaPipe Selfie Segmentation or ONNX rembg) frame-by-frame as a job in the main process, output an alpha-masked overlay, then composite via ffmpeg `overlay` + `alphaextract`/`alphamerge`. User can choose to replace the background with a solid color, blur, or a custom image. Useful for creating clean talking-head Reels without needing a physical green screen.
 
 - [x] **Color correction controls** — per-clip exposure/contrast/saturation (Inspector sliders; preview CSS filter mirrors export `eq`).
+- [x] **Motion stabilization (project default + per-clip override)** — mirrors the
+  noise-filter shape. `Project.stabilizeDefault` (`Stabilize | null`, null = off) is
+  the project-wide default; `VideoContent.stabilize` is **tri-state** (`undefined` =
+  inherit the default, `null` = force off, a `{shakiness, smoothing}` object = force
+  on with these settings). `effectiveStabilize`/`stabilizeOverridden`
+  (`shared/project.ts`) resolve it. Export runs a vidstab **two-pass** _before_
+  compositing on the resolved setting: `vidstabdetect` (pass 1) writes a transforms
+  file, `vidstabtransform` + `unsharp` (pass 2) renders a trimmed, SDR, stabilized
+  intermediate that the single-pass compositor then reads from 0 (HDR tonemap folded
+  into the pre-pass; trim/freezes preserved). Pure builders
+  `buildVidstabDetectArgs`/`buildVidstabTransformArgs` (`exporterArgs.ts`,
+  unit-tested); orchestrated by `stabilizeClip` in `exporter.ts`. UI: project default
+  in the Inspector's "Project settings" (toggle + shakiness/smoothing); per-clip a
+  Default/On/Off segmented control (sliders when forced on); overridden video clips
+  show a small **S** badge (green = on, struck = off) on their timeline block.
+  _Migration v8 seeds `stabilizeDefault=null`. Export-only — preview is unaffected; a
+  long analysis shows no progress until the encode starts._
 - [ ] **LUT (.cube) support** — import a `.cube` LUT file and apply it per clip on export via ffmpeg `lut3d` filter. Preview approximation via CSS or a canvas-based LUT lookup. Useful for cinematic grades and consistent brand look across clips.
 - [ ] **Speed ramping** — no variable speed or slow-mo support. Common in short-form video; would require ffmpeg `setpts` + `atempo` per clip segment and timeline representation of speed curves. _(Large.)_
 - [ ] **Keyframe animation** — no way to animate overlay position, scale, or opacity over time. Would require a keyframe store per overlay property and interpolation in both preview and ASS export. _(Large.)_
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).
+- [x] **Project-wide noise filter + per-clip override** — `Project.denoiseDefault` (off by default) is the lane-wide noise-reduction default; each `AudioClip.denoise` is now **tri-state** (`undefined` = inherit the default, `true`/`false` = force on/off and exempt the clip). `effectiveDenoise`/`denoiseOverridden` (`shared/project.ts`) resolve it; export applies the resolved value. UI: project default lives in the Inspector's no-selection "Project settings"; the audio-clip Inspector has a Default/On/Off segmented control; overridden clips show a small **N** badge (green = on, struck = off) on their timeline block. _Migration v8 seeds `denoiseDefault=false` and normalises legacy redundant `denoise:false` → inherit._
 - [x] **Storyboard / script integration** — Script drawer; lines pin to the playhead and show as ruler markers (click to seek).
 - [x] **Edge-scroll during timeline drag** — dragging a clip, caption, or audio block
   near the left/right edge of the track auto-scrolls the timeline (rAF loop, scroll

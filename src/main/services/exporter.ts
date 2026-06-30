@@ -9,8 +9,8 @@
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle } from '@shared/project'
-import { effectiveOut, isNeutralColor } from '@shared/project'
+import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
+import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
@@ -18,10 +18,13 @@ import { getAsset, imageAssetPath } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import {
   buildExportArgs,
+  buildVidstabDetectArgs,
+  buildVidstabTransformArgs,
   targetForPreset,
   type ExportAudio,
   type ExportImage,
   type ExportVisual,
+  type StabilizeJob,
   type Target
 } from './exporterArgs'
 import { buildAss, type AssOverlay } from './assBuilder'
@@ -121,6 +124,35 @@ async function runExport(
     }
     return rendererRef.current
   }
+
+  // Motion stabilization runs as a per-clip two-pass (vidstab) BEFORE compositing,
+  // baking in the trim so the composite reads the stabilized intermediate from 0.
+  // The HDR tonemap is folded into the transform pass (so the intermediate is
+  // already SDR). Pre-pass ffmpegs don't drive the job progress bar — it stays at
+  // 0 until the main encode; a long analysis is a silent wait (acceptable for v1).
+  let stabN = 0
+  async function stabilizeClip(
+    srcPath: string,
+    inSec: number,
+    len: number,
+    hdrChain: string,
+    stab: Stabilize
+  ): Promise<string> {
+    const n = stabN++
+    const job: StabilizeJob = {
+      input: srcPath,
+      inSec,
+      len,
+      shakiness: stab.shakiness,
+      smoothing: stab.smoothing,
+      hdrChain,
+      trfFile: `stab_${n}.trf`,
+      outFile: `stab_${n}.mp4`
+    }
+    await runFfmpeg(ffmpeg, buildVidstabDetectArgs(job), 0, undefined, tmp)
+    await runFfmpeg(ffmpeg, buildVidstabTransformArgs(job), 0, undefined, tmp)
+    return join(tmp, job.outFile)
+  }
   for (const l of project.layers) {
     if (l.hidden) continue
     const c = l.content
@@ -132,13 +164,26 @@ async function runExport(
       const box = layerBox(aspect, l.scale)
       const boxW = box.w * sx
       const boxH = box.h * sy
+      const trimLen = Math.max(0.01, c.outSec - c.inSec)
+      // Stabilization (clip override, else project default) pre-renders a
+      // trimmed, SDR, stabilized intermediate; the composite then reads it from
+      // 0 with the tonemap already applied.
+      let srcPath = asset.originalPath
+      let srcInSec = c.inSec
+      let hdrChain = v?.isHdr ? hdrToSdrChain(v) : ''
+      const stab = effectiveStabilize(c, project.stabilizeDefault)
+      if (stab) {
+        srcPath = await stabilizeClip(asset.originalPath, c.inSec, trimLen, hdrChain, stab)
+        srcInSec = 0
+        hdrChain = ''
+      }
       visuals.push({
         kind: 'video',
         video: {
-          path: asset.originalPath,
-          inSec: c.inSec,
-          len: Math.max(0.01, c.outSec - c.inSec),
-          hdrChain: v?.isHdr ? hdrToSdrChain(v) : '',
+          path: srcPath,
+          inSec: srcInSec,
+          len: trimLen,
+          hdrChain,
           crop: c.crop ?? null,
           colorEq: isNeutralColor(c.color)
             ? ''
@@ -260,7 +305,7 @@ async function runExport(
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
       duck: a.duck,
-      denoise: a.denoise
+      denoise: effectiveDenoise(a, project.denoiseDefault)
     })
   }
 

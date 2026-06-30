@@ -114,6 +114,10 @@ interface ProjectState {
   addAudioClip: (clip: AudioClip) => void
   updateAudioClip: (id: string, patch: Partial<AudioClip>) => void
   removeAudioClip: (id: string) => void
+  /** Set the project-wide noise-filter default (per-clip overrides still win). */
+  setDenoiseDefault: (on: boolean) => void
+  /** Set the project-wide stabilization default (per-clip overrides still win). */
+  setStabilizeDefault: (stab: import('@shared/project').Stabilize | null) => void
   splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[]) => void
   splitAudioAt: (audioId: string, atSec: number, sourceDurationSec: number) => void
 
@@ -381,6 +385,10 @@ export const useProject = create<ProjectState>((set, get) => {
 
     removeAudioClip: (id) =>
       commit((p) => ({ ...p, audioClips: p.audioClips.filter((a) => a.id !== id) })),
+
+    setDenoiseDefault: (on) => commit((p) => (p.denoiseDefault === on ? p : { ...p, denoiseDefault: on })),
+
+    setStabilizeDefault: (stab) => commit((p) => ({ ...p, stabilizeDefault: stab })),
 
     splitAudioOnSilence: (audioId, ranges) =>
       commit((p) => {

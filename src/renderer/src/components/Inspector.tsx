@@ -1,6 +1,14 @@
 import { useRef, useState, type JSX, type ReactNode } from 'react'
 import type { CaptionStyle, Layer, Project, VideoContent } from '@shared/project'
-import { NEUTRAL_COLOR, effectiveCaptionStyle, effectiveOut, isNeutralColor } from '@shared/project'
+import {
+  DEFAULT_STABILIZE,
+  NEUTRAL_COLOR,
+  effectiveCaptionStyle,
+  effectiveDenoise,
+  effectiveOut,
+  effectiveStabilize,
+  isNeutralColor
+} from '@shared/project'
 import { hookCovered, videoSourceTime } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence } from '@/ipc/client'
@@ -135,6 +143,7 @@ function LayerEditor(): JSX.Element | null {
   const setCropEditing = useUi((s) => s.setCropEditing)
   const setStillsOpen = useUi((s) => s.setStillsOpen)
   const setImageEditOpen = useUi((s) => s.setImageEditOpen)
+  const stabilizeDefault = useProject((s) => s.project?.stabilizeDefault ?? null)
   const { data: assets = [] } = useLibrary()
   if (!layer) return null
   const id = layer.id
@@ -321,6 +330,98 @@ function LayerEditor(): JSX.Element | null {
                   <Field label={`Saturation  ${col.saturation.toFixed(2)}`}>
                     <LiveRange min={0} max={2} step={0.02} value={col.saturation} transform={setCol('saturation')} />
                   </Field>
+                </>
+              )
+            })()}
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            id="stabilize"
+            title="Stabilization"
+            right={
+              c.stabilize !== undefined ? (
+                <button
+                  onClick={() => updateContent(id, { stabilize: undefined })}
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                >
+                  Reset
+                </button>
+              ) : null
+            }
+          >
+            {(() => {
+              const eff = effectiveStabilize(c, stabilizeDefault)
+              const mode = c.stabilize === undefined ? 'default' : c.stabilize ? 'on' : 'off'
+              return (
+                <>
+                  <div className="mb-2">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-xs text-zinc-300">Stabilize motion (on export)</span>
+                      <span className="text-[10px] text-zinc-500">→ {eff ? 'On' : 'Off'}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      {([
+                        ['Default', 'default'],
+                        ['On', 'on'],
+                        ['Off', 'off']
+                      ] as const).map(([label, key]) => (
+                        <button
+                          key={key}
+                          onClick={() =>
+                            updateContent(id, {
+                              stabilize:
+                                key === 'default' ? undefined : key === 'off' ? null : { ...(eff ?? DEFAULT_STABILIZE) }
+                            })
+                          }
+                          title={
+                            key === 'default'
+                              ? `Follow the project default (${stabilizeDefault ? 'On' : 'Off'})`
+                              : `Force stabilization ${key} for this clip`
+                          }
+                          className={`flex-1 rounded px-2 py-1 text-[11px] ${
+                            mode === key ? 'bg-sky-500/30 text-sky-100' : 'bg-white/5 text-zinc-400 hover:bg-white/10'
+                          }`}
+                        >
+                          {label}
+                          {key === 'default' ? ` (${stabilizeDefault ? 'On' : 'Off'})` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {c.stabilize && (
+                    <>
+                      <Field label={`Shakiness · ${c.stabilize.shakiness}`}>
+                        <input
+                          type="range"
+                          min={1}
+                          max={10}
+                          step={1}
+                          value={c.stabilize.shakiness}
+                          onChange={(e) =>
+                            updateContent(id, { stabilize: { ...c.stabilize!, shakiness: Number(e.target.value) } })
+                          }
+                          className="w-full accent-sky-400"
+                        />
+                      </Field>
+                      <Field label={`Smoothing · ${c.stabilize.smoothing} frames`}>
+                        <input
+                          type="range"
+                          min={1}
+                          max={40}
+                          step={1}
+                          value={c.stabilize.smoothing}
+                          onChange={(e) =>
+                            updateContent(id, { stabilize: { ...c.stabilize!, smoothing: Number(e.target.value) } })
+                          }
+                          className="w-full accent-sky-400"
+                        />
+                      </Field>
+                    </>
+                  )}
+                  <p className="text-[10px] leading-snug text-zinc-500">
+                    Analysed and rendered on export (a two-pass stabilize); higher smoothing is steadier but crops in more.
+                    Preview is unaffected.
+                  </p>
                 </>
               )
             })()}
@@ -530,6 +631,7 @@ function AudioClipEditor(): JSX.Element | null {
   const clip = useProject((s) => s.project?.audioClips.find((a) => a.id === selectedAudioId) ?? null)
   const update = useProject((s) => s.updateAudioClip)
   const remove = useProject((s) => s.removeAudioClip)
+  const denoiseDefault = useProject((s) => s.project?.denoiseDefault ?? false)
   const splitOnSilence = useProject((s) => s.splitAudioOnSilence)
   const selectAudio = useUi((s) => s.selectAudio)
   const { data: assets = [] } = useLibrary()
@@ -606,10 +708,38 @@ function AudioClipEditor(): JSX.Element | null {
         <input type="checkbox" checked={clip.duck} onChange={(e) => update(clip.id, { duck: e.target.checked })} />
         Duck under other audio (music bed)
       </label>
-      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
-        <input type="checkbox" checked={!!clip.denoise} onChange={(e) => update(clip.id, { denoise: e.target.checked })} />
-        Reduce noise (on export)
-      </label>
+      <div className="mb-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-zinc-300">Reduce noise (on export)</span>
+          <span className="text-[10px] text-zinc-500">→ {effectiveDenoise(clip, denoiseDefault) ? 'On' : 'Off'}</span>
+        </div>
+        <div className="flex gap-1">
+          {([
+            ['Default', undefined],
+            ['On', true],
+            ['Off', false]
+          ] as const).map(([label, val]) => {
+            const active = clip.denoise === val
+            return (
+              <button
+                key={label}
+                onClick={() => update(clip.id, { denoise: val })}
+                title={
+                  val === undefined
+                    ? `Follow the project default (${denoiseDefault ? 'On' : 'Off'})`
+                    : `Force noise reduction ${label.toLowerCase()} for this clip`
+                }
+                className={`flex-1 rounded px-2 py-1 text-[11px] ${
+                  active ? 'bg-sky-500/30 text-sky-100' : 'bg-white/5 text-zinc-400 hover:bg-white/10'
+                }`}
+              >
+                {label}
+                {val === undefined ? ` (${denoiseDefault ? 'On' : 'Off'})` : ''}
+              </button>
+            )
+          })}
+        </div>
+      </div>
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
         <input
           type="checkbox"
@@ -638,6 +768,74 @@ function AudioClipEditor(): JSX.Element | null {
       >
         Remove audio clip
       </button>
+    </div>
+  )
+}
+
+/** Project-wide settings shown when nothing is selected. */
+function ProjectSettingsEditor(): JSX.Element {
+  const hasProject = useProject((s) => !!s.project)
+  const denoiseDefault = useProject((s) => s.project?.denoiseDefault ?? false)
+  const setDenoiseDefault = useProject((s) => s.setDenoiseDefault)
+  const stabilizeDefault = useProject((s) => s.project?.stabilizeDefault ?? null)
+  const setStabilizeDefault = useProject((s) => s.setStabilizeDefault)
+  if (!hasProject) return <p className="text-sm text-zinc-600">Select a layer to edit it.</p>
+  return (
+    <div>
+      <div className="mb-2 text-sm font-medium text-zinc-200">Project settings</div>
+      <label className="mb-1 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={denoiseDefault}
+          onChange={(e) => setDenoiseDefault(e.target.checked)}
+        />
+        Reduce noise by default (all audio clips)
+      </label>
+      <p className="mb-3 text-[10px] leading-snug text-zinc-500">
+        Applies FFT noise reduction to every audio clip on export. Individual clips can override this from their
+        inspector; overridden clips show an N badge on the timeline.
+      </p>
+
+      <label className="mb-1 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={!!stabilizeDefault}
+          onChange={(e) => setStabilizeDefault(e.target.checked ? { ...DEFAULT_STABILIZE } : null)}
+        />
+        Stabilize by default (all video clips)
+      </label>
+      {stabilizeDefault && (
+        <>
+          <Field label={`Shakiness · ${stabilizeDefault.shakiness}`}>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              step={1}
+              value={stabilizeDefault.shakiness}
+              onChange={(e) => setStabilizeDefault({ ...stabilizeDefault, shakiness: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Smoothing · ${stabilizeDefault.smoothing} frames`}>
+            <input
+              type="range"
+              min={1}
+              max={40}
+              step={1}
+              value={stabilizeDefault.smoothing}
+              onChange={(e) => setStabilizeDefault({ ...stabilizeDefault, smoothing: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
+      )}
+      <p className="text-[10px] leading-snug text-zinc-500">
+        Runs a two-pass stabilize on every video clip on export. Individual clips can override this from their
+        inspector; overridden clips show an S badge on the timeline.
+      </p>
+
+      <p className="mt-3 text-sm text-zinc-600">Select a layer, caption, or audio clip to edit it.</p>
     </div>
   )
 }
@@ -677,7 +875,7 @@ export function Inspector(): JSX.Element {
         ) : selectedAudioId ? (
           <AudioClipEditor />
         ) : (
-          <p className="text-sm text-zinc-600">Select a layer to edit it.</p>
+          <ProjectSettingsEditor />
         )}
       </div>
     </div>

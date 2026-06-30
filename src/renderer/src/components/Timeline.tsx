@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import type { AudioClip, CaptionSegment, Layer, ScriptLine } from '@shared/project'
-import { audioClipEnd, effectiveOut } from '@shared/project'
+import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden } from '@shared/project'
 import { assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
@@ -564,6 +564,16 @@ export function Timeline(): JSX.Element {
           {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : '🎬'}&nbsp;
           {asset?.fileName ?? layerLabel(l)}
         </span>
+        {l.content.kind === 'video' && stabilizeOverridden(l.content) && (
+          <span
+            className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${
+              l.content.stabilize ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
+            }`}
+            title={`Stabilization forced ${l.content.stabilize ? 'on' : 'off'} for this clip (overrides the project default)`}
+          >
+            S
+          </span>
+        )}
         <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
         <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
       </div>
@@ -753,6 +763,16 @@ export function Timeline(): JSX.Element {
                   <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
                     {a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;{asset?.fileName ?? a.mediaId}
                   </span>
+                  {denoiseOverridden(a) && (
+                    <span
+                      className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${
+                        a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
+                      }`}
+                      title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
+                    >
+                      N
+                    </span>
+                  )}
                   <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
                   <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
                 </div>

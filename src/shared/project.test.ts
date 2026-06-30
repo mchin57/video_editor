@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_CAPTION_STYLE, effectiveCaptionStyle, migrateProject } from './project'
+import {
+  DEFAULT_CAPTION_STYLE,
+  effectiveCaptionStyle,
+  effectiveStabilize,
+  migrateProject,
+  stabilizeOverridden
+} from './project'
 import type { CaptionSegment, CaptionsConfig } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 
@@ -12,7 +18,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(7)
+    expect(p.version).toBe(8)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -70,6 +76,57 @@ describe('migrateProject — caption style', () => {
       }
     }
     expect(migrateProject(styled).captions.style.color).toBe('#ff0000')
+  })
+})
+
+describe('migrateProject — noise filter default (v8)', () => {
+  const clip = (over: Record<string, unknown>): Record<string, unknown> => ({
+    id: 'a', mediaId: 'm', startSec: 0, inSec: 0, outSec: 0,
+    gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music', ...over
+  })
+
+  it('defaults denoiseDefault to false and normalises legacy denoise:false to inherit', () => {
+    const legacy = { version: 7, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: false })] }
+    const p = migrateProject(legacy)
+    expect(p.denoiseDefault).toBe(false)
+    expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
+    expect(p.version).toBe(8)
+  })
+
+  it('keeps an explicit denoise:true override across migration', () => {
+    const legacy = { version: 7, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: true })] }
+    expect(migrateProject(legacy).audioClips[0].denoise).toBe(true)
+  })
+
+  it('does not re-normalise denoise:false once already at v8 (an intentional force-off)', () => {
+    const current = { version: 8, denoiseDefault: true, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: false })] }
+    const p = migrateProject(current)
+    expect(p.denoiseDefault).toBe(true)
+    expect(p.audioClips[0].denoise).toBe(false) // stays a real override
+  })
+})
+
+describe('stabilization default + per-clip override', () => {
+  it('defaults stabilizeDefault to null (off) on migration', () => {
+    const legacy = { version: 7, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [] }
+    expect(migrateProject(legacy).stabilizeDefault).toBeNull()
+  })
+
+  it('effectiveStabilize: clip override wins, else the project default', () => {
+    const def = { shakiness: 5, smoothing: 15 }
+    const clipOn = { shakiness: 3, smoothing: 30 }
+    expect(effectiveStabilize({ stabilize: undefined }, def)).toBe(def) // inherit on
+    expect(effectiveStabilize({}, def)).toBe(def) // absent = inherit
+    expect(effectiveStabilize({ stabilize: undefined }, null)).toBeNull() // inherit off
+    expect(effectiveStabilize({ stabilize: null }, def)).toBeNull() // force off
+    expect(effectiveStabilize({ stabilize: clipOn }, null)).toBe(clipOn) // force on
+  })
+
+  it('stabilizeOverridden: only explicit on/off flag an indicator', () => {
+    expect(stabilizeOverridden({ stabilize: undefined })).toBe(false)
+    expect(stabilizeOverridden({})).toBe(false)
+    expect(stabilizeOverridden({ stabilize: null })).toBe(true)
+    expect(stabilizeOverridden({ stabilize: { shakiness: 5, smoothing: 15 } })).toBe(true)
   })
 })
 

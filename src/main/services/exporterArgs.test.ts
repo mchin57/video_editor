@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildExportArgs,
+  buildVidstabDetectArgs,
+  buildVidstabTransformArgs,
   escapeFilterPath,
   targetForPreset,
   type ExportPlan,
-  type ExportVideo
+  type ExportVideo,
+  type StabilizeJob
 } from './exporterArgs'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 
@@ -172,5 +175,47 @@ describe('buildExportArgs', () => {
   it('uses NVENC when available + preferred, else libx264', () => {
     expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: true }), 'o').join(' ')).toContain('h264_nvenc')
     expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: false }), 'o').join(' ')).toContain('libx264')
+  })
+})
+
+const stab = (over: Partial<StabilizeJob> = {}): StabilizeJob => ({
+  input: 'C:/v/a.mov',
+  inSec: 2,
+  len: 5,
+  shakiness: 5,
+  smoothing: 15,
+  hdrChain: '',
+  trfFile: 'stab_0.trf',
+  outFile: 'stab_0.mp4',
+  ...over
+})
+
+describe('buildVidstabDetectArgs', () => {
+  it('analyses the trimmed segment and writes the transforms file (no real output)', () => {
+    const s = buildVidstabDetectArgs(stab()).join(' ')
+    expect(s).toContain('-ss 2.000 -t 5.000 -i C:/v/a.mov')
+    expect(s).toContain('-vf vidstabdetect=shakiness=5:accuracy=15:result=stab_0.trf')
+    expect(s).toContain('-f null -')
+  })
+
+  it('clamps shakiness into 1..10', () => {
+    expect(buildVidstabDetectArgs(stab({ shakiness: 99 })).join(' ')).toContain('shakiness=10')
+    expect(buildVidstabDetectArgs(stab({ shakiness: 0 })).join(' ')).toContain('shakiness=1')
+  })
+})
+
+describe('buildVidstabTransformArgs', () => {
+  it('applies the transforms file with auto-zoom + sharpen into a video-only intermediate', () => {
+    const s = buildVidstabTransformArgs(stab()).join(' ')
+    expect(s).toContain('-ss 2.000 -t 5.000 -i C:/v/a.mov')
+    expect(s).toContain(
+      '-vf vidstabtransform=input=stab_0.trf:smoothing=15:optzoom=1:zoom=0:interpol=bicubic,unsharp=5:5:0.8:3:3:0.4,format=yuv420p'
+    )
+    expect(s).toContain('-c:v libx264 -preset medium -crf 18 -an stab_0.mp4')
+  })
+
+  it('folds the HDR tonemap in front of the stabilize chain when present', () => {
+    const s = buildVidstabTransformArgs(stab({ hdrChain: 'tonemapX' })).join(' ')
+    expect(s).toContain('-vf tonemapX,vidstabtransform=input=stab_0.trf')
   })
 })

@@ -111,6 +111,91 @@ const f3 = (n: number): string => n.toFixed(3)
 const r = (n: number): number => Math.round(n)
 
 /**
+ * One clip's motion-stabilization pre-pass (ffmpeg vidstab, two passes). Pass 1
+ * (`vidstabdetect`) analyses the trimmed segment and writes a transforms file;
+ * pass 2 (`vidstabtransform`) applies the smoothed camera path into a video-only
+ * intermediate that the compositor then treats as an ordinary input. The trim
+ * (`inSec`/`len`) is baked in here, so the composite reads the intermediate from
+ * 0. `trfFile`/`outFile` are resolved relative to ffmpeg's cwd (the temp dir),
+ * matching the ASS handling, so no Windows path escaping is needed.
+ */
+export interface StabilizeJob {
+  input: string
+  inSec: number
+  len: number
+  /** Detector sensitivity (clamped 1..10). */
+  shakiness: number
+  /** Smoothing half-window in frames (clamped >= 1). */
+  smoothing: number
+  /** HDR→SDR tonemap to fold into the transform pass (so the intermediate is
+   *  already SDR), or '' for none. */
+  hdrChain: string
+  /** Relative transforms-file name written by pass 1, read by pass 2. */
+  trfFile: string
+  /** Relative output (stabilized intermediate) name. */
+  outFile: string
+}
+
+const clampInt = (n: number, lo: number, hi: number): number =>
+  Math.max(lo, Math.min(hi, Math.round(n)))
+
+/** Pass 1: analyse camera motion → transforms file (writes no real output). */
+export function buildVidstabDetectArgs(j: StabilizeJob): string[] {
+  const shakiness = clampInt(j.shakiness, 1, 10)
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-ss',
+    f3(j.inSec),
+    '-t',
+    f3(Math.max(0.01, j.len)),
+    '-i',
+    j.input,
+    '-vf',
+    `vidstabdetect=shakiness=${shakiness}:accuracy=15:result=${j.trfFile}`,
+    '-f',
+    'null',
+    '-'
+  ]
+}
+
+/** Pass 2: apply the smoothed path (auto-zooming to hide the corrected edges)
+ *  plus a light sharpen, encoding the stabilized intermediate. */
+export function buildVidstabTransformArgs(j: StabilizeJob): string[] {
+  const smoothing = Math.max(1, Math.round(j.smoothing))
+  const vf = [
+    j.hdrChain,
+    `vidstabtransform=input=${j.trfFile}:smoothing=${smoothing}:optzoom=1:zoom=0:interpol=bicubic`,
+    'unsharp=5:5:0.8:3:3:0.4',
+    'format=yuv420p'
+  ]
+    .filter(Boolean)
+    .join(',')
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-ss',
+    f3(j.inSec),
+    '-t',
+    f3(Math.max(0.01, j.len)),
+    '-i',
+    j.input,
+    '-vf',
+    vf,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'medium',
+    '-crf',
+    '18',
+    '-an',
+    j.outFile
+  ]
+}
+
+/**
  * Escape an absolute path for use as an ffmpeg filtergraph OPTION VALUE (e.g.
  * the `ass` filter's `fontsdir`). Backslashes become forward slashes and the
  * Windows drive colon is escaped so the option parser doesn't treat it as an

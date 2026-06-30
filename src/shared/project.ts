@@ -62,6 +62,20 @@ export function isNeutralColor(c: ColorAdjust | null | undefined): boolean {
   return !c || (c.brightness === 0 && c.contrast === 1 && c.saturation === 1)
 }
 
+/**
+ * Per-clip motion stabilization (ffmpeg vidstab two-pass, applied on export).
+ * Absent/null on a video layer = off. `shakiness` tunes the detector (how much
+ * camera shake to expect); `smoothing` is the half-window in frames the
+ * transform pass averages the camera path over — higher is steadier but crops
+ * and zooms in more to hide the corrected edges.
+ */
+export interface Stabilize {
+  shakiness: number // 1 (subtle) .. 10 (very shaky)
+  smoothing: number // frames; higher = smoother but more crop
+}
+
+export const DEFAULT_STABILIZE: Stabilize = { shakiness: 5, smoothing: 15 }
+
 export interface PillStyle {
   enabled: boolean
   /** 8-digit hex with alpha, e.g. #000000CC. */
@@ -126,6 +140,14 @@ export interface VideoContent {
   crop?: CropRect | null
   /** Optional color correction (absent = none). */
   color?: ColorAdjust
+  /**
+   * Per-clip override of the project-wide stabilization default
+   * (`Project.stabilizeDefault`). `undefined` = inherit the default; `null` =
+   * force stabilization OFF for this clip; a `Stabilize` object = force it ON
+   * with these settings. The last two flag the clip as exempt from the default
+   * (surfacing an indicator on its timeline block). See `effectiveStabilize`.
+   */
+  stabilize?: Stabilize | null
   /** Source-time freeze holds (absent/empty = none). Kept sorted by `atSec`. */
   freezes?: FreezeHold[]
 }
@@ -276,7 +298,13 @@ export interface AudioClip {
   fadeOutSec: number
   /** Duck under dialogue/other audio on export (typical for a music bed). */
   duck: boolean
-  /** Apply FFT noise reduction on export. */
+  /**
+   * Per-clip override of the project-wide noise filter (`Project.denoiseDefault`).
+   * `undefined` = inherit the project default; `true`/`false` = force the FFT
+   * noise reduction on/off for this clip (and flag it as exempt from the default,
+   * which surfaces a small indicator on its timeline block). See
+   * `effectiveDenoise`.
+   */
   denoise?: boolean
   /** Skip this clip when captioning the audio lane (e.g. a music bed). */
   excludeFromCaptions?: boolean
@@ -301,6 +329,17 @@ export interface Project {
   layers: Layer[]
   captions: CaptionsConfig
   audioClips: AudioClip[]
+  /**
+   * Project-wide default for the audio noise filter (FFT denoise on export).
+   * Off by default. Individual clips can override it via `AudioClip.denoise`.
+   */
+  denoiseDefault: boolean
+  /**
+   * Project-wide default for motion stabilization. `null` = off (the default);
+   * a `Stabilize` object = stabilize every video clip with these settings.
+   * Individual clips can override it via `VideoContent.stabilize`.
+   */
+  stabilizeDefault: Stabilize | null
   script: ScriptLine[]
   /**
    * Ids of the media assets that belong to this project (the library panel).
@@ -328,6 +367,31 @@ export function effectiveOut(c: AudioClip, sourceDurationSec: number): number {
   return c.outSec > 0 ? Math.min(c.outSec, sourceDurationSec) : sourceDurationSec
 }
 
+/** Whether the noise filter actually runs for this clip on export (clip override
+ *  wins, else the project-wide default). */
+export function effectiveDenoise(c: Pick<AudioClip, 'denoise'>, denoiseDefault: boolean): boolean {
+  return c.denoise ?? denoiseDefault
+}
+
+/** Whether a clip overrides the project noise-filter default (gets an indicator). */
+export function denoiseOverridden(c: Pick<AudioClip, 'denoise'>): boolean {
+  return c.denoise !== undefined
+}
+
+/** The stabilization actually applied to a video clip on export (clip override
+ *  wins, else the project-wide default). `null` = no stabilization. */
+export function effectiveStabilize(
+  c: Pick<VideoContent, 'stabilize'>,
+  stabilizeDefault: Stabilize | null
+): Stabilize | null {
+  return c.stabilize === undefined ? stabilizeDefault : c.stabilize
+}
+
+/** Whether a clip overrides the project stabilization default (gets an indicator). */
+export function stabilizeOverridden(c: Pick<VideoContent, 'stabilize'>): boolean {
+  return c.stabilize !== undefined
+}
+
 /** Timeline end of an audio clip, given its source duration. */
 export function audioClipEnd(c: AudioClip, sourceDurationSec: number): number {
   return c.startSec + Math.max(0, effectiveOut(c, sourceDurationSec) - c.inSec)
@@ -338,7 +402,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 7,
+    version: 8,
     preset: 'reel',
     layers: [],
     captions: {
@@ -349,6 +413,8 @@ export function createEmptyProject(id: string, name: string): Project {
       segments: []
     },
     audioClips: [],
+    denoiseDefault: false,
+    stabilizeDefault: null,
     script: [],
     mediaIds: [],
     createdAt: now,
@@ -548,9 +614,22 @@ export function migrateProject(raw: unknown): Project {
       if (s.style) s.style.fontFamily = normFont(s.style.fontFamily)
     }
   }
+  // v8: project-wide noise-filter default + tri-state per-clip override. Before
+  // v8 the default was effectively off, so a legacy explicit `denoise:false` was
+  // redundant with the default — normalise it to `undefined` (inherit) so old
+  // projects don't sprout spurious "noise off" indicators. `denoise:true` stays
+  // an explicit override. `stabilize` is a new absence-tolerant optional field.
+  if (typeof p.denoiseDefault !== 'boolean') p.denoiseDefault = false
+  if ((p.version ?? 0) < 8 && Array.isArray(p.audioClips)) {
+    for (const a of p.audioClips) if (a.denoise === false) a.denoise = undefined
+  }
+  // Stabilization shares the noise-filter shape: a project-wide default plus a
+  // tri-state per-clip override (`undefined` inherit / `null` off / object on).
+  // Off by default; per-clip `stabilize` is absence-tolerant.
+  if (p.stabilizeDefault === undefined) p.stabilizeDefault = null
   // v5/v6 only add absence-tolerant optional fields (freezes, image crop/rotate/
   // flip, caption style); v7 normalises font ids above.
-  if (typeof p.version !== 'number' || p.version < 7) p.version = 7
+  if (typeof p.version !== 'number' || p.version < 8) p.version = 8
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.
