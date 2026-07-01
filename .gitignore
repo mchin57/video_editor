@@ -50,6 +50,10 @@ certs/
 # Test coverage
 coverage/
 
+# Claude Code local (machine-specific) — keep CLAUDE.md tracked
+.claude/settings.local.json
+CLAUDE.local.md
+
 # Misc scratch
 tmp/
 *.local

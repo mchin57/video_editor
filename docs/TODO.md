@@ -89,8 +89,8 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     clip) at the cursor position; clips/images also have **＋ PH** (add at
     playhead) and **＋ End** (add to end) buttons in the Library.
   - **Per-clip captions**: a video layer's Inspector has "Caption this clip"
-    (transcribes that clip, id-tagged segments, idempotent re-caption). The header
-    `CaptionsButton` is now just a global show/hide toggle.
+    (transcribes that clip, id-tagged segments, idempotent re-caption). The global
+    show/hide toggle lives in the **Project settings** menu (`ProjectSettingsMenu`).
   - Audio clips and auto-captions stay on their own (non-visual) tracks.
 - [x] **Export: composite the full layer stack.** `exporter.ts` now composites
   in a SINGLE ffmpeg pass (no more normalize+concat): a black base canvas the
@@ -263,7 +263,7 @@ _All apply to **both** text overlays and captions via the shared
 
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 - [x] **Left track-header gutter** — a fixed (non-scrolling) column down the left of the timeline; each lane (Clips / Text / Image / Captions / Audio) gets a full-height tinted rounded "bubble" header, like Premiere/Resolve. The track content scrolls horizontally beside it (gutter stays pinned and is kept vertically in sync with the track scroll). Built in `Timeline.tsx`; persisted in the `timelineView` localStorage view.
-	- [ ] Resize a lane by click-dragging its header bubble vertically (in addition to the bottom-edge handles); minimize/expand by double-clicking the bubble (or the ▾/▸ chevron). Collapsed lanes shrink to a thin tinted strip and hide their resize handle.
+	- [x] Resize a lane by click-dragging its header bubble vertically (or the bottom-edge handle); the drag adjusts height-per-row so clips scale with the lane. Minimize/expand by double-clicking the bubble (or the ▾/▸ chevron). Collapsed lanes shrink to a thin tinted strip, hide their blocks + resize handle. Per-lane `{ rowH, collapsed }` persisted in the `timelineView` localStorage view.
 - [ ] **Per-lane mute / solo** — the gutter header bubbles exist but have no mute or solo buttons yet. Would require adding a `mutedLanes` set to the project or view state, then skipping those layers during preview playback and export. Data-model change needed before the UI can wire up.
 
 ### Explicitly out of scope for v1 (revisit post-launch)

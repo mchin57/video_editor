@@ -70,8 +70,8 @@ function OverrideToggle({
 }
 
 /** Shakiness + smoothing sliders for a `Stabilize` value — shared by the per-clip
- *  override and the project default. */
-function StabilizeSliders({
+ *  override, the project default, and the Project settings menu. */
+export function StabilizeSliders({
   value,
   onChange
 }: {
@@ -770,51 +770,6 @@ function AudioClipEditor(): JSX.Element | null {
   )
 }
 
-/** Project-wide settings shown when nothing is selected. */
-function ProjectSettingsEditor(): JSX.Element {
-  const hasProject = useProject((s) => !!s.project)
-  const denoiseDefault = useProject((s) => s.project?.denoiseDefault ?? false)
-  const setDenoiseDefault = useProject((s) => s.setDenoiseDefault)
-  const stabilizeDefault = useProject((s) => s.project?.stabilizeDefault ?? null)
-  const setStabilizeDefault = useProject((s) => s.setStabilizeDefault)
-  if (!hasProject) return <p className="text-sm text-zinc-600">Select a layer to edit it.</p>
-  return (
-    <div>
-      <div className="mb-2 text-sm font-medium text-zinc-200">Project settings</div>
-      <label className="mb-1 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={denoiseDefault}
-          onChange={(e) => setDenoiseDefault(e.target.checked)}
-        />
-        Reduce noise by default (all audio clips)
-      </label>
-      <p className="mb-3 text-[10px] leading-snug text-zinc-500">
-        Applies FFT noise reduction to every audio clip on export. Individual clips can override this from their
-        inspector; overridden clips show an N badge on the timeline.
-      </p>
-
-      <label className="mb-1 flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={!!stabilizeDefault}
-          onChange={(e) => setStabilizeDefault(e.target.checked ? { ...DEFAULT_STABILIZE } : null)}
-        />
-        Stabilize by default (all video clips)
-      </label>
-      {stabilizeDefault && (
-        <StabilizeSliders value={stabilizeDefault} onChange={setStabilizeDefault} />
-      )}
-      <p className="text-[10px] leading-snug text-zinc-500">
-        Runs a two-pass stabilize on every video clip on export. Individual clips can override this from their
-        inspector; overridden clips show an S badge on the timeline.
-      </p>
-
-      <p className="mt-3 text-sm text-zinc-600">Select a layer, caption, or audio clip to edit it.</p>
-    </div>
-  )
-}
-
 export function Inspector(): JSX.Element {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
@@ -850,7 +805,7 @@ export function Inspector(): JSX.Element {
         ) : selectedAudioId ? (
           <AudioClipEditor />
         ) : (
-          <ProjectSettingsEditor />
+          <p className="text-sm text-zinc-600">Select a layer, caption, or audio clip to edit it.</p>
         )}
       </div>
     </div>

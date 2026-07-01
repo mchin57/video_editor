@@ -1,5 +1,4 @@
 import { useState, type JSX } from 'react'
-import type { PresetId } from '@shared/export'
 import { EXPORT_PRESETS } from '@shared/export'
 import { useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
@@ -13,7 +12,6 @@ export function ExportButton(): JSX.Element {
   const project = useProject((s) => s.project)
   const clipCount = project?.layers.filter((l) => l.content.kind === 'video').length ?? 0
   const preset = project?.preset ?? 'reel'
-  const setPreset = useProject((s) => s.setPreset)
   const exportJob = useEditor((s) => s.exportJob)
   const [busy, setBusy] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
@@ -51,20 +49,6 @@ export function ExportButton(): JSX.Element {
         <span className="max-w-[260px] truncate text-xs text-rose-400" title={error}>
           Export failed: {error}
         </span>
-      )}
-      {!busy && (
-        <select
-          value={preset}
-          onChange={(e) => setPreset(e.target.value as PresetId)}
-          className="rounded-md border border-white/10 bg-zinc-800 px-1.5 py-1 text-xs text-zinc-200 outline-none"
-          title="Export preset"
-        >
-          {Object.values(EXPORT_PRESETS).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
       )}
       <button
         onClick={run}

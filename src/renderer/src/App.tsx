@@ -11,7 +11,7 @@ import { ImageEditPopout } from '@/components/ImageEditPopout'
 import { Splitter } from '@/components/Splitter'
 import { ExportButton } from '@/components/ExportButton'
 import { FileMenu } from '@/components/FileMenu'
-import { CaptionsButton } from '@/components/CaptionsButton'
+import { ProjectSettingsMenu } from '@/components/ProjectSettingsMenu'
 import { CaptionAudioButton } from '@/components/CaptionAudioButton'
 import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
@@ -188,6 +188,7 @@ export default function App(): JSX.Element {
         <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
         <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
         <FileMenu />
+        <ProjectSettingsMenu />
         <div className="flex-1" />
         <button
           onClick={() => importMedia.mutate(undefined)}
@@ -197,7 +198,6 @@ export default function App(): JSX.Element {
           {importMedia.isPending ? 'Importing…' : 'Import video'}
         </button>
         <CaptionAudioButton />
-        <CaptionsButton />
         <button
           onClick={() => useUi.getState().setScriptOpen(!useUi.getState().scriptOpen)}
           title="Script / talking points"

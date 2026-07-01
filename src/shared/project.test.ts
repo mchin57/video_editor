@@ -4,10 +4,20 @@ import {
   effectiveCaptionStyle,
   effectiveStabilize,
   migrateProject,
+  pillRadiusPx,
   stabilizeOverridden
 } from './project'
 import type { CaptionSegment, CaptionsConfig } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
+
+describe('pillRadiusPx', () => {
+  it('scales the corner radius with padding (0.6×, rounded)', () => {
+    expect(pillRadiusPx(0)).toBe(0)
+    expect(pillRadiusPx(10)).toBe(6)
+    expect(pillRadiusPx(18)).toBe(11) // default caption/overlay padding
+    expect(pillRadiusPx(25)).toBe(15)
+  })
+})
 
 describe('migrateProject — caption style', () => {
   it('seeds a lane-wide caption style from a legacy yBaseline', () => {

@@ -84,6 +84,14 @@ export interface PillStyle {
   padPx: number
 }
 
+/** Corner radius (logical px) for the pill behind text, scaled to its padding so
+ *  a roomier pill reads as rounder. The single source of truth for both the
+ *  CSS-scaled preview (`PreviewStage`) and the export rasteriser (`textImage`),
+ *  which must agree on the shape. */
+export function pillRadiusPx(padPx: number): number {
+  return Math.round(padPx * 0.6)
+}
+
 // --- Shared text decoration (used by BOTH text overlays and captions) -------
 
 /**

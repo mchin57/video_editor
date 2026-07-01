@@ -29,6 +29,7 @@ Refactor for the per-theme history.)
 | `startDragWithUndo((ev, before) => …)` | `lib/pointerDrag.ts` | the snapshot-project → liveUpdate → `commitLive(before)` dance for canvas drags |
 | `OverrideToggle`, `StabilizeSliders` | `components/Inspector.tsx` | re-rendering the Default/On/Off segmented control or the shakiness/smoothing sliders a second time |
 | `updateById(arr, id, fn)`, `replaceAt(arr, i, count, …items)` | `lib/arrays.ts` | `arr.map(x => x.id===id?…:x)` and `slice()`+`splice()` in store actions |
+| `packRows`, `layoutLanes`, `resizeRowH` | `lib/lanes.ts` | computing timeline lane rows / vertical stack (top/height/collapse) / resize height **inline** in `Timeline.tsx`, where a refactor can delete it untested (see `docs/TIMELINE.md`) |
 
 `Timeline.tsx`'s block drags use `startPointerDrag` with the `edgeAutoScroll` rAF
 loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
@@ -44,6 +45,7 @@ loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
 | `containBox(aspect, scale, frame?)` | `layers.ts` | re-deriving the aspect-fit ("contain") box math (was in `exporter.layerBox` + `PreviewStage.mediaBox`) |
 | `effectiveImageAspect(base, crop, rotateQuarters)` | `layers.ts` | re-deriving image crop-reshape + 90°/270° aspect swap |
 | `effectiveCaptionStyle`, `effectiveOut`, `contentOfKind`, `audioClipEnd` | `project.ts`/`layers.ts` | already-canonical; extend rather than add parallels |
+| `pillRadiusPx(padPx)` | `project.ts` | hard-coding the text-pill corner radius; preview (`PreviewStage`, in `cqw`) and export (`textImage`, in px) must agree on the shape |
 
 _Note:_ video-layer aspect is still a one-line ternary at each call site — the
 preview and export fallbacks differ (frame-aspect vs `1` when the probe is

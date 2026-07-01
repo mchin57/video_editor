@@ -17,7 +17,7 @@ import { BrowserWindow } from 'electron'
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { GradientStyle, PillStyle, ShadowStyle, StrokeStyle } from '@shared/project'
+import { pillRadiusPx, type GradientStyle, type PillStyle, type ShadowStyle, type StrokeStyle } from '@shared/project'
 import { FONTS, resolveFont } from '@shared/fonts'
 
 /** One text element to rasterise (geometry already in output px). */
@@ -60,8 +60,7 @@ function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string |
     `font-family:"${def.label}",system-ui,sans-serif`,
     'font-weight:normal',
     `font-size:${spec.fontSizePx}px`,
-    'line-height:1.1',
-    'display:inline-block'
+    'line-height:1.1'
   ]
   // Gradient fill via background-clip:text (color falls through to transparent).
   span.push(
@@ -81,14 +80,17 @@ function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string |
     const d = spec.shadow.distancePx
     span.push(`text-shadow:${d}px ${d}px ${spec.shadow.blur}px ${spec.shadow.color}`)
   }
-  // The pill is a WRAPPER (not on the text span): with background-clip:text the
-  // span's own background is clipped to the glyphs, so an opaque box must sit
-  // behind it. Matches the preview's StyledText composition.
+  // Pill: an inline wrapper so box-decoration-break clones a padded, rounded
+  // background onto each wrapped line (per-line, hugging each line's width). The
+  // inner text is position:relative so all glyphs paint in the positioned phase,
+  // above every line's background — otherwise a lower line's padding bleeds up
+  // and paints over the line above. Matches PreviewStage.StyledText.
   const pillCss = pillOn
     ? `background:${spec.pill.color};padding:${spec.pill.padPx}px;` +
-      `border-radius:${Math.round(spec.pill.padPx * 0.6)}px;` +
+      `border-radius:${pillRadiusPx(spec.pill.padPx)}px;` +
       `-webkit-box-decoration-break:clone;box-decoration-break:clone`
     : ''
+  if (pillOn) span.push('position:relative')
   const rot = spec.rotationDeg ? ` rotate(${spec.rotationDeg}deg)` : ''
   const box = [
     'position:absolute',

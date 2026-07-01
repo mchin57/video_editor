@@ -52,3 +52,11 @@ When you extend or add a shared helper, update `docs/SHARED.md` too.
 - **Never push.** Commit locally only — the owner runs all `git push` himself.
 - Behavior-preserving refactors must keep `npm test` + `npm run typecheck` green at
   every step.
+- **Don't let untested behavior get refactored away.** `npm test` only guards the
+  pure layers; UI interaction (drag, scroll, pointer) is invisible to it, so a
+  rewrite can silently drop a feature. Two defenses: (1) put a feature's pure
+  logic in a `lib/`/`shared/` module with tests — then deleting it fails the suite
+  or won't compile; (2) for the genuinely un-unit-testable parts, keep a
+  behavior checklist (see `docs/TIMELINE.md`). Before refactoring a dense UI
+  component, list the interactions it supports and confirm each is still green or
+  checked off afterward.

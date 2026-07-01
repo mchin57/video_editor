@@ -16,7 +16,15 @@ import { useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
-import { packRows, rowCount, type Span } from '@/lib/lanes'
+import {
+  layoutLanes,
+  packRows,
+  resizeRowH,
+  rowCount,
+  type LaneGeometry,
+  type LaneViewPref,
+  type Span
+} from '@/lib/lanes'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
@@ -28,6 +36,9 @@ const SNAP_PX = 7
 const GUTTER = 84
 const RULER_H = 20
 const ROW_H = 26
+const MIN_ROW_H = 16
+const MAX_ROW_H = 60
+const COLLAPSED_H = 14
 const GAP = 4
 const SCALE_H = 18
 const DND_MIME = 'application/x-reel-asset'
@@ -40,36 +51,56 @@ const EMPTY_AUDIO: AudioClip[] = []
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 /**
- * Auto-scrolls a horizontal container while a drag hovers near its left/right
- * edge. Feed the pointer's X on every move (`setX`); a rAF loop nudges
- * `scrollLeft` proportional to edge proximity and calls `onScroll` after each
- * real nudge, so the drag handler can re-apply the block's position (which reads
- * the live `scrollLeft`). Returns `setX`/`stop`; the loop starts immediately.
+ * Auto-scrolls a container while a drag hovers near an edge. Feed the pointer's
+ * X and/or Y on every move (`setX`/`setY`; an axis stays off until first fed); a
+ * rAF loop nudges `scrollLeft`/`scrollTop` proportional to edge proximity and
+ * calls `onScroll` after each real nudge, so the drag handler can re-apply its
+ * position (which reads the live scroll offset). Horizontal callers (block
+ * drags) use only `setX`; the vertical lane-resize uses only `setY`. Returns
+ * `setX`/`setY`/`stop`; the loop starts immediately.
  */
 function edgeAutoScroll(
   el: HTMLElement,
   onScroll: () => void
-): { setX: (x: number) => void; stop: () => void } {
+): { setX: (x: number) => void; setY: (y: number) => void; stop: () => void } {
   const EDGE = 40 // px from an edge where auto-scroll kicks in
   const MAX = 20 // px/frame at the very edge
   let x = -1
+  let y = -1
   let raf = 0
   const tick = (): void => {
     raf = requestAnimationFrame(tick)
-    if (x < 0) return
     const rect = el.getBoundingClientRect()
-    let v = 0
-    if (x < rect.left + EDGE) v = -Math.min(1, (rect.left + EDGE - x) / EDGE) * MAX
-    else if (x > rect.right - EDGE) v = Math.min(1, (x - (rect.right - EDGE)) / EDGE) * MAX
-    if (v === 0) return
-    const before = el.scrollLeft
-    el.scrollLeft = Math.max(0, before + v)
-    if (el.scrollLeft !== before) onScroll()
+    let scrolled = false
+    if (x >= 0) {
+      let v = 0
+      if (x < rect.left + EDGE) v = -Math.min(1, (rect.left + EDGE - x) / EDGE) * MAX
+      else if (x > rect.right - EDGE) v = Math.min(1, (x - (rect.right - EDGE)) / EDGE) * MAX
+      if (v !== 0) {
+        const before = el.scrollLeft
+        el.scrollLeft = Math.max(0, before + v)
+        if (el.scrollLeft !== before) scrolled = true
+      }
+    }
+    if (y >= 0) {
+      let v = 0
+      if (y < rect.top + EDGE) v = -Math.min(1, (rect.top + EDGE - y) / EDGE) * MAX
+      else if (y > rect.bottom - EDGE) v = Math.min(1, (y - (rect.bottom - EDGE)) / EDGE) * MAX
+      if (v !== 0) {
+        const before = el.scrollTop
+        el.scrollTop = Math.max(0, before + v)
+        if (el.scrollTop !== before) scrolled = true
+      }
+    }
+    if (scrolled) onScroll()
   }
   raf = requestAnimationFrame(tick)
   return {
     setX: (nx: number) => {
       x = nx
+    },
+    setY: (ny: number) => {
+      y = ny
     },
     stop: () => cancelAnimationFrame(raf)
   }
@@ -119,6 +150,33 @@ const LANE_STYLE = {
   caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
   audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' }
 } as const
+
+type LaneKey = keyof typeof LANE_STYLE
+
+// Vertical geometry passed to the pure lane-layout math in `lib/lanes.ts`.
+const LANE_GEOM: LaneGeometry = {
+  rulerH: RULER_H,
+  rowH: ROW_H,
+  minRowH: MIN_ROW_H,
+  maxRowH: MAX_ROW_H,
+  collapsedH: COLLAPSED_H,
+  gap: GAP,
+  scaleH: SCALE_H
+}
+
+/** Per-lane view prefs — height-per-row (so clips scale with the lane) and a
+ *  collapsed flag. Purely a UI preference like the zoom level, so it lives in
+ *  localStorage (`timelineView`), not the project document. */
+type TimelineView = Partial<Record<LaneKey, LaneViewPref>>
+
+function loadTimelineView(): TimelineView {
+  try {
+    const v = JSON.parse(localStorage.getItem('timelineView') ?? '{}')
+    return v && typeof v === 'object' ? (v as TimelineView) : {}
+  } catch {
+    return {}
+  }
+}
 
 export function Timeline(): JSX.Element {
   const project = useProject((s) => s.project)
@@ -173,6 +231,20 @@ export function Timeline(): JSX.Element {
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
 
+  // Per-lane height / collapse prefs, persisted across reloads.
+  const [laneView, setLaneView] = useState<TimelineView>(loadTimelineView)
+  useEffect(() => {
+    localStorage.setItem('timelineView', JSON.stringify(laneView))
+  }, [laneView])
+  const patchLane = (key: LaneKey, patch: LaneViewPref): void =>
+    setLaneView((v) => ({ ...v, [key]: { ...v[key], ...patch } }))
+  const toggleLaneCollapsed = (key: LaneKey): void =>
+    setLaneView((v) => ({ ...v, [key]: { ...v[key], collapsed: !v[key]?.collapsed } }))
+  // While a lane resize is shrinking the track, we pin the scrollable height to
+  // the tallest it reached this drag so the browser can't clamp scrollTop out
+  // from under us (which would feed back into the height and run away). 0 = idle.
+  const [resizeFloorH, setResizeFloorH] = useState(0)
+
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
@@ -224,16 +296,46 @@ export function Timeline(): JSX.Element {
     ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
     { key: 'audio' as const, label: 'Audio', rows: rowCount(audRows) }
   ]
-  let acc = RULER_H
-  const lanes = laneDefs.map((l) => {
-    const top = acc
-    const height = l.rows * ROW_H
-    acc += height + GAP
-    return { ...l, top, height }
-  })
-  const scaleTop = acc
-  const totalH = scaleTop + SCALE_H
+  const { lanes, scaleTop, totalH } = layoutLanes(laneDefs, laneView, LANE_GEOM)
   const laneTop = (key: string): number => lanes.find((l) => l.key === key)?.top ?? RULER_H
+  const laneRowHeight = (key: string): number => lanes.find((l) => l.key === key)?.rowH ?? ROW_H
+  const laneCollapsed = (key: string): boolean => lanes.find((l) => l.key === key)?.collapsed ?? false
+
+  // Resize a lane by dragging its header bubble (or bottom-edge handle)
+  // vertically: the drag adjusts height-per-row so the clips scale with it.
+  // Dragging past the track's top/bottom edge auto-scrolls, and the scroll delta
+  // is folded into the height so you can keep growing a lane off-screen.
+  const startLaneResize = (e: ReactPointerEvent, key: LaneKey, rows: number): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startY = e.clientY
+    const startRowH = clamp(laneView[key]?.rowH ?? ROW_H, MIN_ROW_H, MAX_ROW_H)
+    const startTotalH = totalH
+    const n = Math.max(1, rows)
+    const sc = scrollRef.current
+    const startScroll = sc?.scrollTop ?? 0
+    const apply = (clientY: number): void => {
+      const dy = clientY - startY + ((sc?.scrollTop ?? 0) - startScroll)
+      const nextRowH = resizeRowH(startRowH, dy, rows, LANE_GEOM)
+      patchLane(key, { rowH: nextRowH })
+      // Only this lane's height moves, so the new total is exact. Keep the
+      // scrollable height at the drag's high-water mark (never shrink mid-drag).
+      const nextTotalH = startTotalH + n * (nextRowH - startRowH)
+      setResizeFloorH((f) => Math.max(f, startTotalH, nextTotalH))
+    }
+    let last: PointerEvent | null = null
+    let scroller: { setY: (y: number) => void; stop: () => void } | null = null
+    const onMove = (ev: PointerEvent): void => {
+      last = ev
+      scroller?.setY(ev.clientY)
+      apply(ev.clientY)
+    }
+    scroller = sc ? edgeAutoScroll(sc, () => last && apply(last.clientY)) : null
+    startPointerDrag(onMove, () => {
+      scroller?.stop()
+      setResizeFloorH(0) // release the pin; the track settles to its true height
+    })
+  }
 
   // Snap targets: layer + audio boundaries, playhead, 0, end.
   const snapTargets = useMemo(() => {
@@ -525,6 +627,7 @@ export function Timeline(): JSX.Element {
     const selected = l.id === selectedLayerId
     const asset = l.content.kind === 'video' || l.content.kind === 'image' ? assetById.get(l.content.mediaId) : undefined
     const st = LANE_STYLE[laneKey]
+    const rowH = laneRowHeight(laneKey)
     return (
       <div
         key={l.id}
@@ -533,7 +636,7 @@ export function Timeline(): JSX.Element {
         className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
           selected ? st.sel : st.block
         } ${l.hidden ? 'opacity-40' : ''}`}
-        style={{ left, width, top: laneTop(laneKey) + (rows.get(l.id) ?? 0) * ROW_H, height: ROW_H - 2 }}
+        style={{ left, width, top: laneTop(laneKey) + (rows.get(l.id) ?? 0) * rowH, height: rowH - 2 }}
       >
         {asset && (
           <img
@@ -616,23 +719,47 @@ export function Timeline(): JSX.Element {
             </div>
             {lanes.map((lane) => {
               const st = LANE_STYLE[lane.key]
-              // The Captions label is a control: click it to edit the lane-wide
-              // caption style (every caption without its own override).
+              // The Captions label is also a control: click it to edit the
+              // lane-wide caption style (every caption without its own override).
               const isCaption = lane.key === 'caption'
               const selected = isCaption && captionsGlobalSelected
               return (
                 <div
                   key={lane.key}
-                  onPointerDown={isCaption ? () => selectCaptionsGlobal() : undefined}
-                  title={isCaption ? 'Edit the style of all captions' : undefined}
-                  className={`absolute inset-x-1 flex select-none items-center gap-1.5 overflow-hidden rounded-md border px-1.5 ${st.tint} ${
-                    isCaption ? 'cursor-pointer hover:brightness-125' : ''
-                  } ${selected ? st.sel : ''}`}
+                  // Drag the bubble body vertically to resize; double-click to
+                  // collapse/expand. Caption bubbles also select on press.
+                  onPointerDown={(e) => {
+                    if (isCaption) selectCaptionsGlobal()
+                    if (!lane.collapsed) startLaneResize(e, lane.key, lane.rows)
+                  }}
+                  onDoubleClick={() => toggleLaneCollapsed(lane.key)}
+                  title={`${isCaption ? 'Click to edit all captions · ' : ''}drag to resize · double-click to collapse`}
+                  className={`absolute inset-x-1 flex select-none items-center gap-1 overflow-hidden rounded-md border px-1 ${st.tint} ${
+                    lane.collapsed ? 'cursor-pointer' : 'cursor-ns-resize'
+                  } ${isCaption ? 'hover:brightness-125' : ''} ${selected ? st.sel : ''}`}
                   style={{ top: lane.top + 1, height: Math.max(0, lane.height - 2) }}
                 >
+                  <button
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onClick={() => toggleLaneCollapsed(lane.key)}
+                    title={lane.collapsed ? 'Expand lane' : 'Collapse lane'}
+                    className="shrink-0 text-[9px] leading-none text-zinc-400 hover:text-zinc-100"
+                  >
+                    {lane.collapsed ? '▸' : '▾'}
+                  </button>
                   <span className={`h-2 w-2 shrink-0 rounded-sm ${st.dot}`} />
                   <span className="truncate text-[10px] font-medium leading-none text-zinc-200">{lane.label}</span>
-                  {isCaption && <span className="ml-auto text-[9px] text-emerald-300/80">✎</span>}
+                  {isCaption && !lane.collapsed && <span className="ml-auto text-[9px] text-emerald-300/80">✎</span>}
+                  {/* Bottom-edge resize handle (hidden while collapsed). */}
+                  {!lane.collapsed && (
+                    <div
+                      onPointerDown={(e) => startLaneResize(e, lane.key, lane.rows)}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      title="Drag to resize lane"
+                      className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize hover:bg-white/30"
+                    />
+                  )}
                 </div>
               )
             })}
@@ -653,7 +780,7 @@ export function Timeline(): JSX.Element {
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
             className="relative h-full cursor-pointer"
-            style={{ width: Math.max(total * pxPerSec + 24, 200), minWidth: '100%', minHeight: totalH }}
+            style={{ width: Math.max(total * pxPerSec + 24, 200), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
           >
             {/* Ruler */}
             <div className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30" style={{ height: RULER_H }} />
@@ -685,15 +812,16 @@ export function Timeline(): JSX.Element {
             )}
 
             {/* Layer lanes */}
-            {grouped.video.map((l) => layerBlock(l, 'clips', grouped.vRows))}
-            {grouped.text.map((l) => layerBlock(l, 'text', grouped.tRows))}
-            {grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
+            {!laneCollapsed('clips') && grouped.video.map((l) => layerBlock(l, 'clips', grouped.vRows))}
+            {!laneCollapsed('text') && grouped.text.map((l) => layerBlock(l, 'text', grouped.tRows))}
+            {!laneCollapsed('image') && grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
 
             {/* Caption lane */}
-            {captionSegs.map((seg) => {
+            {!laneCollapsed('caption') && captionSegs.map((seg) => {
               const left = seg.startSec * pxPerSec
               const width = Math.max(10, (seg.endSec - seg.startSec) * pxPerSec)
               const selected = seg.id === selectedCaptionId
+              const rowH = laneRowHeight('caption')
               return (
                 <div
                   key={seg.id}
@@ -702,7 +830,7 @@ export function Timeline(): JSX.Element {
                   className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
                     selected ? LANE_STYLE.caption.sel : seg.enabled ? LANE_STYLE.caption.block : 'border-zinc-500/40 bg-zinc-600/30'
                   }`}
-                  style={{ left, width, top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * ROW_H, height: ROW_H - 2 }}
+                  style={{ left, width, top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * rowH, height: rowH - 2 }}
                 >
                   <span className="truncate text-[9px] font-medium text-emerald-100">CC&nbsp;&nbsp;{seg.text}</span>
                   <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
@@ -712,13 +840,14 @@ export function Timeline(): JSX.Element {
             })}
 
             {/* Audio lane */}
-            {audioClips.map((a) => {
+            {!laneCollapsed('audio') && audioClips.map((a) => {
               const asset = assetById.get(a.mediaId)
               const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
               const eo = effectiveOut(a, maxOut)
               const left = a.startSec * pxPerSec
               const width = Math.max(12, (eo - a.inSec) * pxPerSec)
               const selected = a.id === selectedAudioId
+              const rowH = laneRowHeight('audio')
               return (
                 <div
                   key={a.id}
@@ -727,7 +856,7 @@ export function Timeline(): JSX.Element {
                   className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
                     selected ? LANE_STYLE.audio.sel : LANE_STYLE.audio.block
                   }`}
-                  style={{ left, width, top: laneTop('audio') + (audRows.get(a.id) ?? 0) * ROW_H, height: ROW_H - 2 }}
+                  style={{ left, width, top: laneTop('audio') + (audRows.get(a.id) ?? 0) * rowH, height: rowH - 2 }}
                 >
                   {asset && (
                     <img

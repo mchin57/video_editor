@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import type { AudioClip, CaptionSegment, Layer, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
-import { audioClipEnd, effectiveCaptionStyle, effectiveOut } from '@shared/project'
+import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
 import {
@@ -69,22 +69,31 @@ function fillStyle(s: TextDeco): CSSProperties {
   return css
 }
 
-/** The opaque pill behind the text (kept as a wrapper so it composes with a
- *  background-clip:text gradient fill on the inner span). */
+/** The per-line pill behind the text: an inline wrapper, so box-decoration-break
+ *  clones a padded, rounded background onto EACH wrapped line — lines of
+ *  different lengths get different-width pills. */
 function pillWrapStyle(pill: PillStyle): CSSProperties {
   return {
     background: pill.color,
     padding: cqw(pill.padPx),
-    borderRadius: cqw(10),
+    borderRadius: cqw(pillRadiusPx(pill.padPx)),
     boxDecorationBreak: 'clone',
     WebkitBoxDecorationBreak: 'clone'
   }
 }
 
-/** Text glyphs with their fill/stroke/shadow, wrapped in a pill if enabled. */
+/** Text glyphs with their fill/stroke/shadow, wrapped in a per-line pill when
+ *  enabled. The inner text span is `position:relative` so ALL glyphs paint in the
+ *  positioned phase — above every line's background. Without it, a lower line's
+ *  padded background bleeds up into the line above and paints OVER its text
+ *  (the reported multi-line bug). Mirrored in the export (`textImage.buildHtml`). */
 function StyledText({ s, text }: { s: TextDeco; text: string }): JSX.Element {
-  const inner = <span style={fillStyle(s)}>{text}</span>
-  return s.pill.enabled ? <span style={pillWrapStyle(s.pill)}>{inner}</span> : inner
+  if (!s.pill.enabled) return <span style={fillStyle(s)}>{text}</span>
+  return (
+    <span style={pillWrapStyle(s.pill)}>
+      <span style={{ ...fillStyle(s), position: 'relative' }}>{text}</span>
+    </span>
+  )
 }
 
 /** Absolute box (in %) for a media layer, sized to its aspect at the layer's
