@@ -30,10 +30,13 @@ export interface TextImageSpec {
   fontSizePx: number
   /** Flat colour (used only if no gradient). */
   color: string
-  gradient: GradientStyle
+  /** Gradient fill (background-clip:text). Absent = flat `color`. */
+  gradient?: GradientStyle
   pill: PillStyle
   stroke?: StrokeStyle | null
   shadow?: ShadowStyle | null
+  /** Explicit wrap-box width in output px (from a text side-resize). Absent = hug. */
+  widthPx?: number
   /** Clockwise rotation in degrees. */
   rotationDeg?: number
 }
@@ -62,14 +65,18 @@ function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string |
     `font-size:${spec.fontSizePx}px`,
     'line-height:1.1'
   ]
-  // Gradient fill via background-clip:text (color falls through to transparent).
-  span.push(
-    `background:linear-gradient(${spec.gradient.angle}deg,${spec.gradient.from},${spec.gradient.to})`,
-    '-webkit-background-clip:text',
-    'background-clip:text',
-    '-webkit-text-fill-color:transparent',
-    'color:transparent'
-  )
+  // Gradient fill via background-clip:text, else a flat colour.
+  if (spec.gradient) {
+    span.push(
+      `background:linear-gradient(${spec.gradient.angle}deg,${spec.gradient.from},${spec.gradient.to})`,
+      '-webkit-background-clip:text',
+      'background-clip:text',
+      '-webkit-text-fill-color:transparent',
+      'color:transparent'
+    )
+  } else {
+    span.push(`color:${spec.color}`)
+  }
   if (!pillOn && spec.stroke && spec.stroke.widthPx > 0) {
     span.push(
       `-webkit-text-stroke:${spec.stroke.widthPx}px ${spec.stroke.color}`,
@@ -97,7 +104,7 @@ function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string |
     `left:${spec.xCenter}px`,
     `top:${spec.yCenter}px`,
     `transform:translate(-50%,-50%)${rot}`,
-    'max-width:88%',
+    spec.widthPx != null ? `width:${spec.widthPx}px` : 'max-width:88%',
     'text-align:center',
     'white-space:pre-wrap'
   ]

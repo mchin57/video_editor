@@ -1,7 +1,9 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type CSSProperties,
   type JSX,
   type PointerEvent as ReactPointerEvent
@@ -11,13 +13,16 @@ import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx } from 
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
 import {
-  containBox,
   effectiveImageAspect,
   isFrozenAt,
   layersAtTime,
   makeVideoLayer,
+  resizeBox,
+  stretchedBox,
   videoSourceTime,
-  visualDuration
+  visualDuration,
+  type ResizeBox,
+  type ResizeHandle
 } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
@@ -37,6 +42,8 @@ const EMPTY_AUDIO: AudioClip[] = []
 /** A logical-px length expressed in the container-query unit text is sized in, so
  *  fonts/strokes/shadows scale with the stage like the burned output does. */
 const cqw = (px: number): string => `${(px / LOGICAL.width) * 100}cqw`
+/** Vertical counterpart of `cqw`, for positioning by the logical y axis. */
+const cqh = (px: number): string => `${(px / LOGICAL.height) * 100}cqh`
 
 /** The decoration knobs shared by a text overlay and a caption (the fill +
  *  pill/stroke/shadow subset of the shared `TextStyleBase`). */
@@ -100,7 +107,7 @@ function StyledText({ s, text }: { s: TextDeco; text: string }): JSX.Element {
  *  scale and centered on (x,y). Aspect-correct so there's no letterbox fill to
  *  occlude the layers behind it; anything past the frame is cropped by the stage. */
 function mediaBox(layer: Layer, aspect: number): CSSProperties {
-  const { w, h } = containBox(aspect, layer.scale, LOGICAL)
+  const { w, h } = stretchedBox(aspect, layer.scale, layer.stretchX ?? 1, layer.stretchY ?? 1, LOGICAL)
   return {
     position: 'absolute',
     left: pct(layer.x - w / 2, LOGICAL.width),
@@ -137,6 +144,61 @@ const mediaAspect = (asset: MediaAsset | undefined, content: VideoContent | { cr
   if ('crop' in content && content.crop) return content.crop.w / content.crop.h
   const v = asset?.probe.video
   return v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+}
+
+/** Measure the selected layer's on-screen box (tagged `data-resizebox`) in logical
+ *  px, via the stage. Text height is intrinsic so it must be read from the DOM;
+ *  measuring media the same way keeps one path and tracks any live transform. */
+function measureSelectedBox(stage: HTMLElement): ResizeBox | null {
+  const el = stage.querySelector('[data-resizebox]') as HTMLElement | null
+  if (!el) return null
+  const er = el.getBoundingClientRect()
+  const sr = stage.getBoundingClientRect()
+  if (sr.width === 0) return null
+  const s = LOGICAL.width / sr.width
+  return {
+    cx: (er.left + er.width / 2 - sr.left) * s,
+    cy: (er.top + er.height / 2 - sr.top) * s,
+    w: er.width * s,
+    h: er.height * s
+  }
+}
+
+// Media gets all 8 handles; text only the 4 corners + left/right sides (its
+// height is automatic, so top/bottom handles have nothing to resize).
+const MEDIA_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+const TEXT_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw', 'e', 'w']
+const handleCursor = (h: ResizeHandle): string =>
+  h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize'
+
+/** The edge/corner resize handles drawn on the selected layer's box. Positioned
+ *  in a non-scaled overlay (so they stay a constant size), driven by the measured
+ *  box; `onStart` begins the drag for the grabbed handle. */
+function ResizeHandles({
+  box,
+  isText,
+  onStart
+}: {
+  box: ResizeBox
+  isText: boolean
+  onStart: (e: ReactPointerEvent, handle: ResizeHandle) => void
+}): JSX.Element {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[450]">
+      {(isText ? TEXT_HANDLES : MEDIA_HANDLES).map((h) => {
+        const x = box.cx + (h.includes('e') ? box.w / 2 : h.includes('w') ? -box.w / 2 : 0)
+        const y = box.cy + (h.includes('s') ? box.h / 2 : h.includes('n') ? -box.h / 2 : 0)
+        return (
+          <span
+            key={h}
+            onPointerDown={(e) => onStart(e, h)}
+            style={{ left: pct(x, LOGICAL.width), top: pct(y, LOGICAL.height), cursor: handleCursor(h) }}
+            className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-sky-500 bg-white shadow"
+          />
+        )
+      })}
+    </div>
+  )
 }
 
 /** A hidden <audio> that follows the timeline clock for one audio clip. */
@@ -221,6 +283,7 @@ function VideoLayerView({
     <div
       style={boxStyle}
       onPointerDown={onMoveDown}
+      data-resizebox={selected ? '' : undefined}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
       <video
@@ -330,17 +393,42 @@ export function PreviewStage(): JSX.Element {
     })
   }
 
-  // Drag the corner handle to zoom the selected layer.
-  const startLayerZoom = (e: ReactPointerEvent, layer: Layer): void => {
+  // Drag an edge/corner handle to resize the selected layer. Corners scale
+  // uniformly (aspect preserved); edges distort media (per-axis stretch) or, for
+  // text, change the wrap width. The opposite edge/corner stays put, so the drag
+  // also shifts x/y. Box geometry comes from the DOM (text height is intrinsic).
+  const startLayerResize = (e: ReactPointerEvent, layer: Layer, handle: ResizeHandle): void => {
     e.stopPropagation()
     e.preventDefault()
+    const stage = stageRef.current
+    if (!stage) return
+    const startBox = measureSelectedBox(stage)
+    if (!startBox) return
+    const s = LOGICAL.width / stage.getBoundingClientRect().width
     const startX = e.clientX
-    const s0 = layer.scale
+    const startY = e.clientY
+    const isCorner = handle.length === 2
+    const isText = layer.content.kind === 'text'
     startDragWithUndo((ev) => {
-      const ns = clamp(s0 + (ev.clientX - startX) * 0.004, 0.05, 8)
+      const dx = (ev.clientX - startX) * s
+      const dy = (ev.clientY - startY) * s
+      const nb = resizeBox(startBox, handle, dx, dy, isCorner)
       useProject.getState().liveUpdate((p) => ({
         ...p,
-        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, scale: ns } : l))
+        layers: p.layers.map((l) => {
+          if (l.id !== layer.id) return l
+          if (isCorner) {
+            return { ...l, x: nb.cx, y: nb.cy, scale: clamp(layer.scale * (nb.w / startBox.w), 0.05, 8) }
+          }
+          if (isText && l.content.kind === 'text') {
+            // widthPx is the pre-scale wrap width; the measured box is post-scale.
+            return { ...l, x: nb.cx, content: { ...l.content, widthPx: nb.w / layer.scale } }
+          }
+          if (handle === 'e' || handle === 'w') {
+            return { ...l, x: nb.cx, stretchX: (layer.stretchX ?? 1) * (nb.w / startBox.w) }
+          }
+          return { ...l, y: nb.cy, stretchY: (layer.stretchY ?? 1) * (nb.h / startBox.h) }
+        })
       }))
     })
   }
@@ -379,6 +467,23 @@ export function PreviewStage(): JSX.Element {
 
   const activeLayers = layersAtTime(previewLayers, time).filter((l) => !l.hidden)
   const selectedLayer = activeLayers.find((l) => l.id === selectedLayerId) ?? null
+
+  // Measure the selected layer's box for the resize handles. Re-runs whenever the
+  // layer object changes (incl. each live drag frame) and on stage resize, so the
+  // handles track the box. `useLayoutEffect` reads the freshly committed DOM.
+  const [handleBox, setHandleBox] = useState<ResizeBox | null>(null)
+  useLayoutEffect(() => {
+    const stage = stageRef.current
+    if (!stage || !selectedLayer) {
+      setHandleBox(null)
+      return undefined
+    }
+    const update = (): void => setHandleBox(measureSelectedBox(stage))
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [selectedLayer])
+
   // All captions on screen now (audio clips are captioned independently, so two
   // overlapping clips can show two captions at once — stack them).
   const activeCaptions = captions?.enabled
@@ -475,6 +580,7 @@ export function PreviewStage(): JSX.Element {
               key={layer.id}
               style={box}
               onPointerDown={onMoveDown}
+              data-resizebox={selected ? '' : undefined}
               className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
             >
               <div
@@ -494,22 +600,27 @@ export function PreviewStage(): JSX.Element {
           )
         }
 
-        // Text layer
+        // Text layer. Position via transform (left/top = 0) so the wrap width is
+        // independent of x — anchoring by `left:x%` made the box narrower as it
+        // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap
+        // width; otherwise it hugs content up to a position-independent max.
         const content = layer.content
         return (
           <div
             key={layer.id}
             onPointerDown={onMoveDown}
+            data-resizebox={selected ? '' : undefined}
             style={{
               position: 'absolute',
-              left: pct(layer.x, LOGICAL.width),
-              top: pct(layer.y, LOGICAL.height),
-              transform: `translate(-50%, -50%) scale(${layer.scale})`,
+              left: 0,
+              top: 0,
+              transform: `translate(calc(${cqw(layer.x)} - 50%), calc(${cqh(layer.y)} - 50%)) scale(${layer.scale})`,
               transformOrigin: 'center',
               fontSize: cqw(content.fontSizePx),
               fontFamily: fontCssFamily(content.fontFamily),
               fontWeight: 'normal',
-              maxWidth: '92%',
+              width: content.widthPx != null ? cqw(content.widthPx) : undefined,
+              maxWidth: content.widthPx != null ? undefined : '92%',
               zIndex: z
             }}
             className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
@@ -521,16 +632,14 @@ export function PreviewStage(): JSX.Element {
         )
       })}
 
-      {/* Zoom handle for the selected layer (pinned to the stage corner so it's
-          always reachable regardless of where the layer sits). */}
-      {selectedLayer && (
-        <span
-          onPointerDown={(e) => startLayerZoom(e, selectedLayer)}
-          title="Drag to zoom the selected layer"
-          className="absolute bottom-2 right-2 z-[200] flex h-6 w-6 cursor-nwse-resize items-center justify-center rounded border border-white/70 bg-sky-500 text-[11px] text-white shadow"
-        >
-          ⤢
-        </span>
+      {/* Edge/corner resize handles on the selected layer (corners scale
+          uniformly, edges stretch media / re-wrap text). */}
+      {selectedLayer && handleBox && (
+        <ResizeHandles
+          box={handleBox}
+          isText={selectedLayer.content.kind === 'text'}
+          onStart={(e, handle) => startLayerResize(e, selectedLayer, handle)}
+        />
       )}
 
       {!hasContent && (

@@ -201,6 +201,9 @@ export interface ImageContent {
 export interface TextContent extends TextStyleBase {
   kind: 'text'
   text: string
+  /** Explicit wrap-box width in logical px. Absent = auto (hug the text). Set
+   *  when the user drags a side resize handle; text re-wraps within it. */
+  widthPx?: number
 }
 
 export type LayerContent = VideoContent | ImageContent | TextContent
@@ -223,8 +226,13 @@ export interface Layer {
   /** Center position in logical px. */
   x: number
   y: number
-  /** Uniform zoom (1 = natural size). */
+  /** Uniform zoom (1 = natural size). Corner resize handles adjust this. */
   scale: number
+  /** Non-uniform box multipliers on top of `scale` (default 1). Media edge
+   *  handles set these to stretch/squeeze one dimension (distortion). Reserved
+   *  for a future text free-distort mode; text ignores them today. */
+  stretchX?: number
+  stretchY?: number
   content: LayerContent
 }
 
@@ -425,7 +433,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 8,
+    version: 9,
     preset: 'reel',
     layers: [],
     captions: {
@@ -649,8 +657,10 @@ export function migrateProject(raw: unknown): Project {
   // Off by default; per-clip `stabilize` is absence-tolerant.
   if (p.stabilizeDefault === undefined) p.stabilizeDefault = null
   // v5/v6 only add absence-tolerant optional fields (freezes, image crop/rotate/
-  // flip, caption style); v7 normalises font ids above.
-  if (typeof p.version !== 'number' || p.version < 8) p.version = 8
+  // flip, caption style); v7 normalises font ids above. v9 adds absence-tolerant
+  // resize geometry (layer `stretchX`/`stretchY`, text `widthPx`) — read sites
+  // default `stretch` to 1 and `widthPx` to auto, so no data transform is needed.
+  if (typeof p.version !== 'number' || p.version < 9) p.version = 9
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

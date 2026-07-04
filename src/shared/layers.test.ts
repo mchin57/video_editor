@@ -14,6 +14,8 @@ import {
   makeTextLayer,
   makeVideoLayer,
   moveLayer,
+  resizeBox,
+  stretchedBox,
   videoSourceTime,
   visualDuration
 } from './layers'
@@ -39,6 +41,51 @@ describe('containBox', () => {
   })
   it('honors a custom (output) frame', () => {
     expect(containBox(1, 1, { width: 1080, height: 1080 })).toEqual({ w: 1080, h: 1080 })
+  })
+})
+
+describe('stretchedBox', () => {
+  it('equals containBox when stretch is 1', () => {
+    expect(stretchedBox(2, 1, 1, 1)).toEqual(containBox(2, 1))
+  })
+  it('multiplies each axis by its stretch independently (distortion)', () => {
+    expect(stretchedBox(2, 1, 1.5, 0.5)).toEqual({ w: 1620, h: 270 })
+  })
+  it('defaults stretch to 1', () => {
+    expect(stretchedBox(2, 0.5)).toEqual({ w: 540, h: 270 })
+  })
+})
+
+describe('resizeBox', () => {
+  const box = { cx: 100, cy: 100, w: 40, h: 20 } // edges at x:80..120, y:90..110
+
+  it('east edge: widens right, left edge stays fixed, center shifts by dx/2', () => {
+    const r = resizeBox(box, 'e', 10, 0, false)
+    expect(r).toEqual({ cx: 105, cy: 100, w: 50, h: 20 })
+    expect(r.cx - r.w / 2).toBe(80) // left edge unmoved
+  })
+  it('west edge: dragging right narrows, right edge stays fixed', () => {
+    const r = resizeBox(box, 'w', 10, 0, false)
+    expect(r).toEqual({ cx: 105, cy: 100, w: 30, h: 20 })
+    expect(r.cx + r.w / 2).toBe(120) // right edge unmoved
+  })
+  it('south edge only touches the vertical axis', () => {
+    const r = resizeBox(box, 's', 0, 8, false)
+    expect(r).toEqual({ cx: 100, cy: 104, w: 40, h: 28 })
+  })
+  it('clamps to minSize instead of inverting', () => {
+    const r = resizeBox(box, 'e', -1000, 0, false, 8)
+    expect(r.w).toBe(8)
+    expect(r.cx - r.w / 2).toBe(80) // still anchored to the left edge
+  })
+  it('corner scales both dims uniformly, anchored at the opposite corner', () => {
+    // Grab SE corner; a drag purely along +x projects onto the diagonal.
+    const r = resizeBox({ cx: 0, cy: 0, w: 40, h: 20 }, 'se', 20, 10, true)
+    const f = r.w / 40
+    expect(r.h / 20).toBeCloseTo(f) // aspect preserved
+    // opposite (NW) corner fixed at (-20, -10)
+    expect(r.cx - r.w / 2).toBeCloseTo(-20)
+    expect(r.cy - r.h / 2).toBeCloseTo(-10)
   })
 })
 

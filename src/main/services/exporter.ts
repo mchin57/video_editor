@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
-import { containBox, effectiveImageAspect, FRAME } from '@shared/layers'
+import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
@@ -108,10 +108,10 @@ async function runExport(
     }
     return rendererRef.current
   }
-  // Rasterise one gradient text/caption spec (already scaled to output px) to a
-  // PNG and wrap it as a full-frame overlay. Shared by the text-layer and caption
-  // gradient paths (their only difference is how they build the spec).
-  async function renderGradientImage(
+  // Rasterise one text/caption spec (already scaled to output px) to a PNG and
+  // wrap it as a full-frame overlay. Used for gradient fills and for text with an
+  // explicit wrap width — cases libass can't render — matching the preview CSS.
+  async function renderTextImage(
     spec: Parameters<TextRenderer['render']>[0],
     startSec: number,
     endSec: number
@@ -157,7 +157,7 @@ async function runExport(
       if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
       const v = asset.probe.video
       const aspect = c.crop ? c.crop.w / c.crop.h : v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : FRAME.width / FRAME.height
-      const box = containBox(aspect, l.scale)
+      const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
       const boxW = box.w * sx
       const boxH = box.h * sy
       const trimLen = Math.max(0.01, c.outSec - c.inSec)
@@ -212,7 +212,7 @@ async function runExport(
       // base aspect, reshaped by crop, swapped for 90°/270° rotation (shared helper).
       const aspect = effectiveImageAspect(base, c.crop, c.rotateQuarters)
       const q = (((c.rotateQuarters ?? 0) % 4) + 4) % 4
-      const box = containBox(aspect, l.scale)
+      const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
       const boxW = box.w * sx
       const boxH = box.h * sy
       visuals.push({
@@ -235,10 +235,12 @@ async function runExport(
     } else {
       if (c.text.trim().length === 0) continue
       const fontSizePx = c.fontSizePx * l.scale * sy
-      // Gradient text burns as a full-frame PNG overlay at this z-position.
-      if (c.gradient) {
+      // A gradient (libass can't do it) OR an explicit wrap width (libass can't
+      // wrap to an arbitrary width under \pos) burns as a full-frame PNG overlay,
+      // rasterised with the same CSS the preview uses so the two match exactly.
+      if (c.gradient || c.widthPx != null) {
         try {
-          const image = await renderGradientImage(
+          const image = await renderTextImage(
             {
               text: c.text,
               xCenter: l.x * sx,
@@ -246,7 +248,8 @@ async function runExport(
               fontFamily: c.fontFamily,
               fontSizePx,
               color: c.color,
-              gradient: c.gradient,
+              gradient: c.gradient ?? undefined,
+              widthPx: c.widthPx != null ? c.widthPx * l.scale * sx : undefined,
               pill: scaledPill(c.pill, sy),
               stroke: scaledStroke(c.stroke, sy) ?? null,
               shadow: scaledShadow(c.shadow, sy) ?? null
@@ -258,7 +261,7 @@ async function runExport(
           continue
         } catch {
           // Rasterising failed — fall through to a flat-colour ASS burn so the
-          // overlay still appears (using the gradient's start colour).
+          // overlay still appears (losing the gradient / exact wrap width).
         }
       }
       const assName = `text_${textN++}.ass`
@@ -328,7 +331,7 @@ async function runExport(
       if (!eff.gradient) continue
       const st = scaleStyle(eff)
       try {
-        const image = await renderGradientImage(
+        const image = await renderTextImage(
           {
             text: seg.text,
             xCenter: st.x,

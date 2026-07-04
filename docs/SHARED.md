@@ -43,6 +43,8 @@ loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
 | `resolveOverride(value, projectDefault)`, `isOverridden(value)` | `project.ts` | writing `value === undefined ? dflt : value` for a new inherit/force-on/force-off knob. `effectiveDenoise`/`effectiveStabilize` + `*Overridden` are thin wrappers |
 | `FRAME` = `{ width: 1080, height: 1920 }` | `layers.ts` | a new `{w,h}`/`{width,height}` literal. Renderer imports it as `LOGICAL` (`lib/coords.ts`); export presets (`shared/export.ts`) own per-preset **output** sizes |
 | `containBox(aspect, scale, frame?)` | `layers.ts` | re-deriving the aspect-fit ("contain") box math (was in `exporter.layerBox` + `PreviewStage.mediaBox`) |
+| `stretchedBox(aspect, scale, stretchX, stretchY, frame?)` | `layers.ts` | `containBox` + the non-uniform edge-resize stretch; preview `mediaBox` and `exporter` both size media through it |
+| `resizeBox(box, handle, dx, dy, aspect)` | `layers.ts` | hand-rolling edge/corner resize math (opposite-anchor recompute, aspect-locked corners) — drives every stage resize handle |
 | `effectiveImageAspect(base, crop, rotateQuarters)` | `layers.ts` | re-deriving image crop-reshape + 90°/270° aspect swap |
 | `effectiveCaptionStyle`, `effectiveOut`, `contentOfKind`, `audioClipEnd` | `project.ts`/`layers.ts` | already-canonical; extend rather than add parallels |
 | `pillRadiusPx(padPx)` | `project.ts` | hard-coding the text-pill corner radius; preview (`PreviewStage`, in `cqw`) and export (`textImage`, in px) must agree on the shape |

@@ -40,6 +40,79 @@ export function containBox(
 }
 
 /**
+ * Media box after the uniform `scale` AND the non-uniform edge-resize stretch:
+ * `containBox` gives the aspect-fit size, then the stretch multipliers squash /
+ * stretch each axis independently (media edge-resize distortion). Same math on
+ * preview (`mediaBox`) and export (`exporter`). @see docs/SHARED.md
+ */
+export function stretchedBox(
+  aspect: number,
+  scale: number,
+  stretchX = 1,
+  stretchY = 1,
+  frame: { width: number; height: number } = FRAME
+): { w: number; h: number } {
+  const { w, h } = containBox(aspect, scale, frame)
+  return { w: w * stretchX, h: h * stretchY }
+}
+
+export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+/** A layer's on-screen bounding box: center + size, all in logical px. */
+export interface ResizeBox {
+  cx: number
+  cy: number
+  w: number
+  h: number
+}
+
+/**
+ * New box after dragging `handle` by (dx, dy) logical px, keeping the OPPOSITE
+ * edge/corner fixed. `aspect` (corner handles) scales both dims uniformly by the
+ * pointer's projection onto the box diagonal; otherwise each grabbed edge moves
+ * on its own (distortion). Pure + unit-tested; drives every stage resize.
+ * @see docs/SHARED.md
+ */
+export function resizeBox(
+  box: ResizeBox,
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+  aspect: boolean,
+  minSize = 8
+): ResizeBox {
+  const hx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0
+  const hy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0
+  if (aspect) {
+    // Uniform scale anchored at the opposite corner: project the drag onto the
+    // grabbed corner's diagonal (dirX, dirY) to get the scale factor.
+    const dirX = hx * box.w
+    const dirY = hy * box.h
+    const denom = dirX * dirX + dirY * dirY || 1
+    const f = Math.max(1 + (dx * dirX + dy * dirY) / denom, minSize / box.w, minSize / box.h)
+    const w = box.w * f
+    const h = box.h * f
+    return {
+      cx: box.cx - (hx * box.w) / 2 + (hx * w) / 2,
+      cy: box.cy - (hy * box.h) / 2 + (hy * h) / 2,
+      w,
+      h
+    }
+  }
+  let { cx, cy, w, h } = box
+  if (hx !== 0) {
+    const anchorX = box.cx - (hx * box.w) / 2
+    w = Math.max(minSize, box.w + hx * dx)
+    cx = anchorX + (hx * w) / 2
+  }
+  if (hy !== 0) {
+    const anchorY = box.cy - (hy * box.h) / 2
+    h = Math.max(minSize, box.h + hy * dy)
+    cy = anchorY + (hy * h) / 2
+  }
+  return { cx, cy, w, h }
+}
+
+/**
  * Effective on-screen aspect of an image layer: the base source aspect, reshaped
  * by an optional 0..1 crop, then swapped for 90°/270° rotation. Used identically
  * by preview and export so a rotated/cropped image fills its box the same way.
