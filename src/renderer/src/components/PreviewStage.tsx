@@ -26,7 +26,7 @@ import {
 } from '@shared/layers'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
-import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
+import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
@@ -288,7 +288,7 @@ function VideoLayerView({
     >
       <video
         ref={ref}
-        src={proxyUrl(asset.id)}
+        src={videoProxyUrl(asset)}
         muted={content.mute}
         playsInline
         style={fill}
@@ -504,7 +504,7 @@ export function PreviewStage(): JSX.Element {
       {audioClips.map((a) => {
         const asset = assetById.get(a.mediaId)
         if (!asset?.proxyReady) return null
-        const src = asset.probe.video ? proxyUrl(asset.id) : audioUrl(asset.id)
+        const src = asset.probe.video ? videoProxyUrl(asset) : audioUrl(asset.id)
         return <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
       })}
 

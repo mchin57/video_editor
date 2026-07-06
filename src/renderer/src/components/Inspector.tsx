@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import type { CaptionStyle, Layer, Project, Stabilize, VideoContent } from '@shared/project'
 import {
   DEFAULT_STABILIZE,
@@ -11,7 +11,7 @@ import {
 } from '@shared/project'
 import { hookCovered, videoSourceTime } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { detectSilence } from '@/ipc/client'
+import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { speechSegments } from '@/lib/silence'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
@@ -103,6 +103,69 @@ export function StabilizeSliders({
         />
       </Field>
     </>
+  )
+}
+
+/**
+ * "Remove background" for a video layer: runs the segmentation model over the
+ * source clip (a background job) and adds the resulting transparent clip to the
+ * project library, ready to drop on a lane above a new background. Export-time /
+ * job effect — like stabilize, the preview only updates once the new clip exists.
+ * Renders nothing when the model isn't installed, or for an already-alpha clip.
+ */
+function RemoveBackground({ mediaId }: { mediaId: string }): JSX.Element | null {
+  const addMedia = useProject((s) => s.addMedia)
+  const [available, setAvailable] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [pct, setPct] = useState(0)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    void segmentAvailable().then(setAvailable)
+  }, [])
+
+  useEffect(() => {
+    if (!busy) return undefined
+    return onJobProgress((ev) => {
+      if (ev.type === 'matte' && ev.subjectId === mediaId && ev.status === 'running') {
+        setPct(Math.round(ev.progress * 100))
+      }
+    })
+  }, [busy, mediaId])
+
+  if (!available) return null
+
+  const run = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setErr(null)
+    setPct(0)
+    try {
+      const asset = await removeBackground(mediaId)
+      addMedia([asset.id]) // surface the new "(no bg)" clip in the library
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <CollapsibleSection id="removebg" title="Background">
+      <button
+        onClick={() => void run()}
+        disabled={busy}
+        title="Detect the subject and save a background-free copy of this clip to the library"
+        className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
+      >
+        {busy ? `Removing background… ${pct}%` : '✂ Remove background'}
+      </button>
+      {err && <p className="mt-1 text-[10px] leading-snug text-rose-300">{err}</p>}
+      <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+        Runs a segmentation model over the clip (a background job) and adds a transparent copy to your
+        library. Drop it on a lane above a new background (color, image, or another clip).
+      </p>
+    </CollapsibleSection>
   )
 }
 
@@ -446,6 +509,10 @@ function LayerEditor(): JSX.Element | null {
               )
             })()}
           </CollapsibleSection>
+
+          {/* Background removal → a new transparent library clip. Hidden for a
+              clip that already has alpha (a previously removed-background copy). */}
+          {!asset?.probe.video?.hasAlpha && <RemoveBackground mediaId={c.mediaId} />}
         </>
       )}
 

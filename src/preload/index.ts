@@ -55,6 +55,12 @@ const api = {
   detectSilence: (mediaId: string): Promise<{ start: number; end: number }[]> =>
     ipcRenderer.invoke(IPC.detectSilence, mediaId),
 
+  // Background removal (subject-aware crop) — matte a clip into a new transparent
+  // library asset (a VP9 WebM), gated on the segmentation model being present.
+  segmentAvailable: (): Promise<boolean> => ipcRenderer.invoke(IPC.segmentAvailable),
+  removeBackground: (mediaId: string): Promise<MediaAsset> =>
+    ipcRenderer.invoke(IPC.removeBackground, mediaId),
+
   // Stills — capture a frame from a clip into the library, or save it to disk.
   captureStillToLibrary: (req: StillRequest): Promise<MediaAsset> =>
     ipcRenderer.invoke(IPC.captureStillToLibrary, req),

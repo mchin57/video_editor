@@ -30,6 +30,7 @@ import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 import { detectSilence, type Interval } from './services/silence'
+import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 
 /** Import each path (fast hash+probe), then kick proxy generation in the background. */
 async function importMany(paths: string[]): Promise<MediaAsset[]> {
@@ -188,6 +189,10 @@ export function registerIpcHandlers(): void {
     if (!asset) return []
     return detectSilence(asset.originalPath, asset.probe.durationSec)
   })
+
+  // Background removal: matte a clip into a new transparent library asset.
+  ipcMain.handle(IPC.segmentAvailable, () => segmentAvailable())
+  ipcMain.handle(IPC.removeBackground, (_event, mediaId: string) => removeBackgroundToLibrary(mediaId))
 
   // Stills: capture an exact frame from a clip, matching the preview's HDR
   // tonemap / crop / color, into the library or to a user-chosen file.

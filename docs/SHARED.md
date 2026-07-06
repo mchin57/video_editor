@@ -76,3 +76,10 @@ builders (`proxyUrl`/`thumbUrl`/`imageUrl`/`audioUrl`/`waveformUrl`/`fontUrl`).
 To add an IPC call: add the channel in `shared/ipc.ts`, the invoker in
 `preload/index.ts`, the handler in `main/ipc.ts`, then add the method name to the
 destructure in `ipc/client.ts`. Don't write a `() => window.api.x()` wrapper.
+
+`ipc/client.ts` also owns the `reelmedia://` URL builders. For a video layer's
+playable proxy use **`videoProxyUrl(asset)`**, not `proxyUrl(id)` directly — it
+picks the alpha-preserving `proxy.webm` for background-removed clips
+(`probe.video.hasAlpha`) and the H.264 `proxy.mp4` otherwise, so the preview
+`<video>` keeps transparency. The matching main-side split is in
+`mediaStore.ts` (`playableProxyPath`/`ensureProxy` → `generateAlphaProxy`).

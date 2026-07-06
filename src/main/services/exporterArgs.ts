@@ -34,6 +34,9 @@ export interface ExportVideo {
   len: number
   /** Precomputed HDR→SDR tonemap chain, or '' (none). */
   hdrChain: string
+  /** Background-removed clip: keep the alpha channel (format=yuva420p) so the
+   *  overlay blends the subject over lower layers instead of a black box. */
+  hasAlpha?: boolean
   /** Source-pixel crop, or null. */
   crop: { x: number; y: number; w: number; h: number } | null
   /** Precomputed eq filter (color correction), or '' (neutral). */
@@ -260,7 +263,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       const setpts = freezeSum
         ? `setpts=PTS-STARTPTS+(${freezeSum})/TB+${f3(v.startSec)}/TB`
         : `setpts=PTS-STARTPTS+${f3(v.startSec)}/TB`
-      pre.push('setsar=1', 'format=yuv420p', setpts)
+      pre.push('setsar=1', v.hasAlpha ? 'format=yuva420p' : 'format=yuv420p', setpts)
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
       chains.push(
         `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`

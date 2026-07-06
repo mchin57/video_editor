@@ -41,6 +41,7 @@ Thumbs.db
 # App data / bundled binaries that are downloaded on first run, not committed
 resources/bin/
 resources/whisper-models/
+resources/models/
 
 # Code-signing certificates / keys — never commit
 certs/

@@ -70,6 +70,15 @@ describe('buildExportArgs', () => {
     )
   })
 
+  it('keeps the alpha channel (format=yuva420p) for a background-removed clip so the overlay blends', () => {
+    const opaque = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
+    expect(opaque).toContain('setsar=1,format=yuv420p,setpts=') // default path unchanged
+
+    const alpha = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, hasAlpha: true } }] }), 'o').join(' ')
+    expect(alpha).toContain('setsar=1,format=yuva420p,setpts=')
+    expect(alpha).not.toContain('format=yuv420p,setpts=')
+  })
+
   it('stretches PTS for freeze holds (escaped commas), keeping the plain form with none', () => {
     const none = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
     expect(none).toContain('setpts=PTS-STARTPTS+1.000/TB[pv1]') // unchanged when no freezes

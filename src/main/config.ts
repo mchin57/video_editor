@@ -22,7 +22,7 @@ export function getDataDir(): string {
 }
 
 export function getSubdir(
-  name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin' | 'extracted' | 'stills'
+  name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin' | 'extracted' | 'stills' | 'nobg'
 ): string {
   const p = join(getDataDir(), name)
   mkdirSync(p, { recursive: true })
@@ -59,6 +59,21 @@ export function getBundledFontsDir(): string | null {
   if (app.isPackaged) return join(process.resourcesPath, 'fonts')
   for (const base of [app.getAppPath(), process.cwd()]) {
     const dir = join(base, 'resources', 'fonts')
+    if (existsSync(dir)) return dir
+  }
+  return null
+}
+
+/**
+ * Directory holding the bundled ML models (electron-builder `extraResources` →
+ * <resources>/models; the committed/staged `resources/models` in dev). Currently
+ * the RVM background-removal ONNX model. Returns null when absent, so discovery
+ * can fall back to the user data dir (`<data>/bin/models`).
+ */
+export function getBundledModelsDir(): string | null {
+  if (app.isPackaged) return join(process.resourcesPath, 'models')
+  for (const base of [app.getAppPath(), process.cwd()]) {
+    const dir = join(base, 'resources', 'models')
     if (existsSync(dir)) return dir
   }
   return null

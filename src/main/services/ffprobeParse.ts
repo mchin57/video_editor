@@ -9,6 +9,7 @@
  */
 
 import type { ProbeInfo, VideoStreamInfo, AudioStreamInfo } from '@shared/media'
+import { pixFmtHasAlpha } from '@shared/media'
 
 interface RawSideData {
   side_data_type?: string
@@ -107,7 +108,8 @@ function parseVideo(s: RawStream): VideoStreamInfo {
     colorTransfer: transfer,
     colorPrimaries: cleanColor(s.color_primaries),
     colorSpace: cleanColor(s.color_space),
-    isHdr: transfer !== null && HDR_TRANSFERS.has(transfer)
+    isHdr: transfer !== null && HDR_TRANSFERS.has(transfer),
+    hasAlpha: pixFmtHasAlpha(s.pix_fmt)
   }
 }
 

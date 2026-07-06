@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildProxyArgs, proxyDimensions } from './proxy'
+import { buildAlphaProxyArgs, buildProxyArgs, proxyDimensions } from './proxy'
 import type { ProbeInfo } from '@shared/media'
 
 function probe(over: Partial<ProbeInfo['video']> & { isHdr?: boolean }): ProbeInfo {
@@ -74,5 +74,17 @@ describe('buildProxyArgs', () => {
     const args = buildProxyArgs('in.mov', 'out.mp4', noAudio).join(' ')
     expect(args).toContain('-an')
     expect(args).not.toContain('0:a:0')
+  })
+})
+
+describe('buildAlphaProxyArgs', () => {
+  it('encodes a silent VP9 yuva420p WebM at the proxy scale', () => {
+    const args = buildAlphaProxyArgs('in.webm', 'out.webm', probe({ displayWidth: 1080, displayHeight: 1920 }))
+    const s = args.join(' ')
+    expect(s).toContain('libvpx-vp9')
+    expect(s).toContain('yuva420p')
+    expect(s).toContain('scale=720:1280')
+    expect(args).toContain('-an') // background-removed clips are silent
+    expect(args[args.length - 1]).toBe('out.webm')
   })
 })

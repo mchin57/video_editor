@@ -22,6 +22,10 @@ export interface VideoStreamInfo {
   colorSpace: string | null
   /** True for PQ (smpte2084) or HLG (arib-std-b67) transfer — needs tone-mapping. */
   isHdr: boolean
+  /** True when the pixel format carries an alpha channel (e.g. yuva420p). Set for
+   *  background-removed clips so preview + export keep transparency instead of
+   *  flattening to yuv420p. Absent on assets probed before this field existed. */
+  hasAlpha?: boolean
 }
 
 export interface AudioStreamInfo {
@@ -80,6 +84,19 @@ export function deriveKind(probe: ProbeInfo): MediaKind {
 /** The asset's class, using the stored kind when present, else derived. */
 export function assetKind(a: MediaAsset): MediaKind {
   return a.kind ?? deriveKind(a.probe)
+}
+
+/** Whether an ffprobe pixel-format name carries an alpha channel. Covers the
+ *  planar YUV+alpha (`yuva*`), gray+alpha (`ya*`), packed RGB+alpha, and planar
+ *  GBR+alpha (`gbrap*`) families. */
+export function pixFmtHasAlpha(pixFmt: string | undefined | null): boolean {
+  if (!pixFmt) return false
+  return (
+    /^yuva/.test(pixFmt) ||
+    /^ya(8|16)?$/.test(pixFmt) ||
+    /^gbrap/.test(pixFmt) ||
+    ['rgba', 'argb', 'abgr', 'bgra', 'rgba64be', 'rgba64le'].includes(pixFmt)
+  )
 }
 
 export const isImageAsset = (a: MediaAsset): boolean => assetKind(a) === 'image'

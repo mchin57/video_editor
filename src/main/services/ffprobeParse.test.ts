@@ -101,6 +101,19 @@ describe('parseFfprobeJson — landscape H.264 SDR CFR', () => {
   })
 })
 
+describe('parseFfprobeJson — alpha channel detection', () => {
+  const withPixFmt = (pix_fmt: string): FfprobeJson => ({
+    streams: [{ codec_type: 'video', codec_name: 'vp9', width: 1080, height: 1920, pix_fmt }],
+    format: { duration: '5.0', format_name: 'matroska,webm' }
+  })
+  it('flags alpha for yuva420p (background-removed clips)', () => {
+    expect(parseFfprobeJson(withPixFmt('yuva420p')).video?.hasAlpha).toBe(true)
+  })
+  it('does not flag alpha for ordinary yuv420p footage', () => {
+    expect(parseFfprobeJson(withPixFmt('yuv420p')).video?.hasAlpha).toBe(false)
+  })
+})
+
 describe('parseFfprobeJson — VFR detection + legacy rotate tag', () => {
   const json: FfprobeJson = {
     streams: [

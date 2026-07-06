@@ -49,6 +49,46 @@ export function hdrToSdrChain(v: VideoStreamInfo): string {
   ].join(',')
 }
 
+/**
+ * Alpha-preserving proxy for a background-removed clip: a downscaled VP9 WebM in
+ * `yuva420p` so the renderer's <video> keeps transparency (H.264/mp4 can't). No
+ * audio (these clips are silent). Chromium plays VP8/VP9-alpha WebM with a
+ * transparent background, so the subject composites over lower layers in preview.
+ */
+export function buildAlphaProxyArgs(input: string, output: string, probe: ProbeInfo): string[] {
+  const { w, h } = proxyDimensions(probe)
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    input,
+    '-map',
+    '0:v:0',
+    '-vf',
+    `scale=${w}:${h}:flags=bicubic`,
+    '-c:v',
+    'libvpx-vp9',
+    '-pix_fmt',
+    'yuva420p',
+    '-b:v',
+    '0',
+    '-crf',
+    '32',
+    '-deadline',
+    'good',
+    '-cpu-used',
+    '4',
+    '-row-mt',
+    '1',
+    '-an',
+    '-progress',
+    'pipe:1',
+    '-nostats',
+    output
+  ]
+}
+
 export function buildProxyArgs(input: string, output: string, probe: ProbeInfo): string[] {
   const { w, h } = proxyDimensions(probe)
   const chain: string[] = []
@@ -83,18 +123,14 @@ export function buildProxyArgs(input: string, output: string, probe: ProbeInfo):
   return args
 }
 
-/** Run the proxy transcode, reporting progress (0..1) to the given job. */
-export async function generateProxy(
-  input: string,
-  output: string,
-  probe: ProbeInfo,
+/** Spawn an ffmpeg encode, forwarding `-progress pipe:1` output to the job (0..1). */
+function runEncodeWithProgress(
+  ffmpeg: string,
+  args: string[],
+  durationSec: number,
   jobId: string
 ): Promise<void> {
-  const { ffmpeg } = await getBinaries()
-  const args = buildProxyArgs(input, output, probe)
-  const durationSec = probe.durationSec || 0
-
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true })
     let tail = ''
 
@@ -115,4 +151,26 @@ export async function generateProxy(
       else reject(new Error(`ffmpeg proxy exited ${code}: ${tail.slice(-500)}`))
     })
   })
+}
+
+/** Run the proxy transcode, reporting progress (0..1) to the given job. */
+export async function generateProxy(
+  input: string,
+  output: string,
+  probe: ProbeInfo,
+  jobId: string
+): Promise<void> {
+  const { ffmpeg } = await getBinaries()
+  await runEncodeWithProgress(ffmpeg, buildProxyArgs(input, output, probe), probe.durationSec || 0, jobId)
+}
+
+/** Run the alpha-preserving (VP9 WebM) proxy transcode for a background-removed clip. */
+export async function generateAlphaProxy(
+  input: string,
+  output: string,
+  probe: ProbeInfo,
+  jobId: string
+): Promise<void> {
+  const { ffmpeg } = await getBinaries()
+  await runEncodeWithProgress(ffmpeg, buildAlphaProxyArgs(input, output, probe), probe.durationSec || 0, jobId)
 }

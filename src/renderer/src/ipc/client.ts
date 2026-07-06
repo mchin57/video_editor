@@ -8,6 +8,8 @@
  * the renderer itself owns. @see docs/SHARED.md
  */
 
+import type { MediaAsset } from '@shared/media'
+
 export const {
   getCapabilities,
   getDataDir,
@@ -30,6 +32,8 @@ export const {
   transcribeMedia,
   getTranscript,
   detectSilence,
+  segmentAvailable,
+  removeBackground,
   captureStillToLibrary,
   captureStillToDisk,
   pathForFile,
@@ -38,6 +42,14 @@ export const {
 
 /** Stream URL for a media asset's proxy via the reelmedia:// scheme. */
 export const proxyUrl = (id: string): string => `reelmedia://${id}/proxy.mp4`
+
+/** Stream URL for a background-removed clip's alpha-preserving VP9 WebM proxy. */
+export const alphaProxyUrl = (id: string): string => `reelmedia://${id}/proxy.webm`
+
+/** The playable video-proxy URL for an asset: the alpha WebM for background-removed
+ *  clips (so <video> keeps transparency), else the H.264 mp4. */
+export const videoProxyUrl = (asset: MediaAsset): string =>
+  asset.probe.video?.hasAlpha ? alphaProxyUrl(asset.id) : proxyUrl(asset.id)
 
 /** URL for a media asset's first-frame thumbnail. */
 export const thumbUrl = (id: string): string => `reelmedia://${id}/thumb.jpg`

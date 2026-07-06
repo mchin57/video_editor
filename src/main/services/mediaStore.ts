@@ -12,13 +12,14 @@ import type { MediaAsset, MediaKind } from '@shared/media'
 import { assetKind, deriveKind, isAudioAsset, isImageAsset, kindFromExt } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
-import { generateProxy } from './proxy'
+import { generateProxy, generateAlphaProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
 import { extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
 
-function hashFile(path: string): Promise<string> {
+/** Content hash (first 12 hex of sha1) of a file — the media folder / id. */
+export function hashFile(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha1')
     const stream = createReadStream(path)
@@ -30,6 +31,8 @@ function hashFile(path: string): Promise<string> {
 
 const mediaDir = (id: string): string => join(getSubdir('media'), id)
 const proxyPath = (id: string): string => join(mediaDir(id), 'proxy.mp4')
+/** Alpha-preserving proxy (VP9 WebM) for background-removed clips. */
+const alphaProxyPath = (id: string): string => join(mediaDir(id), 'proxy.webm')
 const audioProxyPath = (id: string): string => join(mediaDir(id), 'audio.m4a')
 const imagePath = (id: string): string => join(mediaDir(id), 'image.png')
 const waveformPath = (id: string): string => join(mediaDir(id), 'waveform.png')
@@ -39,9 +42,19 @@ const assetJsonPath = (id: string): string => join(mediaDir(id), 'asset.json')
 /** Absolute path to an image asset's display PNG (used by preview + export). */
 export const imageAssetPath = (id: string): string => imagePath(id)
 
-/** The "ready to use" artifact for an asset: image PNG, audio bed, or video proxy. */
+/** Whether a video asset carries an alpha channel (background-removed clip). */
+const isAlphaVideo = (a: MediaAsset): boolean => !!a.probe.video?.hasAlpha
+
+/** The "ready to use" artifact for an asset: image PNG, audio bed, or video proxy
+ *  (a VP9 WebM for alpha clips so preview keeps transparency, else an H.264 mp4). */
 const playableProxyPath = (a: MediaAsset): string =>
-  isImageAsset(a) ? imagePath(a.id) : isAudioAsset(a) ? audioProxyPath(a.id) : proxyPath(a.id)
+  isImageAsset(a)
+    ? imagePath(a.id)
+    : isAudioAsset(a)
+      ? audioProxyPath(a.id)
+      : isAlphaVideo(a)
+        ? alphaProxyPath(a.id)
+        : proxyPath(a.id)
 
 /** Best-effort first-frame thumbnail; never fails the import if it errors. */
 async function makeThumb(asset: MediaAsset): Promise<void> {
@@ -161,7 +174,13 @@ export async function ensureProxy(id: string): Promise<void> {
   await makeThumb(asset) // ensure a thumbnail exists even if import-time gen failed
   const job = createJob('proxy', `Proxy · ${asset.fileName}`, id)
   try {
-    await generateProxy(asset.originalPath, proxyPath(id), asset.probe, job.id)
+    // Alpha clips (background-removed) proxy to a VP9 WebM so preview keeps
+    // transparency; everything else gets the small H.264 mp4.
+    if (isAlphaVideo(asset)) {
+      await generateAlphaProxy(asset.originalPath, alphaProxyPath(id), asset.probe, job.id)
+    } else {
+      await generateProxy(asset.originalPath, proxyPath(id), asset.probe, job.id)
+    }
     await makeWaveform(asset) // for the audio lane if this clip's audio is extracted
     asset.proxyReady = true
     await writeAsset(asset)

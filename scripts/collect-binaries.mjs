@@ -82,4 +82,25 @@ const modelSrc =
 if (!modelSrc || !existsSync(modelSrc)) die('whisper model (*.bin) not found. Set WHISPER_MODEL.')
 copyInto(modelSrc, destWhisper)
 
+// --- background-removal model (RVM ONNX) -----------------------------------
+// Optional: the "Remove background" feature is gated on the model being present,
+// so a build without it just leaves the feature unavailable. The resources/models
+// dir is always created so electron-builder's extraResources `from` path exists.
+console.log('• background-removal model (RVM ONNX)')
+const destModels = join(root, 'resources', 'models')
+mkdirSync(destModels, { recursive: true })
+const matteModelSrc =
+  process.env.MATTE_MODEL ??
+  (() => {
+    const dir = join(HOME, 'Documents', 'VideoEditor', 'bin', 'models')
+    if (!existsSync(dir)) return null
+    const onnx = readdirSync(dir).find((f) => f.toLowerCase().endsWith('.onnx'))
+    return onnx ? join(dir, onnx) : null
+  })()
+if (!matteModelSrc || !existsSync(matteModelSrc)) {
+  console.log('  ! no RVM .onnx found (set MATTE_MODEL or place one in <data>/bin/models) — skipping')
+} else {
+  copyInto(matteModelSrc, destModels)
+}
+
 console.log('✓ binaries staged in resources/bin/')

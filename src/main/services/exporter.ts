@@ -180,6 +180,7 @@ async function runExport(
           inSec: srcInSec,
           len: trimLen,
           hdrChain,
+          hasAlpha: !!v?.hasAlpha,
           crop: c.crop ?? null,
           colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
           boxW,

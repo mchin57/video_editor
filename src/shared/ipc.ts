@@ -30,6 +30,9 @@ export const IPC = {
   getTranscript: 'whisper:getTranscript',
   // Audio editing
   detectSilence: 'audio:detectSilence',
+  // Background removal (subject-aware crop)
+  segmentAvailable: 'segment:available',
+  removeBackground: 'segment:removeBackground',
   // Stills (capture a frame from a clip)
   captureStillToLibrary: 'still:toLibrary',
   captureStillToDisk: 'still:toDisk'
