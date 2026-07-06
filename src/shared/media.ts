@@ -22,9 +22,12 @@ export interface VideoStreamInfo {
   colorSpace: string | null
   /** True for PQ (smpte2084) or HLG (arib-std-b67) transfer — needs tone-mapping. */
   isHdr: boolean
-  /** True when the pixel format carries an alpha channel (e.g. yuva420p). Set for
-   *  background-removed clips so preview + export keep transparency instead of
-   *  flattening to yuv420p. Absent on assets probed before this field existed. */
+  /** True when the stream carries an alpha channel. Set for background-removed
+   *  clips so preview + export keep transparency instead of flattening to
+   *  yuv420p. NB: for VP8/VP9 WebM the alpha lives in a container side-band —
+   *  ffprobe reports `pix_fmt=yuv420p` and signals alpha only via the
+   *  `alpha_mode=1` stream tag (see ffprobeParse). Absent on assets probed
+   *  before this field existed. */
   hasAlpha?: boolean
 }
 
@@ -97,6 +100,23 @@ export function pixFmtHasAlpha(pixFmt: string | undefined | null): boolean {
     /^gbrap/.test(pixFmt) ||
     ['rgba', 'argb', 'abgr', 'bgra', 'rgba64be', 'rgba64le'].includes(pixFmt)
   )
+}
+
+/**
+ * The decoder ffmpeg must be forced to (`-c:v <name>` placed BEFORE that `-i`)
+ * for an alpha video's transparency to survive decoding. VP8/VP9 store alpha as
+ * a Matroska side-band the native decoders silently drop — only the libvpx
+ * decoders read it (verified against ffmpeg 8.1: default decode of a yuva420p
+ * VP9 WebM yields a fully-opaque alpha plane). Null = no forcing needed: either
+ * no alpha, or a codec whose default decoder carries it (e.g. ProRes 4444).
+ */
+export function alphaInputDecoder(
+  v: Pick<VideoStreamInfo, 'codec' | 'hasAlpha'> | null | undefined
+): string | null {
+  if (!v?.hasAlpha) return null
+  if (v.codec === 'vp9') return 'libvpx-vp9'
+  if (v.codec === 'vp8') return 'libvpx'
+  return null
 }
 
 export const isImageAsset = (a: MediaAsset): boolean => assetKind(a) === 'image'

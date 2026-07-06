@@ -109,7 +109,9 @@ function parseVideo(s: RawStream): VideoStreamInfo {
     colorPrimaries: cleanColor(s.color_primaries),
     colorSpace: cleanColor(s.color_space),
     isHdr: transfer !== null && HDR_TRANSFERS.has(transfer),
-    hasAlpha: pixFmtHasAlpha(s.pix_fmt)
+    // VP8/VP9 WebM alpha is a container side-band: pix_fmt stays yuv420p and the
+    // only signal is the `alpha_mode=1` stream tag (verified against ffmpeg 8.1).
+    hasAlpha: pixFmtHasAlpha(s.pix_fmt) || s.tags?.alpha_mode === '1'
   }
 }
 

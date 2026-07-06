@@ -112,6 +112,11 @@ describe('parseFfprobeJson — alpha channel detection', () => {
   it('does not flag alpha for ordinary yuv420p footage', () => {
     expect(parseFfprobeJson(withPixFmt('yuv420p')).video?.hasAlpha).toBe(false)
   })
+  it('flags alpha via the alpha_mode stream tag — real ffprobe reports yuv420p for VP9-alpha WebM', () => {
+    const json = withPixFmt('yuv420p')
+    json.streams![0].tags = { alpha_mode: '1' }
+    expect(parseFfprobeJson(json).video?.hasAlpha).toBe(true)
+  })
 })
 
 describe('parseFfprobeJson — VFR detection + legacy rotate tag', () => {

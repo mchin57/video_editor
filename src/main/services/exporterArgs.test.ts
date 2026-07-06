@@ -79,6 +79,18 @@ describe('buildExportArgs', () => {
     expect(alpha).not.toContain('format=yuv420p,setpts=')
   })
 
+  it('forces the input decoder for a VP9-alpha clip (native decode drops the alpha)', () => {
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, hasAlpha: true, inputDecoder: 'libvpx-vp9' } }] }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('-c:v libvpx-vp9 -ss 2.000 -t 5.000 -i C:/v/a.mov')
+
+    const plain = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
+    expect(plain).toContain('-ss 2.000 -t 5.000 -i C:/v/a.mov')
+    expect(plain).not.toContain('-c:v libvpx-vp9 -ss')
+  })
+
   it('stretches PTS for freeze holds (escaped commas), keeping the plain form with none', () => {
     const none = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
     expect(none).toContain('setpts=PTS-STARTPTS+1.000/TB[pv1]') // unchanged when no freezes

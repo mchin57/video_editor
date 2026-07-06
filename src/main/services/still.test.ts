@@ -22,4 +22,9 @@ describe('buildStillArgs', () => {
   it('clamps negative seek to zero', () => {
     expect(buildStillArgs('i', 'o.png', -3).join(' ')).toContain('-ss 0.000')
   })
+
+  it('forces the input decoder when given (VP9-alpha sources)', () => {
+    const s = buildStillArgs('in.webm', 'o.png', 1, [], 'libvpx-vp9').join(' ')
+    expect(s).toContain('-c:v libvpx-vp9 -ss 1.000 -i in.webm')
+  })
 })

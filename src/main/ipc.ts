@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join, parse } from 'node:path'
 import { IPC, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
-import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
+import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
 import { isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
@@ -201,7 +201,7 @@ export function registerIpcHandlers(): void {
     if (!asset) throw new Error('Source media not found for this still.')
     const base = parse(asset.fileName).name
     const out = join(getSubdir('stills'), `${base}-still-${Date.now().toString(36)}.png`)
-    await generateStill(asset.originalPath, out, req.sourceSec, stillVfChain(asset, req))
+    await generateStill(asset.originalPath, out, req.sourceSec, stillVfChain(asset, req), alphaInputDecoder(asset.probe.video))
     return importFile(out, `${base} (still).png`)
   })
 
@@ -221,7 +221,7 @@ export function registerIpcHandlers(): void {
       }
       const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
       if (result.canceled || !result.filePath) return null
-      await generateStill(asset.originalPath, result.filePath, req.sourceSec, stillVfChain(asset, req))
+      await generateStill(asset.originalPath, result.filePath, req.sourceSec, stillVfChain(asset, req), alphaInputDecoder(asset.probe.video))
       return result.filePath
     }
   )

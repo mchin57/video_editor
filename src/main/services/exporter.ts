@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/export'
+import { alphaInputDecoder } from '@shared/media'
 import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
@@ -167,11 +168,16 @@ async function runExport(
       let srcPath = asset.originalPath
       let srcInSec = c.inSec
       let hdrChain = v?.isHdr ? hdrToSdrChain(v) : ''
+      let hasAlpha = !!v?.hasAlpha
+      let inputDecoder = alphaInputDecoder(v)
       const stab = effectiveStabilize(c, project.stabilizeDefault)
       if (stab) {
         srcPath = await stabilizeClip(asset.originalPath, c.inSec, trimLen, hdrChain, stab)
         srcInSec = 0
         hdrChain = ''
+        // The stabilized intermediate is an opaque yuv420p mp4 — any alpha is gone.
+        hasAlpha = false
+        inputDecoder = null
       }
       visuals.push({
         kind: 'video',
@@ -180,7 +186,8 @@ async function runExport(
           inSec: srcInSec,
           len: trimLen,
           hdrChain,
-          hasAlpha: !!v?.hasAlpha,
+          hasAlpha,
+          inputDecoder,
           crop: c.crop ?? null,
           colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
           boxW,

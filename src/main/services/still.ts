@@ -13,12 +13,16 @@ export function buildStillArgs(
   input: string,
   output: string,
   sourceSec: number,
-  vfChain: string[] = []
+  vfChain: string[] = [],
+  /** Force this input decoder (`-c:v` before `-i`) — needed for VP8/VP9 alpha
+   *  (see `alphaInputDecoder`, shared/media). */
+  inputDecoder: string | null = null
 ): string[] {
   const args = [
     '-y',
     '-hide_banner',
     '-nostdin',
+    ...(inputDecoder ? ['-c:v', inputDecoder] : []),
     '-ss',
     Math.max(0, sourceSec).toFixed(3),
     '-i',
@@ -39,10 +43,11 @@ export async function generateStill(
   input: string,
   output: string,
   sourceSec: number,
-  vfChain: string[] = []
+  vfChain: string[] = [],
+  inputDecoder: string | null = null
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  const args = buildStillArgs(input, output, sourceSec, vfChain)
+  const args = buildStillArgs(input, output, sourceSec, vfChain, inputDecoder)
   await new Promise<void>((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true })
     let tail = ''

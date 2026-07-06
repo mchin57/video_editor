@@ -37,6 +37,11 @@ export interface ExportVideo {
   /** Background-removed clip: keep the alpha channel (format=yuva420p) so the
    *  overlay blends the subject over lower layers instead of a black box. */
   hasAlpha?: boolean
+  /** Decoder to force for this input (`-c:v <name>` before its `-i`), or null.
+   *  VP8/VP9 alpha is a side-band the native decoders silently drop — see
+   *  `alphaInputDecoder` (shared/media). Without it, `hasAlpha` composites an
+   *  opaque rectangle. */
+  inputDecoder?: string | null
   /** Source-pixel crop, or null. */
   crop: { x: number; y: number; w: number; h: number } | null
   /** Precomputed eq filter (color correction), or '' (neutral). */
@@ -233,7 +238,10 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
   const audioBase = idx
 
   const inputs: string[] = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=${f3(totalDur)}`]
-  for (const v of videos) inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
+  for (const v of videos) {
+    if (v.inputDecoder) inputs.push('-c:v', v.inputDecoder)
+    inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
+  }
   for (const im of images) inputs.push('-i', im.path)
   for (const im of topImages) inputs.push('-i', im.path)
   for (const a of audio) inputs.push('-i', a.path)

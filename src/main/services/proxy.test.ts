@@ -87,4 +87,8 @@ describe('buildAlphaProxyArgs', () => {
     expect(args).toContain('-an') // background-removed clips are silent
     expect(args[args.length - 1]).toBe('out.webm')
   })
+  it('forces the libvpx decoder for a VP9-alpha input (native decode drops the alpha)', () => {
+    const s = buildAlphaProxyArgs('in.webm', 'out.webm', probe({ codec: 'vp9', hasAlpha: true })).join(' ')
+    expect(s).toContain('-c:v libvpx-vp9 -i in.webm')
+  })
 })

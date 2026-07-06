@@ -50,4 +50,10 @@ describe('buildThumbnailArgs', () => {
     expect(sdr).not.toContain('tonemap')
     expect(hdr).toContain('tonemap=tonemap=hable')
   })
+  it('forces the libvpx decoder for VP9-alpha sources (native decode drops the alpha)', () => {
+    const s = buildThumbnailArgs('in.webm', 'out.jpg', probe({ codec: 'vp9', hasAlpha: true })).join(' ')
+    expect(s).toContain('-c:v libvpx-vp9 -ss 0 -i in.webm')
+    const plain = buildThumbnailArgs('in.mov', 'out.jpg', probe()).join(' ')
+    expect(plain).not.toContain('-c:v')
+  })
 })

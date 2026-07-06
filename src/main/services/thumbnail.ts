@@ -6,6 +6,7 @@
 
 import { spawn } from 'node:child_process'
 import type { ProbeInfo } from '@shared/media'
+import { alphaInputDecoder } from '@shared/media'
 import { getBinaries } from './ffmpeg'
 import { hdrToSdrChain } from './proxy'
 
@@ -24,10 +25,14 @@ export function buildThumbnailArgs(input: string, output: string, probe: ProbeIn
   const chain: string[] = []
   if (probe.video?.isHdr) chain.push(hdrToSdrChain(probe.video))
   chain.push(`scale=${w}:${h}:flags=bicubic`)
+  // Alpha WebM: force the libvpx decoder so the thumb shows the matted subject
+  // (over black) instead of the model's full-frame foreground smear.
+  const dec = alphaInputDecoder(probe.video)
   return [
     '-y',
     '-hide_banner',
     '-nostdin',
+    ...(dec ? ['-c:v', dec] : []),
     '-ss',
     '0',
     '-i',

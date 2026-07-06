@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process'
 import type { ProbeInfo, VideoStreamInfo } from '@shared/media'
+import { alphaInputDecoder } from '@shared/media'
 import { getBinaries } from './ffmpeg'
 import { setProgress } from './jobs'
 
@@ -57,10 +58,14 @@ export function hdrToSdrChain(v: VideoStreamInfo): string {
  */
 export function buildAlphaProxyArgs(input: string, output: string, probe: ProbeInfo): string[] {
   const { w, h } = proxyDimensions(probe)
+  // VP8/VP9 alpha only survives decoding under the libvpx decoders (the native
+  // ones silently drop the side-band), so force the input decoder when needed.
+  const dec = alphaInputDecoder(probe.video)
   return [
     '-y',
     '-hide_banner',
     '-nostdin',
+    ...(dec ? ['-c:v', dec] : []),
     '-i',
     input,
     '-map',

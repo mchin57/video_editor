@@ -61,8 +61,17 @@ export function discoverMatteModel(): string | null {
   return null
 }
 
-export function segmentAvailable(): boolean {
-  return discoverMatteModel() !== null
+/** Feature gate: the model must exist on disk AND onnxruntime-node must load
+ *  (it's a native module — an Electron ABI mismatch fails at import time, and
+ *  the UI should hide the button rather than fail at click time). */
+export async function segmentAvailable(): Promise<boolean> {
+  if (discoverMatteModel() === null) return false
+  try {
+    await loadOrt()
+    return true
+  } catch {
+    return false
+  }
 }
 
 // onnxruntime-node is loaded lazily (native module) so a load failure can't crash
@@ -113,12 +122,34 @@ export async function removeBackgroundToLibrary(mediaId: string): Promise<MediaA
   try {
     const ort = await loadOrt()
     const session = await getSession(ort, modelPath)
+    // Fail early and clearly if a non-RVM ONNX was dropped in (inputs: src,
+    // r1i..r4i, downsample_ratio) — checked BEFORE any ffmpeg is spawned so a
+    // bad model can't leak live child processes.
+    if (!session.inputNames.includes('src') || !session.inputNames.includes('downsample_ratio')) {
+      throw new Error(
+        `"${basename(modelPath)}" is not a Robust Video Matting model (inputs: ${session.inputNames.join(', ')}).`
+      )
+    }
 
     const { w, h } = matteDims(v.displayWidth, v.displayHeight)
     const fps = Math.min(60, Math.max(1, Math.round(v.avgFps || 30)))
     const ratio = downsampleRatioFor(w, h)
     const frameBytes = w * h * 3
     const estTotal = Math.max(1, Math.round(fps * (asset.probe.durationSec || 0)))
+
+    // Recurrent state: zero on the first frame, then the model's own outputs fed
+    // back each step for temporal stability. Created before spawning ffmpeg for
+    // the same no-leak reason as the model check above.
+    const zero = (): OrtTensor => new ort.Tensor('float32', new Float32Array(1), [1, 1, 1, 1])
+    let r1 = zero()
+    let r2 = zero()
+    let r3 = zero()
+    let r4 = zero()
+    // downsample_ratio is a scalar the RVM export shapes as (1,); some exports use
+    // a 0-d scalar. Start at (1,) and fall back to () once, on the first frame.
+    const makeRatio = (dims: number[]): OrtTensor => new ort.Tensor('float32', new Float32Array([ratio]), dims)
+    let ratioT = makeRatio([1])
+    let ratioFixed = false
 
     const { ffmpeg } = await getBinaries()
     const tmpOut = join(getSubdir('tmp'), `nobg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webm`)
@@ -148,64 +179,50 @@ export async function removeBackgroundToLibrary(mediaId: string): Promise<MediaA
       decode.on('close', (code) => resolve(code ?? -1))
     })
 
-    // Fail early and clearly if a non-RVM ONNX was dropped in (inputs: src,
-    // r1i..r4i, downsample_ratio).
-    if (!session.inputNames.includes('src') || !session.inputNames.includes('downsample_ratio')) {
-      throw new Error(
-        `"${basename(modelPath)}" is not a Robust Video Matting model (inputs: ${session.inputNames.join(', ')}).`
-      )
-    }
-
-    // Recurrent state: zero on the first frame, then the model's own outputs fed
-    // back each step for temporal stability.
-    const zero = (): OrtTensor => new ort.Tensor('float32', new Float32Array(1), [1, 1, 1, 1])
-    let r1 = zero()
-    let r2 = zero()
-    let r3 = zero()
-    let r4 = zero()
-    // downsample_ratio is a scalar the RVM export shapes as (1,); some exports use
-    // a 0-d scalar. Start at (1,) and fall back to () once, on the first frame.
-    const makeRatio = (dims: number[]): OrtTensor => new ort.Tensor('float32', new Float32Array([ratio]), dims)
-    let ratioT = makeRatio([1])
-    let ratioFixed = false
-
     let n = 0
     try {
-      for await (const frame of rawFrames(dout, frameBytes)) {
-        const src = new ort.Tensor('float32', frameToSrcTensor(frame, w, h), [1, 3, h, w])
-        const feeds = { src, r1i: r1, r2i: r2, r3i: r3, r4i: r4, downsample_ratio: ratioT }
-        let out: Awaited<ReturnType<OrtSession['run']>>
-        if (ratioFixed) {
-          out = await session.run(feeds)
-        } else {
-          try {
+      try {
+        for await (const frame of rawFrames(dout, frameBytes)) {
+          const src = new ort.Tensor('float32', frameToSrcTensor(frame, w, h), [1, 3, h, w])
+          const feeds = { src, r1i: r1, r2i: r2, r3i: r3, r4i: r4, downsample_ratio: ratioT }
+          let out: Awaited<ReturnType<OrtSession['run']>>
+          if (ratioFixed) {
             out = await session.run(feeds)
-          } catch {
-            ratioT = makeRatio([]) // retry once with a 0-d scalar shape
-            out = await session.run({ ...feeds, downsample_ratio: ratioT })
+          } else {
+            try {
+              out = await session.run(feeds)
+            } catch {
+              ratioT = makeRatio([]) // retry once with a 0-d scalar shape
+              out = await session.run({ ...feeds, downsample_ratio: ratioT })
+            }
+            ratioFixed = true
           }
-          ratioFixed = true
+          const rgba = compositeRgba(out.fgr.data as Float32Array, out.pha.data as Float32Array, w, h)
+          r1 = out.r1o as OrtTensor
+          r2 = out.r2o as OrtTensor
+          r3 = out.r3o as OrtTensor
+          r4 = out.r4o as OrtTensor
+          if (!ein.write(rgba)) await once(ein, 'drain')
+          n++
+          if (n % 4 === 0) setProgress(job.id, Math.min(0.98, n / estTotal))
         }
-        const rgba = compositeRgba(out.fgr.data as Float32Array, out.pha.data as Float32Array, w, h)
-        r1 = out.r1o as OrtTensor
-        r2 = out.r2o as OrtTensor
-        r3 = out.r3o as OrtTensor
-        r4 = out.r4o as OrtTensor
-        if (!ein.write(rgba)) await once(ein, 'drain')
-        n++
-        if (n % 4 === 0) setProgress(job.id, Math.min(0.98, n / estTotal))
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        throw new Error(`Frame processing failed: ${detail}${decErr ? ` · ${decErr.slice(-300)}` : ''}`)
       }
+      ein.end()
+      await encodeDone
+      const dcode = await decodeExit
+      if (dcode !== 0) throw new Error(`ffmpeg decode exited ${dcode}: ${decErr.slice(-500)}`)
+      if (n === 0) throw new Error('No frames were produced from the source.')
     } catch (err) {
+      // Kill whatever is still alive (a no-op for exited processes) and drop the
+      // partial output so failed jobs don't accumulate scratch files.
       decode.kill()
       encode.kill()
-      const detail = err instanceof Error ? err.message : String(err)
-      throw new Error(`Frame processing failed: ${detail}${decErr ? ` · ${decErr.slice(-300)}` : ''}`)
+      await fsp.rm(tmpOut, { force: true }).catch(() => {})
+      throw err
     }
-    ein.end()
-    await encodeDone
-    const dcode = await decodeExit
-    if (dcode !== 0) throw new Error(`ffmpeg decode exited ${dcode}: ${decErr.slice(-500)}`)
-    if (n === 0) throw new Error('No frames were produced from the source.')
 
     // Content-address the result, then register it as a normal library asset.
     const hash = await hashFile(tmpOut)
