@@ -6,8 +6,8 @@
  * full quality; .jpg for a smaller copy).
  */
 
-import { spawn } from 'node:child_process'
 import { getBinaries } from './ffmpeg'
+import { runFfmpeg } from './ffmpegRun'
 
 export function buildStillArgs(
   input: string,
@@ -47,17 +47,5 @@ export async function generateStill(
   inputDecoder: string | null = null
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  const args = buildStillArgs(input, output, sourceSec, vfChain, inputDecoder)
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(ffmpeg, args, { windowsHide: true })
-    let tail = ''
-    child.stderr.on('data', (buf: Buffer) => {
-      tail = (tail + buf.toString()).slice(-2000)
-    })
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`ffmpeg still exited ${code}: ${tail.slice(-300)}`))
-    })
-  })
+  await runFfmpeg(ffmpeg, buildStillArgs(input, output, sourceSec, vfChain, inputDecoder), 0)
 }

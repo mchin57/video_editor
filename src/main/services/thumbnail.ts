@@ -4,10 +4,10 @@
  * matches the eventual preview. buildThumbnailArgs is pure (unit-tested).
  */
 
-import { spawn } from 'node:child_process'
 import type { ProbeInfo } from '@shared/media'
 import { alphaInputDecoder } from '@shared/media'
 import { getBinaries } from './ffmpeg'
+import { runFfmpeg } from './ffmpegRun'
 import { hdrToSdrChain } from './proxy'
 
 const THUMB_MAX_EDGE = 360
@@ -55,17 +55,5 @@ export async function generateThumbnail(
   probe: ProbeInfo
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  const args = buildThumbnailArgs(input, output, probe)
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(ffmpeg, args, { windowsHide: true })
-    let tail = ''
-    child.stderr.on('data', (buf: Buffer) => {
-      tail = (tail + buf.toString()).slice(-2000)
-    })
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`ffmpeg thumbnail exited ${code}: ${tail.slice(-300)}`))
-    })
-  })
+  await runFfmpeg(ffmpeg, buildThumbnailArgs(input, output, probe), 0)
 }

@@ -7,10 +7,10 @@
  * buildProxyArgs is pure (unit-tested); generateProxy runs ffmpeg with progress.
  */
 
-import { spawn } from 'node:child_process'
 import type { ProbeInfo, VideoStreamInfo } from '@shared/media'
 import { alphaInputDecoder } from '@shared/media'
 import { getBinaries } from './ffmpeg'
+import { runFfmpeg } from './ffmpegRun'
 import { setProgress } from './jobs'
 
 const PROXY_MAX_EDGE = 1280
@@ -128,36 +128,6 @@ export function buildProxyArgs(input: string, output: string, probe: ProbeInfo):
   return args
 }
 
-/** Spawn an ffmpeg encode, forwarding `-progress pipe:1` output to the job (0..1). */
-function runEncodeWithProgress(
-  ffmpeg: string,
-  args: string[],
-  durationSec: number,
-  jobId: string
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(ffmpeg, args, { windowsHide: true })
-    let tail = ''
-
-    child.stdout.on('data', (buf: Buffer) => {
-      const matches = [...buf.toString().matchAll(/out_time_(?:us|ms)=(\d+)/g)]
-      const last = matches.at(-1)
-      if (last && durationSec > 0) {
-        const sec = Number(last[1]) / 1e6 // ffmpeg emits microseconds for both keys
-        setProgress(jobId, Math.min(0.99, sec / durationSec))
-      }
-    })
-    child.stderr.on('data', (buf: Buffer) => {
-      tail = (tail + buf.toString()).slice(-4000)
-    })
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`ffmpeg proxy exited ${code}: ${tail.slice(-500)}`))
-    })
-  })
-}
-
 /** Run the proxy transcode, reporting progress (0..1) to the given job. */
 export async function generateProxy(
   input: string,
@@ -166,7 +136,9 @@ export async function generateProxy(
   jobId: string
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await runEncodeWithProgress(ffmpeg, buildProxyArgs(input, output, probe), probe.durationSec || 0, jobId)
+  await runFfmpeg(ffmpeg, buildProxyArgs(input, output, probe), probe.durationSec || 0, (p) =>
+    setProgress(jobId, p)
+  )
 }
 
 /** Run the alpha-preserving (VP9 WebM) proxy transcode for a background-removed clip. */
@@ -177,5 +149,7 @@ export async function generateAlphaProxy(
   jobId: string
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await runEncodeWithProgress(ffmpeg, buildAlphaProxyArgs(input, output, probe), probe.durationSec || 0, jobId)
+  await runFfmpeg(ffmpeg, buildAlphaProxyArgs(input, output, probe), probe.durationSec || 0, (p) =>
+    setProgress(jobId, p)
+  )
 }
