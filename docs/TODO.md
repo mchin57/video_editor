@@ -19,6 +19,16 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Finish the drag-helper sweep.** `Popout.tsx`, `LayersPanel.tsx`, and `Splitter.tsx`
   still hand-roll the pointermove/pointerup dance (small, no edge-scroll) — convert to
   `startPointerDrag` when next touched.
+- [ ] **IPC hardening pass (pre-distribution).** The renderer-facing IPC surface is
+  unvalidated: `writeProjectFile(project, path)` is an arbitrary-path write primitive,
+  `importPaths` an arbitrary read, and the window runs `sandbox: false`. Fine for a
+  local tool; before shipping to strangers, validate paths against known roots (data
+  dir / previously-dialog-approved paths), consider re-enabling the sandbox, and add a
+  CSP. Tracked from the 2026-07 code review.
+- [ ] **Preview can't play positive gain (parity gap).** HTMLMediaElement volume clamps
+  at 1.0, so `gainDb > 0` is only audible in the export (`volume=` filter). Needs
+  WebAudio gain routing in `AudioFollower`/`VideoLayerView` if it ever matters — noted
+  in `docs/FFMPEG-NOTES.md` parity notes.
 
 ## Open
 
@@ -316,7 +326,7 @@ _All apply to **both** text overlays and captions via the shared
   that can't export a `.pfx`), then point `CSC_LINK` at it or add
   `win.azureSignOptions`. No code change needed._ See README → Code-signing.
 ## Bug List
-- [ ] If I click and begin click and drag a file the editor puts the "drop in here to add the file" but if I drop it somewhere else and not in the editor the overlay never goes away.
+- [x] If I click and begin click and drag a file the editor puts the "drop in here to add the file" but if I drop it somewhere else and not in the editor the overlay never goes away. _Fixed via the depth-counted `useDragDepth` hook (`lib/dragDepth.ts`); the Timeline's drop ring had the same latent bug and uses it too._
 ## Manual TODO
 
 Hands-on steps that can't be done in code — needed to actually ship the macOS build and hand it to a friend.

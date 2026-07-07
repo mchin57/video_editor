@@ -19,6 +19,7 @@ green. Everything under _Manual_ you must smoke-test in `npm run dev`.
 | Lane-resize height math — delta spread across rows, clamped (`resizeRowH`) | `lib/lanes.test.ts` |
 | Boundary snapping (`snap`) | `lib/lanes.test.ts` |
 | Time-scale tick spacing/labels | `lib/timescale.test.ts` |
+| Freeze-aware trim/split — holds survive edge trims, splits partition holds, window invariant (`trimVideoStart`/`trimVideoEnd`/`splitVideoLayer`) | `lib/timeline.test.ts` |
 
 If you change any of the above, the math change should show up as a test diff —
 if it doesn't, the logic probably drifted back inline into the component (where

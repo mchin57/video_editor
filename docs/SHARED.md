@@ -29,6 +29,8 @@ Refactor for the per-theme history.)
 | `startDragWithUndo((ev, before) => …)` | `lib/pointerDrag.ts` | the snapshot-project → liveUpdate → `commitLive(before)` dance for canvas drags |
 | `OverrideToggle`, `StabilizeSliders` | `components/Inspector.tsx` | re-rendering the Default/On/Off segmented control or the shakiness/smoothing sliders a second time |
 | `updateById(arr, id, fn)`, `replaceAt(arr, i, count, …items)` | `lib/arrays.ts` | `arr.map(x => x.id===id?…:x)` and `slice()`+`splice()` in store actions |
+| `useDragDepth(accepts)` | `lib/dragDepth.ts` | tracking a drop-zone highlight with `onDragLeave={e => e.currentTarget === e.target && …}` — that misses the final leave and leaves the overlay stuck (depth-counted enter/leave + window dragend/drop mop-up) |
+| `trimVideoStart` / `trimVideoEnd` / `splitVideoLayer` | `lib/timeline.ts` | inlining timeline↔source math in a trim/split handler — freeze holds make the mapping **nonlinear**; these keep the window invariant `endSec − startSec = (out − in) + Σ holds` |
 | `packRows`, `layoutLanes`, `resizeRowH` | `lib/lanes.ts` | computing timeline lane rows / vertical stack (top/height/collapse) / resize height **inline** in `Timeline.tsx`, where a refactor can delete it untested (see `docs/TIMELINE.md`) |
 
 `Timeline.tsx`'s block drags use `startPointerDrag` with the `edgeAutoScroll` rAF
@@ -59,6 +61,8 @@ missing), so it was deliberately **not** unified to keep behavior identical.
 | --- | --- | --- |
 | `cropFilter(rect)`, `eqFilter(color)` | `ffmpegFilters.ts` | hand-writing `crop=w:h:x:y` or `eq=brightness=…:contrast=…:saturation=…` |
 | `f3(n)` (`toFixed(3)`), `r(n)` (`Math.round`) | `ffmpegFilters.ts` | redefining the seconds/rounding formatters per module |
+| `runFfmpeg(ffmpeg, args, durationSec, onProgress?, cwd?)` | `ffmpegRun.ts` | re-rolling the spawn + stderr-tail + exit-code promise (with `-progress pipe:1` parsing) — proxy/thumbnail/still all go through it |
+| `alphaInputDecoder(video)` | `shared/media.ts` | decoding a VP8/VP9-alpha WebM without forcing `-c:v libvpx…` before `-i` (native decode silently drops alpha — see `docs/FFMPEG-NOTES.md`) |
 | `renderGradientImage(spec, start, end)` (closure in `exporter.ts`) | `exporter.ts` | duplicating the rasterise-text-to-PNG → full-frame-overlay block for text vs captions |
 | `hdrToSdrChain` (`proxy.ts`), `buildAudioGraph` (`audio.ts`), `buildAss` (`assBuilder.ts`) | their modules | the orchestration seams the new helpers feed; don't reimplement |
 

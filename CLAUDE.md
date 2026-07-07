@@ -47,6 +47,42 @@ homes — check it before writing any of these:**
 
 When you extend or add a shared helper, update `docs/SHARED.md` too.
 
+## Media semantics — the binary is the oracle
+
+The arg-builder tests pin *strings*, not ffmpeg *behavior*; they stay green
+while the command does the wrong thing (this once shipped a feature whose own
+output never registered as alpha). Before wiring any new codec / container /
+pix_fmt / filter interaction, verify the assumption against the real ffmpeg
+once: synthesize a tiny input (lavfi) in a scratch dir, run the actual command,
+inspect the result (ffprobe, `alphaextract`+`signalstats`, pixel dumps). Never
+answer ffmpeg edge-case questions from memory. Verified traps live in
+**`docs/FFMPEG-NOTES.md`** — read it before touching probe/proxy/export code,
+and add an entry whenever you verify something new.
+
+## Definition of done
+
+A feature touching preview or export is NOT done — and must not be marked `[x]`
+in `docs/TODO.md` — until exercised end-to-end in `npm run dev` with real media.
+Tests + typecheck green is necessary, not sufficient (the suite cannot see
+ffmpeg runtime behavior or pointer interaction). If you implemented but could
+not smoke-test, mark it `[~]` and state exactly what remains unverified. Docs
+must never assert untested behavior as fact.
+
+## Process & time-mapping rules
+
+- Every `spawn()` needs a kill path on every exception route between spawn and
+  the awaited exit — a throw in between leaks a live ffmpeg. Use `runFfmpeg`
+  (`services/ffmpegRun.ts`) instead of re-rolling the spawn/progress/stderr-tail
+  promise.
+- All timeline-time ↔ source-time conversion goes through the shared helpers
+  (`videoSourceTime` in `shared/layers.ts`; `trimVideoStart`/`trimVideoEnd`/
+  `splitVideoLayer` in `lib/timeline.ts`). Freeze holds (and future speed
+  ramps) make the mapping nonlinear — never re-derive it inline in a
+  drag/split/trim handler.
+- Anything implemented twice on purpose (CSS preview + ffmpeg export, renderer
+  + main path selection) must either share a pure helper or be called out in
+  the relevant doc's parity notes before the change lands.
+
 ## House rules
 
 - **Never push.** Commit locally only — the owner runs all `git push` himself.
