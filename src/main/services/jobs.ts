@@ -22,7 +22,15 @@ function broadcast(job: Job): void {
   }
 }
 
+/** Finished jobs kept for listJobs history; older ones are evicted. */
+const FINISHED_KEEP = 50
+
 export function createJob(type: JobType, label: string, subjectId?: string): Job {
+  // Evict the oldest finished jobs so the registry doesn't grow unbounded over
+  // a long session (Map iteration order = insertion order = age).
+  const finished = [...jobs.values()].filter((j) => j.status !== 'queued' && j.status !== 'running')
+  for (const j of finished.slice(0, Math.max(0, finished.length - FINISHED_KEEP))) jobs.delete(j.id)
+
   const job: Job = { id: randomUUID(), type, status: 'running', progress: 0, label, subjectId }
   jobs.set(job.id, job)
   broadcast(job)

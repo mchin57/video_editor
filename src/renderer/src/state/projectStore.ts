@@ -77,6 +77,9 @@ interface ProjectState {
   liveUpdate: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
   commitLive: (before: Project) => void
+  /** Flush a pending debounced autosave immediately (window unload can land
+   *  inside the 400ms debounce window and lose the last edit). */
+  flushSave: () => void
 
   // --- Layers ---
   /** Append a layer to the FRONT of the stack (top). */
@@ -226,6 +229,16 @@ export const useProject = create<ProjectState>((set, get) => {
       set({ past: [...get().past, before].slice(-HISTORY_LIMIT), future: [] })
       scheduleSave(current)
       markDirty()
+    },
+
+    flushSave: () => {
+      if (!saveTimer) return
+      clearTimeout(saveTimer)
+      saveTimer = null
+      const p = get().project
+      // Fire-and-forget: the invoke reaches the main process before the window
+      // tears down, and main outlives the renderer to finish the write.
+      if (p) void saveProject(p)
     },
 
     // --- Layers ---

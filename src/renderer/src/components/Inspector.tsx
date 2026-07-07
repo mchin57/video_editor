@@ -195,9 +195,23 @@ function LiveRange({
       onPointerDown={() => (before.current = useProject.getState().project)}
       onChange={(e) => {
         const v = Number(e.target.value)
-        useProject.getState().liveUpdate((p) => transform(p, v))
+        const store = useProject.getState()
+        if (before.current) {
+          store.liveUpdate((p) => transform(p, v))
+          return
+        }
+        // Keyboard adjustment (no pointer drag in progress): there is no
+        // pointerup to close the interaction, so record a normal undo step —
+        // otherwise arrow-key changes bypass history, autosave and dirty.
+        const prev = store.project
+        if (!prev) return
+        store.liveUpdate((p) => transform(p, v))
+        store.commitLive(prev)
       }}
-      onPointerUp={() => before.current && useProject.getState().commitLive(before.current)}
+      onPointerUp={() => {
+        if (before.current) useProject.getState().commitLive(before.current)
+        before.current = null // so later keyboard changes take the commit path
+      }}
       className="w-full accent-sky-400"
     />
   )

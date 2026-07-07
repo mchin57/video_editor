@@ -31,6 +31,12 @@ describe('assColor', () => {
   it('inverts CSS alpha to ASS alpha', () => {
     expect(assColor('#000000cc')).toBe('&H33000000') // cc(204) → 255-204=51=0x33
   })
+  it('expands shorthand hex and falls back to opaque white on garbage', () => {
+    expect(assColor('#fff')).toBe('&H00FFFFFF')
+    expect(assColor('#f00c')).toBe('&H330000FF') // #RGBA shorthand
+    expect(assColor('not-a-color')).toBe('&H00FFFFFF')
+    expect(assColor('#12345')).toBe('&H00FFFFFF') // wrong length
+  })
 })
 
 describe('buildAss', () => {

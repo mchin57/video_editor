@@ -61,9 +61,14 @@ export default function App(): JSX.Element {
     localStorage.setItem('panelSizes', JSON.stringify(panels))
   }, [panels])
 
-  // Load the persisted project once on startup.
+  // Load the persisted project once on startup; flush any pending debounced
+  // autosave on window unload so quitting inside the 400ms window can't lose
+  // the last edit.
   useEffect(() => {
     void useProject.getState().load()
+    const flush = (): void => useProject.getState().flushSave()
+    window.addEventListener('beforeunload', flush)
+    return () => window.removeEventListener('beforeunload', flush)
   }, [])
 
   // Subscribe to background job progress; refresh library when a proxy lands.

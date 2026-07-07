@@ -44,9 +44,13 @@ function assTime(sec: number): string {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
 }
 
-/** #RRGGBB or #RRGGBBAA → ASS &HAABBGGRR (ASS alpha: 00 opaque, FF transparent). */
+/** #RGB/#RGBA/#RRGGBB/#RRGGBBAA → ASS &HAABBGGRR (ASS alpha: 00 opaque, FF
+ *  transparent). Malformed input falls back to opaque white rather than
+ *  emitting a garbage tag libass would choke on. */
 export function assColor(hex: string): string {
-  const h = hex.replace('#', '')
+  let h = hex.replace('#', '').trim()
+  if (h.length === 3 || h.length === 4) h = [...h].map((c) => c + c).join('') // shorthand → full
+  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(h)) return '&H00FFFFFF'
   const r = h.slice(0, 2)
   const g = h.slice(2, 4)
   const b = h.slice(4, 6)
