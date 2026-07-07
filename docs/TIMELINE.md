@@ -10,6 +10,12 @@ timeline refactor because nothing failed.
 item still works. Anything with a test file is guarded automatically — keep it
 green. Everything under _Manual_ you must smoke-test in `npm run dev`.
 
+**The e2e suite (`npm run test:e2e`, Playwright driving the real Electron app)
+is the migration target for the Manual list** — real pointer drags, keybinds,
+and drop-zone state are all expressible there now (see `e2e/fixtures.ts` for
+the arrange-via-stores / act-via-events pattern). When you automate a Manual
+item, move it into the guarded table below.
+
 ## Guarded by tests (keep green)
 
 | Behavior | Test |
@@ -20,6 +26,10 @@ green. Everything under _Manual_ you must smoke-test in `npm run dev`.
 | Boundary snapping (`snap`) | `lib/lanes.test.ts` |
 | Time-scale tick spacing/labels | `lib/timescale.test.ts` |
 | Freeze-aware trim/split — holds survive edge trims, splits partition holds, window invariant (`trimVideoStart`/`trimVideoEnd`/`splitVideoLayer`) | `lib/timeline.test.ts` |
+| Block move drag + right-edge trim drag on the real timeline (incl. frozen-clip regression) | `e2e/freezeTrim.spec.ts` |
+| S-keybind split at the playhead | `e2e/freezeTrim.spec.ts` |
+| T/Ctrl+Z/Ctrl+Shift+Z/Delete keybind flow | `e2e/keybinds.spec.ts` |
+| OS-file import overlay can't get stuck (depth counter; the Timeline drop-ring shares the hook) | `e2e/dropOverlay.spec.ts` |
 
 If you change any of the above, the math change should show up as a test diff —
 if it doesn't, the logic probably drifted back inline into the component (where
@@ -27,8 +37,8 @@ it can be deleted silently). Push it back into `lib/`.
 
 ## Manual — smoke-test in `npm run dev`
 
-- **Block edits:** drag a clip/caption/audio block to move; trim its left/right
-  edge (video trims in/out against source length; caption/audio too).
+- **Block edits:** video move + right-edge trim are e2e-guarded; still manual:
+  video LEFT-edge trim, and caption/audio block move + both trims.
 - **Horizontal edge auto-scroll:** drag a block near the left/right edge → the
   track scrolls and the block keeps following.
 - **Playhead:** click/drag on the track scrubs; space toggles play.

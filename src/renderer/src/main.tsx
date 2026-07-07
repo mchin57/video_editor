@@ -3,7 +3,27 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { ensureFontFaces } from './lib/fontFaces'
+import { useProject } from './state/projectStore'
+import { useEditor } from './state/store'
+import { useUi } from './state/ui'
+import { usePlayback } from './state/playback'
 import './index.css'
+
+declare global {
+  interface Window {
+    /** Debug / e2e handle to the zustand stores. Playwright specs ARRANGE
+     *  state through real store actions (the same ones the UI calls), then ACT
+     *  via real pointer/keyboard events and ASSERT on store + DOM. Also handy
+     *  from devtools. Harmless to expose in a local desktop app. */
+    __reelStores: {
+      useProject: typeof useProject
+      useEditor: typeof useEditor
+      useUi: typeof useUi
+      usePlayback: typeof usePlayback
+    }
+  }
+}
+window.__reelStores = { useProject, useEditor, useUi, usePlayback }
 
 // Register the bundled-font @font-face rules before first paint so previews use
 // the same faces the export burns.

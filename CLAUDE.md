@@ -25,8 +25,15 @@ Instagram Reels. Read this before adding code.
   audio/timeline/crop/checklist + ffmpegFilters). The `exporterArgs` tests pin the
   exact ffmpeg arg strings — keep them green; they're how we know export output
   didn't change.
-- `npm run dev` — launch the app (preview/export aren't unit-covered, so smoke-test
-  UI changes here).
+- `npm run test:e2e` — Playwright drives the BUILT Electron app (builds first)
+  with real pointer/keyboard events against a throwaway data dir + profile.
+  This is where interaction guarantees live (drags, drops, keybinds, overlays)
+  — the things vitest/jsdom can't express. Spec pattern: ARRANGE via
+  `window.__reelStores` (real store actions), ACT via real events, ASSERT on
+  store + DOM — see `e2e/fixtures.ts`. Keep it small and high-value; pure logic
+  still goes in `src/**/*.test.ts`.
+- `npm run dev` — launch the app (visual polish and ffmpeg-dependent flows still
+  need a human smoke-test here).
 
 ## Reuse, don't duplicate
 
@@ -67,6 +74,11 @@ Tests + typecheck green is necessary, not sufficient (the suite cannot see
 ffmpeg runtime behavior or pointer interaction). If you implemented but could
 not smoke-test, mark it `[~]` and state exactly what remains unverified. Docs
 must never assert untested behavior as fact.
+
+Interaction features (drags, keybinds, drop targets) should land with a
+Playwright spec in `e2e/` where practical — and every interaction BUG you fix
+gets a regression spec there. That is what converts `docs/TIMELINE.md`'s manual
+checklist into guarantees a refactor can't silently break.
 
 ## Process & time-mapping rules
 

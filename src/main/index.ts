@@ -7,6 +7,10 @@ import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaPro
 import { getSubdir } from './config'
 import { initAutoUpdate } from './services/updater'
 
+// Test isolation: relocate Electron's profile (localStorage, caches) so e2e
+// runs get a clean slate and can't pollute the real one. Must run pre-'ready'.
+if (process.env.REEL_USER_DATA_DIR) app.setPath('userData', process.env.REEL_USER_DATA_DIR)
+
 // Must be declared before app 'ready'.
 registerMediaSchemePrivileges()
 

@@ -64,3 +64,7 @@ samples/
 
 # Obsidian vault config (docs viewed in Obsidian)
 docs/.obsidian/
+
+# Playwright output
+test-results/
+playwright-report/
