@@ -1,8 +1,10 @@
 import { app, shell, BrowserWindow } from 'electron'
+import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaProtocol'
+import { getSubdir } from './config'
 import { initAutoUpdate } from './services/updater'
 
 // Must be declared before app 'ready'.
@@ -63,6 +65,11 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   createWindow()
   initAutoUpdate()
+
+  // Best-effort scratch sweep: exports clean their per-job tmp dirs, but a
+  // crashed or failed job (export, matte) leaves partial files behind. Nothing
+  // is running at startup, so the whole dir is safe to clear.
+  void fsp.rm(getSubdir('tmp'), { recursive: true, force: true }).catch(() => {})
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

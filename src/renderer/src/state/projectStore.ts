@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import type { AudioClip, CaptionsConfig, Layer, Project, ScriptLine } from '@shared/project'
+import type {
+  AudioClip,
+  CaptionsConfig,
+  ImageContent,
+  Layer,
+  Project,
+  ScriptLine,
+  TextContent,
+  VideoContent
+} from '@shared/project'
 import { createEmptyProject, migrateProject } from '@shared/project'
 import { applyVisibleOrder, makeVideoLayer } from '@shared/layers'
 import type { PresetId } from '@shared/export'
@@ -24,8 +33,10 @@ function scheduleSave(project: Project): void {
 
 const newId = (): string => crypto.randomUUID()
 
-/** A partial patch over a layer's content (the caller guards the content kind). */
-type ContentPatch = Record<string, unknown>
+/** A partial patch over a layer's content (the caller guards the content kind).
+ *  A union of partials rather than Record<string, unknown> so a typo'd field
+ *  name fails typecheck instead of silently landing in the saved document. */
+type ContentPatch = Partial<VideoContent> | Partial<ImageContent> | Partial<TextContent>
 
 /**
  * The file binding (which .reel file, and whether there are unsaved changes)
