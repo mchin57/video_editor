@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { extractAudioPieces, reorder, splitAudioClip, splitVideoLayer } from './timeline'
+import { extractAudioPieces, reorder, splitAudioClip, splitVideoLayer, trimVideoEnd, trimVideoStart } from './timeline'
 import { makeVideoLayer } from '@shared/layers'
-import type { AudioClip, VideoContent } from '@shared/project'
+import type { AudioClip, Layer, VideoContent } from '@shared/project'
 
 function audio(over: Partial<AudioClip> = {}): AudioClip {
   return {
@@ -70,6 +70,83 @@ describe('splitVideoLayer', () => {
     expect(splitVideoLayer(layer, 2, makeId)).toBeNull()
     const text = { ...layer, content: { kind: 'text' as const, text: 'x', fontFamily: 'a', fontSizePx: 10, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } } }
     expect(splitVideoLayer(text, 7, makeId)).toBeNull()
+  })
+
+  // A 10s clip (in 0, out 10) with a 2s hold at source 3s → window 0..12
+  // (mimicking addFreeze, which extends endSec by the hold).
+  const frozen = (): Layer => {
+    const l = makeVideoLayer('a', 'm', 0, 10)
+    return { ...l, endSec: 12, content: { ...(l.content as VideoContent), freezes: [{ atSec: 3, holdSec: 2 }] } }
+  }
+  const video = (l: Layer): VideoContent => l.content as VideoContent
+  // Window invariant every half must keep: endSec − startSec = (out − in) + Σ holds.
+  const invariant = (l: Layer): void => {
+    const c = video(l)
+    const holds = (c.freezes ?? []).reduce((s, f) => s + f.holdSec, 0)
+    expect(l.endSec - l.startSec).toBeCloseTo(c.outSec - c.inSec + holds, 6)
+  }
+
+  it('splitting AFTER a hold keeps the hold on the left and maps the cut through it', () => {
+    const [left, right] = splitVideoLayer(frozen(), 7, makeId)! // played 7 = source 5 (2s held)
+    expect(left).toMatchObject({ endSec: 7 })
+    expect(video(left)).toMatchObject({ outSec: 5, freezes: [{ atSec: 3, holdSec: 2 }] })
+    expect(right).toMatchObject({ startSec: 7, endSec: 12 })
+    expect(video(right).inSec).toBe(5)
+    expect(video(right).freezes).toBeUndefined()
+    invariant(left)
+    invariant(right)
+  })
+
+  it('splitting BEFORE a hold moves the hold to the right half', () => {
+    const [left, right] = splitVideoLayer(frozen(), 2, makeId)!
+    expect(video(left)).toMatchObject({ outSec: 2 })
+    expect(video(left).freezes).toBeUndefined()
+    expect(video(right)).toMatchObject({ inSec: 2, freezes: [{ atSec: 3, holdSec: 2 }] })
+    invariant(left)
+    invariant(right)
+  })
+
+  it('splitting INSIDE a hold splits the hold duration across the halves', () => {
+    const [left, right] = splitVideoLayer(frozen(), 4, makeId)! // hold spans played 3..5
+    expect(video(left)).toMatchObject({ outSec: 3, freezes: [{ atSec: 3, holdSec: 1 }] })
+    expect(video(right)).toMatchObject({ inSec: 3, freezes: [{ atSec: 3, holdSec: 1 }] })
+    expect(left.endSec).toBe(4)
+    expect(right.startSec).toBe(4)
+    invariant(left)
+    invariant(right)
+  })
+
+  describe('trimVideoStart / trimVideoEnd (freeze-aware)', () => {
+    it('trimming the right edge keeps remaining hold time in the window', () => {
+      const l = frozen()
+      const t = trimVideoEnd(l, video(l), 8)
+      expect(t.endSec).toBe(10) // 8s of source + the 2s hold
+      expect(video(t)).toMatchObject({ outSec: 8, freezes: [{ atSec: 3, holdSec: 2 }] })
+      invariant(t)
+    })
+    it('trimming the right edge past a hold drops it', () => {
+      const l = frozen()
+      const t = trimVideoEnd(l, video(l), 2)
+      expect(t.endSec).toBe(2)
+      expect(video(t).freezes).toBeUndefined()
+      invariant(t)
+    })
+    it('trimming the left edge past a hold drops it and shifts start by its time too', () => {
+      const l = frozen()
+      const t = trimVideoStart(l, video(l), 5)
+      expect(t.startSec).toBe(7) // 5s of trimmed source + the dropped 2s hold
+      expect(t.endSec).toBe(12) // right edge untouched
+      expect(video(t)).toMatchObject({ inSec: 5 })
+      expect(video(t).freezes).toBeUndefined()
+      invariant(t)
+    })
+    it('trimming the left edge before the hold keeps it', () => {
+      const l = frozen()
+      const t = trimVideoStart(l, video(l), 2)
+      expect(t.startSec).toBe(2)
+      expect(video(t)).toMatchObject({ inSec: 2, freezes: [{ atSec: 3, holdSec: 2 }] })
+      invariant(t)
+    })
   })
 })
 

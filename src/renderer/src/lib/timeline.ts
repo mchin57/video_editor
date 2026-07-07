@@ -5,7 +5,7 @@
  * dependency-free so it can be unit-tested.
  */
 
-import type { AudioClip, Layer, VideoContent } from '@shared/project'
+import type { AudioClip, FreezeHold, Layer, VideoContent } from '@shared/project'
 import { audioClipEnd } from '@shared/project'
 
 /** Move the item at `from` to index `to`, returning a new array. */
@@ -20,6 +20,12 @@ export function reorder<T>(items: T[], from: number, to: number): T[] {
 /**
  * Split a video layer at an absolute timeline time `atSec` into [left, right]
  * sharing the same source, or null if the cut falls at/outside the layer's span.
+ *
+ * Freeze holds make the timeline→source mapping NONLINEAR, so the cut's source
+ * point is found by walking the holds (mirroring `videoSourceTime`) and the
+ * freezes are partitioned between the halves — a hold the cut lands inside is
+ * itself split, so both halves keep the invariant
+ * `window = (outSec − inSec) + Σ holds`.
  */
 export function splitVideoLayer(
   layer: Layer,
@@ -30,19 +36,72 @@ export function splitVideoLayer(
   const eps = 1e-3
   if (atSec <= layer.startSec + eps || atSec >= layer.endSec - eps) return null
   const c = layer.content as VideoContent
-  const cutSource = c.inSec + (atSec - layer.startSec)
+  const freezes = [...(c.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
+
+  const cutLocal = atSec - layer.startSec // cut position in played time
+  const leftFreezes: FreezeHold[] = []
+  const rightFreezes: FreezeHold[] = []
+  let holdBefore = 0 // played time consumed by holds fully before the cut
+  let cutSource: number | null = null
+  for (const f of freezes) {
+    const atPlayed = f.atSec - c.inSec + holdBefore // where this hold starts, in played time
+    if (cutSource != null || cutLocal <= atPlayed + eps) {
+      rightFreezes.push(f) // hold is entirely after the cut
+    } else if (cutLocal < atPlayed + f.holdSec) {
+      // Cut lands inside this hold: split its duration across the halves.
+      const leftPart = cutLocal - atPlayed
+      const rightPart = f.holdSec - leftPart
+      if (leftPart > eps) leftFreezes.push({ atSec: f.atSec, holdSec: leftPart })
+      if (rightPart > eps) rightFreezes.push({ atSec: f.atSec, holdSec: rightPart })
+      cutSource = f.atSec // the held frame is the cut frame
+    } else {
+      leftFreezes.push(f)
+      holdBefore += f.holdSec
+    }
+  }
+  if (cutSource == null) cutSource = c.inSec + (cutLocal - holdBefore)
+
   const left: Layer = {
     ...layer,
     endSec: atSec,
-    content: { ...c, outSec: cutSource }
+    content: { ...c, outSec: cutSource, freezes: leftFreezes.length ? leftFreezes : undefined }
   }
   const right: Layer = {
     ...layer,
     id: makeId(),
     startSec: atSec,
-    content: { ...c, inSec: cutSource }
+    content: { ...c, inSec: cutSource, freezes: rightFreezes.length ? rightFreezes : undefined }
   }
   return [left, right]
+}
+
+/**
+ * Trim a video layer's LEFT edge to source in-point `ni` (caller clamps `ni` to
+ * `[0, outSec)`). Holds before the new in-point are dropped and the start shifts
+ * by the trimmed source time PLUS the dropped hold time, keeping `endSec` fixed
+ * and the window invariant intact. Computed from the drag-start snapshot, so
+ * dragging back left restores previously dropped holds.
+ */
+export function trimVideoStart(layer: Layer, c: VideoContent, ni: number): Layer {
+  const freezes = c.freezes ?? []
+  const kept = freezes.filter((f) => f.atSec >= ni)
+  const dropped = freezes.reduce((s, f) => s + (f.atSec < ni ? Math.max(0, f.holdSec) : 0), 0)
+  const startSec = Math.max(0, layer.startSec + (ni - c.inSec) + dropped)
+  return { ...layer, startSec, content: { ...c, inSec: ni, freezes: kept.length ? kept : undefined } }
+}
+
+/**
+ * Trim the RIGHT edge to source out-point `no` (caller clamps to `(inSec, src]`).
+ * Holds past the new out-point are dropped; the new end keeps the remaining
+ * holds' time — recomputing `endSec` without them silently cut the hold time
+ * out of a frozen clip (the pre-helper inline math did exactly that).
+ */
+export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
+  const freezes = c.freezes ?? []
+  const kept = freezes.filter((f) => f.atSec <= no)
+  const keptHold = kept.reduce((s, f) => s + Math.max(0, f.holdSec), 0)
+  const endSec = layer.startSec + (no - c.inSec) + keptHold
+  return { ...layer, endSec, content: { ...c, outSec: no, freezes: kept.length ? kept : undefined } }
 }
 
 /**

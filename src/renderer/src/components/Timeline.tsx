@@ -26,6 +26,7 @@ import {
   type Span
 } from '@/lib/lanes'
 import { startPointerDrag } from '@/lib/pointerDrag'
+import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
@@ -474,19 +475,18 @@ export function Timeline(): JSX.Element {
             return { ...l, startSec: ns, endSec: ns + dur }
           }
           if (mode === 'start') {
-            if (l.content.kind === 'video' && layer.content.kind === 'video') {
+            if (layer.content.kind === 'video') {
+              // Freeze-aware: drops holds trimmed past and keeps the window
+              // invariant (computed from the drag-start snapshot).
               const c = layer.content
-              const ni = clamp(c.inSec + d, 0, c.outSec - 0.1)
-              const ns = Math.max(0, startSec + (ni - c.inSec))
-              return { ...l, startSec: ns, content: { ...l.content, inSec: ni } }
+              return trimVideoStart(layer, c, clamp(c.inSec + d, 0, c.outSec - 0.1))
             }
             return { ...l, startSec: clamp(snapSec(startSec + d), 0, l.endSec - 0.2) }
           }
           // end
-          if (l.content.kind === 'video' && layer.content.kind === 'video') {
+          if (layer.content.kind === 'video') {
             const c = layer.content
-            const no = clamp(c.outSec + d, c.inSec + 0.1, srcDur)
-            return { ...l, endSec: startSec + (no - c.inSec), content: { ...l.content, outSec: no } }
+            return trimVideoEnd(layer, c, clamp(c.outSec + d, c.inSec + 0.1, srcDur))
           }
           return { ...l, endSec: Math.max(l.startSec + 0.2, snapSec(endSec + d)) }
         })

@@ -61,3 +61,6 @@ tmp/
 
 # Local test media (synthetic clips for manual testing)
 samples/
+
+# Obsidian vault config (docs viewed in Obsidian)
+docs/.obsidian/
