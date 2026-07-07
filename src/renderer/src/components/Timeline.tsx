@@ -25,6 +25,7 @@ import {
   type LaneViewPref,
   type Span
 } from '@/lib/lanes'
+import { useDragDepth } from '@/lib/dragDepth'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
@@ -249,7 +250,9 @@ export function Timeline(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
-  const [dropActive, setDropActive] = useState(false)
+  // Library-asset drag highlight — depth-counted so an abandoned drag can't
+  // leave the drop ring stuck on.
+  const assetDrag = useDragDepth((types) => types.includes(DND_MIME))
 
   const audioEnd = useMemo(
     () =>
@@ -406,7 +409,7 @@ export function Timeline(): JSX.Element {
     if (!id) return
     e.preventDefault()
     e.stopPropagation()
-    setDropActive(false)
+    assetDrag.reset()
     const asset = assetById.get(id)
     if (!asset || !asset.proxyReady) return
     const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
@@ -438,7 +441,6 @@ export function Timeline(): JSX.Element {
     if (!e.dataTransfer.types.includes(DND_MIME)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
-    if (!dropActive) setDropActive(true)
   }
 
   // Drag a layer block: move in time, or trim its left/right edge.
@@ -769,11 +771,10 @@ export function Timeline(): JSX.Element {
         {/* Horizontally-scrolling track (also the library drop target) */}
         <div
           ref={scrollRef}
-          className={`relative min-h-0 flex-1 overflow-auto ${dropActive ? 'ring-2 ring-inset ring-sky-400/60' : ''}`}
+          className={`relative min-h-0 flex-1 overflow-auto ${assetDrag.active ? 'ring-2 ring-inset ring-sky-400/60' : ''}`}
+          onDragEnter={assetDrag.onDragEnter}
           onDragOver={onDragOver}
-          onDragLeave={(e) => {
-            if (e.currentTarget === e.target) setDropActive(false)
-          }}
+          onDragLeave={assetDrag.onDragLeave}
           onDrop={onDrop}
         >
           <div

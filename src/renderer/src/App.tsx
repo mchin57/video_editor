@@ -18,6 +18,7 @@ import { ChecklistModal } from '@/components/ChecklistModal'
 import { ScriptModal } from '@/components/ScriptModal'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
+import { useDragDepth } from '@/lib/dragDepth'
 import { onJobProgress, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { useProject } from '@/state/projectStore'
@@ -50,7 +51,10 @@ export default function App(): JSX.Element {
   const { data: assets = [] } = useLibrary()
   const assetsRef = useRef(assets)
   assetsRef.current = assets
-  const [dragging, setDragging] = useState(false)
+  // OS-file drag highlight — depth-counted so dropping outside the app can't
+  // leave the overlay stuck (library-item drags carry a custom type and are
+  // filtered out here; the Timeline handles those).
+  const fileDrag = useDragDepth((types) => types.includes('Files'))
   const [panels, setPanels] = useState<PanelSizes>(loadPanelSizes)
 
   useEffect(() => {
@@ -162,7 +166,7 @@ export default function App(): JSX.Element {
 
   const onDrop = (e: DragEvent): void => {
     e.preventDefault()
-    setDragging(false)
+    fileDrag.reset()
     const paths = Array.from(e.dataTransfer.files)
       .map((f) => pathForFile(f))
       .filter(Boolean)
@@ -172,16 +176,14 @@ export default function App(): JSX.Element {
   return (
     <div
       className="relative flex h-full select-none flex-col bg-[#0b0b0f]"
+      onDragEnter={fileDrag.onDragEnter}
       onDragOver={(e) => {
         // Only react to OS file drags (import); library-item drags onto the
         // timeline carry a custom type and are handled by the Timeline itself.
         if (!e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
-        if (!dragging) setDragging(true)
       }}
-      onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false)
-      }}
+      onDragLeave={fileDrag.onDragLeave}
       onDrop={onDrop}
     >
       <header className="flex items-center gap-3 border-b border-white/10 px-4 py-2">
@@ -268,7 +270,7 @@ export default function App(): JSX.Element {
       <ChecklistModal />
       <ScriptModal />
 
-      {dragging && (
+      {fileDrag.active && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">
           <div className="rounded-xl border-2 border-dashed border-sky-400/70 px-8 py-6 text-sm font-medium text-sky-200">
             Drop video files to import

@@ -15,6 +15,10 @@ import { useProject } from '@/state/projectStore'
  * Begin a drag: install window `pointermove`/`pointerup` listeners and tear them
  * down automatically on release. `onMove` fires for every move; optional `onUp`
  * fires once on release (after the listeners are removed).
+ *
+ * `pointercancel` (window focus loss, OS gesture stealing the pointer) is
+ * treated as a release — without it the move listener leaks, the drag's undo
+ * step is never committed, and any rAF loop stopped in `onUp` spins forever.
  */
 export function startPointerDrag(
   onMove: (ev: PointerEvent) => void,
@@ -24,10 +28,12 @@ export function startPointerDrag(
   const up = (ev: PointerEvent): void => {
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
     onUp?.(ev)
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', up)
 }
 
 /**
