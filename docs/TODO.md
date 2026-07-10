@@ -275,11 +275,13 @@ _All apply to **both** text overlays and captions via the shared
   `scrollLeft` delta into its time delta (`deltaFor`) so the dragged block keeps
   tracking the cursor as the view scrolls, and re-applies position on each scroll
   tick. Loop cancels on `pointerup`.
-- [ ] **Playhead follow modes** — during playback the timeline scroll position should optionally track the playhead. Three modes, selectable from a new "Timeline" or "View" menu in the menu bar:
-  - **No follow** (current behavior) — timeline stays wherever the user scrolled it.
-  - **Page jump** — when the playhead reaches the right edge of the visible area, the timeline jumps forward by one page so the playhead is back at the left edge. Like most DAWs at default.
-  - **Centered** — the timeline continuously scrolls so the playhead stays horizontally centered in the view at all times.
-  - Setting persisted in `localStorage` (view preference, not project state). Implementation: in the playback `rAF` loop (or a `useEffect` watching `time`), read the current mode and adjust `scrollRef.current.scrollLeft` accordingly. Centered mode needs to suppress user scroll events during playback to avoid fighting the auto-scroll.
+- [x] **Playhead follow modes** — Off / Page / Center segmented control in the
+  timeline toolbar (next to Zoom; there is no menu bar yet). A `useEffect`
+  watching `time` while playing adjusts `scrollLeft`: Center keeps the playhead
+  mid-view every tick (user horizontal wheel is swallowed while active so it
+  can't fight the auto-scroll; scrollbar drags are re-asserted away next frame);
+  Page jumps the view so the playhead lands back at the left edge whenever it
+  exits. Persisted as `timelineFollow` in localStorage. e2e: `e2e/follow.spec.ts`.
 
 - [ ] **Import folder into library** — allow the user to select an entire folder (via File → "Import folder…" or drag-dropping a folder onto the library) and have all supported media files inside it imported at once. Each file goes through the normal import pipeline (hash, probe, proxy job). Subdirectories should be traversed recursively with an option to skip or include them.
 

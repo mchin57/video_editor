@@ -171,6 +171,22 @@ const LANE_GEOM: LaneGeometry = {
  *  localStorage (`timelineView`), not the project document. */
 type TimelineView = Partial<Record<LaneKey, LaneViewPref>>
 
+/** How the track scroll tracks the playhead during playback: stay put, jump a
+ *  page when the playhead exits the view (DAW default), or keep it centered.
+ *  A view preference like zoom, so it lives in localStorage. */
+type FollowMode = 'none' | 'page' | 'centered'
+
+const FOLLOW_OPTIONS: { mode: FollowMode; label: string; title: string }[] = [
+  { mode: 'none', label: 'Off', title: 'Timeline stays where you scrolled it during playback' },
+  { mode: 'page', label: 'Page', title: 'Jump forward a page when the playhead reaches the right edge' },
+  { mode: 'centered', label: 'Center', title: 'Continuously scroll to keep the playhead centered' }
+]
+
+function loadFollowMode(): FollowMode {
+  const v = localStorage.getItem('timelineFollow')
+  return v === 'page' || v === 'centered' ? v : 'none'
+}
+
 function loadTimelineView(): TimelineView {
   try {
     const v = JSON.parse(localStorage.getItem('timelineView') ?? '{}')
@@ -232,6 +248,15 @@ export function Timeline(): JSX.Element {
   }, [pxPerSec])
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
+
+  const [followMode, setFollowMode] = useState<FollowMode>(loadFollowMode)
+  useEffect(() => {
+    localStorage.setItem('timelineFollow', followMode)
+  }, [followMode])
+  const followModeRef = useRef(followMode)
+  followModeRef.current = followMode
+  const playingRef = useRef(playing)
+  playingRef.current = playing
 
   // Per-lane height / collapse prefs, persisted across reloads.
   const [laneView, setLaneView] = useState<TimelineView>(loadTimelineView)
@@ -361,7 +386,19 @@ export function Timeline(): JSX.Element {
     const el = scrollRef.current
     if (!el) return undefined
     const onWheel = (e: WheelEvent): void => {
-      if (!e.ctrlKey && !e.metaKey) return
+      if (!e.ctrlKey && !e.metaKey) {
+        // Centered follow owns the horizontal scroll during playback — swallow
+        // user horizontal wheel so it doesn't fight the auto-scroll (vertical
+        // lane scrolling stays live).
+        if (
+          followModeRef.current === 'centered' &&
+          playingRef.current &&
+          (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))
+        ) {
+          e.preventDefault()
+        }
+        return
+      }
       e.preventDefault()
       const rect = el.getBoundingClientRect()
       const cursorX = e.clientX - rect.left
@@ -377,6 +414,26 @@ export function Timeline(): JSX.Element {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
+
+  // Playhead follow: while playing, keep the playhead in view per the selected
+  // mode. Runs on every playback tick (time updates each rAF), so user scrolls
+  // in centered mode are re-asserted away within a frame.
+  useEffect(() => {
+    if (!playing || followMode === 'none') return
+    const el = scrollRef.current
+    if (!el) return
+    const x = time * pxPerSec
+    if (followMode === 'centered') {
+      el.scrollLeft = Math.max(0, x - el.clientWidth / 2)
+    } else {
+      // Page jump: playhead exits the visible span → snap it back to the left
+      // edge (a page forward when it ran off the right, straight there on seeks).
+      const margin = 8
+      if (x > el.scrollLeft + el.clientWidth - margin || x < el.scrollLeft) {
+        el.scrollLeft = Math.max(0, x - margin)
+      }
+    }
+  }, [time, playing, followMode, pxPerSec])
 
   // Keep the fixed gutter aligned as the track scrolls vertically.
   useEffect(() => {
@@ -696,6 +753,22 @@ export function Timeline(): JSX.Element {
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">Follow</span>
+        <div className="flex overflow-hidden rounded border border-white/10" role="group" aria-label="Playhead follow mode">
+          {FOLLOW_OPTIONS.map((o) => (
+            <button
+              key={o.mode}
+              onClick={() => setFollowMode(o.mode)}
+              title={o.title}
+              className={`px-1.5 py-0.5 text-[10px] ${
+                followMode === o.mode ? 'bg-white/20 text-zinc-100' : 'text-zinc-400 hover:bg-white/10'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <div className="mx-1 h-4 w-px bg-white/10" />
         <span className="text-[10px] uppercase tracking-wide text-zinc-500">Zoom</span>
         <ToolbarButton title="Zoom out" onClick={() => setPxPerSec((p) => clamp(p / 1.3, 8, 240))}>
           −
@@ -771,6 +844,7 @@ export function Timeline(): JSX.Element {
         {/* Horizontally-scrolling track (also the library drop target) */}
         <div
           ref={scrollRef}
+          data-testid="timeline-scroll"
           className={`relative min-h-0 flex-1 overflow-auto ${assetDrag.active ? 'ring-2 ring-inset ring-sky-400/60' : ''}`}
           onDragEnter={assetDrag.onDragEnter}
           onDragOver={onDragOver}
