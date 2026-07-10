@@ -18,6 +18,7 @@
 import type { PresetId } from './export'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
+import type { TextAnimation } from './textAnim'
 
 export interface CropRect {
   /** Source-pixel crop rectangle, aspect-locked to the output preset. */
@@ -204,6 +205,11 @@ export interface TextContent extends TextStyleBase {
   /** Explicit wrap-box width in logical px. Absent = auto (hug the text). Set
    *  when the user drags a side resize handle; text re-wraps within it. */
   widthPx?: number
+  /** Entrance/exit animation (absent/null = static). Not honored while the
+   *  overlay burns as a rasterised PNG (gradient / explicit wrap width) — see
+   *  `effectiveTextAnimation` (shared/textAnim.ts), which both preview and
+   *  export resolve through. */
+  animation?: TextAnimation | null
 }
 
 export type LayerContent = VideoContent | ImageContent | TextContent
@@ -433,7 +439,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 9,
+    version: 10,
     preset: 'reel',
     layers: [],
     captions: {
@@ -660,7 +666,8 @@ export function migrateProject(raw: unknown): Project {
   // flip, caption style); v7 normalises font ids above. v9 adds absence-tolerant
   // resize geometry (layer `stretchX`/`stretchY`, text `widthPx`) — read sites
   // default `stretch` to 1 and `widthPx` to auto, so no data transform is needed.
-  if (typeof p.version !== 'number' || p.version < 9) p.version = 9
+  // v10 adds absence-tolerant text `animation` (absent = static, no transform).
+  if (typeof p.version !== 'number' || p.version < 10) p.version = 10
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

@@ -25,6 +25,29 @@ ffprobe / `alphaextract`+`signalstats` / raw pixel dumps.
 - Codecs like ProRes 4444 carry alpha in their native decoder — no forcing, and
   their alpha DOES show in `pix_fmt` (`yuva444p10le`).
 
+## ASS animation tags (verified ffmpeg 8.1.1 / bundled libass, 2026-07)
+
+Verified by rendering scratch ASS files over a lavfi color base and inspecting
+frame dumps (`assBuilder.overlayEvents` maps `shared/textAnim.ts` onto these):
+
+- **`\fad(inMs,outMs)`, `\move(x1,y1,x2,y2,t0,t1)`, `\t(t0,t1,\fscx\fscy)` all
+  animate as documented** and compose with `\fn`/`fontsdir`, pill (BorderStyle
+  3) and stroke/shadow tags. All ramps are linear — keep the CSS preview linear.
+- **One `\move` per event.** Slide-in + slide-out therefore splits into
+  entrance / static / exit Dialogue events; abutting events at the same
+  computed position show no visible pop at the boundary.
+- **Mid-line `{\1a&HFF&\3a&HFF&\4a&HFF&}` hides the rest of the line but keeps
+  its layout space** — a partial reveal stays aligned with the full centered
+  text (the typewriter mechanism). With a pill, hide only `\1a\4a`: the
+  BorderStyle-3 box then renders FULL-SIZE from the start while glyphs type in
+  (hiding `\3a` mid-line would blank the box for the unrevealed run instead).
+- **`\k<cs>` karaoke flips a word from the secondary fill to primary at the
+  START of its interval** (not the end). Un-highlighted words render in
+  SecondaryColour — always set `\2c`/`\2a` inline (the style default is red).
+  Whitespace can ride inside a syllable.
+- libass logs `Error opening memory font 'LICENSES.md'` for non-font files in
+  `fontsdir` — noisy but harmless.
+
 ## Audio channels — one-sided sources & mono-fold (verified ffmpeg 8.1.1, 2026-07)
 
 - **A "mono mic on one side" source probes as ordinary `stereo`** (2 channels,

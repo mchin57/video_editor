@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import type { CaptionStyle, Layer, Project, Stabilize, VideoContent } from '@shared/project'
+import type { CaptionStyle, Layer, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
 import {
   DEFAULT_STABILIZE,
   NEUTRAL_COLOR,
@@ -10,6 +10,13 @@ import {
   isNeutralColor
 } from '@shared/project'
 import { hookCovered, videoSourceTime } from '@shared/layers'
+import {
+  DEFAULT_IN_SEC,
+  DEFAULT_OUT_SEC,
+  type TextAnimIn,
+  type TextAnimOut,
+  type TextAnimation
+} from '@shared/textAnim'
 import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { speechSegments } from '@/lib/silence'
@@ -561,6 +568,7 @@ function LayerEditor(): JSX.Element | null {
             <textarea value={c.text} rows={2} onChange={(e) => updateContent(id, { text: e.target.value })} className={inputCls} />
           </Field>
           <TextStyleControls style={c} onPatch={(patch) => updateContent(id, patch)} />
+          <TextAnimationFields content={c} onPatch={(patch) => updateContent(id, patch)} />
         </CollapsibleSection>
       )}
 
@@ -570,6 +578,111 @@ function LayerEditor(): JSX.Element | null {
       >
         Delete layer
       </button>
+    </div>
+  )
+}
+
+const ANIM_IN_OPTIONS: { value: TextAnimIn; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'fadeIn', label: 'Fade in' },
+  { value: 'slideUp', label: 'Slide in from bottom' },
+  { value: 'typewriter', label: 'Typewriter' },
+  { value: 'bounce', label: 'Bounce' },
+  { value: 'wordHighlight', label: 'Word-by-word highlight' }
+]
+const ANIM_OUT_OPTIONS: { value: TextAnimOut; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'fadeOut', label: 'Fade out' },
+  { value: 'slideDown', label: 'Slide out' }
+]
+
+/** Entrance/exit animation controls for a text layer. Disabled while the layer
+ *  burns as a rasterised PNG (gradient fill / fixed wrap width) — that path
+ *  can't animate, and `effectiveTextAnimation` ignores the setting there so
+ *  preview and export agree. */
+function TextAnimationFields({
+  content,
+  onPatch
+}: {
+  content: TextContent
+  onPatch: (patch: Partial<TextContent>) => void
+}): JSX.Element {
+  const anim: TextAnimation = content.animation ?? {
+    in: 'none',
+    inSec: DEFAULT_IN_SEC.fadeIn,
+    out: 'none',
+    outSec: DEFAULT_OUT_SEC
+  }
+  const disabled = !!content.gradient || content.widthPx != null
+  const patch = (p: Partial<TextAnimation>): void => onPatch({ animation: { ...anim, ...p } })
+  return (
+    <div className={disabled ? 'opacity-50' : ''}>
+      <div className="mb-1 mt-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Animation</div>
+      {disabled && (
+        <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
+          Not available with a gradient fill or a fixed wrap width (that text is rendered as an image).
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Field label="Entrance">
+          <select
+            value={anim.in}
+            disabled={disabled}
+            onChange={(e) => {
+              const v = e.target.value as TextAnimIn
+              patch({ in: v, inSec: DEFAULT_IN_SEC[v] })
+            }}
+            className={inputCls}
+          >
+            {ANIM_IN_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="In (s)">
+          <input
+            type="number"
+            min={0.1}
+            max={10}
+            step={0.1}
+            value={anim.inSec}
+            disabled={disabled || anim.in === 'none' || anim.in === 'wordHighlight'}
+            title={anim.in === 'wordHighlight' ? 'Word-by-word spans the whole layer duration' : undefined}
+            onChange={(e) => patch({ inSec: Math.max(0.1, Number(e.target.value) || 0.1) })}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      <div className="flex gap-2">
+        <Field label="Exit">
+          <select
+            value={anim.out}
+            disabled={disabled}
+            onChange={(e) => patch({ out: e.target.value as TextAnimOut, outSec: DEFAULT_OUT_SEC })}
+            className={inputCls}
+          >
+            {ANIM_OUT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Out (s)">
+          <input
+            type="number"
+            min={0.1}
+            max={10}
+            step={0.1}
+            value={anim.outSec}
+            disabled={disabled || anim.out === 'none'}
+            onChange={(e) => patch({ outSec: Math.max(0.1, Number(e.target.value) || 0.1) })}
+            className={inputCls}
+          />
+        </Field>
+      </div>
     </div>
   )
 }

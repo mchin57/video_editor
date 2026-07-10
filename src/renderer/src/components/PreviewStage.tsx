@@ -24,6 +24,7 @@ import {
   type ResizeBox,
   type ResizeHandle
 } from '@shared/layers'
+import { effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
@@ -89,18 +90,64 @@ function pillWrapStyle(pill: PillStyle): CSSProperties {
   }
 }
 
+/** Unrevealed typewriter glyphs: keep their layout space, hide every paint —
+ *  the CSS mirror of the ASS `\1a\3a\4a &HFF&` reveal (with a pill, the box
+ *  stays; only fill/stroke/shadow vanish — verified parity). */
+function hiddenGlyphStyle(s: TextDeco): CSSProperties {
+  const css = fillStyle(s)
+  css.color = 'transparent'
+  css.WebkitTextFillColor = 'transparent'
+  css.textShadow = 'none'
+  if (css.WebkitTextStroke) css.WebkitTextStroke = String(css.WebkitTextStroke).replace(/ .*$/, ' transparent')
+  delete css.backgroundImage
+  return css
+}
+
 /** Text glyphs with their fill/stroke/shadow, wrapped in a per-line pill when
  *  enabled. The inner text span is `position:relative` so ALL glyphs paint in the
  *  positioned phase — above every line's background. Without it, a lower line's
  *  padded background bleeds up into the line above and paints OVER its text
- *  (the reported multi-line bug). Mirrored in the export (`textImage.buildHtml`). */
-function StyledText({ s, text }: { s: TextDeco; text: string }): JSX.Element {
-  if (!s.pill.enabled) return <span style={fillStyle(s)}>{text}</span>
-  return (
-    <span style={pillWrapStyle(s.pill)}>
-      <span style={{ ...fillStyle(s), position: 'relative' }}>{text}</span>
-    </span>
-  )
+ *  (the reported multi-line bug). Mirrored in the export (`textImage.buildHtml`).
+ *
+ *  `reveal` (typewriter: characters visible) and `litWords` (word-by-word
+ *  karaoke: words highlighted) come from the shared `textAnimStateAt`, so the
+ *  preview matches the ASS burn frame-for-frame. */
+function StyledText({
+  s,
+  text,
+  reveal,
+  litWords
+}: {
+  s: TextDeco
+  text: string
+  reveal?: number | null
+  litWords?: number | null
+}): JSX.Element {
+  const rel = (css: CSSProperties): CSSProperties => (s.pill.enabled ? { ...css, position: 'relative' } : css)
+  let inner: React.ReactNode
+  if (reveal != null && reveal < text.length) {
+    inner = (
+      <>
+        <span style={rel(fillStyle(s))}>{text.slice(0, reveal)}</span>
+        <span style={rel(hiddenGlyphStyle(s))}>{text.slice(reveal)}</span>
+      </>
+    )
+  } else if (litWords != null) {
+    let w = 0
+    inner = text.split(/(\s+)/).map((tok, i) => {
+      if (tok.length === 0 || /^\s+$/.test(tok)) return tok
+      const lit = w++ < litWords
+      return (
+        <span key={i} style={rel({ ...fillStyle(s), opacity: lit ? 1 : KARAOKE_DIM_OPACITY })}>
+          {tok}
+        </span>
+      )
+    })
+  } else {
+    inner = <span style={rel(fillStyle(s))}>{text}</span>
+  }
+  if (!s.pill.enabled) return <>{inner}</>
+  return <span style={pillWrapStyle(s.pill)}>{inner}</span>
 }
 
 /** Absolute box (in %) for a media layer, sized to its aspect at the layer's
@@ -604,7 +651,16 @@ export function PreviewStage(): JSX.Element {
         // independent of x — anchoring by `left:x%` made the box narrower as it
         // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap
         // width; otherwise it hugs content up to a position-independent max.
+        // Animation state comes from the shared per-frame helper (playhead-
+        // driven, so scrub/pause stay exact — never CSS animations).
         const content = layer.content
+        const anim = textAnimStateAt(
+          effectiveTextAnimation(content),
+          layer.startSec,
+          layer.endSec,
+          content.text,
+          time
+        )
         return (
           <div
             key={layer.id}
@@ -614,8 +670,9 @@ export function PreviewStage(): JSX.Element {
               position: 'absolute',
               left: 0,
               top: 0,
-              transform: `translate(calc(${cqw(layer.x)} - 50%), calc(${cqh(layer.y)} - 50%)) scale(${layer.scale})`,
+              transform: `translate(calc(${cqw(layer.x)} - 50%), calc(${cqh(layer.y + anim.dy)} - 50%)) scale(${layer.scale * anim.scale})`,
               transformOrigin: 'center',
+              opacity: anim.opacity < 1 ? anim.opacity : undefined,
               fontSize: cqw(content.fontSizePx),
               fontFamily: fontCssFamily(content.fontFamily),
               fontWeight: 'normal',
@@ -627,7 +684,7 @@ export function PreviewStage(): JSX.Element {
               selected ? 'outline-dashed outline-2 outline-sky-400' : ''
             }`}
           >
-            <StyledText s={content} text={content.text} />
+            <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
           </div>
         )
       })}

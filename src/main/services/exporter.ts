@@ -11,6 +11,7 @@ import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor } from '@shared/project'
+import { effectiveTextAnimation } from '@shared/textAnim'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
 import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
@@ -286,7 +287,10 @@ async function runExport(
         color: c.gradient ? c.gradient.from : c.color,
         pill: c.pill,
         stroke: scaledStroke(c.stroke, sy),
-        shadow: scaledShadow(c.shadow, sy)
+        shadow: scaledShadow(c.shadow, sy),
+        // Resolved (not raw): rasterised text (gradient/wrap fallback) never
+        // animates, and the preview resolves through the same helper.
+        animation: effectiveTextAnimation(c)
       }
       await fsp.writeFile(join(tmp, assName), buildAss([overlay], target), 'utf8')
       visuals.push({ kind: 'text', assFile: assName })

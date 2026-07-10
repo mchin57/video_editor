@@ -50,6 +50,7 @@ loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
 | `effectiveImageAspect(base, crop, rotateQuarters)` | `layers.ts` | re-deriving image crop-reshape + 90°/270° aspect swap |
 | `effectiveCaptionStyle`, `effectiveOut`, `contentOfKind`, `audioClipEnd` | `project.ts`/`layers.ts` | already-canonical; extend rather than add parallels |
 | `pillRadiusPx(padPx)` | `project.ts` | hard-coding the text-pill corner radius; preview (`PreviewStage`, in `cqw`) and export (`textImage`, in px) must agree on the shape |
+| Text animation timing/geometry (`textAnimStateAt`, `clampAnimWindows`, `typewriterSteps`, `splitWords`, slide/bounce/karaoke constants) | `textAnim.ts` | re-deriving entrance/exit animation math in the preview or the ASS builder. Preview computes per-frame state from the playhead; `assBuilder.overlayEvents` maps the SAME constants onto `\fad`/`\move`/`\t`/`\k`. Both must resolve through `effectiveTextAnimation` (rasterised text never animates) |
 
 _Note:_ video-layer aspect is still a one-line ternary at each call site — the
 preview and export fallbacks differ (frame-aspect vs `1` when the probe is

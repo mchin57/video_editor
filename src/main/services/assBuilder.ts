@@ -14,6 +14,18 @@
 
 import type { CaptionsConfig, PillStyle, ShadowStyle, StrokeStyle } from '@shared/project'
 import { resolveFont } from '@shared/fonts'
+import { FRAME } from '@shared/layers'
+import {
+  BOUNCE_FADE_SEC,
+  BOUNCE_OVERSHOOT_FRAC,
+  BOUNCE_OVERSHOOT_SCALE,
+  BOUNCE_START_SCALE,
+  clampAnimWindows,
+  SLIDE_DIST_PX,
+  splitWords,
+  typewriterSteps,
+  type TextAnimation
+} from '@shared/textAnim'
 import type { Target } from './exporterArgs'
 
 /** A resolved text overlay to burn (geometry in logical/output px). */
@@ -33,6 +45,11 @@ export interface AssOverlay {
   stroke?: StrokeStyle | null
   /** Drop shadow (output px). Absent = style default. */
   shadow?: ShadowStyle | null
+  /** Entrance/exit animation (already resolved via `effectiveTextAnimation` —
+   *  gradient/wrapped text never reaches this builder). Mapped onto
+   *  \fad/\move/\t/\k and, for typewriter, per-step reveal events; every tag
+   *  verified against ffmpeg 8.1.1 (docs/FFMPEG-NOTES.md "ASS animation tags"). */
+  animation?: TextAnimation | null
 }
 
 function assTime(sec: number): string {
@@ -149,26 +166,156 @@ export function buildAss(
 
   for (const o of overlays) {
     if (o.text.trim().length === 0) continue
-    const style = o.pill.enabled ? 'Pill' : 'Plain'
-    const an = o.anchor === 'center' ? 5 : 7
-    const tags = [
-      `\\an${an}`,
-      `\\pos(${Math.round(o.x)},${Math.round(o.y)})`,
-      fontTags(o.fontFamily),
-      `\\fs${Math.round(o.fontSizePx)}`,
-      `\\c${assColor(o.color)}&`
-    ]
-    if (o.pill.enabled) {
-      // BorderStyle=3 opaque box: \3c is the box colour, \bord its padding.
-      tags.push(`\\3c${assColor(o.pill.color)}&`, `\\bord${Math.round(o.pill.padPx)}`)
-    }
-    const deco = decoTags(o.pill.enabled, o.stroke, o.shadow)
-    if (deco) tags.push(deco)
-    const text = `{${tags.join('')}}${escapeText(o.text)}`
-    lines.push(
-      `Dialogue: 0,${assTime(o.startSec)},${assTime(o.endSec)},${style},,0,0,0,,${text}`
-    )
+    lines.push(...overlayEvents(o, target))
   }
 
   return lines.join('\n') + '\n'
+}
+
+/**
+ * The Dialogue event(s) for one overlay. A static overlay is a single \pos
+ * event. Animations map onto tags within one event where possible (\fad for
+ * fades, \t for the bounce scale pop, \k for word-by-word); a slide uses \move,
+ * and since an event carries at most ONE \move, combinations that need two
+ * (slide in + slide out) split into entrance / static / exit events at the
+ * same computed position (no visual pop at the boundary — verified).
+ * Typewriter emits one event per reveal step: the not-yet-revealed characters
+ * ride along with their fill/outline/shadow alphas forced transparent
+ * (\1a\3a\4a &HFF&), which keeps the centered layout stable; with a pill only
+ * \1a\4a are hidden so the full-size box shows from the start (both verified —
+ * docs/FFMPEG-NOTES.md).
+ */
+function overlayEvents(o: AssOverlay, target: Target): string[] {
+  const style = o.pill.enabled ? 'Pill' : 'Plain'
+  const an = o.anchor === 'center' ? 5 : 7
+  const x = Math.round(o.x)
+  const y = Math.round(o.y)
+  const base: string[] = [`\\an${an}`, fontTags(o.fontFamily), `\\fs${Math.round(o.fontSizePx)}`, `\\c${assColor(o.color)}&`]
+  if (o.pill.enabled) {
+    // BorderStyle=3 opaque box: \3c is the box colour, \bord its padding.
+    base.push(`\\3c${assColor(o.pill.color)}&`, `\\bord${Math.round(o.pill.padPx)}`)
+  }
+  const deco = decoTags(o.pill.enabled, o.stroke, o.shadow)
+  if (deco) base.push(deco)
+  const pos = `\\pos(${x},${y})`
+
+  const ev = (t0: number, t1: number, tags: string[], text: string): string =>
+    `Dialogue: 0,${assTime(t0)},${assTime(t1)},${style},,0,0,0,,{${tags.join('')}}${text}`
+
+  const anim = o.animation && (o.animation.in !== 'none' || o.animation.out !== 'none') ? o.animation : null
+  if (!anim) return [ev(o.startSec, o.endSec, [base[0], pos, ...base.slice(1)], escapeText(o.text))]
+
+  const dur = Math.max(0.01, o.endSec - o.startSec)
+  const { inSec, outSec } = clampAnimWindows(anim, dur)
+  const inMs = Math.round(inSec * 1000)
+  const outMs = Math.round(outSec * 1000)
+  // Slide travel is a logical-px constant; scale it like every other vertical.
+  const slide = Math.round((SLIDE_DIST_PX * target.height) / FRAME.height)
+  const events: string[] = []
+
+  // Exit needs its own event only for slideDown (a second \move); fades ride
+  // whichever event touches the overlay end via \fad(…, outMs).
+  const splitExit = anim.out === 'slideDown'
+  const exitStart = splitExit ? o.endSec - outSec : o.endSec
+  const fadeOutMs = anim.out === 'fadeOut' ? outMs : 0
+
+  // Tags an event needs when it TOUCHES the overlay end (fade-out only).
+  const tailFade = (from: string[]): string[] => (fadeOutMs > 0 ? [...from, `\\fad(0,${fadeOutMs})`] : from)
+
+  switch (anim.in) {
+    case 'slideUp': {
+      const tags = [base[0], `\\move(${x},${y + slide},${x},${y},0,${inMs})`, ...base.slice(1)]
+      if (splitExit) {
+        events.push(ev(o.startSec, o.startSec + inSec, [...tags, `\\fad(${inMs},0)`], escapeText(o.text)))
+        if (exitStart > o.startSec + inSec + 0.001) {
+          events.push(ev(o.startSec + inSec, exitStart, [base[0], pos, ...base.slice(1)], escapeText(o.text)))
+        }
+      } else {
+        events.push(ev(o.startSec, o.endSec, [...tags, `\\fad(${inMs},${fadeOutMs})`], escapeText(o.text)))
+      }
+      break
+    }
+    case 'typewriter': {
+      const steps = typewriterSteps(o.text.length)
+      const stepDur = steps.length > 0 ? inSec / steps.length : 0
+      // Hide unrevealed glyphs, keeping layout: fill+shadow always, outline only
+      // without a pill (with one, \3a would blank the box for those chars).
+      const hide = o.pill.enabled ? '{\\1a&HFF&\\4a&HFF&}' : '{\\1a&HFF&\\3a&HFF&\\4a&HFF&}'
+      const posTags = [base[0], pos, ...base.slice(1)]
+      steps.forEach((chars, k) => {
+        const t0 = o.startSec + k * stepDur
+        const t1 = k === steps.length - 1 ? o.startSec + inSec : o.startSec + (k + 1) * stepDur
+        const body =
+          chars >= o.text.length
+            ? escapeText(o.text)
+            : `${escapeText(o.text.slice(0, chars))}${hide}${escapeText(o.text.slice(chars))}`
+        events.push(ev(t0, Math.min(t1, exitStart), posTags, body))
+      })
+      if (exitStart > o.startSec + inSec + 0.001) {
+        events.push(ev(o.startSec + inSec, exitStart, tailFade(posTags), escapeText(o.text)))
+      }
+      break
+    }
+    case 'wordHighlight': {
+      // One karaoke event across the window: a word flips from the dimmed
+      // secondary fill (\2c + \2a) to the primary at the START of its \k
+      // interval (verified). Whitespace rides with the preceding word.
+      const winEnd = exitStart
+      const winDur = Math.max(0.01, winEnd - o.startSec)
+      const words = splitWords(o.text)
+      const perWordCs = words.map((_, i) => {
+        const b0 = Math.round(((i * winDur) / words.length) * 100)
+        const b1 = Math.round((((i + 1) * winDur) / words.length) * 100)
+        return b1 - b0
+      })
+      let wi = 0
+      let body = ''
+      for (const tok of o.text.split(/(\s+)/)) {
+        if (tok.length === 0) continue
+        if (/^\s+$/.test(tok)) body += escapeText(tok)
+        else body += `{\\k${perWordCs[Math.min(wi++, perWordCs.length - 1)]}}${escapeText(tok)}`
+      }
+      const tags = tailFade([base[0], pos, ...base.slice(1), `\\2c${assColor(o.color)}&`, `\\2a&H99&`])
+      events.push(ev(o.startSec, winEnd, tags, body))
+      break
+    }
+    case 'bounce': {
+      const peakMs = Math.round(inMs * BOUNCE_OVERSHOOT_FRAC)
+      const s0 = Math.round(BOUNCE_START_SCALE * 100)
+      const s1 = Math.round(BOUNCE_OVERSHOOT_SCALE * 100)
+      const fadeMs = Math.min(inMs, Math.round(BOUNCE_FADE_SEC * 1000))
+      const tags = [
+        base[0],
+        pos,
+        ...base.slice(1),
+        `\\fscx${s0}\\fscy${s0}`,
+        `\\t(0,${peakMs},\\fscx${s1}\\fscy${s1})`,
+        `\\t(${peakMs},${inMs},\\fscx100\\fscy100)`,
+        `\\fad(${fadeMs},${splitExit ? 0 : fadeOutMs})`
+      ]
+      events.push(ev(o.startSec, exitStart, tags, escapeText(o.text)))
+      break
+    }
+    case 'fadeIn':
+    case 'none': {
+      const enterMs = anim.in === 'fadeIn' ? inMs : 0
+      const tags = [base[0], pos, ...base.slice(1)]
+      if (enterMs > 0 || (!splitExit && fadeOutMs > 0)) {
+        tags.push(`\\fad(${enterMs},${splitExit ? 0 : fadeOutMs})`)
+      }
+      events.push(ev(o.startSec, exitStart, tags, escapeText(o.text)))
+      break
+    }
+  }
+
+  if (splitExit) {
+    const tags = [
+      base[0],
+      `\\move(${x},${y},${x},${y + slide},0,${outMs})`,
+      ...base.slice(1),
+      `\\fad(0,${outMs})`
+    ]
+    events.push(ev(exitStart, o.endSec, tags, escapeText(o.text)))
+  }
+  return events
 }

@@ -169,13 +169,28 @@ _All apply to **both** text overlays and captions via the shared
   (libass has no independent x/y offset). Preview via `text-shadow`.
 
 #### Text animation effects
-- [ ] **Per-overlay entrance animation** — add an `animation` field to text overlays with these presets (rendered in preview via CSS animation; burned to video on export by rendering the animated frames via a canvas/offscreen approach or an ffmpeg `fade`/`drawtext` trick):
-  - **Fade in** — opacity 0→1 over the first 0.3s. Universal default.
-  - **Slide in from bottom** — translates up into position. Most common caption entrance.
-  - **Typewriter** — characters reveal one-by-one. Popular for hook text.
-  - **Bounce** — overshoots position slightly then settles. Fun/casual tone.
-  - **Word-by-word highlight** — karaoke-style; each word lights up as it's spoken (driven by whisper word timestamps). High engagement for spoken-word content.
-- [ ] **Exit animation** — matching fade-out or slide-out at the end of the overlay's duration.
+- [~] **Per-overlay entrance animation** — `TextContent.animation` (migration v10)
+  with all five presets: fade in, slide in from bottom, typewriter, bounce, and
+  word-by-word highlight. The shared timing/geometry source of truth is
+  `src/shared/textAnim.ts` (`textAnimStateAt` + constants, unit-tested); the
+  preview computes a per-frame state from the playhead (scrub-exact — no CSS
+  animations) and the export maps the same constants onto ASS tags in
+  `assBuilder.overlayEvents` (`\fad`/`\move`/`\t` scale pop/`\k` karaoke/
+  per-step alpha-reveal events — every mechanism verified against ffmpeg 8.1.1
+  frame dumps, see FFMPEG-NOTES "ASS animation tags"). Word-by-word distributes
+  evenly across the overlay window (text overlays have no whisper timing; the
+  spoken-word karaoke variant belongs to captions if ever needed). Inspector:
+  Entrance/Exit dropdowns + durations in the Text section. _Limitations:
+  rasterised text (gradient fill / fixed wrap width) does not animate —
+  `effectiveTextAnimation` resolves to none on both sides so preview and export
+  agree; the Inspector disables the controls there and says why._
+  _Unverified: not yet smoke-tested through `npm run dev` (Inspector → preview
+  → real export with media); the generated ASS was verified standalone against
+  the real ffmpeg, and unit tests pin the event strings._
+- [~] **Exit animation** — same field: fade out or slide out (down), with the
+  in+out windows clamped proportionally when they exceed the overlay duration.
+  Slide-in + slide-out splits into entrance/static/exit ASS events (one `\move`
+  per event). Same unverified caveat as above.
 
 #### Other
 - [ ] **Text free-distort resize mode** — stage objects are now resizable (edge/corner handles in `PreviewStage`): media edges distort, text sides re-wrap and corners scale the font. A follow-up is a per-text-layer "free distort" mode where the edges *squish the glyphs* non-uniformly (via the layer's already-reserved `stretchX`/`stretchY`, which text currently ignores). Open question: where the mode toggle lives in the UI/menus. The model + `resizeBox` math already support it.
