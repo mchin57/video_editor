@@ -235,6 +235,21 @@ export type LayerContent = VideoContent | ImageContent | TextContent
 export type LayerKind = LayerContent['kind']
 
 /**
+ * One keyframe of a layer's animatable transform. `tSec` is relative to the
+ * layer's `startSec` (so moving the block on the timeline keeps the motion);
+ * values are the same units as the layer's base `x`/`y`/`scale`. Kept sorted
+ * by `tSec`. Interpolation is LINEAR between keyframes and holds outside the
+ * first/last — both sides resolve through `layerTransformAt`
+ * (`shared/layers.ts`); never lerp inline.
+ */
+export interface LayerKeyframe {
+  tSec: number
+  x: number
+  y: number
+  scale: number
+}
+
+/**
  * A single composited element. Spatially: `x`/`y` are the CENTER of the layer in
  * logical 1080x1920 px and `scale` is a uniform zoom (1 = natural — a media
  * layer fills the frame letterboxed, text renders at its font size). Temporally:
@@ -258,6 +273,12 @@ export interface Layer {
    *  for a future text free-distort mode; text ignores them today. */
   stretchX?: number
   stretchY?: number
+  /**
+   * Position/scale keyframes (absent/empty = static base transform). Honored
+   * for video and image layers by preview and export (`layerTransformAt`);
+   * text layers ignore them (they animate via `TextContent.animation`).
+   */
+  keyframes?: LayerKeyframe[]
   content: LayerContent
 }
 
@@ -458,7 +479,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 11,
+    version: 12,
     preset: 'reel',
     layers: [],
     captions: {
@@ -687,7 +708,8 @@ export function migrateProject(raw: unknown): Project {
   // default `stretch` to 1 and `widthPx` to auto, so no data transform is needed.
   // v10 adds absence-tolerant text `animation` (absent = static, no transform).
   // v11 adds absence-tolerant video `speed` (absent = 1, no transform).
-  if (typeof p.version !== 'number' || p.version < 11) p.version = 11
+  // v12 adds absence-tolerant layer `keyframes` (absent = static, no transform).
+  if (typeof p.version !== 'number' || p.version < 12) p.version = 12
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

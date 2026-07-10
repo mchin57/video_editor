@@ -14,7 +14,31 @@
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EXPORT_PRESETS, type PresetId } from '@shared/export'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
-import { cropFilter, f3, r } from './ffmpegFilters'
+import { cropFilter, f3, piecewiseLinearExpr, r } from './ffmpegFilters'
+
+/**
+ * A layer keyframe resolved to OUTPUT pixels and ABSOLUTE output time: the
+ * display box size and its center. Baked into per-frame `t` expressions
+ * (`scale=…:eval=frame` after the setpts shift + `overlay` x/y with
+ * `overlay_w/2` centering — all verified, see FFMPEG-NOTES "Keyframes").
+ */
+export interface ExportKeyframe {
+  t: number
+  w: number
+  h: number
+  cx: number
+  cy: number
+}
+
+/** Even-rounded (yuv420-safe) per-frame dimension expression. */
+const kfDimExpr = (kfs: ExportKeyframe[], dim: 'w' | 'h'): string =>
+  `trunc((${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k[dim] })))})/2)*2`
+
+/** Center-anchored per-frame overlay position expressions. */
+const kfPosExprs = (kfs: ExportKeyframe[]): { x: string; y: string } => ({
+  x: `(${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k.cx })))})-overlay_w/2`,
+  y: `(${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k.cy })))})-overlay_h/2`
+})
 
 export interface Target {
   width: number
@@ -60,6 +84,8 @@ export interface ExportVideo {
   /** Constant playback speed (1 = normal). PTS scale by 1/speed; freeze holds
    *  stay wall-clock; the cfr output resamples the frame rate. */
   speed?: number
+  /** Position/scale keyframes (empty/absent = the static box above). */
+  keyframes?: ExportKeyframe[]
 }
 
 /** An image layer resolved for compositing (geometry in output px). */
@@ -79,6 +105,9 @@ export interface ExportImage {
   rotateQuarters?: number
   flipH?: boolean
   flipV?: boolean
+  /** Position/scale keyframes (empty/absent = static). A keyframed image input
+   *  becomes `-loop 1` + `fps=30` so it is a real frame stream `t` can drive. */
+  keyframes?: ExportKeyframe[]
 }
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
@@ -250,7 +279,15 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     if (v.inputDecoder) inputs.push('-c:v', v.inputDecoder)
     inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
   }
-  for (const im of images) inputs.push('-i', im.path)
+  for (const im of images) {
+    // A keyframed image must be a real frame stream (not a single held frame)
+    // so the per-frame scale/overlay expressions have frames to evaluate on.
+    if (im.keyframes && im.keyframes.length > 0) {
+      inputs.push('-loop', '1', '-t', f3(Math.max(0.04, im.endSec)), '-i', im.path)
+    } else {
+      inputs.push('-i', im.path)
+    }
+  }
   for (const im of topImages) inputs.push('-i', im.path)
   for (const a of audio) inputs.push('-i', a.path)
 
@@ -263,10 +300,14 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     if (vis.kind === 'video') {
       const v = vis.video
       const i = videoIdx.get(v)!
+      const kfs = v.keyframes && v.keyframes.length > 0 ? v.keyframes : null
       const pre: string[] = []
       if (v.hdrChain) pre.push(v.hdrChain)
       if (v.crop) pre.push(cropFilter(v.crop))
-      pre.push(`scale=${r(v.boxW)}:${r(v.boxH)}:flags=bicubic`)
+      // Keyframed layers scale per-frame AFTER the setpts shift (so the scale
+      // expressions see output-timeline t); static layers keep the one-shot
+      // scale here (exact strings pinned by tests).
+      if (!kfs) pre.push(`scale=${r(v.boxW)}:${r(v.boxH)}:flags=bicubic`)
       if (v.colorEq) pre.push(v.colorEq)
       // Freeze holds stretch PTS: each pushes all frames at/after its source point
       // forward by holdSec, so the held frame repeats (under -fps_mode cfr) instead
@@ -285,9 +326,15 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
         : `setpts=${elapsed}+${f3(v.startSec)}/TB`
       pre.push('setsar=1', v.hasAlpha ? 'format=yuva420p' : 'format=yuv420p', setpts)
+      if (kfs) {
+        pre.push(`scale=w='${kfDimExpr(kfs, 'w')}':h='${kfDimExpr(kfs, 'h')}':eval=frame:flags=bicubic`)
+      }
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
+      const pos = kfs ? kfPosExprs(kfs) : null
       chains.push(
-        `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`
+        pos
+          ? `[${prev}][pv${i}]overlay=x='${pos.x}':y='${pos.y}':enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`
+          : `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`
       )
     } else if (vis.kind === 'image') {
       const im = vis.image
@@ -305,11 +352,23 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       else if (q === 3) steps.push('transpose=2')
       if (im.flipH) steps.push('hflip')
       if (im.flipV) steps.push('vflip')
-      steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
-      if (op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+      const ikfs = im.keyframes && im.keyframes.length > 0 ? im.keyframes : null
+      if (ikfs) {
+        // The -loop 1 input already runs on the output clock from 0, so the
+        // per-frame scale expressions read absolute timeline t directly.
+        steps.push('format=rgba')
+        if (op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+        steps.push('fps=30', `scale=w='${kfDimExpr(ikfs, 'w')}':h='${kfDimExpr(ikfs, 'h')}':eval=frame`)
+      } else {
+        steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
+        if (op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+      }
       chains.push(`[${i}:v]${steps.join(',')}[pi${i}]`)
+      const ipos = ikfs ? kfPosExprs(ikfs) : null
       chains.push(
-        `[${prev}][pi${i}]overlay=${r(im.x)}:${r(im.y)}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
+        ipos
+          ? `[${prev}][pi${i}]overlay=x='${ipos.x}':y='${ipos.y}':enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
+          : `[${prev}][pi${i}]overlay=${r(im.x)}:${r(im.y)}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
       )
     } else {
       chains.push(`[${prev}]ass=${vis.assFile}${assOpts}[${out}]`)

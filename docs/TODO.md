@@ -290,7 +290,25 @@ _All apply to **both** text overlays and captions via the shared
   tempo; speed curves/ramps within a clip are the remaining large piece._
   _Unverified: not yet smoke-tested through `npm run dev` with real media
   (drag-trim feel at ≠1×, A/V sync on a real clip's unmuted audio)._
-- [ ] **Keyframe animation** — no way to animate overlay position, scale, or opacity over time. Would require a keyframe store per overlay property and interpolation in both preview and ASS export. _(Large.)_
+- [~] **Keyframe animation — position + scale shipped for video/image layers;
+  opacity and text keyframes remain backlogged.** `Layer.keyframes`
+  (`LayerKeyframe[]` — `tSec` relative to `startSec`, so moving the block keeps
+  the motion; migration v12). Interpolation is LINEAR with hold outside the
+  range, resolved through the shared `layerTransformAt` (+`upsertKeyframe`)
+  in `shared/layers.ts`. Preview evaluates it per playhead tick; canvas drags /
+  corner-resizes on a keyframed layer write a keyframe at the playhead. Export
+  bakes the same ramps into per-frame `t` expressions: `scale=…:eval=frame`
+  AFTER the setpts shift (so absolute timeline time, composing with
+  speed/freezes) + `overlay` x/y with `overlay_w/2` centering; keyframed still
+  images become `-loop 1` + `fps=30` frame streams — every mechanism verified
+  against ffmpeg 8.1.1 frame dumps (FFMPEG-NOTES "Keyframed layer motion").
+  UI: Inspector ▸ Keyframes (add-at-playhead, list with seek/remove, clear);
+  base X/Y/Zoom disable while keyframed. _Limitations: no opacity keyframes
+  (no clean per-frame alpha path in one ffmpeg pass — needs sendcmd or a
+  slow geq); text layers excluded (they animate via `TextContent.animation`);
+  easing is linear-only._ _Unverified: not yet smoke-tested through
+  `npm run dev` with real media (drag-writes-keyframe feel, export A/B against
+  preview motion)._
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).
 - [x] **Project-wide noise filter + per-clip override** — `Project.denoiseDefault` (off by default) is the lane-wide noise-reduction default; each `AudioClip.denoise` is now **tri-state** (`undefined` = inherit the default, `true`/`false` = force on/off and exempt the clip). `effectiveDenoise`/`denoiseOverridden` (`shared/project.ts`) resolve it; export applies the resolved value. UI: project default lives in the Inspector's no-selection "Project settings"; the audio-clip Inspector has a Default/On/Off segmented control; overridden clips show a small **N** badge (green = on, struck = off) on their timeline block. _Migration v8 seeds `denoiseDefault=false` and normalises legacy redundant `denoise:false` → inherit._

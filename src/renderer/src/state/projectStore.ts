@@ -10,7 +10,13 @@ import type {
   VideoContent
 } from '@shared/project'
 import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
-import { applyVisibleOrder, makeVideoLayer, playedVideoDuration } from '@shared/layers'
+import {
+  applyVisibleOrder,
+  layerTransformAt,
+  makeVideoLayer,
+  playedVideoDuration,
+  upsertKeyframe
+} from '@shared/layers'
 import type { PresetId } from '@shared/export'
 import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
 import { replaceAt, updateById } from '@/lib/arrays'
@@ -110,6 +116,13 @@ interface ProjectState {
   /** Set a video layer's constant playback speed, recomputing its timeline end
    *  from the shared duration invariant (source span / speed + holds). */
   setVideoSpeed: (id: string, speed: number) => void
+  /** Capture the layer's effective transform at timeline time `atSec` as a
+   *  keyframe (upserting one already at that offset). Video/image layers only. */
+  addLayerKeyframe: (id: string, atSec: number) => void
+  /** Remove the keyframe at `index` (in sorted order). */
+  removeLayerKeyframe: (id: string, index: number) => void
+  /** Drop all keyframes; the layer returns to its static base transform. */
+  clearLayerKeyframes: (id: string) => void
   /** Add a freeze hold at source time `atSrcSec`, extending the layer by `holdSec`. */
   addFreeze: (id: string, atSrcSec: number, holdSec: number) => void
   /** Remove the freeze at `index`, shrinking the layer by its hold. */
@@ -315,6 +328,29 @@ export const useProject = create<ProjectState>((set, get) => {
           return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
         })
       ),
+
+    addLayerKeyframe: (id, atSec) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind === 'text') return l
+          const tSec = Math.max(0, Math.min(atSec - l.startSec, Math.max(0, l.endSec - l.startSec)))
+          const tr = layerTransformAt(l, atSec)
+          return { ...l, keyframes: upsertKeyframe(l.keyframes, { tSec, ...tr }) }
+        })
+      ),
+
+    removeLayerKeyframe: (id, index) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          const kfs = [...(l.keyframes ?? [])].sort((a, b) => a.tSec - b.tSec)
+          if (!kfs[index]) return l
+          const next = kfs.filter((_, i) => i !== index)
+          return { ...l, keyframes: next.length ? next : undefined }
+        })
+      ),
+
+    clearLayerKeyframes: (id) =>
+      commit((p) => mapLayer(p, id, (l) => ({ ...l, keyframes: undefined }))),
 
     extractLayerAudio: (id) =>
       commit((p) => {

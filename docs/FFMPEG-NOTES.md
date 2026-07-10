@@ -85,6 +85,25 @@ exact compositor filter shapes and reading the counter off frame dumps:
   `atempo=2.000`); each instance only accepts 0.5–2, so arbitrary tempos chain
   (`atempoChain`, `services/audio.ts` — 4 → `2,2`, 0.25 → `0.5,0.5`).
 
+## Keyframed layer motion (verified ffmpeg 8.1.1, 2026-07)
+
+Verified with lavfi bases + frame dumps (drives `ExportKeyframe` handling in
+`exporterArgs.ts`):
+
+- **`scale=w='expr':h='expr':eval=frame` accepts `t`** and re-evaluates per
+  frame; `overlay` tolerates the mid-stream resizing secondary input.
+- **Filter `t` downstream of `setpts` is the SHIFTED time** — placing the
+  animated scale after the compositor's setpts lets expressions use absolute
+  output-timeline seconds (and composes with speed/freeze shifts for free).
+- **`overlay` x/y expressions re-evaluate per frame with live
+  `overlay_w`/`overlay_h`**, so `x='cx(t)-overlay_w/2'` keeps a resizing layer
+  center-anchored exactly.
+- **A keyframed still image needs `-loop 1 -t <dur>` + `fps=30`** — a plain
+  `-i img.png` is a single held frame, so per-frame expressions never
+  re-evaluate. The looped stream's pts start at 0 on the output clock; no
+  setpts needed.
+- Keep animated dimensions even (`trunc(expr/2)*2`) for yuv420 outputs.
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are

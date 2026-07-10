@@ -304,6 +304,8 @@ function LayerEditor(): JSX.Element | null {
   const asset =
     c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
   const kindName = c.kind === 'video' ? 'Video layer' : c.kind === 'image' ? 'Image layer' : 'Text layer'
+  // Keyframes override the base transform for media layers; grey those fields.
+  const keyframed = c.kind !== 'text' && (layer.keyframes?.length ?? 0) > 0
 
   return (
     <div>
@@ -337,12 +339,18 @@ function LayerEditor(): JSX.Element | null {
         </Field>
       </div>
 
+      {keyframed && (
+        <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
+          Position &amp; zoom are animated by keyframes (below) — these base values are ignored.
+        </p>
+      )}
       <div className="flex gap-2">
         <Field label="Position X">
           <input
             type="number"
             step="5"
             value={Math.round(layer.x)}
+            disabled={keyframed}
             onChange={(e) => update(id, { x: Number(e.target.value) })}
             className={inputCls}
           />
@@ -352,6 +360,7 @@ function LayerEditor(): JSX.Element | null {
             type="number"
             step="5"
             value={Math.round(layer.y)}
+            disabled={keyframed}
             onChange={(e) => update(id, { y: Number(e.target.value) })}
             className={inputCls}
           />
@@ -359,13 +368,15 @@ function LayerEditor(): JSX.Element | null {
       </div>
 
       <Field label={`Zoom · ${Math.round(layer.scale * 100)}%`}>
-        <LiveRange
-          min={0.05}
-          max={4}
-          step={0.01}
-          value={layer.scale}
-          transform={(p, v) => mut(p, (l) => ({ ...l, scale: v }))}
-        />
+        <div className={keyframed ? 'pointer-events-none opacity-40' : ''}>
+          <LiveRange
+            min={0.05}
+            max={4}
+            step={0.01}
+            value={layer.scale}
+            transform={(p, v) => mut(p, (l) => ({ ...l, scale: v }))}
+          />
+        </div>
       </Field>
 
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
@@ -373,6 +384,13 @@ function LayerEditor(): JSX.Element | null {
         Visible
       </label>
       </CollapsibleSection>
+
+      {/* Keyframed motion (video/image; text animates via its own presets) */}
+      {c.kind !== 'text' && (
+        <CollapsibleSection id="keyframes" title="Keyframes">
+          <KeyframesSection layer={layer} />
+        </CollapsibleSection>
+      )}
 
       {/* Video-specific controls */}
       {c.kind === 'video' && (
@@ -587,6 +605,67 @@ function LayerEditor(): JSX.Element | null {
       >
         Delete layer
       </button>
+    </div>
+  )
+}
+
+/**
+ * Position/scale keyframes for a media layer. "＋ Keyframe" captures the
+ * layer's effective transform at the playhead; with keyframes present, canvas
+ * drags/corner-resizes write keyframes at the playhead too (PreviewStage).
+ * Motion previews and exports through the same shared interpolation
+ * (`layerTransformAt`).
+ */
+function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
+  const addKf = useProject((s) => s.addLayerKeyframe)
+  const removeKf = useProject((s) => s.removeLayerKeyframe)
+  const clearKfs = useProject((s) => s.clearLayerKeyframes)
+  const setTime = usePlayback((s) => s.setTime)
+  const kfs = [...(layer.keyframes ?? [])].sort((a, b) => a.tSec - b.tSec)
+  return (
+    <div>
+      <button
+        onClick={() => addKf(layer.id, usePlayback.getState().time)}
+        className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+        title="Capture the layer's position & zoom at the playhead as a keyframe"
+      >
+        ＋ Keyframe at playhead
+      </button>
+      {kfs.length > 0 && (
+        <>
+          <ul className="mt-1.5 space-y-1">
+            {kfs.map((k, i) => (
+              <li key={`${k.tSec}-${i}`} className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[10px] text-zinc-300">
+                <button
+                  onClick={() => setTime(layer.startSec + k.tSec)}
+                  className="rounded bg-white/10 px-1 text-zinc-200 hover:bg-white/20"
+                  title="Jump the playhead to this keyframe"
+                >
+                  ▸
+                </button>
+                <span className="w-10 font-mono">{k.tSec.toFixed(2)}s</span>
+                <span className="flex-1 truncate text-zinc-500">
+                  x{Math.round(k.x)} y{Math.round(k.y)} · {Math.round(k.scale * 100)}%
+                </span>
+                <button
+                  onClick={() => removeKf(layer.id, i)}
+                  className="text-zinc-500 hover:text-rose-400"
+                  title="Remove this keyframe"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => clearKfs(layer.id)} className="mt-1.5 w-full rounded bg-white/5 px-2 py-1 text-[10px] text-zinc-400 hover:bg-white/10">
+            Clear all keyframes
+          </button>
+          <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+            Motion is linear between keyframes and holds outside them. Dragging the layer on the
+            canvas updates the keyframe at the playhead.
+          </p>
+        </>
+      )}
     </div>
   )
 }

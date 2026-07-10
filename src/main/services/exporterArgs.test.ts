@@ -146,6 +146,55 @@ describe('buildExportArgs', () => {
     expect(s).toContain('atempo=2.000,atempo=2.000,adelay=1000|1000')
   })
 
+  it('keyframed video scales per-frame AFTER setpts and centers via overlay exprs', () => {
+    const kfs = [
+      { t: 1, w: 500, h: 900, cx: 540, cy: 960 },
+      { t: 3, w: 700, h: 1260, cx: 300, cy: 500 }
+    ]
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, keyframes: kfs } }] }),
+      'o'
+    ).join(' ')
+    // No static one-shot scale; animated scale follows the setpts shift.
+    expect(s).not.toContain('scale=1080:1920')
+    expect(s).toContain(
+      "setpts=PTS-STARTPTS+1.000/TB,scale=w='trunc((if(lt(t,1.000),500.000,if(lt(t,3.000),500.000+200.000*(t-1.000)/2.000,700.000)))/2)*2'"
+    )
+    expect(s).toContain(":eval=frame:flags=bicubic[pv1]")
+    expect(s).toContain(
+      "overlay=x='(if(lt(t,1.000),540.000,if(lt(t,3.000),540.000+-240.000*(t-1.000)/2.000,300.000)))-overlay_w/2'"
+    )
+    expect(s).toContain("-overlay_h/2':enable='between(t,1.000,6.000)':eof_action=pass[v0]")
+  })
+
+  it('keyframed image becomes a -loop 1 frame stream with fps and per-frame scale', () => {
+    const img = {
+      path: 'C:/i/p.png',
+      boxW: 300,
+      boxH: 200,
+      x: 100,
+      y: 100,
+      startSec: 0,
+      endSec: 4,
+      opacity: 1,
+      keyframes: [
+        { t: 0, w: 300, h: 200, cx: 250, cy: 200 },
+        { t: 4, w: 600, h: 400, cx: 540, cy: 960 }
+      ]
+    }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: img }] }), 'o').join(' ')
+    expect(s).toContain('-loop 1 -t 4.000 -i C:/i/p.png')
+    expect(s).toContain("format=rgba,fps=30,scale=w='trunc((if(lt(t,0.000),300.000,if(lt(t,4.000),300.000+300.000*(t-0.000)/4.000,600.000)))/2)*2'")
+    expect(s).toContain("overlay=x='(if(lt(t,0.000),250.000,")
+
+    // Static images keep the exact original input/chain form.
+    const staticImg = { ...img, keyframes: [] }
+    const s2 = buildExportArgs(plan({ visuals: [{ kind: 'image', image: staticImg }] }), 'o').join(' ')
+    expect(s2).toContain('-i C:/i/p.png')
+    expect(s2).not.toContain('-loop 1')
+    expect(s2).toContain('scale=300:200,format=rgba')
+  })
+
   it('applies image crop, 90° rotation and flips before scaling', () => {
     const img = {
       path: 'C:/i/p.png',

@@ -4,7 +4,7 @@
  * is computed identically on both sides. Coordinates are logical 1080x1920 px.
  */
 
-import type { Layer, LayerContent, PillStyle, VideoContent } from './project'
+import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent } from './project'
 import { videoSpeed } from './project'
 import { DEFAULT_FONT_ID } from './fonts'
 
@@ -190,6 +190,64 @@ export function isFrozenAt(content: VideoContent, layer: Layer, t: number): bool
     local -= Math.max(0, f.holdSec)
   }
   return false
+}
+
+// --- Keyframed transform (shared by preview + export) ------------------------
+
+/** A layer's animatable transform values at one instant. */
+export interface LayerTransform {
+  x: number
+  y: number
+  scale: number
+}
+
+/**
+ * The layer's effective transform at timeline time `t`: linear interpolation
+ * between its keyframes (times relative to `startSec`), holding the first/last
+ * outside the range; without keyframes, the static base transform. The preview
+ * evaluates this per frame; the export bakes the same piecewise-linear ramps
+ * into ffmpeg `t` expressions — keep them identical.
+ */
+export function layerTransformAt(layer: Layer, t: number): LayerTransform {
+  const kfs = layer.keyframes
+  if (!kfs || kfs.length === 0) return { x: layer.x, y: layer.y, scale: layer.scale }
+  const sorted = [...kfs].sort((a, b) => a.tSec - b.tSec)
+  const local = t - layer.startSec
+  if (local <= sorted[0].tSec) return pick(sorted[0])
+  const last = sorted[sorted.length - 1]
+  if (local >= last.tSec) return pick(last)
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i]
+    const b = sorted[i + 1]
+    if (local <= b.tSec) {
+      const span = b.tSec - a.tSec
+      const f = span > 0 ? (local - a.tSec) / span : 1
+      return {
+        x: a.x + (b.x - a.x) * f,
+        y: a.y + (b.y - a.y) * f,
+        scale: a.scale + (b.scale - a.scale) * f
+      }
+    }
+  }
+  return pick(last)
+}
+
+function pick(k: LayerKeyframe): LayerTransform {
+  return { x: k.x, y: k.y, scale: k.scale }
+}
+
+/**
+ * Insert or replace a keyframe at `tSec` (an existing one within `eps` seconds
+ * is replaced — a canvas drag at the playhead updates rather than stacking).
+ * Returns a new sorted array.
+ */
+export function upsertKeyframe(
+  kfs: LayerKeyframe[] | undefined,
+  kf: LayerKeyframe,
+  eps = 0.02
+): LayerKeyframe[] {
+  const kept = (kfs ?? []).filter((k) => Math.abs(k.tSec - kf.tSec) > eps)
+  return [...kept, kf].sort((a, b) => a.tSec - b.tSec)
 }
 
 /** The background is the bottom-most (index 0) layer. */

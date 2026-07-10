@@ -10,6 +10,7 @@ import {
   isBackgroundId,
   isFrozenAt,
   layersAtTime,
+  layerTransformAt,
   makeImageLayer,
   makeTextLayer,
   makeVideoLayer,
@@ -17,6 +18,7 @@ import {
   playedVideoDuration,
   resizeBox,
   stretchedBox,
+  upsertKeyframe,
   videoSourceTime,
   visualDuration
 } from './layers'
@@ -200,6 +202,52 @@ describe('freezeExtraSec / isFrozenAt', () => {
     expect(isFrozenAt(c, l, 2.9)).toBe(false)
     expect(isFrozenAt(c, l, 3.5)).toBe(true)
     expect(isFrozenAt(c, l, 5)).toBe(false)
+  })
+})
+
+describe('layerTransformAt / upsertKeyframe', () => {
+  const base = { ...makeVideoLayer('a', 'm', 2, 10) } // startSec 2
+  it('returns the base transform without keyframes', () => {
+    expect(layerTransformAt(base, 5)).toEqual({ x: base.x, y: base.y, scale: base.scale })
+  })
+  it('holds before the first and after the last keyframe', () => {
+    const l = {
+      ...base,
+      keyframes: [
+        { tSec: 1, x: 100, y: 200, scale: 1 },
+        { tSec: 3, x: 300, y: 400, scale: 2 }
+      ]
+    }
+    expect(layerTransformAt(l, 2)).toEqual({ x: 100, y: 200, scale: 1 }) // t=2 → local 0 < 1
+    expect(layerTransformAt(l, 9)).toEqual({ x: 300, y: 400, scale: 2 }) // local 7 > 3
+  })
+  it('lerps linearly between keyframes', () => {
+    const l = {
+      ...base,
+      keyframes: [
+        { tSec: 1, x: 100, y: 200, scale: 1 },
+        { tSec: 3, x: 300, y: 400, scale: 2 }
+      ]
+    }
+    // t=4 → local 2 → halfway between tSec 1 and 3.
+    expect(layerTransformAt(l, 4)).toEqual({ x: 200, y: 300, scale: 1.5 })
+  })
+  it('a single keyframe pins the transform', () => {
+    const l = { ...base, keyframes: [{ tSec: 1, x: 50, y: 60, scale: 0.5 }] }
+    expect(layerTransformAt(l, 2)).toEqual({ x: 50, y: 60, scale: 0.5 })
+    expect(layerTransformAt(l, 9)).toEqual({ x: 50, y: 60, scale: 0.5 })
+  })
+  it('upsert replaces a keyframe within epsilon and keeps the list sorted', () => {
+    const kfs = [
+      { tSec: 0, x: 1, y: 1, scale: 1 },
+      { tSec: 2, x: 2, y: 2, scale: 1 }
+    ]
+    const replaced = upsertKeyframe(kfs, { tSec: 2.01, x: 9, y: 9, scale: 2 })
+    expect(replaced).toHaveLength(2)
+    expect(replaced[1]).toEqual({ tSec: 2.01, x: 9, y: 9, scale: 2 })
+    const inserted = upsertKeyframe(kfs, { tSec: 1, x: 5, y: 5, scale: 1 })
+    expect(inserted.map((k) => k.tSec)).toEqual([0, 1, 2])
+    expect(upsertKeyframe(undefined, { tSec: 0.5, x: 1, y: 1, scale: 1 })).toHaveLength(1)
   })
 })
 

@@ -23,3 +23,29 @@ export function cropFilter(c: { x: number; y: number; w: number; h: number }): s
 export function eqFilter(c: { brightness: number; contrast: number; saturation: number }): string {
   return `eq=brightness=${c.brightness}:contrast=${c.contrast}:saturation=${c.saturation}`
 }
+
+/**
+ * Piecewise-LINEAR ramp of `v` over time as a nested-if ffmpeg expression in
+ * `t` (holds the first/last value outside the range) — the export twin of
+ * `layerTransformAt`'s interpolation. The result contains commas, so the
+ * caller must place it inside a single-quoted option value
+ * (`x='…'`), NOT bare in a filtergraph. Times are absolute output seconds.
+ */
+export function piecewiseLinearExpr(points: { t: number; v: number }[]): string {
+  if (points.length === 0) return '0'
+  const p = [...points].sort((a, b) => a.t - b.t)
+  if (p.length === 1) return f3(p[0].v)
+  let expr = f3(p[p.length - 1].v) // after the last point: hold its value
+  // Build inside-out: each earlier segment wraps the rest in one if().
+  for (let i = p.length - 2; i >= 0; i--) {
+    const a = p[i]
+    const b = p[i + 1]
+    const span = b.t - a.t
+    const seg =
+      span > 0
+        ? `${f3(a.v)}+${f3(b.v - a.v)}*(t-${f3(a.t)})/${f3(span)}`
+        : f3(b.v)
+    expr = `if(lt(t,${f3(b.t)}),${seg},${expr})`
+  }
+  return `if(lt(t,${f3(p[0].t)}),${f3(p[0].v)},${expr})`
+}

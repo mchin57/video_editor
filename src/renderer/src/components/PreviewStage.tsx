@@ -16,9 +16,11 @@ import {
   effectiveImageAspect,
   isFrozenAt,
   layersAtTime,
+  layerTransformAt,
   makeVideoLayer,
   resizeBox,
   stretchedBox,
+  upsertKeyframe,
   videoSourceTime,
   visualDuration,
   type ResizeBox,
@@ -36,6 +38,14 @@ import { usePlayback } from '@/state/playback'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
+
+/** The layer with its keyframed transform baked in for rendering at time `t`
+ *  (text layers ignore keyframes — they animate via `TextContent.animation`). */
+function withKeyframedTransform(l: Layer, t: number): Layer {
+  if (!l.keyframes?.length || l.content.kind === 'text') return l
+  const tr = layerTransformAt(l, t)
+  return { ...l, x: tr.x, y: tr.y, scale: tr.scale }
+}
 
 const EMPTY_LAYERS: Layer[] = []
 const EMPTY_AUDIO: AudioClip[] = []
@@ -439,12 +449,25 @@ export function PreviewStage(): JSX.Element {
     const scale = LOGICAL.width / stage.getBoundingClientRect().width
     const startX = e.clientX
     const startY = e.clientY
+    // On a keyframed layer, dragging writes/updates a keyframe at the playhead
+    // (standard editor behavior) instead of the base transform, which keyframes
+    // override. `layer.x/y` are already the effective values at `time`.
+    const kfd = !!layer.keyframes?.length && layer.content.kind !== 'text'
+    const t0 = usePlayback.getState().time
+    const kfT = clamp(t0 - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
+    const kfScale = layerTransformAt(layer, t0).scale
     startDragWithUndo((ev) => {
       const nx = layer.x + (ev.clientX - startX) * scale
       const ny = layer.y + (ev.clientY - startY) * scale
       useProject.getState().liveUpdate((p) => ({
         ...p,
-        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, x: nx, y: ny } : l))
+        layers: p.layers.map((l) => {
+          if (l.id !== layer.id) return l
+          if (kfd) {
+            return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale }) }
+          }
+          return { ...l, x: nx, y: ny }
+        })
       }))
     })
   }
@@ -465,6 +488,14 @@ export function PreviewStage(): JSX.Element {
     const startY = e.clientY
     const isCorner = handle.length === 2
     const isText = layer.content.kind === 'text'
+    // Corner-resizing a keyframed layer writes a keyframe at the playhead
+    // (like a canvas move). `layer.scale` is already the effective value.
+    const kfd = !!layer.keyframes?.length && !isText
+    const kfT = clamp(
+      usePlayback.getState().time - layer.startSec,
+      0,
+      Math.max(0, layer.endSec - layer.startSec)
+    )
     startDragWithUndo((ev) => {
       const dx = (ev.clientX - startX) * s
       const dy = (ev.clientY - startY) * s
@@ -474,7 +505,11 @@ export function PreviewStage(): JSX.Element {
         layers: p.layers.map((l) => {
           if (l.id !== layer.id) return l
           if (isCorner) {
-            return { ...l, x: nb.cx, y: nb.cy, scale: clamp(layer.scale * (nb.w / startBox.w), 0.05, 8) }
+            const ns = clamp(layer.scale * (nb.w / startBox.w), 0.05, 8)
+            if (kfd) {
+              return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nb.cx, y: nb.cy, scale: ns }) }
+            }
+            return { ...l, x: nb.cx, y: nb.cy, scale: ns }
           }
           if (isText && l.content.kind === 'text') {
             // widthPx is the pre-scale wrap width; the measured box is post-scale.
@@ -538,7 +573,9 @@ export function PreviewStage(): JSX.Element {
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [selectedLayer])
+    // A keyframed layer's box moves with the playhead — re-measure per tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLayer, selectedLayer?.keyframes?.length ? time : 0])
 
   // All captions on screen now (audio clips are captioned independently, so two
   // overlapping clips can show two captions at once — stack them).
@@ -565,7 +602,8 @@ export function PreviewStage(): JSX.Element {
       })}
 
       {/* The composited layer stack, back (index 0) → front. */}
-      {activeLayers.map((layer, i) => {
+      {activeLayers.map((rawLayer, i) => {
+        const layer = withKeyframedTransform(rawLayer, time)
         const z = 10 + i
         const selected = layer.id === selectedLayerId
         const onMoveDown = (e: ReactPointerEvent): void => startLayerMove(e, layer)
@@ -704,7 +742,7 @@ export function PreviewStage(): JSX.Element {
         <ResizeHandles
           box={handleBox}
           isText={selectedLayer.content.kind === 'text'}
-          onStart={(e, handle) => startLayerResize(e, selectedLayer, handle)}
+          onStart={(e, handle) => startLayerResize(e, withKeyframedTransform(selectedLayer, time), handle)}
         />
       )}
 

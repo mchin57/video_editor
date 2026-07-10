@@ -15,6 +15,8 @@ import { effectiveTextAnimation } from '@shared/textAnim'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
 import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
+import type { Layer } from '@shared/project'
+import type { ExportKeyframe } from './exporterArgs'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
@@ -93,6 +95,21 @@ async function runExport(
 
   const tmp = join(getSubdir('tmp'), jobId)
   await fsp.mkdir(tmp, { recursive: true })
+
+  // A layer's position/scale keyframes, resolved for the compositor: display
+  // box per keyframe (same stretchedBox math as the static path) in output px,
+  // at absolute output times.
+  const exportKeyframes = (l: Layer, aspect: number): ExportKeyframe[] =>
+    (l.keyframes ?? []).map((k) => {
+      const b = stretchedBox(aspect, k.scale, l.stretchX ?? 1, l.stretchY ?? 1)
+      return {
+        t: l.startSec + k.tSec,
+        w: b.w * sx,
+        h: b.h * sy,
+        cx: k.x * sx,
+        cy: k.y * sy
+      }
+    })
 
   // Walk the stack back→front, resolving each visible layer to a composite step.
   // Geometry is mapped from the logical 1080x1920 space into output pixels.
@@ -198,7 +215,8 @@ async function runExport(
           startSec: l.startSec,
           endSec: l.endSec,
           freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
-          speed: videoSpeed(c)
+          speed: videoSpeed(c),
+          keyframes: exportKeyframes(l, aspect)
         }
       })
       // An unmuted video layer's own audio joins the mix (placed at its start),
@@ -242,7 +260,8 @@ async function runExport(
           crop: c.crop ?? null,
           rotateQuarters: q,
           flipH: c.flipH,
-          flipV: c.flipV
+          flipV: c.flipV,
+          keyframes: exportKeyframes(l, aspect)
         }
       })
     } else {
