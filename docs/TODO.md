@@ -285,7 +285,14 @@ _All apply to **both** text overlays and captions via the shared
 
 - [ ] **Bug: font size input clamps on every keystroke** — the font size field in the Inspector prevents the user from deleting the number all the way down while typing (it snaps back to the minimum on each change). It should allow any intermediate value (including empty string) while the field is focused, and only clamp to the minimum on `blur` if the value is below the minimum or empty. Fix: store a local draft string in component state on `onChange`, and only commit + clamp to the store on `onBlur`.
 
-- [ ] **Bug: audio waveform not rendering on timeline audio blocks** — audio clips in the Audio lane show no waveform image. The waveform PNG is generated on import via `showwavespic` and served via `waveformUrl(asset.id)`, and the `<img>` element is present in the audio block JSX in `Timeline.tsx`, but the image is not displaying. Check: (1) whether `waveformUrl` returns a valid URL for audio-only assets, (2) whether the waveform job actually runs for files imported via "Extract audio from clip", and (3) whether the `<img>` negative-left offset CSS (based on `inSec` ratio) is pushing it out of view for clips where `inSec=0`.
+- [x] **Bug: audio waveform not rendering on timeline audio blocks** — root cause
+  was none of the suspects: generation, the URL, and the offset math were all fine.
+  Tailwind preflight's `img { max-width: 100% }` clamped the inline
+  `width: >100%` (used to window the full-source waveform to the trimmed span)
+  while the negative `left` still applied — so any clip with `inSec > 0`
+  (every split/leading-trim) pushed its waveform entirely outside the
+  overflow-hidden block. Fixed with `max-w-none` on the img (`Timeline.tsx`);
+  regression spec `e2e/waveform.spec.ts` pins the img/block overlap.
 
 - [ ] **Snap selected clip to end of previous clip** — a keybind or toolbar button that moves the selected layer's `startSec` to exactly the `endSec` of the nearest clip that ends before it (on the same lane), eliminating any gap between them. Useful for butting clips together without manual dragging. If no prior clip exists in the lane, snap to 0. Logic belongs in a pure helper in `lib/timeline.ts`; dispatches via `liveUpdate` + `commitLive` so it's undoable.
 

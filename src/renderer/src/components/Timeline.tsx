@@ -864,7 +864,7 @@ export function Timeline(): JSX.Element {
                       src={waveformUrl(asset.id)}
                       alt=""
                       onError={(e) => (e.currentTarget.style.display = 'none')}
-                      className="pointer-events-none absolute inset-y-0 opacity-70"
+                      className="pointer-events-none absolute inset-y-0 max-w-none opacity-70"
                       style={{
                         left: `${-(a.inSec / Math.max(0.01, eo - a.inSec)) * 100}%`,
                         width: `${(maxOut / Math.max(0.01, eo - a.inSec)) * 100}%`,
