@@ -63,6 +63,7 @@ missing), so it was deliberately **not** unified to keep behavior identical.
 | `f3(n)` (`toFixed(3)`), `r(n)` (`Math.round`) | `ffmpegFilters.ts` | redefining the seconds/rounding formatters per module |
 | `runFfmpeg(ffmpeg, args, durationSec, onProgress?, cwd?)` | `ffmpegRun.ts` | re-rolling the spawn + stderr-tail + exit-code promise (with `-progress pipe:1` parsing) — proxy/thumbnail/still all go through it |
 | `alphaInputDecoder(video)` | `shared/media.ts` | decoding a VP8/VP9-alpha WebM without forcing `-c:v libvpx…` before `-i` (native decode silently drops alpha — see `docs/FFMPEG-NOTES.md`) |
+| `monoFoldPan(channel)` + `detectMonoFoldChannel`/`monoFoldFrom`/`parseChannelPeaks` | `audio.ts` | hand-writing a `pan=stereo\|c0=cN\|c1=cN` fold or re-parsing `astats` peaks to mirror a one-sided (dead-channel) source to both sides (see `AudioStreamInfo.monoFoldChannel`) |
 | `renderGradientImage(spec, start, end)` (closure in `exporter.ts`) | `exporter.ts` | duplicating the rasterise-text-to-PNG → full-frame-overlay block for text vs captions |
 | `hdrToSdrChain` (`proxy.ts`), `buildAudioGraph` (`audio.ts`), `buildAss` (`assBuilder.ts`) | their modules | the orchestration seams the new helpers feed; don't reimplement |
 

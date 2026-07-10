@@ -25,6 +25,23 @@ ffprobe / `alphaextract`+`signalstats` / raw pixel dumps.
 - Codecs like ProRes 4444 carry alpha in their native decoder — no forcing, and
   their alpha DOES show in `pix_fmt` (`yuva444p10le`).
 
+## Audio channels — one-sided sources & mono-fold (verified ffmpeg 8.1.1, 2026-07)
+
+- **A "mono mic on one side" source probes as ordinary `stereo`** (2 channels,
+  `channel_layout=stereo`) — the container gives no hint one channel is dead.
+  The only signal is per-channel level: `astats=measure_perchannel=Peak_level`
+  on the real MOV showed **ch1 peak −86.7 dB (dead), ch2 −1.6 dB (the signal)**.
+  Detection lives in `detectMonoFoldChannel`/`parseChannelPeaks`/`monoFoldFrom`
+  (`services/audio.ts`); a channel peaking below −60 dBFS is treated as silent.
+- **`pan=stereo|c0=cN|c1=cN` mirrors channel N to both outputs.** Verified: after
+  `pan=…c1`, both output channels read peak −1.6 dB (was −86.7/−1.6). This is the
+  auto mono-fold applied in the proxies and the export mix (`monoFoldPan`).
+- The fold is **idempotent** — re-applying it to an already-folded stream is a
+  no-op (both channels already carry the signal), so it's safe that the audio
+  proxy is folded *and* the export graph folds the same source again.
+- `astats` logs to **stderr at info level**; `-v error` suppresses it. Capture
+  stderr (not stdout) and don't lower the log level when probing channel peaks.
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are

@@ -9,6 +9,7 @@
 
 import type { ProbeInfo, VideoStreamInfo } from '@shared/media'
 import { alphaInputDecoder } from '@shared/media'
+import { monoFoldPan } from './audio'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { setProgress } from './jobs'
@@ -119,7 +120,11 @@ export function buildProxyArgs(input: string, output: string, probe: ProbeInfo):
   args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p')
 
   if (probe.audio) {
-    args.push('-map', '0:a:0?', '-c:a', 'aac', '-b:a', '128k')
+    args.push('-map', '0:a:0?')
+    // Mono-fold a one-sided source so preview plays out of both ears (the same
+    // fold the export applies). See AudioStreamInfo.monoFoldChannel.
+    if (probe.audio.monoFoldChannel != null) args.push('-af', monoFoldPan(probe.audio.monoFoldChannel))
+    args.push('-c:a', 'aac', '-b:a', '128k')
   } else {
     args.push('-an')
   }

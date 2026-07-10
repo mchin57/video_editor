@@ -95,6 +95,9 @@ export interface ExportAudio {
   fadeOutSec: number
   duck: boolean
   denoise?: boolean
+  /** Mirror this stereo channel to both sides (one-sided source), or null. See
+   *  `AudioStreamInfo.monoFoldChannel`. */
+  foldChannel?: number | null
 }
 
 export interface ExportPlan {
@@ -330,7 +333,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     fadeInSec: a.fadeInSec,
     fadeOutSec: a.fadeOutSec,
     duck: a.duck,
-    denoise: a.denoise
+    denoise: a.denoise,
+    foldChannel: a.foldChannel
   }))
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, null) : null
   if (graph) chains.push(graph.filter)

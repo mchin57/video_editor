@@ -209,7 +209,8 @@ async function runExport(
           gainDb: c.gainDb,
           fadeInSec: 0,
           fadeOutSec: 0,
-          duck: false
+          duck: false,
+          foldChannel: asset.probe.audio.monoFoldChannel ?? null
         })
       }
     } else if (c.kind === 'image') {
@@ -310,7 +311,8 @@ async function runExport(
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
       duck: a.duck,
-      denoise: effectiveDenoise(a, project.denoiseDefault)
+      denoise: effectiveDenoise(a, project.denoiseDefault),
+      foldChannel: asset.probe.audio?.monoFoldChannel ?? null
     })
   }
 

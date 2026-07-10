@@ -15,7 +15,7 @@ import { probeFile } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
-import { extractAudio, generateAudioProxy, generateWaveform } from './audio'
+import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
 
 /** Content hash (first 12 hex of sha1) of a file — the media folder / id. */
@@ -123,6 +123,11 @@ export async function importFile(srcPath: string, displayName?: string): Promise
   }
 
   const probe = await probeFile(srcPath)
+  // Level-probe stereo sources for a dead channel so the proxy + export can
+  // mono-fold "mono mic on one side" footage (best-effort; null on any failure).
+  if (probe.audio?.channels === 2) {
+    probe.audio.monoFoldChannel = await detectMonoFoldChannel(srcPath)
+  }
   const kind: MediaKind = kindFromExt(srcPath) ?? deriveKind(probe)
   const asset: MediaAsset = {
     id,
@@ -159,7 +164,7 @@ export async function ensureProxy(id: string): Promise<void> {
   if (isAudioAsset(asset)) {
     const job = createJob('proxy', `Audio · ${asset.fileName}`, id)
     try {
-      await generateAudioProxy(asset.originalPath, audioProxyPath(id))
+      await generateAudioProxy(asset.originalPath, audioProxyPath(id), asset.probe.audio?.monoFoldChannel ?? null)
       await makeWaveform(asset)
       asset.proxyReady = true
       await writeAsset(asset)

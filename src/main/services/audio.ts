@@ -6,15 +6,80 @@
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 
-export function buildAudioProxyArgs(input: string, output: string): string[] {
+export function buildAudioProxyArgs(
+  input: string,
+  output: string,
+  foldChannel: number | null = null
+): string[] {
   return [
     '-y', '-hide_banner', '-nostdin',
     '-i', input,
     '-vn',
+    ...(foldChannel != null ? ['-af', monoFoldPan(foldChannel)] : []),
     '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
     '-movflags', '+faststart',
     output
   ]
+}
+
+/**
+ * Mirror one channel of a stereo source to BOTH output channels. Used for the
+ * "mono mic recorded to a single side" case: without it that footage plays out
+ * of one ear (and can read as silent). `channel` is 0 = left, 1 = right.
+ * Verified against ffmpeg 8.1.1 — see docs/FFMPEG-NOTES.md. */
+export function monoFoldPan(channel: number): string {
+  return `pan=stereo|c0=c${channel}|c1=c${channel}`
+}
+
+/** A channel whose peak sits below this (dBFS) is treated as silent/dead. */
+const SILENCE_PEAK_DB = -60
+
+/**
+ * ffmpeg args that print each channel's peak level (and nothing else) to stderr
+ * for a one-shot level probe. Decodes the whole audio stream to a null sink —
+ * cheap for Reel-length clips. Pair with `parseChannelPeaks` + `monoFoldFrom`.
+ */
+export function buildChannelStatsArgs(input: string): string[] {
+  return [
+    '-hide_banner', '-nostdin', '-nostats',
+    '-i', input,
+    '-map', '0:a:0',
+    '-af', 'astats=measure_perchannel=Peak_level:measure_overall=none',
+    '-f', 'null', '-'
+  ]
+}
+
+/** Parse per-channel peak levels (dBFS) out of `astats` stderr; index 0 = ch1. */
+export function parseChannelPeaks(stderr: string): number[] {
+  const peaks: number[] = []
+  let cur = -1
+  for (const line of stderr.split(/\r?\n/)) {
+    const ch = line.match(/Channel:\s*(\d+)/)
+    if (ch) {
+      cur = Number(ch[1]) - 1
+      continue
+    }
+    const pk = line.match(/Peak level dB:\s*(-?inf|-?\d+(?:\.\d+)?)/i)
+    if (pk && cur >= 0) {
+      peaks[cur] = /inf/i.test(pk[1]) ? -Infinity : Number(pk[1])
+      cur = -1
+    }
+  }
+  return peaks
+}
+
+/**
+ * Given per-channel peaks, decide the mono-fold channel: only for a 2-channel
+ * source where exactly one channel is live and the other is silent, return the
+ * live one's index; otherwise `null` (true stereo, mono, or dead silence — no
+ * fold). See `AudioStreamInfo.monoFoldChannel`.
+ */
+export function monoFoldFrom(peaksDb: number[]): number | null {
+  if (peaksDb.length !== 2) return null
+  const live = peaksDb.map((p) => p > SILENCE_PEAK_DB)
+  if (live[0] && !live[1]) return 0
+  if (live[1] && !live[0]) return 1
+  return null
 }
 
 /**
@@ -67,6 +132,9 @@ export interface AudioGraphItem {
   duck: boolean
   /** Apply FFT noise reduction. */
   denoise?: boolean
+  /** Mirror this stereo channel to both sides (mono-fold), or null. See
+   *  `AudioStreamInfo.monoFoldChannel`. */
+  foldChannel?: number | null
 }
 
 /**
@@ -88,8 +156,9 @@ export function buildAudioGraph(
     const gain = dbToGain(it.gainDb).toFixed(3)
     const startMs = Math.round(Math.max(0, it.startSec) * 1000)
     const clipEnd = it.startSec + Math.max(0.01, it.outSec - it.inSec)
+    const fold = it.foldChannel != null ? `${monoFoldPan(it.foldChannel)},` : ''
     const parts = [
-      `[${it.inputLabel}]atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`,
+      `[${it.inputLabel}]${fold}atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`,
       'asetpts=N/SR/TB'
     ]
     if (it.denoise) parts.push('afftdn=nf=-25')
@@ -128,9 +197,36 @@ function run(ffmpeg: string, args: string[]): Promise<void> {
   return runFfmpeg(ffmpeg, args, 0)
 }
 
-export async function generateAudioProxy(input: string, output: string): Promise<void> {
+export async function generateAudioProxy(
+  input: string,
+  output: string,
+  foldChannel: number | null = null
+): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await run(ffmpeg, buildAudioProxyArgs(input, output))
+  await run(ffmpeg, buildAudioProxyArgs(input, output, foldChannel))
+}
+
+/**
+ * Level-probe a source's channels and, for the one-live-channel case, return the
+ * channel to mono-fold (see `monoFoldFrom`). Best-effort: any failure (no audio,
+ * odd container, ffmpeg error) resolves to `null` — this must never break import.
+ */
+export async function detectMonoFoldChannel(input: string): Promise<number | null> {
+  try {
+    const { ffmpeg } = await getBinaries()
+    // astats logs to stderr; runFfmpeg tails stderr but doesn't return it, so
+    // spawn directly here to capture the full level dump.
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const execFileAsync = promisify(execFile)
+    const { stderr } = await execFileAsync(ffmpeg, buildChannelStatsArgs(input), {
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024
+    })
+    return monoFoldFrom(parseChannelPeaks(stderr))
+  } catch {
+    return null
+  }
 }
 
 export async function generateWaveform(input: string, output: string, durationSec = 0): Promise<void> {

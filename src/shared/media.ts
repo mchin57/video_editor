@@ -35,6 +35,15 @@ export interface AudioStreamInfo {
   codec: string
   sampleRate: number
   channels: number
+  /**
+   * MEASURED at import (astats level probe, not ffprobe JSON): when a stereo
+   * source has exactly one live channel and the other is silent — the common
+   * "mono mic wired to one side" case — the index (0 = L, 1 = R) of the live
+   * channel. Drives an automatic mono-fold (`monoFoldPan`) that mirrors that
+   * channel to both sides in the preview proxies and the export mix. `null`
+   * (or absent, on assets imported before this field) = both channels carry
+   * signal (true stereo) or both are silent → no fold. */
+  monoFoldChannel?: number | null
 }
 
 export interface ProbeInfo {
