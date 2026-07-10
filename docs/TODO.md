@@ -201,21 +201,16 @@ _All apply to **both** text overlays and captions via the shared
   Audio cards toggle inline play/pause on click (`AudioThumb` — ♪ shows ▶/⏸ on hover,
   drives a hidden `<audio>`).
 
-- [ ] **Scrub bar on the library preview popout** — add a progress/scrub bar to the
-  hover `PreviewPopout` (`Library.tsx`) so a clip can be quickly moved through without
-  placing it on the timeline. Bar shows `currentTime/duration` (via the video's
-  `timeupdate`); click/drag to seek (`video.currentTime = frac * duration`), ideally
-  pausing the loop while scrubbing.
-  - **Key blocker (why it's not trivial):** the popout is currently
-    `pointer-events-none` and is dismissed by the card's `onMouseLeave`, so the cursor
-    can't enter the popout to grab the bar without instantly closing it. Need to make
-    the popout interactive and keep it open while the cursor is over *either* the card
-    *or* the popout — e.g. a shared hover group with a small close delay (timeout
-    cleared on re-enter) so moving from card→popout doesn't dismiss, plus an invisible
-    "bridge" over the gap. Watch for re-introducing the hover flicker the
-    `pointer-events-none` design was added to avoid.
-  - _Possible extra: scrub-on-hover (seek by horizontal cursor position over the bar)
-    and a current-time / duration readout._
+- [x] **Scrub bar on the library preview popout** — the hover `PreviewPopout`
+  (`Library.tsx`) is now interactive: bottom-gradient scrub bar with a
+  current/total readout, click/drag to seek (rAF-smoothed progress; the loop
+  pauses while scrubbing and resumes on release). Dismissal is the shared hover
+  group from the TODO note: the popout stays while the cursor is over the card
+  OR the popout, a leave only closes it after a 160ms grace delay a re-enter
+  cancels, and an invisible bridge div spans the card→popout gap. A scrub-drag
+  released outside the group closes it (the drag swallows the mouseleave).
+  e2e: `e2e/popoutScrub.spec.ts` (cursor travel, seek accuracy, drag-follow,
+  pause/resume, dismissal).
 
 - [ ] **Multi-clip layout formats (split screen, panels)** — place multiple clips side-by-side or in a grid within a single frame at a given timeline position. Built-in layout presets to ship:
   - **Split screen (2-up):** left/right or top/bottom, each half fills its cell.

@@ -8,6 +8,7 @@ import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration } from '@/lib/format'
+import { startPointerDrag } from '@/lib/pointerDrag'
 import { makeImageLayer, visualDuration } from '@shared/layers'
 import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 
@@ -15,16 +16,43 @@ import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
  * Large floating video preview, portaled to <body> so the timeline/library
  * overflow can't clip it. Anchored beside the hovered card (flips to the other
  * side near the viewport edge), sized to the clip's aspect, and plays with sound.
- * `pointer-events-none` so the cursor stays "on" the card — moving onto the
- * popout would otherwise end the hover and dismiss it.
+ *
+ * Interactive: the card + popout form one hover group (`onEnter`/`onLeave` feed
+ * the card's delayed-close timer), so the cursor can travel onto the popout to
+ * grab the scrub bar without dismissing it. An invisible "bridge" spans the gap
+ * between card and popout so the crossing never reads as a leave at all.
  */
-function PreviewPopout({ asset, anchor }: { asset: MediaAsset; anchor: HTMLElement }): JSX.Element {
+function PreviewPopout({
+  asset,
+  anchor,
+  onEnter,
+  onLeave
+}: {
+  asset: MediaAsset
+  anchor: HTMLElement
+  onEnter: () => void
+  onLeave: () => void
+}): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
+  const [dur, setDur] = useState(0)
+  const [cur, setCur] = useState(0)
+
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el) return undefined
     el.volume = 1
     void el.play().catch(() => {})
+    // Smooth progress (timeupdate alone is ~4 Hz).
+    let raf = 0
+    const tick = (): void => {
+      raf = requestAnimationFrame(tick)
+      const v = ref.current
+      if (v) setCur(v.currentTime)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   const v = asset.probe.video
@@ -43,13 +71,92 @@ function PreviewPopout({ asset, anchor }: { asset: MediaAsset; anchor: HTMLEleme
   left = Math.max(8, left)
   const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, window.innerHeight - height - 8))
 
+  // Invisible strip covering the card→popout gap, tall enough to span both.
+  const bridgeLeft = left >= rect.right ? rect.right : left + width
+  const bridgeWidth = left >= rect.right ? left - rect.right : rect.left - (left + width)
+  const bridgeTop = Math.min(top, rect.top)
+  const bridgeHeight = Math.max(top + height, rect.bottom) - bridgeTop
+
+  // Click/drag on the bar seeks; the loop pauses while scrubbing and resumes on
+  // release. If the release lands outside the hover group, close (with the usual
+  // grace delay) — the drag swallowed the mouseleave the group would have seen.
+  const seekTo = (clientX: number): void => {
+    const vid = ref.current
+    const bar = barRef.current
+    if (!vid || !bar || !Number.isFinite(vid.duration) || vid.duration <= 0) return
+    const r = bar.getBoundingClientRect()
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / Math.max(1, r.width)))
+    vid.currentTime = frac * vid.duration
+    setCur(vid.currentTime)
+  }
+  const onBarDown = (e: React.PointerEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    ref.current?.pause()
+    seekTo(e.clientX)
+    startPointerDrag(
+      (ev) => seekTo(ev.clientX),
+      (ev) => {
+        void ref.current?.play().catch(() => {})
+        const at = document.elementFromPoint(ev.clientX, ev.clientY)
+        if (!at || !rootRef.current?.contains(at)) onLeave()
+      }
+    )
+  }
+
+  const frac = dur > 0 ? Math.min(1, cur / dur) : 0
   return createPortal(
-    <div
-      style={{ position: 'fixed', left, top, width, height }}
-      className="pointer-events-none z-[500] overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl"
-    >
-      <video ref={ref} src={proxyUrl(asset.id)} loop autoPlay playsInline className="h-full w-full object-contain" />
-    </div>,
+    <>
+      {bridgeWidth > 0 && (
+        <div
+          style={{ position: 'fixed', left: bridgeLeft, top: bridgeTop, width: bridgeWidth, height: bridgeHeight }}
+          className="z-[499]"
+          onMouseEnter={onEnter}
+          onMouseLeave={onLeave}
+        />
+      )}
+      <div
+        ref={rootRef}
+        data-testid="preview-popout"
+        style={{ position: 'fixed', left, top, width, height }}
+        className="z-[500] overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl"
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+      >
+        <video
+          ref={ref}
+          src={proxyUrl(asset.id)}
+          loop
+          autoPlay
+          playsInline
+          onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+          className="h-full w-full object-contain"
+        />
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5">
+          <div className="mb-0.5 flex justify-between font-mono text-[9px] text-zinc-300">
+            <span data-testid="popout-time">{formatDuration(cur)}</span>
+            <span>{formatDuration(dur)}</span>
+          </div>
+          <div
+            ref={barRef}
+            data-testid="popout-scrub"
+            onPointerDown={onBarDown}
+            title="Click or drag to seek"
+            className="relative h-3 cursor-pointer"
+          >
+            <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25" />
+            <div
+              className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded bg-sky-400"
+              style={{ width: `${frac * 100}%` }}
+            />
+            <div
+              className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300 shadow"
+              style={{ left: `${frac * 100}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    </>,
     document.body
   )
 }
@@ -57,19 +164,40 @@ function PreviewPopout({ asset, anchor }: { asset: MediaAsset; anchor: HTMLEleme
 /**
  * First-frame thumbnail with a ▶ fallback until/if the jpg is available. Hovering
  * a video clip pops out a large preview beside the card (with sound), so a clip
- * can be reviewed without placing it on the timeline; it dismisses on mouse-leave.
+ * can be reviewed without placing it on the timeline. The popout is interactive
+ * (scrub bar), so dismissal is a shared hover group with a short close delay:
+ * it stays while the cursor is over the card OR the popout, and a leave only
+ * closes it after a grace period a re-enter cancels (no card→popout flicker).
  */
 function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   const [failed, setFailed] = useState(false)
   const [hover, setHover] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const hideTimer = useRef<number | null>(null)
   const canPreview = asset.proxyReady && !!asset.probe.video && !isImageAsset(asset)
+  const show = (): void => {
+    if (hideTimer.current != null) {
+      window.clearTimeout(hideTimer.current)
+      hideTimer.current = null
+    }
+    setHover(true)
+  }
+  const scheduleHide = (): void => {
+    if (hideTimer.current != null) window.clearTimeout(hideTimer.current)
+    hideTimer.current = window.setTimeout(() => setHover(false), 160)
+  }
+  useEffect(
+    () => () => {
+      if (hideTimer.current != null) window.clearTimeout(hideTimer.current)
+    },
+    []
+  )
   return (
     <div
       ref={wrapRef}
       className="relative h-full w-full"
-      onMouseEnter={() => canPreview && setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={() => canPreview && show()}
+      onMouseLeave={scheduleHide}
     >
       {failed ? (
         <span className="flex h-full w-full items-center justify-center text-base text-zinc-600">▶</span>
@@ -81,7 +209,9 @@ function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
           className="h-full w-full object-cover"
         />
       )}
-      {hover && canPreview && wrapRef.current && <PreviewPopout asset={asset} anchor={wrapRef.current} />}
+      {hover && canPreview && wrapRef.current && (
+        <PreviewPopout asset={asset} anchor={wrapRef.current} onEnter={show} onLeave={scheduleHide} />
+      )}
     </div>
   )
 }
