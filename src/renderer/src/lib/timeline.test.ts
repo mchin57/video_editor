@@ -48,6 +48,44 @@ describe('extractAudioPieces', () => {
   })
 })
 
+describe('speed-aware trim & split', () => {
+  const makeId = (): string => 'new'
+  it('splits a 2× clip at the speed-scaled source point', () => {
+    // start 0, in 0, out 10, speed 2 → plays 0..5 on the timeline.
+    const base = makeVideoLayer('a', 'm', 0, 10)
+    const layer: Layer = {
+      ...base,
+      endSec: 5,
+      content: { ...(base.content as VideoContent), speed: 2 }
+    }
+    const res = splitVideoLayer(layer, 2, makeId)
+    expect(res).not.toBeNull()
+    const [left, right] = res!
+    expect(left.endSec).toBe(2)
+    expect((left.content as VideoContent).outSec).toBe(4) // 2 played s × 2
+    expect(right.startSec).toBe(2)
+    expect((right.content as VideoContent).inSec).toBe(4)
+    // Both halves keep the invariant window = (out−in)/speed (+ holds).
+    expect(left.endSec - left.startSec).toBeCloseTo(4 / 2)
+    expect(right.endSec - right.startSec).toBeCloseTo((10 - 4) / 2)
+  })
+
+  it('trims a slow-mo clip with speed-scaled played time', () => {
+    // start 0, in 0, out 10, speed 0.5 → plays 0..20.
+    const base = makeVideoLayer('a', 'm', 0, 10)
+    const layer: Layer = {
+      ...base,
+      endSec: 20,
+      content: { ...(base.content as VideoContent), speed: 0.5 }
+    }
+    const c = layer.content as VideoContent
+    // New in-point at source 2 → start shifts by 2/0.5 = 4 played seconds.
+    expect(trimVideoStart(layer, c, 2).startSec).toBe(4)
+    // New out-point at source 8 → end = 0 + 8/0.5 = 16.
+    expect(trimVideoEnd(layer, c, 8).endSec).toBe(16)
+  })
+})
+
 describe('splitVideoLayer', () => {
   const makeId = (): string => 'new'
   it('splits a video layer at an absolute time, sharing the source', () => {

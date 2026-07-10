@@ -10,7 +10,7 @@
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
-import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor } from '@shared/project'
+import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
 import { effectiveTextAnimation } from '@shared/textAnim'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
@@ -197,10 +197,12 @@ async function runExport(
           y: r(l.y * sy - boxH / 2),
           startSec: l.startSec,
           endSec: l.endSec,
-          freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec }))
+          freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
+          speed: videoSpeed(c)
         }
       })
-      // An unmuted video layer's own audio joins the mix (placed at its start).
+      // An unmuted video layer's own audio joins the mix (placed at its start),
+      // tempo-matched to the clip's speed (pitch-preserving atempo chain).
       if (!c.mute && asset.probe.audio) {
         audio.push({
           path: asset.originalPath,
@@ -211,7 +213,8 @@ async function runExport(
           fadeInSec: 0,
           fadeOutSec: 0,
           duck: false,
-          foldChannel: asset.probe.audio.monoFoldChannel ?? null
+          foldChannel: asset.probe.audio.monoFoldChannel ?? null,
+          tempo: videoSpeed(c)
         })
       }
     } else if (c.kind === 'image') {

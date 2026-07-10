@@ -135,6 +135,27 @@ export interface AudioGraphItem {
   /** Mirror this stereo channel to both sides (mono-fold), or null. See
    *  `AudioStreamInfo.monoFoldChannel`. */
   foldChannel?: number | null
+  /** Pitch-preserving tempo factor (a re-timed video layer's own audio; 1 =
+   *  normal). Applied as an `atempo` chain — each stage only accepts 0.5–2. */
+  tempo?: number
+}
+
+/** `atempo` filter chain for an arbitrary tempo: factored into stages within
+ *  the filter's [0.5, 2] per-instance range (e.g. 4 → 2×2, 0.25 → 0.5×0.5). */
+export function atempoChain(tempo: number): string[] {
+  if (!Number.isFinite(tempo) || tempo <= 0 || tempo === 1) return []
+  const stages: string[] = []
+  let t = tempo
+  while (t > 2) {
+    stages.push('atempo=2.000')
+    t /= 2
+  }
+  while (t < 0.5) {
+    stages.push('atempo=0.500')
+    t /= 0.5
+  }
+  stages.push(`atempo=${t.toFixed(3)}`)
+  return stages
 }
 
 /**
@@ -161,6 +182,9 @@ export function buildAudioGraph(
       `[${it.inputLabel}]${fold}atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`,
       'asetpts=N/SR/TB'
     ]
+    // Tempo before the delay: atempo rescales the trimmed clip's duration, then
+    // adelay places the shortened/stretched result at its timeline position.
+    if (it.tempo != null && it.tempo !== 1) parts.push(...atempoChain(it.tempo))
     if (it.denoise) parts.push('afftdn=nf=-25')
     parts.push(`adelay=${startMs}|${startMs}`, `volume=${gain}`)
     if (it.fadeInSec > 0)

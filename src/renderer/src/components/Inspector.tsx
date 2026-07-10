@@ -2,12 +2,15 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import type { CaptionStyle, Layer, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
 import {
   DEFAULT_STABILIZE,
+  MAX_VIDEO_SPEED,
+  MIN_VIDEO_SPEED,
   NEUTRAL_COLOR,
   effectiveCaptionStyle,
   effectiveDenoise,
   effectiveOut,
   effectiveStabilize,
-  isNeutralColor
+  isNeutralColor,
+  videoSpeed
 } from '@shared/project'
 import { hookCovered, videoSourceTime } from '@shared/layers'
 import {
@@ -402,6 +405,7 @@ function LayerEditor(): JSX.Element | null {
             <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
           )}
           {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
+          <SpeedControl layerId={id} content={c} />
           <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
             <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
             Mute this layer
@@ -424,8 +428,13 @@ function LayerEditor(): JSX.Element | null {
             {asset?.probe.audio && (
               <button
                 onClick={() => extractAudio(id)}
-                className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-                title="Move this layer's audio onto the audio track and mute the layer"
+                disabled={videoSpeed(c) !== 1}
+                className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                title={
+                  videoSpeed(c) !== 1
+                    ? 'Not available on a re-timed clip — the audio track plays at 1× (reset speed first)'
+                    : "Move this layer's audio onto the audio track and mute the layer"
+                }
               >
                 ♪ Extract audio
               </button>
@@ -579,6 +588,49 @@ function LayerEditor(): JSX.Element | null {
         Delete layer
       </button>
     </div>
+  )
+}
+
+const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
+
+/** Constant clip speed. Presets + a free field; committed through the
+ *  `setVideoSpeed` store action so `endSec` keeps the shared duration
+ *  invariant (source span / speed + freeze holds) and the change is one
+ *  undo step. */
+function SpeedControl({ layerId, content }: { layerId: string; content: VideoContent }): JSX.Element {
+  const setSpeed = useProject((s) => s.setVideoSpeed)
+  const cur = videoSpeed(content)
+  return (
+    <Field label={`Speed · ${cur}×`}>
+      <div className="flex flex-wrap gap-1">
+        {SPEED_PRESETS.map((v) => (
+          <button
+            key={v}
+            onClick={() => setSpeed(layerId, v)}
+            className={`rounded px-1.5 py-0.5 text-[10px] ${
+              cur === v ? 'bg-sky-500/40 text-sky-100' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
+            }`}
+            title={v < 1 ? `Slow motion (${v}×)` : v > 1 ? `Speed up (${v}×)` : 'Normal speed'}
+          >
+            {v}×
+          </button>
+        ))}
+        <input
+          type="number"
+          min={MIN_VIDEO_SPEED}
+          max={MAX_VIDEO_SPEED}
+          step={0.05}
+          value={cur}
+          onChange={(e) => {
+            const v = Number(e.target.value)
+            if (Number.isFinite(v) && v > 0) {
+              setSpeed(layerId, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
+            }
+          }}
+          className={`${inputCls} w-16 flex-none`}
+        />
+      </div>
+    </Field>
   )
 }
 

@@ -9,8 +9,8 @@ import type {
   TextContent,
   VideoContent
 } from '@shared/project'
-import { createEmptyProject, migrateProject } from '@shared/project'
-import { applyVisibleOrder, makeVideoLayer } from '@shared/layers'
+import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
+import { applyVisibleOrder, makeVideoLayer, playedVideoDuration } from '@shared/layers'
 import type { PresetId } from '@shared/export'
 import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
 import { replaceAt, updateById } from '@/lib/arrays'
@@ -107,6 +107,9 @@ interface ProjectState {
   splitLayerAt: (id: string, atSec: number) => void
   /** Pull a video layer's audio onto the audio track and mute the layer. */
   extractLayerAudio: (id: string) => void
+  /** Set a video layer's constant playback speed, recomputing its timeline end
+   *  from the shared duration invariant (source span / speed + holds). */
+  setVideoSpeed: (id: string, speed: number) => void
   /** Add a freeze hold at source time `atSrcSec`, extending the layer by `holdSec`. */
   addFreeze: (id: string, atSrcSec: number, holdSec: number) => void
   /** Remove the freeze at `index`, shrinking the layer by its hold. */
@@ -304,10 +307,22 @@ export const useProject = create<ProjectState>((set, get) => {
         return { ...p, layers: replaceAt(p.layers, idx, 1, res[0], res[1]) }
       }),
 
+    setVideoSpeed: (id, speed) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video') return l
+          const content = { ...l.content, speed: speed === 1 ? undefined : speed }
+          return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
+        })
+      ),
+
     extractLayerAudio: (id) =>
       commit((p) => {
         const layer = p.layers.find((l) => l.id === id)
         if (!layer || layer.content.kind !== 'video') return p
+        // A re-timed clip's audio can't be detached to the (1×) audio lane —
+        // the AudioClip model has no tempo. The Inspector disables the action.
+        if (videoSpeed(layer.content) !== 1) return p
         const c = layer.content
         // Freeze holds split the audio into pieces with silent gaps so the dialogue
         // cuts while a frame is held (and stays synced to the stretched video).

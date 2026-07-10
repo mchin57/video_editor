@@ -57,6 +57,9 @@ export interface ExportVideo {
   endSec: number
   /** Freeze holds, in trimmed-stream time (atLocal = source atSec − inSec). */
   freezes: { atLocal: number; holdSec: number }[]
+  /** Constant playback speed (1 = normal). PTS scale by 1/speed; freeze holds
+   *  stay wall-clock; the cfr output resamples the frame rate. */
+  speed?: number
 }
 
 /** An image layer resolved for compositing (geometry in output px). */
@@ -98,6 +101,8 @@ export interface ExportAudio {
   /** Mirror this stereo channel to both sides (one-sided source), or null. See
    *  `AudioStreamInfo.monoFoldChannel`. */
   foldChannel?: number | null
+  /** Pitch-preserving tempo (a re-timed video layer's own audio; 1 = normal). */
+  tempo?: number
 }
 
 export interface ExportPlan {
@@ -268,12 +273,17 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       // of advancing. Commas inside gte() are escaped for the filtergraph parser.
       // T-STARTT = seconds since this input's first frame, so the threshold is
       // origin-independent (input -ss can start raw timestamps at inSec, not 0).
+      // Speed divides the elapsed PTS (0.5× doubles the spacing → slow-mo under
+      // cfr); freeze thresholds compare SOURCE time so they're speed-independent,
+      // and holdSec stays wall-clock (verified — see FFMPEG-NOTES "Speed").
+      const speed = v.speed && v.speed > 0 ? v.speed : 1
+      const elapsed = speed !== 1 ? `(PTS-STARTPTS)/${f3(speed)}` : 'PTS-STARTPTS'
       const freezeSum = v.freezes
         .map((f) => `gte(T-STARTT\\,${f3(f.atLocal)})*${f3(f.holdSec)}`)
         .join('+')
       const setpts = freezeSum
-        ? `setpts=PTS-STARTPTS+(${freezeSum})/TB+${f3(v.startSec)}/TB`
-        : `setpts=PTS-STARTPTS+${f3(v.startSec)}/TB`
+        ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
+        : `setpts=${elapsed}+${f3(v.startSec)}/TB`
       pre.push('setsar=1', v.hasAlpha ? 'format=yuva420p' : 'format=yuv420p', setpts)
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
       chains.push(
@@ -334,7 +344,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     fadeOutSec: a.fadeOutSec,
     duck: a.duck,
     denoise: a.denoise,
-    foldChannel: a.foldChannel
+    foldChannel: a.foldChannel,
+    tempo: a.tempo
   }))
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, null) : null
   if (graph) chains.push(graph.filter)

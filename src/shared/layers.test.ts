@@ -14,6 +14,7 @@ import {
   makeTextLayer,
   makeVideoLayer,
   moveLayer,
+  playedVideoDuration,
   resizeBox,
   stretchedBox,
   videoSourceTime,
@@ -153,6 +154,40 @@ describe('videoSourceTime', () => {
     expect(videoSourceTime(c, l, 4)).toBe(3) // after first hold (1s dead time removed)
     expect(videoSourceTime(c, l, 6)).toBe(5) // inside second hold (2+3 dead... at played 6: source 5)
     expect(videoSourceTime(c, l, 9)).toBe(6) // both holds (3s) removed
+  })
+})
+
+describe('videoSourceTime with speed', () => {
+  it('advances source time at the clip speed', () => {
+    const l = makeVideoLayer('a', 'm', 4, 10)
+    const c = { ...(l.content as VideoContent), speed: 2 }
+    expect(videoSourceTime(c, l, 4)).toBe(0)
+    expect(videoSourceTime(c, l, 6)).toBe(4) // 2 played s × 2 = source 4
+    const slow = { ...(l.content as VideoContent), speed: 0.5 }
+    expect(videoSourceTime(slow, l, 6)).toBe(1) // 2 played s × 0.5 = source 1
+  })
+
+  it('keeps freeze holds wall-clock and thresholds in source time', () => {
+    // in 0, out 10, speed 2: freeze at source 4 begins at played 2, holds 3s.
+    const l = makeVideoLayer('a', 'm', 0, 10)
+    const c = { ...(l.content as VideoContent), speed: 2, freezes: [{ atSec: 4, holdSec: 3 }] }
+    expect(videoSourceTime(c, l, 1)).toBe(2) // before the hold: 2× mapping
+    expect(videoSourceTime(c, l, 2.5)).toBe(4) // inside the hold
+    expect(isFrozenAt(c, l, 2.5)).toBe(true)
+    expect(videoSourceTime(c, l, 5)).toBe(4) // hold ends at played 5
+    expect(videoSourceTime(c, l, 6)).toBe(6) // 1s after resume → +2 source s
+    expect(isFrozenAt(c, l, 6)).toBe(false)
+  })
+})
+
+describe('playedVideoDuration', () => {
+  const l = makeVideoLayer('a', 'm', 0, 10)
+  it('is source span / speed + wall-clock holds', () => {
+    const c = l.content as VideoContent
+    expect(playedVideoDuration(c)).toBe(10)
+    expect(playedVideoDuration({ ...c, speed: 2 })).toBe(5)
+    expect(playedVideoDuration({ ...c, speed: 0.5 })).toBe(20)
+    expect(playedVideoDuration({ ...c, speed: 2, freezes: [{ atSec: 3, holdSec: 2 }] })).toBe(7)
   })
 })
 

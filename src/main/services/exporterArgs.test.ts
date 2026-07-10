@@ -102,6 +102,50 @@ describe('buildExportArgs', () => {
     expect(frozen).toContain('setpts=PTS-STARTPTS+(gte(T-STARTT\\,1.500)*2.000)/TB+1.000/TB[pv1]')
   })
 
+  it('scales PTS for clip speed (slow-mo doubles the spacing) and composes with freezes', () => {
+    const slow = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5 } }] }),
+      'o'
+    ).join(' ')
+    expect(slow).toContain('setpts=(PTS-STARTPTS)/0.500+1.000/TB[pv1]')
+
+    const fastFrozen = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 2, freezes: [{ atLocal: 1.5, holdSec: 2 }] } }] }),
+      'o'
+    ).join(' ')
+    // Freeze threshold stays in SOURCE time; the hold stays wall-clock.
+    expect(fastFrozen).toContain('setpts=(PTS-STARTPTS)/2.000+(gte(T-STARTT\\,1.500)*2.000)/TB+1.000/TB[pv1]')
+
+    const normal = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 1 } }] }),
+      'o'
+    ).join(' ')
+    expect(normal).toContain('setpts=PTS-STARTPTS+1.000/TB[pv1]') // speed 1 emits the plain form
+  })
+
+  it('tempo-matches a re-timed layer audio with an atempo chain', () => {
+    const s = buildExportArgs(
+      plan({
+        visuals: [{ kind: 'video', video: vid }],
+        audio: [
+          {
+            path: 'C:/v/a.mov',
+            inSec: 2,
+            outSec: 7,
+            startSec: 1,
+            gainDb: 0,
+            fadeInSec: 0,
+            fadeOutSec: 0,
+            duck: false,
+            tempo: 4
+          }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('atempo=2.000,atempo=2.000,adelay=1000|1000')
+  })
+
   it('applies image crop, 90° rotation and flips before scaling', () => {
     const img = {
       path: 'C:/i/p.png',

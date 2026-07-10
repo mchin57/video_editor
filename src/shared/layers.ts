@@ -5,6 +5,7 @@
  */
 
 import type { Layer, LayerContent, PillStyle, VideoContent } from './project'
+import { videoSpeed } from './project'
 import { DEFAULT_FONT_ID } from './fonts'
 
 /** The single source of truth for the logical output space (1080x1920 px).
@@ -138,29 +139,39 @@ export function visualDuration(layers: Layer[]): number {
   return layers.reduce((max, l) => Math.max(max, l.endSec), 0)
 }
 
-/** Total extra played time a video layer's freeze holds add (seconds). */
+/** Total extra played time a video layer's freeze holds add (seconds). Holds
+ *  are wall-clock — speed does not scale them. */
 export function freezeExtraSec(content: VideoContent): number {
   return (content.freezes ?? []).reduce((sum, f) => sum + Math.max(0, f.holdSec), 0)
 }
 
+/** Played (timeline) duration of a video layer's content: the source span
+ *  scaled by speed, plus the wall-clock freeze holds. The `endSec` a store
+ *  action should maintain is `startSec + playedVideoDuration(content)`. */
+export function playedVideoDuration(content: VideoContent): number {
+  return Math.max(0, content.outSec - content.inSec) / videoSpeed(content) + freezeExtraSec(content)
+}
+
 /**
- * Source-media time a video layer should show at timeline time `t`, honoring any
- * freeze holds. Played time runs `inSec → outSec` but pauses on each freeze's
- * source frame for its `holdSec`, so the played window is longer than the source
- * span by `freezeExtraSec`.
+ * Source-media time a video layer should show at timeline time `t`, honoring
+ * freeze holds AND the clip's constant speed. Played time runs `inSec → outSec`
+ * at `speed` source-seconds per played second, pausing on each freeze's source
+ * frame for its wall-clock `holdSec` — so the played window is
+ * `(outSec−inSec)/speed + freezeExtraSec` long.
  */
 export function videoSourceTime(content: VideoContent, layer: Layer, t: number): number {
+  const speed = videoSpeed(content)
   let local = t - layer.startSec // played time within the (stretched) layer
   const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
   for (const f of freezes) {
     // Earlier holds are already removed from `local`, so this freeze sits at its
-    // raw source distance from the in-point in the reduced timeline.
-    const atPlayed = f.atSec - content.inSec
+    // speed-scaled source distance from the in-point in the reduced timeline.
+    const atPlayed = (f.atSec - content.inSec) / speed
     if (local < atPlayed) break // freeze is still ahead — normal linear mapping
     if (local < atPlayed + f.holdSec) return clampSrc(content, f.atSec) // inside the hold
     local -= Math.max(0, f.holdSec) // passed it: drop its hold as dead played time
   }
-  return clampSrc(content, content.inSec + local)
+  return clampSrc(content, content.inSec + local * speed)
 }
 
 function clampSrc(content: VideoContent, s: number): number {
@@ -169,10 +180,11 @@ function clampSrc(content: VideoContent, s: number): number {
 
 /** True if timeline time `t` falls inside one of the layer's freeze holds. */
 export function isFrozenAt(content: VideoContent, layer: Layer, t: number): boolean {
+  const speed = videoSpeed(content)
   let local = t - layer.startSec
   const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
   for (const f of freezes) {
-    const atPlayed = f.atSec - content.inSec
+    const atPlayed = (f.atSec - content.inSec) / speed
     if (local < atPlayed) return false
     if (local < atPlayed + f.holdSec) return true
     local -= Math.max(0, f.holdSec)

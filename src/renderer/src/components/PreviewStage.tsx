@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import type { AudioClip, CaptionSegment, Layer, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
-import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx } from '@shared/project'
+import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx, videoSpeed } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
 import {
@@ -313,6 +313,15 @@ function VideoLayerView({
   // doesn't drift past it (and trigger reseek jitter).
   const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
+
+  // Constant clip speed: the element plays at the same rate the shared time
+  // mapping advances, so the drift-resync stays quiet. Chromium time-stretches
+  // (preservesPitch) like the export's atempo.
+  const speed = videoSpeed(content)
+  useEffect(() => {
+    const v = ref.current
+    if (v && v.playbackRate !== speed) v.playbackRate = speed
+  }, [speed])
 
   useEffect(() => {
     const v = ref.current

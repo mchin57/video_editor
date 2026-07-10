@@ -181,6 +181,25 @@ export interface VideoContent {
   stabilize?: Stabilize | null
   /** Source-time freeze holds (absent/empty = none). Kept sorted by `atSec`. */
   freezes?: FreezeHold[]
+  /**
+   * Constant playback speed (absent = 1). 0.5 = half speed (slow-mo, the clip
+   * takes twice as long on the timeline), 2 = double. Freeze holds stay
+   * wall-clock (a 2s hold is 2s at any speed). All timeline↔source math goes
+   * through `videoSpeed`/`videoSourceTime`/`playedVideoDuration`
+   * (`shared/layers.ts`) — never divide by this inline.
+   */
+  speed?: number
+}
+
+/** Allowed constant-speed range (matches the Inspector control). */
+export const MIN_VIDEO_SPEED = 0.25
+export const MAX_VIDEO_SPEED = 4
+
+/** A video clip's effective speed: its `speed`, clamped, defaulting to 1. */
+export function videoSpeed(c: Pick<VideoContent, 'speed'>): number {
+  const s = c.speed
+  if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return 1
+  return Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, s))
 }
 
 /** A still image (logo, photo, sticker, graphic) composited as a layer. */
@@ -439,7 +458,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 10,
+    version: 11,
     preset: 'reel',
     layers: [],
     captions: {
@@ -667,7 +686,8 @@ export function migrateProject(raw: unknown): Project {
   // resize geometry (layer `stretchX`/`stretchY`, text `widthPx`) — read sites
   // default `stretch` to 1 and `widthPx` to auto, so no data transform is needed.
   // v10 adds absence-tolerant text `animation` (absent = static, no transform).
-  if (typeof p.version !== 'number' || p.version < 10) p.version = 10
+  // v11 adds absence-tolerant video `speed` (absent = 1, no transform).
+  if (typeof p.version !== 'number' || p.version < 11) p.version = 11
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

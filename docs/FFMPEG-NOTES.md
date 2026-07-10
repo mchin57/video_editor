@@ -65,6 +65,26 @@ frame dumps (`assBuilder.overlayEvents` maps `shared/textAnim.ts` onto these):
 - `astats` logs to **stderr at info level**; `-v error` suppresses it. Capture
   stderr (not stdout) and don't lower the log level when probing channel peaks.
 
+## Speed (constant per-clip rate) (verified ffmpeg 8.1.1, 2026-07)
+
+Verified by compositing a trimmed `testsrc` (burned-in counter) through the
+exact compositor filter shapes and reading the counter off frame dumps:
+
+- **`setpts=(PTS-STARTPTS)/S` plays the clip at S×** under the export's
+  `-r 30 -fps_mode cfr` (0.5× consumed one source second per two output
+  seconds; cfr duplicates/drops frames as needed).
+- **Composes with freeze holds**: in
+  `setpts=(PTS-STARTPTS)/S+(gte(T-STARTT\,atLocal)*hold)/TB+start/TB` the
+  freeze threshold stays in SOURCE time (speed-independent) and the hold stays
+  wall-clock. Post-hold frames land at `atLocal/S + hold + start` exactly.
+- Freeze nuance (pre-existing, speed-independent): the export holds the last
+  frame *before* `atLocal` (frames ≥ the threshold jump forward), while the
+  preview's `videoSourceTime` shows the frame *at* `atSec` — a one-source-frame
+  hairline between the two.
+- **`atempo` halves/doubles duration exactly** (4s sine → 2.00s at
+  `atempo=2.000`); each instance only accepts 0.5–2, so arbitrary tempos chain
+  (`atempoChain`, `services/audio.ts` — 4 → `2,2`, 0.25 → `0.5,0.5`).
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are

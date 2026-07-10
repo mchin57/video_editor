@@ -272,7 +272,24 @@ _All apply to **both** text overlays and captions via the shared
 - [ ] **Noise reduction quality (research + replace)** — the current `afftdn` filter sounds unnatural / artifacts on voice. Research alternatives before implementing: RNNoise (`arnndn` filter in ffmpeg, ML-based, much cleaner on speech), DeepFilterNet (external binary, state-of-the-art but requires bundling), or a two-stage `highpass + afftdn` with conservative settings. Test each against real iPhone audio before choosing. Update `buildAudioGraph` in `audio.ts` once a winner is picked.
 
 - [ ] **LUT (.cube) support** — import a `.cube` LUT file and apply it per clip on export via ffmpeg `lut3d` filter. Preview approximation via CSS or a canvas-based LUT lookup. Useful for cinematic grades and consistent brand look across clips.
-- [ ] **Speed ramping** — no variable speed or slow-mo support. Common in short-form video; would require ffmpeg `setpts` + `atempo` per clip segment and timeline representation of speed curves. _(Large.)_
+- [~] **Speed ramping — constant per-clip speed shipped; keyframed curves
+  remain backlogged.** `VideoContent.speed` (0.25×–4×, absent = 1, migration
+  v11): the timeline↔source mapping is generalized in the SHARED helpers —
+  `videoSpeed`/`playedVideoDuration` (`shared/project.ts`/`layers.ts`),
+  `videoSourceTime`/`isFrozenAt` scale by speed while freeze holds stay
+  wall-clock, and `trimVideoStart`/`trimVideoEnd`/`splitVideoLayer`
+  (`lib/timeline.ts`) keep the invariant `window=(out−in)/speed+Σholds`
+  (edge-drag deltas are played time × speed). Preview: `<video>.playbackRate`
+  (Chromium time-stretches like atempo). Export: `setpts=(PTS-STARTPTS)/S`
+  composing with the freeze expression (source-time thresholds, wall-clock
+  holds) + `atempoChain` for an unmuted layer's own audio — all verified
+  against ffmpeg 8.1.1 frame dumps/durations (FFMPEG-NOTES "Speed"). UI:
+  preset buttons + free field in the clip Inspector; ×N badge on the timeline
+  block. _Limitations: audio-lane clips (incl. the auto-extracted pair and
+  "Extract audio", which is disabled at ≠1×) always play 1× — AudioClip has no
+  tempo; speed curves/ramps within a clip are the remaining large piece._
+  _Unverified: not yet smoke-tested through `npm run dev` with real media
+  (drag-trim feel at ≠1×, A/V sync on a real clip's unmuted audio)._
 - [ ] **Keyframe animation** — no way to animate overlay position, scale, or opacity over time. Would require a keyframe store per overlay property and interpolation in both preview and ASS export. _(Large.)_
 - [x] **Snap-to-grid / magnetic timeline** — block move/trim snaps to clip/audio boundaries, playhead, and 0 (`lib/snap.ts`).
 - [x] **Waveform-based audio editing** — split-on-silence (`silencedetect` → speech segments) + per-clip denoise (`afftdn` on export).

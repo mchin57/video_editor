@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  atempoChain,
   buildAudioProxyArgs,
   buildExtractAudioArgs,
   buildWaveformArgs,
@@ -32,6 +33,28 @@ describe('buildAudioProxyArgs', () => {
     expect(a).toContain('-vn')
     expect(a).toContain('-c:a aac')
     expect(a.endsWith('out.m4a')).toBe(true)
+  })
+})
+
+describe('atempoChain', () => {
+  it('is empty for 1 or invalid tempos', () => {
+    expect(atempoChain(1)).toEqual([])
+    expect(atempoChain(0)).toEqual([])
+    expect(atempoChain(NaN)).toEqual([])
+  })
+  it('emits a single stage inside the [0.5, 2] filter range', () => {
+    expect(atempoChain(1.5)).toEqual(['atempo=1.500'])
+    expect(atempoChain(0.5)).toEqual(['atempo=0.500'])
+    expect(atempoChain(2)).toEqual(['atempo=2.000'])
+  })
+  it('factors out-of-range tempos into compliant stages', () => {
+    expect(atempoChain(4)).toEqual(['atempo=2.000', 'atempo=2.000'])
+    expect(atempoChain(0.25)).toEqual(['atempo=0.500', 'atempo=0.500'])
+    expect(atempoChain(3)).toEqual(['atempo=2.000', 'atempo=1.500'])
+  })
+  it('feeds the graph between the trim and the delay', () => {
+    const g = buildAudioGraph([item({ tempo: 2, startSec: 1 })], null)!
+    expect(g.filter).toContain('asetpts=N/SR/TB,atempo=2.000,adelay=1000|1000')
   })
 })
 
