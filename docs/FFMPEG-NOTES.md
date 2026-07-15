@@ -104,6 +104,25 @@ Verified with lavfi bases + frame dumps (drives `ExportKeyframe` handling in
   setpts needed.
 - Keep animated dimensions even (`trunc(expr/2)*2`) for yuv420 outputs.
 
+## adelay after atrim — poisoned PTS kills the mux (verified ffmpeg 8.1.1, 2026-07)
+
+- **An `atrim`'d stream fed into a non-zero `adelay` emits ONE frame with a
+  near-INT64_MAX PTS at the delay boundary.** The mp4 muxer then "fixes" every
+  following packet to `prev+1` (a stream of Non-monotonic DTS warnings),
+  silently counting up until it hits INT64_MAX ~11–17s later and the whole
+  export dies with `-22 (Invalid argument)`. Three traps in one:
+  - the failure timestamp is FAR from the cause (poison at the delay boundary,
+    death ~15s later);
+  - short clips/tests pass — output ends before the counter overflows;
+  - the stderr tail only shows the final warnings, whose `current:` values
+    point at the death time, not the poison time.
+- `asetpts=N/SR/TB` *before* adelay does NOT help; `adelay=…:all=1` does NOT
+  help. **Renormalizing AFTER (`adelay=…,asetpts=N/SR/TB`) is clean and
+  sample-accurate** (silencedetect: silence ends at exactly the delay;
+  duration exact). Reproduces from pure lavfi `sine` — not a media/container
+  quirk. Fix lives in `buildAudioGraph` (`services/audio.ts`); the ordering is
+  pinned in `audio.test.ts`.
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are

@@ -186,7 +186,12 @@ export function buildAudioGraph(
     // adelay places the shortened/stretched result at its timeline position.
     if (it.tempo != null && it.tempo !== 1) parts.push(...atempoChain(it.tempo))
     if (it.denoise) parts.push('afftdn=nf=-25')
-    parts.push(`adelay=${startMs}|${startMs}`, `volume=${gain}`)
+    // The second asetpts is load-bearing: in ffmpeg 8.1.1 an atrim'd stream fed
+    // into a non-zero adelay emits one frame with a near-INT64_MAX PTS at the
+    // delay boundary, which poisons the muxer's DTS fixup until it overflows and
+    // the export dies mid-encode with EINVAL. Renormalizing after adelay is
+    // verified sample-accurate — see docs/FFMPEG-NOTES.md "adelay after atrim".
+    parts.push(`adelay=${startMs}|${startMs}`, 'asetpts=N/SR/TB', `volume=${gain}`)
     if (it.fadeInSec > 0)
       parts.push(`afade=t=in:st=${it.startSec.toFixed(2)}:d=${it.fadeInSec.toFixed(2)}`)
     if (it.fadeOutSec > 0)

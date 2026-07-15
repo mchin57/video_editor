@@ -140,7 +140,10 @@ describe('buildAudioGraph', () => {
     const res = buildAudioGraph([item({ startSec: 2, inSec: 1, outSec: 5 })], '0:a')!
     expect(res.outLabel).toBe('aout')
     expect(res.filter).toContain('[1:a]atrim=1.000:5.000')
-    expect(res.filter).toContain('adelay=2000|2000')
+    // asetpts AFTER adelay is load-bearing: ffmpeg 8.1.1's atrim→adelay emits a
+    // garbage-PTS frame that overflows the mp4 muxer's DTS fixup mid-export —
+    // see docs/FFMPEG-NOTES.md "adelay after atrim".
+    expect(res.filter).toContain('adelay=2000|2000,asetpts=N/SR/TB')
     expect(res.filter).toContain('amix=inputs=2')
     expect(res.filter).not.toContain('sidechaincompress')
   })
