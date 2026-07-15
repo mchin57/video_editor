@@ -7,6 +7,9 @@ import { useProject } from './state/projectStore'
 import { useEditor } from './state/store'
 import { useUi } from './state/ui'
 import { usePlayback } from './state/playback'
+import { useDock } from './state/dock'
+// dockview's stylesheet first so index.css overrides win at equal specificity.
+import 'dockview-react/dist/styles/dockview.css'
 import './index.css'
 
 declare global {
@@ -20,10 +23,11 @@ declare global {
       useEditor: typeof useEditor
       useUi: typeof useUi
       usePlayback: typeof usePlayback
+      useDock: typeof useDock
     }
   }
 }
-window.__reelStores = { useProject, useEditor, useUi, usePlayback }
+window.__reelStores = { useProject, useEditor, useUi, usePlayback, useDock }
 
 // Register the bundled-font @font-face rules before first paint so previews use
 // the same faces the export burns.

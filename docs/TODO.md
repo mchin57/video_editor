@@ -4,9 +4,10 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ## Codebase health
 
-- [ ] **Finish the drag-helper sweep.** `Popout.tsx`, `LayersPanel.tsx`, and `Splitter.tsx`
+- [ ] **Finish the drag-helper sweep.** `Popout.tsx` and `LayersPanel.tsx`
   still hand-roll the pointermove/pointerup dance (small, no edge-scroll) — convert to
-  `startPointerDrag` when next touched.
+  `startPointerDrag` when next touched. (`Splitter.tsx` was deleted with the dockable-panel
+  refactor — the dock's sashes replaced it.)
 - [ ] **IPC hardening pass (pre-distribution).** The renderer-facing IPC surface is
   unvalidated: `writeProjectFile(project, path)` is an arbitrary-path write primitive,
   `importPaths` an arbitrary read, and the window runs `sandbox: false`. Fine for a
@@ -160,6 +161,9 @@ Hands-on steps that can't be done in code — needed to actually ship the macOS 
 - [x] **Convert `Timeline.tsx` drag handlers to `startPointerDrag`.** The playhead scrub
   + the layer/caption/audio block drags now use the shared helper; the `edgeAutoScroll`
   rAF loop is stopped in the `onUp` callback and the live `scrollLeft` folding is preserved.
+## Open
+
+### Freeze frames, stills & image editing (`feature/freeze-stills-image-edit` branch)
 
 ### Freeze frames, stills & image editing
 - [x] **Freeze / pause a clip.** A video layer carries source-time `freezes`
