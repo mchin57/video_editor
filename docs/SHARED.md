@@ -32,7 +32,8 @@ Refactor for the per-theme history.)
 | `useDragDepth(accepts)` | `lib/dragDepth.ts` | tracking a drop-zone highlight with `onDragLeave={e => e.currentTarget === e.target && …}` — that misses the final leave and leaves the overlay stuck (depth-counted enter/leave + window dragend/drop mop-up) |
 | `trimVideoStart` / `trimVideoEnd` / `splitVideoLayer` | `lib/timeline.ts` | inlining timeline↔source math in a trim/split handler — freeze holds make the mapping **nonlinear**; these keep the window invariant `endSec − startSec = (out − in) + Σ holds` |
 | `packRows`, `layoutLanes`, `resizeRowH` | `lib/lanes.ts` | computing timeline lane rows / vertical stack (top/height/collapse) / resize height **inline** in `Timeline.tsx`, where a refactor can delete it untested (see `docs/TIMELINE.md`) |
-| `DOCK_PANELS`, `buildDefaultLayout`, `placementFor`, `load/saveDockLayout` | `lib/dockLayout.ts` | hardcoding panel arrangement/persistence anywhere — the manifest drives the dock (see below) |
+| `DOCK_PANELS`, `buildDefaultLayout`, `placementFor`, `load/saveDockLayout`, `load/save/clearDefaultLayout` | `lib/dockLayout.ts` | hardcoding panel arrangement/persistence anywhere — the manifest drives the dock (see below) |
+| `applyLayout(api, layout)` | `state/dock.ts` | re-rolling the restore-or-fall-back-to-built-in dance; startup and Reset both go through it |
 | `DockPanel` | `components/DockPanel.tsx` | styling a dock panel body inline; panel chrome as a class is edited HERE only |
 
 `Timeline.tsx`'s block drags use `startPointerDrag` with the `edgeAutoScroll` rAF
@@ -55,6 +56,14 @@ two lists drift). Users with a saved layout see the new panel closed initially;
 they open it from **View ▾**. Content components must fill their container
 (`h-full`/flex) and never assume viewport position. Bump `DOCK_LAYOUT_VERSION`
 when renaming/removing a panel id so stale saved layouts fall back to default.
+
+**Three layouts, in precedence order.** `dockLayout` (localStorage) is the live
+session, saved debounced on every change. `dockDefaultLayout` is the user's own
+default, captured by **View ▸ Set default layout**; **Reset layout** restores it
+and **Forget saved default** discards it. `buildDefaultLayout` is the built-in
+fallback used when neither key is present or valid. Startup resolves
+session → user default → built-in; Reset resolves user default → built-in. Both
+paths go through `applyLayout` (`state/dock.ts`) — don't re-roll that fallback.
 
 ## Shared model — `src/shared/project.ts`, `src/shared/layers.ts`
 

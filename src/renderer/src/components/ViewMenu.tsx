@@ -2,14 +2,38 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { DOCK_PANELS } from '@/lib/dockLayout'
 import { useDock } from '@/state/dock'
 
+function ActionItem({
+  label,
+  title,
+  onClick
+}: {
+  label: string
+  title: string
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
+    >
+      <span className="w-3" />
+      <span>{label}</span>
+    </button>
+  )
+}
+
 /**
  * View menu: toggle each dockable panel (driven by the manifest in
- * lib/dockLayout.ts — new panels appear here automatically) plus a Reset
- * layout escape hatch. Dropdown mechanics mirror FileMenu.
+ * lib/dockLayout.ts — new panels appear here automatically), save the current
+ * arrangement as your default, and reset back to it. Dropdown mechanics
+ * mirror FileMenu.
  */
 export function ViewMenu(): JSX.Element {
   const openPanels = useDock((s) => s.openPanels)
+  const hasCustomDefault = useDock((s) => s.hasCustomDefault)
   const [open, setOpen] = useState(false)
+  const [saved, setSaved] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -50,16 +74,38 @@ export function ViewMenu(): JSX.Element {
             )
           })}
           <div className="my-1 h-px bg-white/10" />
-          <button
+          <ActionItem
+            label={saved ? 'Default layout saved ✓' : 'Set default layout'}
+            title="Save the current arrangement as your default — Reset layout restores it"
+            onClick={() => {
+              useDock.getState().setDefaultLayout()
+              // Confirm in place: the menu stays open so it's obvious it took.
+              setSaved(true)
+              setTimeout(() => setSaved(false), 1200)
+            }}
+          />
+          <ActionItem
+            label="Reset layout"
+            title={
+              hasCustomDefault
+                ? 'Restore your saved default layout'
+                : 'Restore the built-in layout'
+            }
             onClick={() => {
               setOpen(false)
               useDock.getState().resetLayout()
             }}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-          >
-            <span className="w-3" />
-            <span>Reset layout</span>
-          </button>
+          />
+          {hasCustomDefault && (
+            <ActionItem
+              label="Forget saved default"
+              title="Discard your default; Reset layout goes back to the built-in arrangement"
+              onClick={() => {
+                setOpen(false)
+                useDock.getState().clearDefault()
+              }}
+            />
+          )}
         </div>
       )}
     </div>

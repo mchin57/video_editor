@@ -11,8 +11,8 @@ import { PreviewStage } from '@/components/PreviewStage'
 import { LayersPanel } from '@/components/LayersPanel'
 import { Inspector } from '@/components/Inspector'
 import { Timeline } from '@/components/Timeline'
-import { buildDefaultLayout, loadDockLayout, saveDockLayout } from '@/lib/dockLayout'
-import { useDock } from '@/state/dock'
+import { loadDefaultLayout, loadDockLayout, saveDockLayout } from '@/lib/dockLayout'
+import { applyLayout, useDock } from '@/state/dock'
 
 /** 9:16 stage fitted inside the panel regardless of its shape (PreviewStage's
  *  own root is height-driven `aspect-[9/16] h-full`, which would overflow a
@@ -66,19 +66,10 @@ function Watermark(): JSX.Element {
 
 function onReady({ api }: DockviewReadyEvent): void {
   // StrictMode double-invokes onReady on the same instance in dev; only
-  // build the layout once.
+  // build the layout once. Precedence: last session → the user's saved
+  // default → the built-in arrangement.
   if (api.panels.length === 0) {
-    const saved = loadDockLayout()
-    if (saved) {
-      try {
-        api.fromJSON(saved as Parameters<typeof api.fromJSON>[0])
-      } catch {
-        api.clear()
-        buildDefaultLayout(api)
-      }
-    } else {
-      buildDefaultLayout(api)
-    }
+    applyLayout(api, loadDockLayout() ?? loadDefaultLayout())
   }
 
   // Subscribe after restore so the restore itself doesn't immediately

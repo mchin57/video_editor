@@ -111,9 +111,16 @@ export function buildDefaultLayout(api: DockAddPanelApi, panels: PanelSpec[] = D
 }
 
 // ---------------------------------------------------------------------------
-// Persistence: versioned envelope in localStorage, repo-convention try/catch.
+// Persistence: versioned envelopes in localStorage, repo-convention try/catch.
+//
+// Two layouts, same shape:
+//   dockLayout        — the live session arrangement, saved on every change.
+//   dockDefaultLayout — the user's own "default", captured via View ▸ Set
+//                       default layout. Reset restores it; absent it, the
+//                       built-in buildDefaultLayout arrangement is used.
 
 export const DOCK_LAYOUT_KEY = 'dockLayout'
+export const DOCK_DEFAULT_LAYOUT_KEY = 'dockDefaultLayout'
 export const DOCK_LAYOUT_VERSION = 1
 
 /** Shape-checked subset of dockview's SerializedDockview. */
@@ -121,14 +128,12 @@ interface SavedLayout {
   panels?: Record<string, unknown>
 }
 
-/** Returns the saved dockview layout, or null when absent/corrupt/stale
- *  (wrong version, or referencing a panel id no longer in the manifest —
- *  fall back to the default layout rather than crash on restore). Also
- *  retires the pre-dock 'panelSizes' key. */
-export function loadDockLayout(panels: PanelSpec[] = DOCK_PANELS): object | null {
+/** Returns the layout under `key`, or null when absent/corrupt/stale (wrong
+ *  version, or referencing a panel id no longer in the manifest — callers
+ *  fall back to the built-in layout rather than crash on restore). */
+function readLayout(key: string, panels: PanelSpec[]): object | null {
   try {
-    localStorage.removeItem('panelSizes')
-    const raw = localStorage.getItem(DOCK_LAYOUT_KEY)
+    const raw = localStorage.getItem(key)
     if (!raw) return null
     const envelope = JSON.parse(raw)
     if (envelope?.v !== DOCK_LAYOUT_VERSION) return null
@@ -144,10 +149,42 @@ export function loadDockLayout(panels: PanelSpec[] = DOCK_PANELS): object | null
   }
 }
 
-export function saveDockLayout(layout: object): void {
+function writeLayout(key: string, layout: object): void {
   try {
-    localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify({ v: DOCK_LAYOUT_VERSION, layout }))
+    localStorage.setItem(key, JSON.stringify({ v: DOCK_LAYOUT_VERSION, layout }))
   } catch {
     // best-effort, like the other localStorage persistence in this app
+  }
+}
+
+/** The live session layout. Also retires the pre-dock 'panelSizes' key. */
+export function loadDockLayout(panels: PanelSpec[] = DOCK_PANELS): object | null {
+  try {
+    localStorage.removeItem('panelSizes')
+  } catch {
+    // ignore
+  }
+  return readLayout(DOCK_LAYOUT_KEY, panels)
+}
+
+export function saveDockLayout(layout: object): void {
+  writeLayout(DOCK_LAYOUT_KEY, layout)
+}
+
+/** The user's saved default arrangement, or null if they never set one. */
+export function loadDefaultLayout(panels: PanelSpec[] = DOCK_PANELS): object | null {
+  return readLayout(DOCK_DEFAULT_LAYOUT_KEY, panels)
+}
+
+export function saveDefaultLayout(layout: object): void {
+  writeLayout(DOCK_DEFAULT_LAYOUT_KEY, layout)
+}
+
+/** Forget the user's default; Reset then goes back to the built-in layout. */
+export function clearDefaultLayout(): void {
+  try {
+    localStorage.removeItem(DOCK_DEFAULT_LAYOUT_KEY)
+  } catch {
+    // ignore
   }
 }

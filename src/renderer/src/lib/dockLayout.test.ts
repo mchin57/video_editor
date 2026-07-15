@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  DOCK_DEFAULT_LAYOUT_KEY,
   DOCK_LAYOUT_KEY,
   DOCK_LAYOUT_VERSION,
   DOCK_PANELS,
   PANEL_MIN_PX,
   buildDefaultLayout,
+  clearDefaultLayout,
+  loadDefaultLayout,
   loadDockLayout,
   placementFor,
   panelSpec,
+  saveDefaultLayout,
   saveDockLayout,
   type DockAddPanelApi
 } from './dockLayout'
@@ -114,5 +118,38 @@ describe('persistence', () => {
     localStorage.setItem('panelSizes', '{"libW":256}')
     loadDockLayout()
     expect(localStorage.getItem('panelSizes')).toBeNull()
+  })
+})
+
+describe('user default layout', () => {
+  beforeEach(() => localStorage.clear())
+
+  const layout = { grid: {}, panels: { preview: {}, timeline: {} } }
+
+  it('is absent until one is saved, then round-trips', () => {
+    expect(loadDefaultLayout()).toBeNull()
+    saveDefaultLayout(layout)
+    expect(loadDefaultLayout()).toEqual(layout)
+    expect(JSON.parse(localStorage.getItem(DOCK_DEFAULT_LAYOUT_KEY)!).v).toBe(DOCK_LAYOUT_VERSION)
+  })
+
+  it('is stored separately from the live session layout', () => {
+    saveDefaultLayout(layout)
+    saveDockLayout({ grid: {}, panels: { preview: {} } })
+    // Saving the session must not disturb the saved default.
+    expect(loadDefaultLayout()).toEqual(layout)
+  })
+
+  it('clearing forgets it without touching the session layout', () => {
+    saveDefaultLayout(layout)
+    saveDockLayout(layout)
+    clearDefaultLayout()
+    expect(loadDefaultLayout()).toBeNull()
+    expect(loadDockLayout()).toEqual(layout)
+  })
+
+  it('rejects a stale default referencing an unknown panel', () => {
+    saveDefaultLayout({ panels: { preview: {}, retired: {} } })
+    expect(loadDefaultLayout()).toBeNull()
   })
 })
