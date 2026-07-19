@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_CAPTION_STYLE,
   effectiveCaptionStyle,
@@ -11,7 +11,7 @@ import type { CaptionSegment, CaptionsConfig } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 
 describe('pillRadiusPx', () => {
-  it('scales the corner radius with padding (0.6Ã—, rounded)', () => {
+  it('scales the corner radius with padding (0.6×, rounded)', () => {
     expect(pillRadiusPx(0)).toBe(0)
     expect(pillRadiusPx(10)).toBe(6)
     expect(pillRadiusPx(18)).toBe(11) // default caption/overlay padding
@@ -19,7 +19,7 @@ describe('pillRadiusPx', () => {
   })
 })
 
-describe('migrateProject â€” caption style', () => {
+describe('migrateProject — caption style', () => {
   it('seeds a lane-wide caption style from a legacy yBaseline', () => {
     const legacy = {
       version: 5,
@@ -89,7 +89,7 @@ describe('migrateProject â€” caption style', () => {
   })
 })
 
-describe('migrateProject â€” noise filter default (v8)', () => {
+describe('migrateProject — noise filter default (v8)', () => {
   const clip = (over: Record<string, unknown>): Record<string, unknown> => ({
     id: 'a', mediaId: 'm', startSec: 0, inSec: 0, outSec: 0,
     gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music', ...over
@@ -99,7 +99,7 @@ describe('migrateProject â€” noise filter default (v8)', () => {
     const legacy = { version: 7, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: false })] }
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
-    expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off â†’ inherit
+    expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
     expect(p.version).toBe(15)
   })
 

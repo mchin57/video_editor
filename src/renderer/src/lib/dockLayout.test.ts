@@ -41,7 +41,7 @@ describe('buildDefaultLayout', () => {
   it('adds every manifest panel in order with the default arrangement', () => {
     const api = recordingApi()
     buildDefaultLayout(api)
-    expect(api.calls.map((c) => c.id)).toEqual(['preview', 'library', 'layers', 'inspector', 'timeline'])
+    expect(api.calls.map((c) => c.id)).toEqual(['preview', 'library', 'layers', 'inspector', 'format', 'timeline'])
 
     const byId = Object.fromEntries(api.calls.map((c) => [c.id, c]))
     expect(byId.preview.position).toBeUndefined()
@@ -49,18 +49,23 @@ describe('buildDefaultLayout', () => {
     expect(byId.library.initialWidth).toBe(256)
     expect(byId.layers.position).toEqual({ direction: 'right', referencePanel: 'preview' })
     expect(byId.inspector.position).toEqual({ direction: 'below', referencePanel: 'layers' })
+    // Format tabs into the Inspector's group.
+    expect(byId.format.position).toEqual({ direction: 'within', referencePanel: 'inspector' })
     // Timeline docks to the container edge (no reference) so it spans full width.
     expect(byId.timeline.position).toEqual({ direction: 'below' })
     expect(byId.timeline.initialHeight).toBe(176)
   })
 
-  it('applies near-zero minimums and never passes inactive (it blanks new groups)', () => {
+  it('applies near-zero minimums; inactive only for within-group tabs (it blanks new groups)', () => {
     const api = recordingApi()
     buildDefaultLayout(api)
     for (const c of api.calls) {
       expect(c.minimumWidth).toBe(PANEL_MIN_PX)
       expect(c.minimumHeight).toBe(PANEL_MIN_PX)
-      expect('inactive' in c).toBe(false)
+      // `inactive` on a panel that creates a NEW group renders the watermark;
+      // it's only safe (and wanted) when tabbing into an existing group, so
+      // the group's reference panel stays the front tab.
+      expect('inactive' in c && c.inactive).toBe(c.id === 'format')
     }
   })
 })

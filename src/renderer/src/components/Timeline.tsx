@@ -10,7 +10,6 @@ import {
 import type { AudioClip, CaptionSegment, Layer, ScriptLine } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
-import { LAYOUT_PRESETS } from '@shared/layouts'
 import { assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
@@ -691,12 +690,6 @@ export function Timeline(): JSX.Element {
     selectLayer(id)
   }
 
-  const addLayout = (): void => {
-    const id = crypto.randomUUID()
-    useProject.getState().addLayoutLayer(id, LAYOUT_PRESETS[0].id, usePlayback.getState().time)
-    selectLayer(id)
-  }
-
   // Render one layer block within its lane.
   const layerBlock = (l: Layer, laneKey: 'clips' | 'layout' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
     const left = l.startSec * pxPerSec
@@ -783,9 +776,6 @@ export function Timeline(): JSX.Element {
         </ToolbarButton>
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
-        </ToolbarButton>
-        <ToolbarButton title="Add a multi-clip layout (split screen / panels) at the playhead" onClick={addLayout}>
-          ▦ Layout
         </ToolbarButton>
         <ToolbarButton title="Delete the selected layer, caption, or audio clip (Del)" onClick={deleteSelected} disabled={!canDelete}>
           🗑 Delete

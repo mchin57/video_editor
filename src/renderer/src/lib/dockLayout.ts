@@ -41,6 +41,13 @@ export const DOCK_PANELS: PanelSpec[] = [
     title: 'Inspector',
     defaultPlacement: { direction: 'below', referencePanel: 'layers', initialHeight: 360 }
   },
+  // Frame shape & division: aspect ratio + multi-clip layout tools. Tabs with
+  // the Inspector by default.
+  {
+    id: 'format',
+    title: 'Format',
+    defaultPlacement: { direction: 'within', referencePanel: 'inspector' }
+  },
   // No referencePanel: docks against the container's bottom edge, spanning
   // the full width like the old fixed timeline row.
   { id: 'timeline', title: 'Timeline', defaultPlacement: { direction: 'below', initialHeight: 176 } }
@@ -67,6 +74,7 @@ interface AddPanelArgs {
   initialHeight?: number
   minimumWidth?: number
   minimumHeight?: number
+  inactive?: boolean
 }
 
 /** Structural subset of DockviewApi so this module (and its tests) never
@@ -102,10 +110,17 @@ export function buildDefaultLayout(api: DockAddPanelApi, panels: PanelSpec[] = D
   const added = new Set<string>()
   for (const spec of panels) {
     // Panels earlier in the manifest are the only valid references. NOTE: do
-    // not pass dockview's `inactive` here — a panel added inactive into a NEW
-    // group leaves that group with no active tab, which renders the watermark
-    // instead of the panel content.
-    api.addPanel(addPanelArgs(spec, (id) => added.has(id)))
+    // not pass dockview's `inactive` for panels that create a NEW group — that
+    // leaves the group with no active tab, which renders the watermark instead
+    // of the panel content. A panel tabbing WITHIN an already-open reference
+    // joins an existing group, where `inactive` is safe — and wanted, so the
+    // reference (e.g. Inspector) stays the front tab of its group.
+    const args = addPanelArgs(spec, (id) => added.has(id))
+    const joinsExistingGroup =
+      spec.defaultPlacement.direction === 'within' &&
+      !!spec.defaultPlacement.referencePanel &&
+      added.has(spec.defaultPlacement.referencePanel)
+    api.addPanel(joinsExistingGroup ? { ...args, inactive: true } : args)
     added.add(spec.id)
   }
 }

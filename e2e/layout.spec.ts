@@ -7,10 +7,12 @@
 import { test, expect } from './fixtures'
 import type { LayoutContent } from '../src/shared/project'
 
-test('toolbar adds a layout; Inspector switches presets; block drags in time', async ({
+test('Format panel adds a layout and switches presets; block drags in time', async ({
   appPage: page
 }) => {
-  // Create via the real toolbar button.
+  // The layout tools live in the FORMAT dock panel, tabbed (inactive) behind
+  // the Inspector by default — front it first, then create via the real button.
+  await page.locator('.dv-default-tab', { hasText: 'Format' }).click()
   await page.getByTitle('Add a multi-clip layout (split screen / panels) at the playhead').click()
 
   const state = (): Promise<{ startSec: number; endSec: number; c: LayoutContent }> =>

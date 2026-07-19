@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import type { CaptionStyle, Layer, LayoutContent, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
+import type { CaptionStyle, Layer, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
 import {
   DEFAULT_STABILIZE,
   MAX_VIDEO_SPEED,
@@ -14,7 +14,6 @@ import {
 } from '@shared/project'
 import { hookCovered, kfOpacity, videoSourceTime, videoTimelineTime } from '@shared/layers'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
-import { LAYOUT_PRESETS } from '@shared/layouts'
 import {
   DEFAULT_IN_SEC,
   DEFAULT_OUT_SEC,
@@ -402,12 +401,7 @@ function LayerEditor(): JSX.Element | null {
         </CollapsibleSection>
       )}
 
-      {/* Layout-specific controls */}
-      {c.kind === 'layout' && (
-        <CollapsibleSection id="layout" title="Layout">
-          <LayoutControls layerId={id} content={c} />
-        </CollapsibleSection>
-      )}
+      {/* Layout cells/arrangement are edited in the FORMAT dock panel. */}
 
       {/* Video-specific controls */}
       {c.kind === 'video' && (
@@ -701,117 +695,6 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
   )
 }
 
-/** Multi-clip layout controls: pick the arrangement, then fill each cell with
- *  a clip from the project library (with its own trim + mute). All edits go
- *  through the layout store actions so each is one undo step; the geometry the
- *  preview/export use resolves through `shared/layouts.ts`. */
-function LayoutControls({ layerId, content }: { layerId: string; content: LayoutContent }): JSX.Element {
-  const { data: assets = [] } = useLibrary()
-  const setPreset = useProject((s) => s.setLayoutPreset)
-  const updateCell = useProject((s) => s.updateLayoutCell)
-  const videoAssets = assets.filter((a) => a.probe.video)
-  return (
-    <>
-      <Field label="Arrangement">
-        <div className="flex flex-wrap gap-1">
-          {LAYOUT_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setPreset(layerId, p.id)}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${
-                content.presetId === p.id
-                  ? 'bg-fuchsia-500/40 text-fuchsia-100'
-                  : 'bg-white/10 text-zinc-300 hover:bg-white/20'
-              }`}
-              title={`${p.label} (${p.rects.length} cells)`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </Field>
-      <ul className="mt-1.5 space-y-1.5">
-        {content.cells.map((cell, i) => {
-          const cellAsset = cell.mediaId ? assets.find((a) => a.id === cell.mediaId) : undefined
-          return (
-            <li key={i} className="rounded bg-white/5 px-1.5 py-1.5 text-[10px] text-zinc-300">
-              <div className="mb-1 flex items-center gap-1.5">
-                <span className="font-semibold text-zinc-400">Cell {i + 1}</span>
-                <select
-                  value={cell.mediaId ?? ''}
-                  onChange={(e) => {
-                    const mediaId = e.target.value || null
-                    const src = mediaId ? assets.find((a) => a.id === mediaId) : undefined
-                    updateCell(layerId, i, {
-                      mediaId,
-                      inSec: 0,
-                      outSec: src ? Math.max(0.1, src.probe.durationSec) : cell.outSec
-                    })
-                  }}
-                  className={`${inputCls} min-w-0 flex-1`}
-                  title="Clip shown in this cell"
-                >
-                  <option value="">— empty —</option>
-                  {videoAssets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.fileName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {cell.mediaId && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-zinc-500">in</span>
-                  <input
-                    type="number"
-                    step={0.1}
-                    min={0}
-                    value={cell.inSec.toFixed(1)}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      if (Number.isFinite(v)) {
-                        updateCell(layerId, i, { inSec: Math.max(0, Math.min(v, cell.outSec - 0.1)) })
-                      }
-                    }}
-                    className={`${inputCls} w-14 flex-none`}
-                    title="Source in-point (s)"
-                  />
-                  <span className="text-zinc-500">out</span>
-                  <input
-                    type="number"
-                    step={0.1}
-                    value={cell.outSec.toFixed(1)}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      if (Number.isFinite(v)) {
-                        const cap = cellAsset ? cellAsset.probe.durationSec : v
-                        updateCell(layerId, i, { outSec: Math.max(cell.inSec + 0.1, Math.min(v, cap)) })
-                      }
-                    }}
-                    className={`${inputCls} w-14 flex-none`}
-                    title="Source out-point (s)"
-                  />
-                  <label className="ml-auto flex items-center gap-1 text-zinc-400">
-                    <input
-                      type="checkbox"
-                      checked={cell.mute}
-                      onChange={() => updateCell(layerId, i, { mute: !cell.mute })}
-                    />
-                    mute
-                  </label>
-                </div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-      <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-        Cells fill their panel (center-cropped) and play at 1× from the layout&apos;s start. A cell
-        disappears when its clip ends; empty areas show the layers underneath.
-      </p>
-    </>
-  )
-}
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
 
