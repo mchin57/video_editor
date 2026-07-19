@@ -111,38 +111,42 @@ export function LayoutCells({
               <ClipCard
                 asset={cellAsset}
                 footer={
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <span className="text-[10px] text-zinc-500">in</span>
-                    <input
-                      type="number"
-                      step={0.1}
-                      min={0}
-                      value={cell.inSec.toFixed(1)}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        if (Number.isFinite(v)) {
-                          updateCell(layerId, i, { inSec: Math.max(0, Math.min(v, cell.outSec - 0.1)) })
-                        }
-                      }}
-                      className={`${inputCls} w-12 flex-none`}
-                      title="Source in-point (s)"
-                    />
-                    <span className="text-[10px] text-zinc-500">out</span>
-                    <input
-                      type="number"
-                      step={0.1}
-                      value={cell.outSec.toFixed(1)}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        if (Number.isFinite(v)) {
-                          const cap = cellAsset.probe.durationSec
-                          updateCell(layerId, i, { outSec: Math.max(cell.inSec + 0.1, Math.min(v, cap)) })
-                        }
-                      }}
-                      className={`${inputCls} w-12 flex-none`}
-                      title="Source out-point (s)"
-                    />
-                    <label className="ml-auto flex items-center gap-1 text-[10px] text-zinc-400">
+                  <div className="mt-1.5 flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-6 text-[10px] text-zinc-500">in</span>
+                      <input
+                        type="number"
+                        step={0.1}
+                        min={0}
+                        value={cell.inSec.toFixed(1)}
+                        onChange={(e) => {
+                          const v = Number(e.target.value)
+                          if (Number.isFinite(v)) {
+                            updateCell(layerId, i, { inSec: Math.max(0, Math.min(v, cell.outSec - 0.1)) })
+                          }
+                        }}
+                        className={`${inputCls} w-16 flex-none`}
+                        title="Source in-point (s)"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-6 text-[10px] text-zinc-500">out</span>
+                      <input
+                        type="number"
+                        step={0.1}
+                        value={cell.outSec.toFixed(1)}
+                        onChange={(e) => {
+                          const v = Number(e.target.value)
+                          if (Number.isFinite(v)) {
+                            const cap = cellAsset.probe.durationSec
+                            updateCell(layerId, i, { outSec: Math.max(cell.inSec + 0.1, Math.min(v, cap)) })
+                          }
+                        }}
+                        className={`${inputCls} w-16 flex-none`}
+                        title="Source out-point (s)"
+                      />
+                    </div>
+                    <label className="flex items-center gap-1 text-[10px] text-zinc-400">
                       <input
                         type="checkbox"
                         checked={cell.mute}
