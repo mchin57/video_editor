@@ -282,6 +282,7 @@ export function layerLabel(layer: Layer): string {
   const c = layer.content
   if (c.kind === 'text') return c.text.trim() || 'Text'
   if (c.kind === 'image') return 'Image'
+  if (c.kind === 'layout') return 'Layout'
   return 'Video'
 }
 

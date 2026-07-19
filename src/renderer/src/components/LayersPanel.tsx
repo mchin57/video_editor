@@ -10,7 +10,7 @@ const ROW_H = 30 // px — must match the row height below for drag math
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 const kindIcon = (l: Layer): string =>
-  l.content.kind === 'video' ? '🎬' : l.content.kind === 'image' ? '🖼' : '🅣'
+  l.content.kind === 'video' ? '🎬' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🅣'
 
 /** Drag state: the layer being dragged and the live front→back order it implies. */
 interface Drag {

@@ -69,14 +69,32 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ### Not planned / missing features
 
-- [ ] **Multi-clip layout formats (split screen, panels)** — place multiple clips side-by-side or in a grid within a single frame at a given timeline position. Built-in layout presets to ship:
+- [~] **Multi-clip layout formats (split screen, panels) — shipped as a `layout` LAYER kind.**
+  All 7 planned presets (`split-lr`/`split-tb`/`cols-3`/`rows-3`/`big-left`/
+  `big-right`/`grid-2x2`) live in `src/shared/layouts.ts` with the pure geometry
+  (`layoutCellRect` applies the layer's move/zoom; `coverCrop` is the export twin
+  of the preview's `object-fit: cover`). _Design deviation from the sketch below:
+  instead of a separate `LayoutClip` array, a layout is a `LayoutContent` layer in
+  the unified stack (migration v14) — cells `{ mediaId, inSec, outSec, mute, rect }`
+  compile to ORDINARY compositor `ExportVideo` entries (the already-verified
+  crop→scale→overlay chain; zero new ffmpeg mechanisms), and empty cells let lower
+  layers show through rather than forcing a background color._ Cells play 1× from
+  the layout's start, time-gated to `min(cell span, layer window)` (audio clamps
+  identically). UI: "▦ Layout" toolbar button, a fuchsia Layout timeline lane
+  (only when one exists), Inspector ▸ Layout (preset buttons + per-cell
+  media/trim/mute), corner-only resize handles (cells ignore stretch), preview
+  outlines empty slots while selected. e2e: `e2e/layout.spec.ts`.
+  _Limitations: no keyframes on layout layers; start-edge trim shifts the window
+  (cells re-anchor to the new start) rather than trimming cell sources; no
+  per-cell canvas dragging._ _Unverified: not yet smoke-tested through
+  `npm run dev` with real media (cell playback sync, real export of a filled
+  grid)._
+  Original sketch:
   - **Split screen (2-up):** left/right or top/bottom, each half fills its cell.
   - **3-panel (landscape strip):** three equal columns.
   - **3-panel (portrait stack):** three equal rows.
   - **3-panel (1 large + 2 small):** large cell left, two stacked cells right (and mirrored variant).
   - **4-panel grid:** 2×2 equal quadrants.
-  - Each layout is a named preset that defines N cells, each with a rect in logical 1080×1920 space. On export, each cell maps to an ffmpeg `crop+scale+overlay` chain composited onto a black (or custom color) background. Preview renders each cell as a positioned/sized `<video>` element within `PreviewStage`.
-  - Data model: a `LayoutClip` type in `shared/project.ts` — a timeline segment that holds an array of `{ mediaId, inSec, outSec, cell: CellRect }` entries plus a `layoutPresetId`. Layout clips sit in their own timeline lane.
 
 - [ ] **Custom layout editor** — a drag-and-drop canvas for creating and saving custom multi-clip layouts beyond the built-in presets. User can add cells, resize/reposition them freely within the 1080×1920 frame, set a background color or image, and save the result as a named preset that appears alongside the built-in ones. Saved presets stored in `settings.json` under `customLayouts[]`. Implementation: a `LayoutEditor` modal with a scaled-down 1080×1920 canvas; cells are resizable/draggable divs; outputs a `LayoutPreset` definition identical in shape to the built-ins so the rest of the pipeline is unaffected.
 

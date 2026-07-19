@@ -8,9 +8,10 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, CaptionSegment, Layer, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
+import type { AudioClip, CaptionSegment, Layer, LayoutContent, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
+import { cellSpan, layoutCellRect } from '@shared/layouts'
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
 import {
@@ -41,9 +42,10 @@ const pct = (value: number, total: number): string => `${(value / total) * 100}%
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 /** The layer with its keyframed transform baked in for rendering at time `t`
- *  (text layers ignore keyframes — they animate via `TextContent.animation`). */
+ *  (text layers ignore keyframes — they animate via `TextContent.animation`;
+ *  layout layers ignore them too — the export has no keyframe path for them). */
 function withKeyframedTransform(l: Layer, t: number): Layer {
-  if (!l.keyframes?.length || l.content.kind === 'text') return l
+  if (!l.keyframes?.length || l.content.kind === 'text' || l.content.kind === 'layout') return l
   const tr = layerTransformAt(l, t)
   return { ...l, x: tr.x, y: tr.y, scale: tr.scale }
 }
@@ -223,9 +225,12 @@ function measureSelectedBox(stage: HTMLElement): ResizeBox | null {
 }
 
 // Media gets all 8 handles; text only the 4 corners + left/right sides (its
-// height is automatic, so top/bottom handles have nothing to resize).
+// height is automatic, so top/bottom handles have nothing to resize). Layouts
+// get corners only — cells resolve through `scale` and ignore stretch, so edge
+// handles would silently do nothing.
 const MEDIA_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 const TEXT_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw', 'e', 'w']
+const CORNER_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw']
 const handleCursor = (h: ResizeHandle): string =>
   h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize'
 
@@ -234,16 +239,16 @@ const handleCursor = (h: ResizeHandle): string =>
  *  box; `onStart` begins the drag for the grabbed handle. */
 function ResizeHandles({
   box,
-  isText,
+  handles,
   onStart
 }: {
   box: ResizeBox
-  isText: boolean
+  handles: ResizeHandle[]
   onStart: (e: ReactPointerEvent, handle: ResizeHandle) => void
 }): JSX.Element {
   return (
     <div className="pointer-events-none absolute inset-0 z-[450]">
-      {(isText ? TEXT_HANDLES : MEDIA_HANDLES).map((h) => {
+      {handles.map((h) => {
         const x = box.cx + (h.includes('e') ? box.w / 2 : h.includes('w') ? -box.w / 2 : 0)
         const y = box.cy + (h.includes('s') ? box.h / 2 : h.includes('n') ? -box.h / 2 : 0)
         return (
@@ -374,6 +379,127 @@ function VideoLayerView({
           }
         }}
       />
+    </div>
+  )
+}
+
+/** One cell of a layout: a cover-fit <video> following the master clock at 1×
+ *  from the layout's start (same drift-resync pattern as `VideoLayerView`). */
+function LayoutCellVideo({
+  asset,
+  mute,
+  target,
+  playing,
+  style
+}: {
+  asset: MediaAsset
+  mute: boolean
+  target: number
+  playing: boolean
+  style: CSSProperties
+}): JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    if (playing) {
+      if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
+      if (v.paused) void v.play().catch(() => {})
+    } else {
+      if (!v.paused) v.pause()
+      if (v.readyState >= 1 && Math.abs(v.currentTime - target) > 0.05) v.currentTime = target
+    }
+  }, [playing, target])
+  return (
+    <div style={{ ...style, overflow: 'hidden' }}>
+      <video
+        ref={ref}
+        src={videoProxyUrl(asset)}
+        muted={mute}
+        playsInline
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', maxWidth: 'none' }}
+        onLoadedMetadata={() => {
+          const v = ref.current
+          if (v) {
+            v.currentTime = target
+            v.muted = mute
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * A multi-clip layout layer: its cells rendered inside the layer's transformed
+ * full-frame box (so the inner cell offsets are plain preset fractions — the
+ * wrapper carries the move/zoom). A cell disappears when its span or the layer
+ * window ends (lower layers show through), and its cover-fit matches the
+ * export's `coverCrop` — both sides resolve geometry via `layoutCellRect`.
+ */
+function LayoutLayerView({
+  layer,
+  content,
+  assetById,
+  time,
+  playing,
+  selected,
+  boxStyle,
+  onMoveDown
+}: {
+  layer: Layer
+  content: LayoutContent
+  assetById: Map<string, MediaAsset>
+  time: number
+  playing: boolean
+  selected: boolean
+  boxStyle: CSSProperties
+  onMoveDown: (e: ReactPointerEvent) => void
+}): JSX.Element {
+  const local = time - layer.startSec
+  const window = Math.max(0, layer.endSec - layer.startSec)
+  return (
+    <div
+      style={boxStyle}
+      onPointerDown={onMoveDown}
+      data-resizebox={selected ? '' : undefined}
+      className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
+    >
+      {content.cells.map((cell, i) => {
+        const rel: CSSProperties = {
+          position: 'absolute',
+          left: pct(cell.rect.x, LOGICAL.width),
+          top: pct(cell.rect.y, LOGICAL.height),
+          width: pct(cell.rect.w, LOGICAL.width),
+          height: pct(cell.rect.h, LOGICAL.height)
+        }
+        const asset = cell.mediaId ? assetById.get(cell.mediaId) : undefined
+        const effSpan = Math.min(cellSpan(cell), window)
+        if (asset?.proxyReady && asset.probe.video && local >= 0 && local < effSpan) {
+          return (
+            <LayoutCellVideo
+              key={i}
+              asset={asset}
+              mute={cell.mute}
+              target={cell.inSec + local}
+              playing={playing}
+              style={rel}
+            />
+          )
+        }
+        if (asset && local >= 0 && local < effSpan) {
+          // Proxy still building: hold the thumb so the cell doesn't flash empty.
+          return (
+            <div key={i} style={{ ...rel, overflow: 'hidden' }}>
+              <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
+            </div>
+          )
+        }
+        // Empty / out-of-span cell: outline it while selected so the slots show.
+        return selected ? (
+          <div key={i} style={rel} className="border border-dashed border-white/25" />
+        ) : null
+      })}
     </div>
   )
 }
@@ -702,6 +828,35 @@ export function PreviewStage(): JSX.Element {
           )
         }
 
+        if (layer.content.kind === 'layout') {
+          const content = layer.content
+          // The wrapper is the layer's transformed FULL-FRAME rect; cells sit
+          // inside at their plain preset fractions (the wrapper carries the
+          // move/zoom) — same numbers `layoutCellRect` gives the export.
+          const frameRect = layoutCellRect(layer, { x: 0, y: 0, w: LOGICAL.width, h: LOGICAL.height })
+          const box: CSSProperties = {
+            position: 'absolute',
+            left: pct(frameRect.x, LOGICAL.width),
+            top: pct(frameRect.y, LOGICAL.height),
+            width: pct(frameRect.w, LOGICAL.width),
+            height: pct(frameRect.h, LOGICAL.height),
+            zIndex: z
+          }
+          return (
+            <LayoutLayerView
+              key={layer.id}
+              layer={layer}
+              content={content}
+              assetById={assetById}
+              time={time}
+              playing={playing}
+              selected={selected}
+              boxStyle={box}
+              onMoveDown={onMoveDown}
+            />
+          )
+        }
+
         // Text layer. Position via transform (left/top = 0) so the wrap width is
         // independent of x — anchoring by `left:x%` made the box narrower as it
         // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap
@@ -749,7 +904,13 @@ export function PreviewStage(): JSX.Element {
       {selectedLayer && handleBox && (
         <ResizeHandles
           box={handleBox}
-          isText={selectedLayer.content.kind === 'text'}
+          handles={
+            selectedLayer.content.kind === 'text'
+              ? TEXT_HANDLES
+              : selectedLayer.content.kind === 'layout'
+                ? CORNER_HANDLES
+                : MEDIA_HANDLES
+          }
           onStart={(e, handle) => startLayerResize(e, withKeyframedTransform(selectedLayer, time), handle)}
         />
       )}

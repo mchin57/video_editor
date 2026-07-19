@@ -10,6 +10,7 @@ import {
 import type { AudioClip, CaptionSegment, Layer, ScriptLine } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
+import { LAYOUT_PRESETS } from '@shared/layouts'
 import { assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
@@ -148,6 +149,7 @@ function ToolbarButton({
 // grouping over the unified layer stack).
 const LANE_STYLE = {
   clips: { dot: 'bg-sky-400', tint: 'border-sky-400/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/20', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
+  layout: { dot: 'bg-fuchsia-400', tint: 'border-fuchsia-400/30 bg-fuchsia-500/10', block: 'border-fuchsia-400/40 bg-fuchsia-500/20', sel: 'border-fuchsia-300 ring-1 ring-fuchsia-300/50' },
   text: { dot: 'bg-violet-400', tint: 'border-violet-400/30 bg-violet-500/10', block: 'border-violet-400/40 bg-violet-500/20', sel: 'border-violet-300 ring-1 ring-violet-300/50' },
   image: { dot: 'bg-orange-400', tint: 'border-orange-400/30 bg-orange-500/10', block: 'border-orange-400/40 bg-orange-500/20', sel: 'border-orange-300 ring-1 ring-orange-300/50' },
   caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
@@ -293,13 +295,16 @@ export function Timeline(): JSX.Element {
   // Group the unified stack into typed lanes (a visual grouping only).
   const grouped = useMemo(() => {
     const video = layers.filter((l) => l.content.kind === 'video')
+    const layout = layers.filter((l) => l.content.kind === 'layout')
     const text = layers.filter((l) => l.content.kind === 'text')
     const image = layers.filter((l) => l.content.kind === 'image')
     return {
       video,
+      layout,
       text,
       image,
       vRows: packRows(video.map(spanOf)),
+      lRows: packRows(layout.map(spanOf)),
       tRows: packRows(text.map(spanOf)),
       iRows: packRows(image.map(spanOf))
     }
@@ -321,6 +326,10 @@ export function Timeline(): JSX.Element {
   // Captions only when present, Audio always.
   const laneDefs = [
     { key: 'clips' as const, label: 'Clips', rows: rowCount(grouped.vRows) },
+    // Layout lane only when a layout exists (rare enough not to burn a band).
+    ...(grouped.layout.length > 0
+      ? [{ key: 'layout' as const, label: 'Layout', rows: rowCount(grouped.lRows) }]
+      : []),
     { key: 'text' as const, label: 'Text', rows: rowCount(grouped.tRows) },
     { key: 'image' as const, label: 'Image', rows: rowCount(grouped.iRows) },
     ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
@@ -682,8 +691,14 @@ export function Timeline(): JSX.Element {
     selectLayer(id)
   }
 
+  const addLayout = (): void => {
+    const id = crypto.randomUUID()
+    useProject.getState().addLayoutLayer(id, LAYOUT_PRESETS[0].id, usePlayback.getState().time)
+    selectLayer(id)
+  }
+
   // Render one layer block within its lane.
-  const layerBlock = (l: Layer, laneKey: 'clips' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
+  const layerBlock = (l: Layer, laneKey: 'clips' | 'layout' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
     const left = l.startSec * pxPerSec
     const width = Math.max(12, (l.endSec - l.startSec) * pxPerSec)
     const selected = l.id === selectedLayerId
@@ -709,7 +724,7 @@ export function Timeline(): JSX.Element {
           />
         )}
         <span className="truncate text-[9px] font-medium text-zinc-100">
-          {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : '🎬'}&nbsp;
+          {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🎬'}&nbsp;
           {asset?.fileName ?? layerLabel(l)}
         </span>
         {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
@@ -768,6 +783,9 @@ export function Timeline(): JSX.Element {
         </ToolbarButton>
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
+        </ToolbarButton>
+        <ToolbarButton title="Add a multi-clip layout (split screen / panels) at the playhead" onClick={addLayout}>
+          ▦ Layout
         </ToolbarButton>
         <ToolbarButton title="Delete the selected layer, caption, or audio clip (Del)" onClick={deleteSelected} disabled={!canDelete}>
           🗑 Delete
@@ -908,6 +926,7 @@ export function Timeline(): JSX.Element {
 
             {/* Layer lanes */}
             {!laneCollapsed('clips') && grouped.video.map((l) => layerBlock(l, 'clips', grouped.vRows))}
+            {!laneCollapsed('layout') && grouped.layout.map((l) => layerBlock(l, 'layout', grouped.lRows))}
             {!laneCollapsed('text') && grouped.text.map((l) => layerBlock(l, 'text', grouped.tRows))}
             {!laneCollapsed('image') && grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
 

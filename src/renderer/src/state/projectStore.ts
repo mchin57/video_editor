@@ -4,6 +4,7 @@ import type {
   CaptionsConfig,
   ImageContent,
   Layer,
+  LayoutCell,
   Project,
   ScriptLine,
   TextContent,
@@ -19,6 +20,7 @@ import {
   videoSourceTime
 } from '@shared/layers'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
+import { applyLayoutPreset, makeLayoutLayer } from '@shared/layouts'
 import type { PresetId } from '@shared/export'
 import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
 import { replaceAt, updateById } from '@/lib/arrays'
@@ -105,6 +107,12 @@ interface ProjectState {
   addLayer: (layer: Layer) => void
   /** Add a video layer (front) at `startSec`; optionally extract its audio. */
   addVideoLayer: (id: string, mediaId: string, startSec: number, durationSec: number, hasAudio?: boolean) => void
+  /** Add an empty multi-clip layout layer (front) at `startSec`. */
+  addLayoutLayer: (id: string, presetId: string, startSec: number) => void
+  /** Re-shape a layout to another preset (cells keep media/trim by index). */
+  setLayoutPreset: (id: string, presetId: string) => void
+  /** Patch one cell of a layout layer (media / trim / mute). */
+  updateLayoutCell: (id: string, cellIndex: number, patch: Partial<LayoutCell>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
   updateLayerContent: (id: string, patch: ContentPatch) => void
   removeLayer: (id: string) => void
@@ -306,6 +314,27 @@ export const useProject = create<ProjectState>((set, get) => {
         return { ...p, layers: [...p.layers, layer], audioClips }
       }),
 
+    addLayoutLayer: (id, presetId, startSec) =>
+      commit((p) => ({ ...p, layers: [...p.layers, makeLayoutLayer(id, presetId, startSec)] })),
+
+    setLayoutPreset: (id, presetId) =>
+      commit((p) =>
+        mapLayer(p, id, (l) =>
+          l.content.kind === 'layout'
+            ? { ...l, content: applyLayoutPreset(l.content, presetId) }
+            : l
+        )
+      ),
+
+    updateLayoutCell: (id, cellIndex, patch) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'layout') return l
+          const cells = l.content.cells.map((cell, i) => (i === cellIndex ? { ...cell, ...patch } : cell))
+          return { ...l, content: { ...l.content, cells } }
+        })
+      ),
+
     updateLayer: (id, patch) => commit((p) => mapLayer(p, id, (l) => ({ ...l, ...patch }))),
 
     updateLayerContent: (id, patch) =>
@@ -397,7 +426,8 @@ export const useProject = create<ProjectState>((set, get) => {
     addLayerKeyframe: (id, atSec) =>
       commit((p) =>
         mapLayer(p, id, (l) => {
-          if (l.content.kind === 'text') return l
+          // Text animates via its own presets; layouts have no export keyframe path.
+          if (l.content.kind === 'text' || l.content.kind === 'layout') return l
           const tSec = Math.max(0, Math.min(atSec - l.startSec, Math.max(0, l.endSec - l.startSec)))
           const tr = layerTransformAt(l, atSec)
           return { ...l, keyframes: upsertKeyframe(l.keyframes, { tSec, ...tr }) }

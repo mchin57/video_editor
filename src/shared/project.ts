@@ -252,7 +252,43 @@ export interface TextContent extends TextStyleBase {
   animation?: TextAnimation | null
 }
 
-export type LayerContent = VideoContent | ImageContent | TextContent
+/** A cell rectangle in the LOGICAL 1080×1920 space (top-left + size). */
+export interface CellRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * One cell of a multi-clip layout: a media slot with its own source trim,
+ * filling `rect` aspect-FILL (center cover-crop — preview `object-fit: cover`
+ * and the export's `coverCrop` must agree). `mediaId: null` = empty cell
+ * (lower layers show through). Cells play at 1× from the layout's `startSec`.
+ */
+export interface LayoutCell {
+  mediaId: string | null
+  inSec: number
+  outSec: number
+  mute: boolean
+  rect: CellRect
+}
+
+/**
+ * A multi-clip layout (split screen / panels) composited as ONE layer: N cells,
+ * each showing a trimmed clip in a rect of the logical space. `presetId` names
+ * the built-in arrangement the rects came from (`shared/layouts.ts`); the rects
+ * themselves are stored so a future custom-layout editor can reshape them. The
+ * layer's own x/y/scale move/zoom the whole arrangement (cell rects resolve
+ * through `layoutCellRect`); layer keyframes are NOT honored for layouts.
+ */
+export interface LayoutContent {
+  kind: 'layout'
+  presetId: string
+  cells: LayoutCell[]
+}
+
+export type LayerContent = VideoContent | ImageContent | TextContent | LayoutContent
 export type LayerKind = LayerContent['kind']
 
 /**
@@ -440,6 +476,9 @@ export function referencedMediaIds(p: Pick<Project, 'layers' | 'audioClips'>): s
   const ids: string[] = []
   for (const l of p.layers) {
     if (l.content.kind === 'video' || l.content.kind === 'image') ids.push(l.content.mediaId)
+    if (l.content.kind === 'layout') {
+      for (const cell of l.content.cells) if (cell.mediaId) ids.push(cell.mediaId)
+    }
   }
   for (const a of p.audioClips) ids.push(a.mediaId)
   return [...new Set(ids)]
@@ -500,7 +539,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 13,
+    version: 14,
     preset: 'reel',
     layers: [],
     captions: {
@@ -732,7 +771,9 @@ export function migrateProject(raw: unknown): Project {
   // v12 adds absence-tolerant layer `keyframes` (absent = static, no transform).
   // v13 adds absence-tolerant video `speedRamp` (absent = constant speed, no
   // transform).
-  if (typeof p.version !== 'number' || p.version < 13) p.version = 13
+  // v14 adds the `layout` layer content kind (multi-clip split screen/panels) —
+  // purely additive, old projects simply have none.
+  if (typeof p.version !== 'number' || p.version < 14) p.version = 14
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

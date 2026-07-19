@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import type { CaptionStyle, Layer, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
+import type { CaptionStyle, Layer, LayoutContent, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
 import {
   DEFAULT_STABILIZE,
   MAX_VIDEO_SPEED,
@@ -14,6 +14,7 @@ import {
 } from '@shared/project'
 import { hookCovered, videoSourceTime, videoTimelineTime } from '@shared/layers'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
+import { LAYOUT_PRESETS } from '@shared/layouts'
 import {
   DEFAULT_IN_SEC,
   DEFAULT_OUT_SEC,
@@ -304,9 +305,16 @@ function LayerEditor(): JSX.Element | null {
   const c = layer.content
   const asset =
     c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
-  const kindName = c.kind === 'video' ? 'Video layer' : c.kind === 'image' ? 'Image layer' : 'Text layer'
+  const kindName =
+    c.kind === 'video'
+      ? 'Video layer'
+      : c.kind === 'image'
+        ? 'Image layer'
+        : c.kind === 'layout'
+          ? 'Layout layer'
+          : 'Text layer'
   // Keyframes override the base transform for media layers; grey those fields.
-  const keyframed = c.kind !== 'text' && (layer.keyframes?.length ?? 0) > 0
+  const keyframed = c.kind !== 'text' && c.kind !== 'layout' && (layer.keyframes?.length ?? 0) > 0
 
   return (
     <div>
@@ -386,10 +394,18 @@ function LayerEditor(): JSX.Element | null {
       </label>
       </CollapsibleSection>
 
-      {/* Keyframed motion (video/image; text animates via its own presets) */}
-      {c.kind !== 'text' && (
+      {/* Keyframed motion (video/image; text animates via its own presets;
+          layouts have no export keyframe path) */}
+      {c.kind !== 'text' && c.kind !== 'layout' && (
         <CollapsibleSection id="keyframes" title="Keyframes">
           <KeyframesSection layer={layer} />
+        </CollapsibleSection>
+      )}
+
+      {/* Layout-specific controls */}
+      {c.kind === 'layout' && (
+        <CollapsibleSection id="layout" title="Layout">
+          <LayoutControls layerId={id} content={c} />
         </CollapsibleSection>
       )}
 
@@ -668,6 +684,118 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
         </>
       )}
     </div>
+  )
+}
+
+/** Multi-clip layout controls: pick the arrangement, then fill each cell with
+ *  a clip from the project library (with its own trim + mute). All edits go
+ *  through the layout store actions so each is one undo step; the geometry the
+ *  preview/export use resolves through `shared/layouts.ts`. */
+function LayoutControls({ layerId, content }: { layerId: string; content: LayoutContent }): JSX.Element {
+  const { data: assets = [] } = useLibrary()
+  const setPreset = useProject((s) => s.setLayoutPreset)
+  const updateCell = useProject((s) => s.updateLayoutCell)
+  const videoAssets = assets.filter((a) => a.probe.video)
+  return (
+    <>
+      <Field label="Arrangement">
+        <div className="flex flex-wrap gap-1">
+          {LAYOUT_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPreset(layerId, p.id)}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                content.presetId === p.id
+                  ? 'bg-fuchsia-500/40 text-fuchsia-100'
+                  : 'bg-white/10 text-zinc-300 hover:bg-white/20'
+              }`}
+              title={`${p.label} (${p.rects.length} cells)`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </Field>
+      <ul className="mt-1.5 space-y-1.5">
+        {content.cells.map((cell, i) => {
+          const cellAsset = cell.mediaId ? assets.find((a) => a.id === cell.mediaId) : undefined
+          return (
+            <li key={i} className="rounded bg-white/5 px-1.5 py-1.5 text-[10px] text-zinc-300">
+              <div className="mb-1 flex items-center gap-1.5">
+                <span className="font-semibold text-zinc-400">Cell {i + 1}</span>
+                <select
+                  value={cell.mediaId ?? ''}
+                  onChange={(e) => {
+                    const mediaId = e.target.value || null
+                    const src = mediaId ? assets.find((a) => a.id === mediaId) : undefined
+                    updateCell(layerId, i, {
+                      mediaId,
+                      inSec: 0,
+                      outSec: src ? Math.max(0.1, src.probe.durationSec) : cell.outSec
+                    })
+                  }}
+                  className={`${inputCls} min-w-0 flex-1`}
+                  title="Clip shown in this cell"
+                >
+                  <option value="">— empty —</option>
+                  {videoAssets.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.fileName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {cell.mediaId && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-zinc-500">in</span>
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    value={cell.inSec.toFixed(1)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      if (Number.isFinite(v)) {
+                        updateCell(layerId, i, { inSec: Math.max(0, Math.min(v, cell.outSec - 0.1)) })
+                      }
+                    }}
+                    className={`${inputCls} w-14 flex-none`}
+                    title="Source in-point (s)"
+                  />
+                  <span className="text-zinc-500">out</span>
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={cell.outSec.toFixed(1)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      if (Number.isFinite(v)) {
+                        const cap = cellAsset ? cellAsset.probe.durationSec : v
+                        updateCell(layerId, i, { outSec: Math.max(cell.inSec + 0.1, Math.min(v, cap)) })
+                      }
+                    }}
+                    className={`${inputCls} w-14 flex-none`}
+                    title="Source out-point (s)"
+                  />
+                  <label className="ml-auto flex items-center gap-1 text-zinc-400">
+                    <input
+                      type="checkbox"
+                      checked={cell.mute}
+                      onChange={() => updateCell(layerId, i, { mute: !cell.mute })}
+                    />
+                    mute
+                  </label>
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+        Cells fill their panel (center-cropped) and play at 1× from the layout&apos;s start. A cell
+        disappears when its clip ends; empty areas show the layers underneath.
+      </p>
+    </>
   )
 }
 

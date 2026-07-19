@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, speedSegments } from '@shared/speed'
+import { cellSpan, coverCrop, layoutCellRect } from '@shared/layouts'
 import { effectiveTextAnimation } from '@shared/textAnim'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
@@ -278,6 +279,58 @@ async function runExport(
           keyframes: exportKeyframes(l, aspect)
         }
       })
+    } else if (c.kind === 'layout') {
+      // Each cell compiles to an ORDINARY compositor video entry (already-
+      // verified crop→scale→overlay path): cover-cropped to its cell rect,
+      // playing 1× from the layout's start, time-gated to the shorter of the
+      // cell span and the layer window (audio clamps the same way so it can't
+      // outlive the video). Cells composite in array order within the layer's
+      // z-slot; empty cells let lower layers show through.
+      const window = Math.max(0, l.endSec - l.startSec)
+      for (const cell of c.cells) {
+        if (!cell.mediaId) continue
+        const effSpan = Math.min(cellSpan(cell), window)
+        if (effSpan <= 0.01) continue
+        const asset = await getAsset(cell.mediaId)
+        if (!asset?.probe.video) continue
+        const v = asset.probe.video
+        const rect = layoutCellRect(l, cell.rect)
+        if (rect.w <= 0 || rect.h <= 0) continue
+        visuals.push({
+          kind: 'video',
+          video: {
+            path: asset.originalPath,
+            inSec: cell.inSec,
+            len: effSpan,
+            hdrChain: v.isHdr ? hdrToSdrChain(v) : '',
+            hasAlpha: !!v.hasAlpha,
+            inputDecoder: alphaInputDecoder(v),
+            crop: coverCrop(v.displayWidth, v.displayHeight, rect.w / rect.h),
+            colorEq: '',
+            boxW: rect.w * sx,
+            boxH: rect.h * sy,
+            x: r(rect.x * sx),
+            y: r(rect.y * sy),
+            startSec: l.startSec,
+            endSec: l.startSec + effSpan,
+            freezes: [],
+            speed: 1
+          }
+        })
+        if (!cell.mute && asset.probe.audio) {
+          audio.push({
+            path: asset.originalPath,
+            inSec: cell.inSec,
+            outSec: cell.inSec + effSpan,
+            startSec: l.startSec,
+            gainDb: 0,
+            fadeInSec: 0,
+            fadeOutSec: 0,
+            duck: false,
+            foldChannel: asset.probe.audio.monoFoldChannel ?? null
+          })
+        }
+      }
     } else {
       if (c.text.trim().length === 0) continue
       const fontSizePx = c.fontSizePx * l.scale * sy
