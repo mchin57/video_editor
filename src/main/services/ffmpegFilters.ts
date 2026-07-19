@@ -78,6 +78,33 @@ export function speedRampPlayedExpr(points: { u: number; v: number }[], x = 'T-S
   return expr
 }
 
+/**
+ * sendcmd command lines driving a `colorchannelmixer@<id>` alpha (`aa`) ramp —
+ * the per-frame opacity path (verified ffmpeg 8.1.1, see FFMPEG-NOTES
+ * "Keyframed opacity"). One `[expr]` interval per keyframe segment (`TI` is
+ * the 0..1 progress, re-evaluated every frame), plus a constant TAIL interval
+ * pinning the last value — without it the final frame of the last segment
+ * undershoots (TI never reaches 1) and sticks there. Times are the ABSOLUTE
+ * output seconds the target stream's (setpts-shifted) frames carry. Returns ''
+ * when fewer than 2 points (the filter's initial `aa=` covers a constant).
+ */
+export function buildOpacityCmdLines(id: string, points: { t: number; o: number }[]): string {
+  const p = [...points].sort((a, b) => a.t - b.t)
+  if (p.length < 2) return ''
+  const lines: string[] = []
+  for (let i = 0; i < p.length - 1; i++) {
+    const a = p[i]
+    const b = p[i + 1]
+    if (b.t - a.t <= 0.001) continue
+    lines.push(
+      `${f3(a.t)}-${f3(b.t)} [expr] colorchannelmixer@${id} aa 'lerp(${f3(a.o)},${f3(b.o)},TI)';`
+    )
+  }
+  const last = p[p.length - 1]
+  lines.push(`${f3(last.t)}-${f3(last.t + 3600)} [expr] colorchannelmixer@${id} aa '${f3(last.o)}';`)
+  return lines.join('\n') + '\n'
+}
+
 export function piecewiseLinearExpr(points: { t: number; v: number }[]): string {
   if (points.length === 0) return '0'
   const p = [...points].sort((a, b) => a.t - b.t)

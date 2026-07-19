@@ -154,6 +154,54 @@ describe('buildExportArgs', () => {
     )
   })
 
+  it('keyframed opacity inserts format=rgba + sendcmd + colorchannelmixer after setpts', () => {
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          {
+            kind: 'video',
+            video: { ...vid, opacity: { cmdFile: 'opacity_0.cmd', id: 'op0', initial: 1 } }
+          }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(s).toContain(
+      'setpts=PTS-STARTPTS+1.000/TB,format=rgba,sendcmd=f=opacity_0.cmd,colorchannelmixer@op0=aa=1.000[pv1]'
+    )
+
+    // A constant non-1 opacity has no command file — just the initial aa.
+    const constant = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: { ...vid, opacity: { cmdFile: null, id: 'op0', initial: 0.5 } } }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(constant).toContain(',format=rgba,colorchannelmixer@op0=aa=0.500[pv1]')
+    expect(constant).not.toContain('sendcmd')
+  })
+
+  it('an opacity-animated image becomes a -loop 1 + fps=30 stream with sendcmd', () => {
+    const im = {
+      path: 'C:/v/i.png',
+      boxW: 200,
+      boxH: 100,
+      x: 10,
+      y: 20,
+      startSec: 1,
+      endSec: 4,
+      opacity: 1,
+      opacityAnim: { cmdFile: 'opacity_1.cmd', id: 'op1', initial: 0.8 }
+    }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: im }] }), 'o').join(' ')
+    expect(s).toContain('-loop 1 -t 4.000 -i C:/v/i.png')
+    expect(s).toContain(
+      '[1:v]scale=200:100,format=rgba,fps=30,sendcmd=f=opacity_1.cmd,colorchannelmixer@op1=aa=0.800[pi1]'
+    )
+  })
+
   it('tempo-matches a re-timed layer audio with an atempo chain', () => {
     const s = buildExportArgs(
       plan({

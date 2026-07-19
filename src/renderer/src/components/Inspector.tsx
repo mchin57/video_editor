@@ -12,7 +12,7 @@ import {
   isNeutralColor,
   videoSpeed
 } from '@shared/project'
-import { hookCovered, videoSourceTime, videoTimelineTime } from '@shared/layers'
+import { hookCovered, kfOpacity, videoSourceTime, videoTimelineTime } from '@shared/layers'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { LAYOUT_PRESETS } from '@shared/layouts'
 import {
@@ -637,6 +637,7 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
   const addKf = useProject((s) => s.addLayerKeyframe)
   const removeKf = useProject((s) => s.removeLayerKeyframe)
   const clearKfs = useProject((s) => s.clearLayerKeyframes)
+  const setKfOpacity = useProject((s) => s.setLayerKeyframeOpacity)
   const setTime = usePlayback((s) => s.setTime)
   const kfs = [...(layer.keyframes ?? [])].sort((a, b) => a.tSec - b.tSec)
   return (
@@ -664,6 +665,19 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
                 <span className="flex-1 truncate text-zinc-500">
                   x{Math.round(k.x)} y{Math.round(k.y)} · {Math.round(k.scale * 100)}%
                 </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round(kfOpacity(k) * 100)}
+                  onChange={(e) => {
+                    const v = Number(e.target.value)
+                    if (Number.isFinite(v)) setKfOpacity(layer.id, i, v / 100)
+                  }}
+                  className={`${inputCls} w-12 flex-none`}
+                  title="Layer opacity at this keyframe (%) — fades linearly between keyframes"
+                />
                 <button
                   onClick={() => removeKf(layer.id, i)}
                   className="text-zinc-500 hover:text-rose-400"
@@ -678,8 +692,8 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
             Clear all keyframes
           </button>
           <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-            Motion is linear between keyframes and holds outside them. Dragging the layer on the
-            canvas updates the keyframe at the playhead.
+            Motion (and the % opacity) is linear between keyframes and holds outside them.
+            Dragging the layer on the canvas updates the keyframe at the playhead.
           </p>
         </>
       )}

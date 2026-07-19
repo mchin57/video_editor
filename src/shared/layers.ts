@@ -210,11 +210,13 @@ export function videoTimelineTime(content: VideoContent, layer: Layer, s: number
 
 // --- Keyframed transform (shared by preview + export) ------------------------
 
-/** A layer's animatable transform values at one instant. */
+/** A layer's animatable transform values at one instant. `opacity` is 0..1
+ *  (1 = fully visible; multiplies an image layer's base opacity). */
 export interface LayerTransform {
   x: number
   y: number
   scale: number
+  opacity: number
 }
 
 /**
@@ -226,7 +228,7 @@ export interface LayerTransform {
  */
 export function layerTransformAt(layer: Layer, t: number): LayerTransform {
   const kfs = layer.keyframes
-  if (!kfs || kfs.length === 0) return { x: layer.x, y: layer.y, scale: layer.scale }
+  if (!kfs || kfs.length === 0) return { x: layer.x, y: layer.y, scale: layer.scale, opacity: 1 }
   const sorted = [...kfs].sort((a, b) => a.tSec - b.tSec)
   const local = t - layer.startSec
   if (local <= sorted[0].tSec) return pick(sorted[0])
@@ -241,15 +243,35 @@ export function layerTransformAt(layer: Layer, t: number): LayerTransform {
       return {
         x: a.x + (b.x - a.x) * f,
         y: a.y + (b.y - a.y) * f,
-        scale: a.scale + (b.scale - a.scale) * f
+        scale: a.scale + (b.scale - a.scale) * f,
+        opacity: kfOpacity(a) + (kfOpacity(b) - kfOpacity(a)) * f
       }
     }
   }
   return pick(last)
 }
 
+/** A keyframe's opacity, defaulting the absent field to fully visible. */
+export function kfOpacity(k: Pick<LayerKeyframe, 'opacity'>): number {
+  const o = k.opacity
+  return typeof o === 'number' && Number.isFinite(o) ? Math.min(1, Math.max(0, o)) : 1
+}
+
 function pick(k: LayerKeyframe): LayerTransform {
-  return { x: k.x, y: k.y, scale: k.scale }
+  return { x: k.x, y: k.y, scale: k.scale, opacity: kfOpacity(k) }
+}
+
+/**
+ * The layer's opacity keyframes as ABSOLUTE-time points for the export's
+ * sendcmd intervals, or null when no keyframe actually changes opacity (all
+ * absent/1) so the plain opaque pipeline can be kept.
+ */
+export function opacityKeyframePoints(layer: Layer): { t: number; o: number }[] | null {
+  const kfs = layer.keyframes
+  if (!kfs || kfs.length === 0) return null
+  const sorted = [...kfs].sort((a, b) => a.tSec - b.tSec)
+  if (sorted.every((k) => kfOpacity(k) >= 0.9995)) return null
+  return sorted.map((k) => ({ t: layer.startSec + k.tSec, o: kfOpacity(k) }))
 }
 
 /**

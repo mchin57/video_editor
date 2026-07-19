@@ -16,9 +16,9 @@ import { cellSpan, coverCrop, layoutCellRect } from '@shared/layouts'
 import { effectiveTextAnimation } from '@shared/textAnim'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
-import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
+import { effectiveImageAspect, FRAME, opacityKeyframePoints, stretchedBox } from '@shared/layers'
 import type { Layer } from '@shared/project'
-import type { ExportKeyframe } from './exporterArgs'
+import type { ExportKeyframe, OpacityAnim } from './exporterArgs'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { getAsset, imageAssetPath } from './mediaStore'
@@ -38,7 +38,7 @@ import { buildAss, type AssOverlay } from './assBuilder'
 import { createTextRenderer, type TextRenderer } from './textImage'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
-import { eqFilter, r } from './ffmpegFilters'
+import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
 
 /** Scale optional decorations from logical to output px (matching font scaling). */
 const scaledStroke = (s: StrokeStyle | null | undefined, k: number): StrokeStyle | null | undefined =>
@@ -170,6 +170,25 @@ async function runExport(
     await runFfmpeg(ffmpeg, buildVidstabTransformArgs(job), 0, undefined, tmp)
     return join(tmp, job.outFile)
   }
+  // Keyframed OPACITY: a per-visual sendcmd file drives `colorchannelmixer aa`
+  // per frame (verified — FFMPEG-NOTES "Keyframed opacity"). `base` folds an
+  // image layer's static opacity into the animated values; a single point
+  // needs no command file (the initial `aa=` covers a constant).
+  let opN = 0
+  async function opacityAnimFor(l: Layer, base = 1): Promise<OpacityAnim | undefined> {
+    const pts = opacityKeyframePoints(l)
+    if (!pts) return undefined
+    const scaled = base !== 1 ? pts.map((p) => ({ t: p.t, o: p.o * base })) : pts
+    const oid = `op${opN}`
+    const lines = buildOpacityCmdLines(oid, scaled)
+    let cmdFile: string | null = null
+    if (lines) {
+      cmdFile = `opacity_${opN}.cmd`
+      await fsp.writeFile(join(tmp, cmdFile), lines, 'utf8')
+    }
+    opN++
+    return { cmdFile, id: oid, initial: scaled[0].o }
+  }
   for (const l of project.layers) {
     if (l.hidden) continue
     const c = l.content
@@ -229,7 +248,8 @@ async function runExport(
                 ]
               })()
             : undefined,
-          keyframes: exportKeyframes(l, aspect)
+          keyframes: exportKeyframes(l, aspect),
+          opacity: await opacityAnimFor(l)
         }
       })
       // An unmuted video layer's own audio joins the mix (placed at its start),
@@ -276,7 +296,8 @@ async function runExport(
           rotateQuarters: q,
           flipH: c.flipH,
           flipV: c.flipV,
-          keyframes: exportKeyframes(l, aspect)
+          keyframes: exportKeyframes(l, aspect),
+          opacityAnim: await opacityAnimFor(l, c.opacity)
         }
       })
     } else if (c.kind === 'layout') {

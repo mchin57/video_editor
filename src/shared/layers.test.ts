@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+﻿import { describe, it, expect } from 'vitest'
 import type { Layer } from './project'
 import {
   applyVisibleOrder,
@@ -15,6 +15,7 @@ import {
   makeTextLayer,
   makeVideoLayer,
   moveLayer,
+  opacityKeyframePoints,
   playedVideoDuration,
   resizeBox,
   stretchedBox,
@@ -100,7 +101,7 @@ describe('effectiveImageAspect', () => {
   it('reshapes by a 0..1 crop', () => {
     expect(effectiveImageAspect(1, { w: 0.5, h: 1 }, 0)).toBe(0.5)
   })
-  it('inverts the aspect for 90°/270° rotation', () => {
+  it('inverts the aspect for 90Â°/270Â° rotation', () => {
     expect(effectiveImageAspect(2, null, 1)).toBe(0.5)
     expect(effectiveImageAspect(2, null, 3)).toBe(0.5)
     expect(effectiveImageAspect(2, null, 2)).toBe(2)
@@ -147,7 +148,7 @@ describe('videoSourceTime', () => {
     expect(videoSourceTime(c, l, 4)).toBe(3) // mid-hold: frozen
     expect(videoSourceTime(c, l, 4.99)).toBe(3) // still held
     expect(videoSourceTime(c, l, 5)).toBe(3) // hold ends; resumes at source 3
-    expect(videoSourceTime(c, l, 6)).toBe(4) // 1s after resume → source 4
+    expect(videoSourceTime(c, l, 6)).toBe(4) // 1s after resume â†’ source 4
   })
 
   it('chains multiple freezes', () => {
@@ -165,27 +166,27 @@ describe('videoSourceTime with speed', () => {
     const l = makeVideoLayer('a', 'm', 4, 10)
     const c = { ...(l.content as VideoContent), speed: 2 }
     expect(videoSourceTime(c, l, 4)).toBe(0)
-    expect(videoSourceTime(c, l, 6)).toBe(4) // 2 played s × 2 = source 4
+    expect(videoSourceTime(c, l, 6)).toBe(4) // 2 played s Ã— 2 = source 4
     const slow = { ...(l.content as VideoContent), speed: 0.5 }
-    expect(videoSourceTime(slow, l, 6)).toBe(1) // 2 played s × 0.5 = source 1
+    expect(videoSourceTime(slow, l, 6)).toBe(1) // 2 played s Ã— 0.5 = source 1
   })
 
   it('keeps freeze holds wall-clock and thresholds in source time', () => {
     // in 0, out 10, speed 2: freeze at source 4 begins at played 2, holds 3s.
     const l = makeVideoLayer('a', 'm', 0, 10)
     const c = { ...(l.content as VideoContent), speed: 2, freezes: [{ atSec: 4, holdSec: 3 }] }
-    expect(videoSourceTime(c, l, 1)).toBe(2) // before the hold: 2× mapping
+    expect(videoSourceTime(c, l, 1)).toBe(2) // before the hold: 2Ã— mapping
     expect(videoSourceTime(c, l, 2.5)).toBe(4) // inside the hold
     expect(isFrozenAt(c, l, 2.5)).toBe(true)
     expect(videoSourceTime(c, l, 5)).toBe(4) // hold ends at played 5
-    expect(videoSourceTime(c, l, 6)).toBe(6) // 1s after resume → +2 source s
+    expect(videoSourceTime(c, l, 6)).toBe(6) // 1s after resume â†’ +2 source s
     expect(isFrozenAt(c, l, 6)).toBe(false)
   })
 })
 
 describe('videoSourceTime with a speed ramp', () => {
-  // in 0, out 4; speed ramps 1 → 2 across the whole clip. The played window is
-  // 4·ln(2) ≈ 2.7726 s; the closed-form inverse is s(p) = 4·(e^(p/4) − 1).
+  // in 0, out 4; speed ramps 1 â†’ 2 across the whole clip. The played window is
+  // 4Â·ln(2) â‰ˆ 2.7726 s; the closed-form inverse is s(p) = 4Â·(e^(p/4) âˆ’ 1).
   const l = makeVideoLayer('a', 'm', 1, 4)
   const ramp = [
     { atSec: 0, speed: 1 },
@@ -201,7 +202,7 @@ describe('videoSourceTime with a speed ramp', () => {
   })
 
   it('keeps freeze holds wall-clock with source-time thresholds under a ramp', () => {
-    // Freeze at source 2: begins at played 4·ln(1.5), holds 1 s.
+    // Freeze at source 2: begins at played 4Â·ln(1.5), holds 1 s.
     const cf = { ...c, freezes: [{ atSec: 2, holdSec: 1 }] }
     const holdStart = 1 + 4 * Math.log(1.5)
     expect(videoSourceTime(cf, l, holdStart + 0.5)).toBe(2) // mid-hold
@@ -221,7 +222,7 @@ describe('videoTimelineTime', () => {
       freezes: [{ atSec: 4, holdSec: 3 }]
     }
     expect(videoTimelineTime(c, l, 0)).toBe(3)
-    expect(videoTimelineTime(c, l, 2)).toBe(4) // 2 source s at 2× = 1 played s
+    expect(videoTimelineTime(c, l, 2)).toBe(4) // 2 source s at 2Ã— = 1 played s
     expect(videoTimelineTime(c, l, 4)).toBe(5) // the hold's start
     expect(videoTimelineTime(c, l, 6)).toBe(9) // past the hold: +3 wall-clock
     // Round-trip through videoSourceTime away from the hold.
@@ -266,7 +267,7 @@ describe('freezeExtraSec / isFrozenAt', () => {
 describe('layerTransformAt / upsertKeyframe', () => {
   const base = { ...makeVideoLayer('a', 'm', 2, 10) } // startSec 2
   it('returns the base transform without keyframes', () => {
-    expect(layerTransformAt(base, 5)).toEqual({ x: base.x, y: base.y, scale: base.scale })
+    expect(layerTransformAt(base, 5)).toEqual({ x: base.x, y: base.y, scale: base.scale, opacity: 1 })
   })
   it('holds before the first and after the last keyframe', () => {
     const l = {
@@ -276,8 +277,8 @@ describe('layerTransformAt / upsertKeyframe', () => {
         { tSec: 3, x: 300, y: 400, scale: 2 }
       ]
     }
-    expect(layerTransformAt(l, 2)).toEqual({ x: 100, y: 200, scale: 1 }) // t=2 → local 0 < 1
-    expect(layerTransformAt(l, 9)).toEqual({ x: 300, y: 400, scale: 2 }) // local 7 > 3
+    expect(layerTransformAt(l, 2)).toEqual({ x: 100, y: 200, scale: 1, opacity: 1 }) // t=2 â†’ local 0 < 1
+    expect(layerTransformAt(l, 9)).toEqual({ x: 300, y: 400, scale: 2, opacity: 1 }) // local 7 > 3
   })
   it('lerps linearly between keyframes', () => {
     const l = {
@@ -287,13 +288,13 @@ describe('layerTransformAt / upsertKeyframe', () => {
         { tSec: 3, x: 300, y: 400, scale: 2 }
       ]
     }
-    // t=4 → local 2 → halfway between tSec 1 and 3.
-    expect(layerTransformAt(l, 4)).toEqual({ x: 200, y: 300, scale: 1.5 })
+    // t=4 â†’ local 2 â†’ halfway between tSec 1 and 3.
+    expect(layerTransformAt(l, 4)).toEqual({ x: 200, y: 300, scale: 1.5, opacity: 1 })
   })
   it('a single keyframe pins the transform', () => {
     const l = { ...base, keyframes: [{ tSec: 1, x: 50, y: 60, scale: 0.5 }] }
-    expect(layerTransformAt(l, 2)).toEqual({ x: 50, y: 60, scale: 0.5 })
-    expect(layerTransformAt(l, 9)).toEqual({ x: 50, y: 60, scale: 0.5 })
+    expect(layerTransformAt(l, 2)).toEqual({ x: 50, y: 60, scale: 0.5, opacity: 1 })
+    expect(layerTransformAt(l, 9)).toEqual({ x: 50, y: 60, scale: 0.5, opacity: 1 })
   })
   it('upsert replaces a keyframe within epsilon and keeps the list sorted', () => {
     const kfs = [
@@ -309,6 +310,42 @@ describe('layerTransformAt / upsertKeyframe', () => {
   })
 })
 
+describe('keyframed opacity', () => {
+  const base = { ...makeVideoLayer('a', 'm', 2, 10) } // startSec 2
+  it('interpolates opacity between keyframes, defaulting absent to 1', () => {
+    const l: Layer = {
+      ...base,
+      keyframes: [
+        { tSec: 0, x: 0, y: 0, scale: 1 }, // no opacity â†’ 1
+        { tSec: 2, x: 0, y: 0, scale: 1, opacity: 0.4 }
+      ]
+    }
+    expect(layerTransformAt(l, 2).opacity).toBe(1)
+    expect(layerTransformAt(l, 3).opacity).toBeCloseTo(0.7, 9)
+    expect(layerTransformAt(l, 4).opacity).toBeCloseTo(0.4, 9)
+    expect(layerTransformAt(l, 99).opacity).toBeCloseTo(0.4, 9) // holds after
+    expect(layerTransformAt({ ...base, keyframes: undefined }, 3).opacity).toBe(1)
+  })
+
+  it('opacityKeyframePoints: absolute times; null when nothing fades', () => {
+    const l: Layer = {
+      ...base,
+      keyframes: [
+        { tSec: 0, x: 0, y: 0, scale: 1 },
+        { tSec: 2, x: 0, y: 0, scale: 1, opacity: 0.4 }
+      ]
+    }
+    expect(opacityKeyframePoints(l)).toEqual([
+      { t: 2, o: 1 },
+      { t: 4, o: 0.4 }
+    ])
+    // All keyframes fully opaque â†’ null (keep the plain opaque pipeline).
+    const still: Layer = { ...base, keyframes: [{ tSec: 0, x: 0, y: 0, scale: 1 }] }
+    expect(opacityKeyframePoints(still)).toBeNull()
+    expect(opacityKeyframePoints({ ...base, keyframes: undefined })).toBeNull()
+  })
+})
+
 describe('isBackgroundId', () => {
   it('only the bottom (index 0) layer is the background', () => {
     const layers = [vid('a', 0, 2), txt('b', 0, 2)]
@@ -319,10 +356,10 @@ describe('isBackgroundId', () => {
 })
 
 describe('applyVisibleOrder', () => {
-  // Full stack a,b,c,d (back→front). At some time only a, c, d are visible (b hidden by time).
+  // Full stack a,b,c,d (backâ†’front). At some time only a, c, d are visible (b hidden by time).
   const layers = [vid('a', 0, 9), vid('b', 5, 9), txt('c', 0, 9), txt('d', 0, 9)]
   it('reorders visible layers while pinning non-visible ones to their slots', () => {
-    // New visible order back→front: c, a, d (was a, c, d). b stays in its slot (index 1).
+    // New visible order backâ†’front: c, a, d (was a, c, d). b stays in its slot (index 1).
     const next = applyVisibleOrder(layers, ['c', 'a', 'd'])
     expect(next.map((l) => l.id)).toEqual(['c', 'b', 'a', 'd'])
   })
@@ -374,3 +411,4 @@ describe('factories', () => {
     expect(t.y).toBeCloseTo(1920 * 0.32, 5)
   })
 })
+

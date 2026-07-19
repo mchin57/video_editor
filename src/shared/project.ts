@@ -304,6 +304,10 @@ export interface LayerKeyframe {
   x: number
   y: number
   scale: number
+  /** Layer opacity 0..1 at this keyframe (absent = 1). Multiplies an image
+   *  layer's base `opacity`. Export drives it per-frame via sendcmd →
+   *  `colorchannelmixer aa` (see FFMPEG-NOTES "Keyframed opacity"). */
+  opacity?: number
 }
 
 /**
@@ -539,7 +543,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 14,
+    version: 15,
     preset: 'reel',
     layers: [],
     captions: {
@@ -773,7 +777,8 @@ export function migrateProject(raw: unknown): Project {
   // transform).
   // v14 adds the `layout` layer content kind (multi-clip split screen/panels) —
   // purely additive, old projects simply have none.
-  if (typeof p.version !== 'number' || p.version < 14) p.version = 14
+  // v15 adds absence-tolerant keyframe `opacity` (absent = 1, no transform).
+  if (typeof p.version !== 'number' || p.version < 15) p.version = 15
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

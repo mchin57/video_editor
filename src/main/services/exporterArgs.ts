@@ -17,6 +17,18 @@ import { buildAudioGraph, type AudioGraphItem } from './audio'
 import { cropFilter, f3, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
 
 /**
+ * Per-frame opacity animation for a visual: `sendcmd` (reading `cmdFile`,
+ * written by the exporter from `buildOpacityCmdLines`) drives
+ * `colorchannelmixer@<id> aa`, which MULTIPLIES the stream's existing alpha.
+ * `cmdFile` is null for a constant non-1 opacity (the initial `aa=` suffices).
+ */
+export interface OpacityAnim {
+  cmdFile: string | null
+  id: string
+  initial: number
+}
+
+/**
  * A layer keyframe resolved to OUTPUT pixels and ABSOLUTE output time: the
  * display box size and its center. Baked into per-frame `t` expressions
  * (`scale=…:eval=frame` after the setpts shift + `overlay` x/y with
@@ -92,6 +104,8 @@ export interface ExportVideo {
   ramp?: { u: number; v: number }[]
   /** Position/scale keyframes (empty/absent = the static box above). */
   keyframes?: ExportKeyframe[]
+  /** Keyframed opacity (absent = fully opaque). Forces an rgba pipeline. */
+  opacity?: OpacityAnim
 }
 
 /** An image layer resolved for compositing (geometry in output px). */
@@ -114,6 +128,10 @@ export interface ExportImage {
   /** Position/scale keyframes (empty/absent = static). A keyframed image input
    *  becomes `-loop 1` + `fps=30` so it is a real frame stream `t` can drive. */
   keyframes?: ExportKeyframe[]
+  /** Keyframed opacity (absent = the static `opacity` above). The exporter has
+   *  already multiplied the static base opacity into these values. Also forces
+   *  the `-loop 1` + `fps=30` frame stream (commands fire per frame). */
+  opacityAnim?: OpacityAnim
 }
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
@@ -286,9 +304,10 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
   }
   for (const im of images) {
-    // A keyframed image must be a real frame stream (not a single held frame)
-    // so the per-frame scale/overlay expressions have frames to evaluate on.
-    if (im.keyframes && im.keyframes.length > 0) {
+    // A keyframed (transform OR opacity) image must be a real frame stream
+    // (not a single held frame) so the per-frame scale/overlay expressions —
+    // and sendcmd commands — have frames to evaluate on.
+    if ((im.keyframes && im.keyframes.length > 0) || im.opacityAnim) {
       inputs.push('-loop', '1', '-t', f3(Math.max(0.04, im.endSec)), '-i', im.path)
     } else {
       inputs.push('-i', im.path)
@@ -351,6 +370,14 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       if (kfs) {
         pre.push(`scale=w='${kfDimExpr(kfs, 'w')}':h='${kfDimExpr(kfs, 'h')}':eval=frame:flags=bicubic`)
       }
+      if (v.opacity) {
+        // Keyframed opacity: sendcmd sits AFTER the setpts shift so its
+        // interval times see absolute output-timeline pts; colorchannelmixer's
+        // `aa` MULTIPLIES existing alpha (bg-removed clips keep their matte).
+        pre.push('format=rgba')
+        if (v.opacity.cmdFile) pre.push(`sendcmd=f=${v.opacity.cmdFile}`)
+        pre.push(`colorchannelmixer@${v.opacity.id}=aa=${f3(v.opacity.initial)}`)
+      }
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
       const pos = kfs ? kfPosExprs(kfs) : null
       chains.push(
@@ -375,15 +402,24 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       if (im.flipH) steps.push('hflip')
       if (im.flipV) steps.push('vflip')
       const ikfs = im.keyframes && im.keyframes.length > 0 ? im.keyframes : null
+      const oanim = im.opacityAnim
       if (ikfs) {
         // The -loop 1 input already runs on the output clock from 0, so the
         // per-frame scale expressions read absolute timeline t directly.
         steps.push('format=rgba')
-        if (op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+        if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
         steps.push('fps=30', `scale=w='${kfDimExpr(ikfs, 'w')}':h='${kfDimExpr(ikfs, 'h')}':eval=frame`)
       } else {
         steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
-        if (op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+        if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+        if (oanim) steps.push('fps=30') // real frame stream for the commands
+      }
+      if (oanim) {
+        // Keyframed opacity (the exporter baked the static base opacity into
+        // the values): sendcmd intervals are absolute output seconds — the
+        // looped stream runs on the output clock from 0.
+        if (oanim.cmdFile) steps.push(`sendcmd=f=${oanim.cmdFile}`)
+        steps.push(`colorchannelmixer@${oanim.id}=aa=${f3(oanim.initial)}`)
       }
       chains.push(`[${i}:v]${steps.join(',')}[pi${i}]`)
       const ipos = ikfs ? kfPosExprs(ikfs) : null

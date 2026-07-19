@@ -589,7 +589,10 @@ export function PreviewStage(): JSX.Element {
     const kfd = !!layer.keyframes?.length && layer.content.kind !== 'text'
     const t0 = usePlayback.getState().time
     const kfT = clamp(t0 - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
-    const kfScale = layerTransformAt(layer, t0).scale
+    const tr0 = layerTransformAt(layer, t0)
+    const kfScale = tr0.scale
+    // A drag writes position — the keyframe keeps the opacity in effect there.
+    const kfExtra = tr0.opacity < 1 ? { opacity: tr0.opacity } : {}
     startDragWithUndo((ev) => {
       const nx = layer.x + (ev.clientX - startX) * scale
       const ny = layer.y + (ev.clientY - startY) * scale
@@ -598,7 +601,7 @@ export function PreviewStage(): JSX.Element {
         layers: p.layers.map((l) => {
           if (l.id !== layer.id) return l
           if (kfd) {
-            return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale }) }
+            return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale, ...kfExtra }) }
           }
           return { ...l, x: nx, y: ny }
         })
@@ -630,6 +633,8 @@ export function PreviewStage(): JSX.Element {
       0,
       Math.max(0, layer.endSec - layer.startSec)
     )
+    const rOp = layerTransformAt(layer, usePlayback.getState().time).opacity
+    const kfExtra = rOp < 1 ? { opacity: rOp } : {}
     startDragWithUndo((ev) => {
       const dx = (ev.clientX - startX) * s
       const dy = (ev.clientY - startY) * s
@@ -641,7 +646,7 @@ export function PreviewStage(): JSX.Element {
           if (isCorner) {
             const ns = clamp(layer.scale * (nb.w / startBox.w), 0.05, 8)
             if (kfd) {
-              return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nb.cx, y: nb.cy, scale: ns }) }
+              return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nb.cx, y: nb.cy, scale: ns, ...kfExtra }) }
             }
             return { ...l, x: nb.cx, y: nb.cy, scale: ns }
           }
@@ -742,17 +747,26 @@ export function PreviewStage(): JSX.Element {
         const selected = layer.id === selectedLayerId
         const onMoveDown = (e: ReactPointerEvent): void => startLayerMove(e, layer)
 
+        // Keyframed opacity (video/image): same shared interpolation the export
+        // bakes into its sendcmd `aa` ramp — applied on the layer box.
+        const kfOp = layerTransformAt(rawLayer, time).opacity
+
         if (layer.content.kind === 'video') {
           const content = layer.content
           const asset = assetById.get(content.mediaId)
-          const box = { ...mediaBox(layer, mediaAspect(asset, content)), zIndex: z }
+          const box = {
+            ...mediaBox(layer, mediaAspect(asset, content)),
+            zIndex: z,
+            ...(kfOp < 1 ? { opacity: kfOp } : {})
+          }
           if (!asset?.proxyReady || !asset.probe.video) {
             return (
               <div
                 key={layer.id}
                 style={box}
                 onPointerDown={onMoveDown}
-                className="flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500"
+                data-resizebox={selected ? '' : undefined}
+                className={`flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500 ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : ''}`}
               >
                 {asset ? (
                   <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
@@ -786,7 +800,12 @@ export function PreviewStage(): JSX.Element {
           const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
           const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
           const odd = q === 1 || q === 3
-          const box = { ...mediaBox(layer, aspect), zIndex: z, containerType: 'size' as const }
+          const box = {
+            ...mediaBox(layer, aspect),
+            zIndex: z,
+            containerType: 'size' as const,
+            ...(kfOp < 1 ? { opacity: kfOp } : {})
+          }
           // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
           // box, so swap its width/height (cqw/cqh resolve to the box via its
           // container context) for odd quarter-turns.

@@ -141,6 +141,8 @@ interface ProjectState {
   addLayerKeyframe: (id: string, atSec: number) => void
   /** Remove the keyframe at `index` (in sorted order). */
   removeLayerKeyframe: (id: string, index: number) => void
+  /** Set the opacity (0..1) of the keyframe at `index` (in sorted order). */
+  setLayerKeyframeOpacity: (id: string, index: number, opacity: number) => void
   /** Drop all keyframes; the layer returns to its static base transform. */
   clearLayerKeyframes: (id: string) => void
   /** Add a freeze hold at source time `atSrcSec`, extending the layer by `holdSec`. */
@@ -429,8 +431,17 @@ export const useProject = create<ProjectState>((set, get) => {
           // Text animates via its own presets; layouts have no export keyframe path.
           if (l.content.kind === 'text' || l.content.kind === 'layout') return l
           const tSec = Math.max(0, Math.min(atSec - l.startSec, Math.max(0, l.endSec - l.startSec)))
-          const tr = layerTransformAt(l, atSec)
-          return { ...l, keyframes: upsertKeyframe(l.keyframes, { tSec, ...tr }) }
+          // Full opacity is stored as ABSENCE so untouched keyframes keep the
+          // plain (opaque) pipeline on export.
+          const { opacity, ...tr } = layerTransformAt(l, atSec)
+          return {
+            ...l,
+            keyframes: upsertKeyframe(l.keyframes, {
+              tSec,
+              ...tr,
+              ...(opacity < 0.9995 ? { opacity } : {})
+            })
+          }
         })
       ),
 
@@ -441,6 +452,18 @@ export const useProject = create<ProjectState>((set, get) => {
           if (!kfs[index]) return l
           const next = kfs.filter((_, i) => i !== index)
           return { ...l, keyframes: next.length ? next : undefined }
+        })
+      ),
+
+    setLayerKeyframeOpacity: (id, index, opacity) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          const kfs = [...(l.keyframes ?? [])].sort((a, b) => a.tSec - b.tSec)
+          if (!kfs[index]) return l
+          const o = Math.min(1, Math.max(0, opacity))
+          // Store 1 as absence so untouched keyframes keep the plain pipeline.
+          kfs[index] = { ...kfs[index], opacity: o >= 0.9995 ? undefined : o }
+          return { ...l, keyframes: kfs }
         })
       ),
 

@@ -28,7 +28,7 @@ describe('migrateProject â€” caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(14)
+    expect(p.version).toBe(15)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -100,7 +100,7 @@ describe('migrateProject â€” noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off â†’ inherit
-    expect(p.version).toBe(14)
+    expect(p.version).toBe(15)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cropFilter, eqFilter, f3, f6, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
+import { buildOpacityCmdLines, cropFilter, eqFilter, f3, f6, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
 
 describe('ffmpegFilters', () => {
   it('rounds crop geometry to integer pixels (w:h:x:y order)', () => {
@@ -70,6 +70,27 @@ describe('ffmpegFilters', () => {
     })
     it('f6 formats to 6 decimals', () => {
       expect(f6(1 / 3)).toBe('0.333333')
+    })
+  })
+
+  describe('buildOpacityCmdLines', () => {
+    it('one [expr] interval per segment plus the constant tail pin', () => {
+      const s = buildOpacityCmdLines('op0', [
+        { t: 2, o: 1 },
+        { t: 4, o: 0.4 },
+        { t: 5, o: 0.8 }
+      ])
+      expect(s).toBe(
+        "2.000-4.000 [expr] colorchannelmixer@op0 aa 'lerp(1.000,0.400,TI)';\n" +
+          "4.000-5.000 [expr] colorchannelmixer@op0 aa 'lerp(0.400,0.800,TI)';\n" +
+          // The tail pins the final value — the last in-interval frame fires at
+          // TI < 1 and would otherwise stick slightly short of it.
+          "5.000-3605.000 [expr] colorchannelmixer@op0 aa '0.800';\n"
+      )
+    })
+    it('returns empty for fewer than 2 points (initial aa= covers a constant)', () => {
+      expect(buildOpacityCmdLines('op0', [{ t: 1, o: 0.5 }])).toBe('')
+      expect(buildOpacityCmdLines('op0', [])).toBe('')
     })
   })
 })

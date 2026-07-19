@@ -136,6 +136,37 @@ Verified with lavfi bases + frame dumps (drives `ExportKeyframe` handling in
   setpts needed.
 - Keep animated dimensions even (`trunc(expr/2)*2`) for yuv420 outputs.
 
+## Keyframed opacity — sendcmd + colorchannelmixer (verified ffmpeg 8.1.1, 2026-07)
+
+The "no clean per-frame alpha path" blocker is SOLVED. Verified with white-over-
+black + `signalstats` YAVG readbacks (drives `buildOpacityCmdLines` /
+`OpacityAnim` in `ffmpegFilters.ts`/`exporterArgs.ts`):
+
+- **`colorchannelmixer` options carry the `T` (runtime) flag** — they accept
+  commands even though the filter help prints no "commands" section. Address
+  the instance as `colorchannelmixer@<id>` and drive `aa` from a
+  `sendcmd=f=<file>` placed anywhere upstream in the same chain.
+- **A `sendcmd` interval with the `[expr]` flag re-evaluates its argument
+  EVERY FRAME within the interval**; `TI` is the 0..1 progress, so
+  `lerp(a0,a1,TI)` is a smooth per-frame ramp (measured luma matched the
+  prediction to ±1 code value). Cost is one colorchannelmixer — no geq, no
+  second alpha stream.
+- **`aa` MULTIPLIES the existing alpha** (it's the alpha-from-alpha
+  coefficient), so animated opacity composes with a bg-removed clip's matte
+  instead of replacing it. Needs an alpha-capable format first (`format=rgba`).
+- **Interval boundaries are seamless** (the next interval's first frame takes
+  over exactly), **but the LAST interval undershoots its end value** — the
+  final frame fires at TI < 1 and the value then sticks. Emit a constant TAIL
+  interval pinning the last keyframe's value (`buildOpacityCmdLines` does).
+- Frames BEFORE the first interval hold the filter's initial `aa=` option —
+  seed it with the first keyframe's value.
+- **Composes with `setpts`**: sendcmd placed after the shift sees the shifted
+  pts, so interval times are absolute output-timeline seconds (same convention
+  as the keyframed-transform `t` expressions). Verified through the full
+  compositor shape (base + overlay enable + `-r 30 -fps_mode cfr`).
+- A still image needs the `-loop 1` + `fps=30` treatment (like transform
+  keyframes) so there are frames for the commands to fire on.
+
 ## adelay after atrim — poisoned PTS kills the mux (verified ffmpeg 8.1.1, 2026-07)
 
 - **An `atrim`'d stream fed into a non-zero `adelay` emits ONE frame with a
