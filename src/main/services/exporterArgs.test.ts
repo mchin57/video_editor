@@ -123,6 +123,37 @@ describe('buildExportArgs', () => {
     expect(normal).toContain('setpts=PTS-STARTPTS+1.000/TB[pv1]') // speed 1 emits the plain form
   })
 
+  it('bakes a speed RAMP into a quoted piecewise log-integral setpts', () => {
+    // speed 1 → 2 over the 5s trim; ramp overrides the constant speed field.
+    const ramp = [
+      { u: 0, v: 1 },
+      { u: 5, v: 2 }
+    ]
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5, ramp } }] }),
+      'o'
+    ).join(' ')
+    // m = 0.2; total = ln(2)/0.2 = 3.465736, held past the trim end. The whole
+    // value is single-quoted (commas unescaped) — verified against ffmpeg 8.1.1,
+    // see FFMPEG-NOTES "Speed ramps".
+    expect(s).toContain(
+      "setpts='(if(lt(T-STARTT,5.000000),0.000000+log((1.000000+0.200000*(T-STARTT-0.000000))/1.000000)/0.200000,3.465736)+1.000)/TB'[pv1]"
+    )
+
+    // Freeze thresholds stay in source time (unescaped inside the quotes).
+    const frozen = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: { ...vid, ramp, freezes: [{ atLocal: 1.5, holdSec: 2 }] } }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(frozen).toContain(
+      "setpts='(if(lt(T-STARTT,5.000000),0.000000+log((1.000000+0.200000*(T-STARTT-0.000000))/1.000000)/0.200000,3.465736)+gte(T-STARTT,1.500)*2.000+1.000)/TB'[pv1]"
+    )
+  })
+
   it('tempo-matches a re-timed layer audio with an atempo chain', () => {
     const s = buildExportArgs(
       plan({

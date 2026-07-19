@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { extractAudioPieces, reorder, splitAudioClip, splitVideoLayer, trimVideoEnd, trimVideoStart } from './timeline'
-import { makeVideoLayer } from '@shared/layers'
+import { makeVideoLayer, playedVideoDuration } from '@shared/layers'
 import type { AudioClip, Layer, VideoContent } from '@shared/project'
 
 function audio(over: Partial<AudioClip> = {}): AudioClip {
@@ -83,6 +83,53 @@ describe('speed-aware trim & split', () => {
     expect(trimVideoStart(layer, c, 2).startSec).toBe(4)
     // New out-point at source 8 → end = 0 + 8/0.5 = 16.
     expect(trimVideoEnd(layer, c, 8).endSec).toBe(16)
+  })
+})
+
+describe('ramp-aware trim & split', () => {
+  const makeId = (): string => 'new'
+  // in 0, out 4, speed ramps 1 → 2 over the whole source: played span 4·ln 2.
+  const ramp = [
+    { atSec: 0, speed: 1 },
+    { atSec: 4, speed: 2 }
+  ]
+  const mkRamped = (): Layer => {
+    const base = makeVideoLayer('a', 'm', 0, 4)
+    const content: VideoContent = { ...(base.content as VideoContent), speedRamp: ramp }
+    return { ...base, endSec: playedVideoDuration(content), content }
+  }
+
+  it('splits at the log-integral source point and both halves keep the invariant', () => {
+    const layer = mkRamped()
+    const res = splitVideoLayer(layer, 1, makeId)
+    expect(res).not.toBeNull()
+    const [left, right] = res!
+    const cutSource = 4 * (Math.exp(0.25) - 1) // s(p=1)
+    expect((left.content as VideoContent).outSec).toBeCloseTo(cutSource, 9)
+    expect((right.content as VideoContent).inSec).toBeCloseTo(cutSource, 9)
+    // Both halves keep the ramp and the window invariant.
+    expect((left.content as VideoContent).speedRamp).toEqual(ramp)
+    expect((right.content as VideoContent).speedRamp).toEqual(ramp)
+    expect(left.endSec - left.startSec).toBeCloseTo(
+      playedVideoDuration(left.content as VideoContent),
+      9
+    )
+    expect(right.endSec - right.startSec).toBeCloseTo(
+      playedVideoDuration(right.content as VideoContent),
+      9
+    )
+    // The two windows sum to the original.
+    expect(right.endSec - left.startSec).toBeCloseTo(4 * Math.log(2), 9)
+  })
+
+  it('trims keep endSec consistent with the ramp integral', () => {
+    const layer = mkRamped()
+    const c = layer.content as VideoContent
+    const t = trimVideoStart(layer, c, 2)
+    expect(t.startSec).toBeCloseTo(4 * Math.log(1.5), 9) // played time 0→2
+    expect(t.endSec - t.startSec).toBeCloseTo(playedVideoDuration(t.content as VideoContent), 9)
+    const e = trimVideoEnd(layer, c, 2)
+    expect(e.endSec).toBeCloseTo(4 * Math.log(1.5), 9)
   })
 })
 

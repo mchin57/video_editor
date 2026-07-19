@@ -11,6 +11,7 @@ import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
+import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { effectiveTextAnimation } from '@shared/textAnim'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
@@ -216,12 +217,25 @@ async function runExport(
           endSec: l.endSec,
           freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
           speed: videoSpeed(c),
+          // Speed-ramp profile → boundary points in trimmed-input time. The
+          // shared `speedSegments` resolves the same profile the preview plays.
+          ramp: hasSpeedRamp(c)
+            ? (() => {
+                const segs = speedSegments(c, c.inSec, c.outSec)
+                return [
+                  ...segs.map((s) => ({ u: s.s0 - c.inSec, v: s.v0 })),
+                  { u: segs[segs.length - 1].s1 - c.inSec, v: segs[segs.length - 1].v1 }
+                ]
+              })()
+            : undefined,
           keyframes: exportKeyframes(l, aspect)
         }
       })
       // An unmuted video layer's own audio joins the mix (placed at its start),
-      // tempo-matched to the clip's speed (pitch-preserving atempo chain).
-      if (!c.mute && asset.probe.audio) {
+      // tempo-matched to the clip's speed (pitch-preserving atempo chain). A
+      // RAMPED clip's audio is dropped — there is no variable-tempo audio path,
+      // and the preview mutes it too so both sides agree.
+      if (!c.mute && asset.probe.audio && !hasSpeedRamp(c)) {
         audio.push({
           path: asset.originalPath,
           inSec: c.inSec,

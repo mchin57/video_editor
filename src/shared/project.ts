@@ -51,6 +51,19 @@ export interface FreezeHold {
   holdSec: number
 }
 
+/**
+ * One keyframe of a video clip's speed ramp, anchored in SOURCE time (like
+ * freeze holds, so trims/splits keep the ramp attached to the footage). Speed
+ * is piecewise-linear between keyframes and holds flat outside the first/last.
+ * Kept sorted by `atSec`. All timeline↔source math goes through
+ * `shared/speed.ts` (`playedBetween`/`sourceAfterPlayed`) — never integrate
+ * inline.
+ */
+export interface SpeedKeyframe {
+  atSec: number
+  speed: number
+}
+
 /** Per-clip color correction. Neutral = brightness 0, contrast 1, saturation 1. */
 export interface ColorAdjust {
   brightness: number // -1..1
@@ -189,6 +202,14 @@ export interface VideoContent {
    * (`shared/layers.ts`) — never divide by this inline.
    */
   speed?: number
+  /**
+   * Keyframed speed ramp (absent/empty = the constant `speed` applies). When
+   * non-empty it OVERRIDES `speed`: playback speed is piecewise-linear between
+   * the keyframes (source-time anchored). The clip's own audio is dropped
+   * while a ramp is active (no variable-tempo audio path — preview and export
+   * agree by both muting).
+   */
+  speedRamp?: SpeedKeyframe[]
 }
 
 /** Allowed constant-speed range (matches the Inspector control). */
@@ -479,7 +500,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 12,
+    version: 13,
     preset: 'reel',
     layers: [],
     captions: {
@@ -709,7 +730,9 @@ export function migrateProject(raw: unknown): Project {
   // v10 adds absence-tolerant text `animation` (absent = static, no transform).
   // v11 adds absence-tolerant video `speed` (absent = 1, no transform).
   // v12 adds absence-tolerant layer `keyframes` (absent = static, no transform).
-  if (typeof p.version !== 'number' || p.version < 12) p.version = 12
+  // v13 adds absence-tolerant video `speedRamp` (absent = constant speed, no
+  // transform).
+  if (typeof p.version !== 'number' || p.version < 13) p.version = 13
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

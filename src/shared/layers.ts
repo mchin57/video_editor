@@ -5,7 +5,7 @@
  */
 
 import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent } from './project'
-import { videoSpeed } from './project'
+import { playedBetween, sourceAfterPlayed } from './speed'
 import { DEFAULT_FONT_ID } from './fonts'
 
 /** The single source of truth for the logical output space (1080x1920 px).
@@ -145,33 +145,36 @@ export function freezeExtraSec(content: VideoContent): number {
   return (content.freezes ?? []).reduce((sum, f) => sum + Math.max(0, f.holdSec), 0)
 }
 
-/** Played (timeline) duration of a video layer's content: the source span
- *  scaled by speed, plus the wall-clock freeze holds. The `endSec` a store
- *  action should maintain is `startSec + playedVideoDuration(content)`. */
+/** Played (timeline) duration of a video layer's content: the source span at
+ *  the clip's speed profile (constant or ramped), plus the wall-clock freeze
+ *  holds. The `endSec` a store action should maintain is
+ *  `startSec + playedVideoDuration(content)`. */
 export function playedVideoDuration(content: VideoContent): number {
-  return Math.max(0, content.outSec - content.inSec) / videoSpeed(content) + freezeExtraSec(content)
+  return (
+    Math.max(0, playedBetween(content, content.inSec, Math.max(content.inSec, content.outSec))) +
+    freezeExtraSec(content)
+  )
 }
 
 /**
  * Source-media time a video layer should show at timeline time `t`, honoring
- * freeze holds AND the clip's constant speed. Played time runs `inSec → outSec`
- * at `speed` source-seconds per played second, pausing on each freeze's source
- * frame for its wall-clock `holdSec` — so the played window is
- * `(outSec−inSec)/speed + freezeExtraSec` long.
+ * freeze holds AND the clip's speed profile (constant `speed` or a keyframed
+ * `speedRamp`). Played time runs `inSec → outSec` along the profile, pausing
+ * on each freeze's source frame for its wall-clock `holdSec` — so the played
+ * window is `playedBetween(in, out) + freezeExtraSec` long.
  */
 export function videoSourceTime(content: VideoContent, layer: Layer, t: number): number {
-  const speed = videoSpeed(content)
   let local = t - layer.startSec // played time within the (stretched) layer
   const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
   for (const f of freezes) {
     // Earlier holds are already removed from `local`, so this freeze sits at its
-    // speed-scaled source distance from the in-point in the reduced timeline.
-    const atPlayed = (f.atSec - content.inSec) / speed
-    if (local < atPlayed) break // freeze is still ahead — normal linear mapping
+    // profile-mapped played distance from the in-point in the reduced timeline.
+    const atPlayed = playedBetween(content, content.inSec, f.atSec)
+    if (local < atPlayed) break // freeze is still ahead — normal profile mapping
     if (local < atPlayed + f.holdSec) return clampSrc(content, f.atSec) // inside the hold
     local -= Math.max(0, f.holdSec) // passed it: drop its hold as dead played time
   }
-  return clampSrc(content, content.inSec + local * speed)
+  return clampSrc(content, sourceAfterPlayed(content, content.inSec, Math.max(0, local)))
 }
 
 function clampSrc(content: VideoContent, s: number): number {
@@ -180,16 +183,29 @@ function clampSrc(content: VideoContent, s: number): number {
 
 /** True if timeline time `t` falls inside one of the layer's freeze holds. */
 export function isFrozenAt(content: VideoContent, layer: Layer, t: number): boolean {
-  const speed = videoSpeed(content)
   let local = t - layer.startSec
   const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
   for (const f of freezes) {
-    const atPlayed = (f.atSec - content.inSec) / speed
+    const atPlayed = playedBetween(content, content.inSec, f.atSec)
     if (local < atPlayed) return false
     if (local < atPlayed + f.holdSec) return true
     local -= Math.max(0, f.holdSec)
   }
   return false
+}
+
+/**
+ * Timeline time at which the layer shows SOURCE second `s` — the inverse of
+ * `videoSourceTime` (for a source point inside a freeze hold, the hold's
+ * start). Drives "seek to this keyframe" UI.
+ */
+export function videoTimelineTime(content: VideoContent, layer: Layer, s: number): number {
+  const clamped = clampSrc(content, s)
+  const holdsBefore = (content.freezes ?? []).reduce(
+    (sum, f) => sum + (f.atSec < clamped ? Math.max(0, f.holdSec) : 0),
+    0
+  )
+  return layer.startSec + playedBetween(content, content.inSec, clamped) + holdsBefore
 }
 
 // --- Keyframed transform (shared by preview + export) ------------------------

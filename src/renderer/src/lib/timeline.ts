@@ -6,7 +6,8 @@
  */
 
 import type { AudioClip, FreezeHold, Layer, VideoContent } from '@shared/project'
-import { audioClipEnd, videoSpeed } from '@shared/project'
+import { audioClipEnd } from '@shared/project'
+import { playedBetween, sourceAfterPlayed } from '@shared/speed'
 
 /** Move the item at `from` to index `to`, returning a new array. */
 export function reorder<T>(items: T[], from: number, to: number): T[] {
@@ -21,11 +22,13 @@ export function reorder<T>(items: T[], from: number, to: number): T[] {
  * Split a video layer at an absolute timeline time `atSec` into [left, right]
  * sharing the same source, or null if the cut falls at/outside the layer's span.
  *
- * Freeze holds (and the clip's constant speed) make the timeline→source mapping
- * NONLINEAR, so the cut's source point is found by walking the holds (mirroring
- * `videoSourceTime`) and the freezes are partitioned between the halves — a
- * hold the cut lands inside is itself split, so both halves keep the invariant
- * `window = (outSec − inSec)/speed + Σ holds`.
+ * Freeze holds (and the clip's speed profile — constant `speed` or a keyframed
+ * `speedRamp`) make the timeline→source mapping NONLINEAR, so the cut's source
+ * point is found by walking the holds (mirroring `videoSourceTime`) and the
+ * freezes are partitioned between the halves — a hold the cut lands inside is
+ * itself split, so both halves keep the invariant
+ * `window = playedBetween(inSec, outSec) + Σ holds`. The ramp keyframes are
+ * source-anchored, so both halves keep the full ramp list unchanged.
  */
 export function splitVideoLayer(
   layer: Layer,
@@ -36,7 +39,6 @@ export function splitVideoLayer(
   const eps = 1e-3
   if (atSec <= layer.startSec + eps || atSec >= layer.endSec - eps) return null
   const c = layer.content as VideoContent
-  const speed = videoSpeed(c)
   const freezes = [...(c.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
 
   const cutLocal = atSec - layer.startSec // cut position in played time
@@ -45,7 +47,7 @@ export function splitVideoLayer(
   let holdBefore = 0 // played time consumed by holds fully before the cut
   let cutSource: number | null = null
   for (const f of freezes) {
-    const atPlayed = (f.atSec - c.inSec) / speed + holdBefore // hold start, in played time
+    const atPlayed = playedBetween(c, c.inSec, f.atSec) + holdBefore // hold start, in played time
     if (cutSource != null || cutLocal <= atPlayed + eps) {
       rightFreezes.push(f) // hold is entirely after the cut
     } else if (cutLocal < atPlayed + f.holdSec) {
@@ -60,7 +62,7 @@ export function splitVideoLayer(
       holdBefore += f.holdSec
     }
   }
-  if (cutSource == null) cutSource = c.inSec + (cutLocal - holdBefore) * speed
+  if (cutSource == null) cutSource = sourceAfterPlayed(c, c.inSec, cutLocal - holdBefore, c.outSec)
 
   const left: Layer = {
     ...layer,
@@ -87,7 +89,7 @@ export function trimVideoStart(layer: Layer, c: VideoContent, ni: number): Layer
   const freezes = c.freezes ?? []
   const kept = freezes.filter((f) => f.atSec >= ni)
   const dropped = freezes.reduce((s, f) => s + (f.atSec < ni ? Math.max(0, f.holdSec) : 0), 0)
-  const startSec = Math.max(0, layer.startSec + (ni - c.inSec) / videoSpeed(c) + dropped)
+  const startSec = Math.max(0, layer.startSec + playedBetween(c, c.inSec, ni) + dropped)
   return { ...layer, startSec, content: { ...c, inSec: ni, freezes: kept.length ? kept : undefined } }
 }
 
@@ -101,7 +103,7 @@ export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
   const freezes = c.freezes ?? []
   const kept = freezes.filter((f) => f.atSec <= no)
   const keptHold = kept.reduce((s, f) => s + Math.max(0, f.holdSec), 0)
-  const endSec = layer.startSec + (no - c.inSec) / videoSpeed(c) + keptHold
+  const endSec = layer.startSec + playedBetween(c, c.inSec, no) + keptHold
   return { ...layer, endSec, content: { ...c, outSec: no, freezes: kept.length ? kept : undefined } }
 }
 

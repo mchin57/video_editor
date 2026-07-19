@@ -14,7 +14,7 @@
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { EXPORT_PRESETS, type PresetId } from '@shared/export'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
-import { cropFilter, f3, piecewiseLinearExpr, r } from './ffmpegFilters'
+import { cropFilter, f3, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
 
 /**
  * A layer keyframe resolved to OUTPUT pixels and ABSOLUTE output time: the
@@ -84,6 +84,12 @@ export interface ExportVideo {
   /** Constant playback speed (1 = normal). PTS scale by 1/speed; freeze holds
    *  stay wall-clock; the cfr output resamples the frame rate. */
   speed?: number
+  /** Speed-ramp profile as boundary points in trimmed-input time (u = source
+   *  seconds since the in-point, spanning [0, len]; ≥ 2 points). When present
+   *  it overrides `speed`: PTS follow the piecewise log-integral of 1/speed
+   *  (`speedRampPlayedExpr`). The layer's own audio is dropped by the planner
+   *  while ramped. */
+  ramp?: { u: number; v: number }[]
   /** Position/scale keyframes (empty/absent = the static box above). */
   keyframes?: ExportKeyframe[]
 }
@@ -318,13 +324,29 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       // cfr); freeze thresholds compare SOURCE time so they're speed-independent,
       // and holdSec stays wall-clock (verified — see FFMPEG-NOTES "Speed").
       const speed = v.speed && v.speed > 0 ? v.speed : 1
-      const elapsed = speed !== 1 ? `(PTS-STARTPTS)/${f3(speed)}` : 'PTS-STARTPTS'
-      const freezeSum = v.freezes
-        .map((f) => `gte(T-STARTT\\,${f3(f.atLocal)})*${f3(f.holdSec)}`)
-        .join('+')
-      const setpts = freezeSum
-        ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
-        : `setpts=${elapsed}+${f3(v.startSec)}/TB`
+      const ramp = v.ramp && v.ramp.length >= 2 ? v.ramp : null
+      let setpts: string
+      if (ramp) {
+        // Speed RAMP: played time is the piecewise log-integral of 1/speed in
+        // trimmed-input seconds; freeze thresholds stay in source time and
+        // holds wall-clock, exactly as in the constant-speed form. The whole
+        // value is single-quoted, so the commas inside if()/gte() need no
+        // backslash escaping (verified — see FFMPEG-NOTES "Speed ramps").
+        const rampExpr = speedRampPlayedExpr(ramp)
+        const freezeSum = v.freezes
+          .map((f) => `gte(T-STARTT,${f3(f.atLocal)})*${f3(f.holdSec)}`)
+          .join('+')
+        const inner = freezeSum ? `${rampExpr}+${freezeSum}` : rampExpr
+        setpts = `setpts='(${inner}+${f3(v.startSec)})/TB'`
+      } else {
+        const elapsed = speed !== 1 ? `(PTS-STARTPTS)/${f3(speed)}` : 'PTS-STARTPTS'
+        const freezeSum = v.freezes
+          .map((f) => `gte(T-STARTT\\,${f3(f.atLocal)})*${f3(f.holdSec)}`)
+          .join('+')
+        setpts = freezeSum
+          ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
+          : `setpts=${elapsed}+${f3(v.startSec)}/TB`
+      }
       pre.push('setsar=1', v.hasAlpha ? 'format=yuva420p' : 'format=yuv420p', setpts)
       if (kfs) {
         pre.push(`scale=w='${kfDimExpr(kfs, 'w')}':h='${kfDimExpr(kfs, 'h')}':eval=frame:flags=bicubic`)

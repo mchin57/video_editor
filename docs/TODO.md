@@ -89,7 +89,28 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 - [ ] **LUT (.cube) support** — import a `.cube` LUT file and apply it per clip on export via ffmpeg `lut3d` filter. Preview approximation via CSS or a canvas-based LUT lookup. Useful for cinematic grades and consistent brand look across clips.
 
-- [~] **Speed ramping — constant per-clip speed shipped; keyframed curves remain backlogged.** `VideoContent.speed` (0.25×–4×, absent = 1, migration v11): the timeline↔source mapping is generalized in the SHARED helpers — `videoSpeed`/`playedVideoDuration` (`shared/project.ts`/`layers.ts`), `videoSourceTime`/`isFrozenAt` scale by speed while freeze holds stay wall-clock, and `trimVideoStart`/`trimVideoEnd`/`splitVideoLayer` (`lib/timeline.ts`) keep the invariant `window=(out−in)/speed+Σholds` (edge-drag deltas are played time × speed). Preview: `<video>.playbackRate` (Chromium time-stretches like atempo). Export: `setpts=(PTS-STARTPTS)/S` composing with the freeze expression (source-time thresholds, wall-clock holds) + `atempoChain` for an unmuted layer's own audio — all verified against ffmpeg 8.1.1 frame dumps/durations (FFMPEG-NOTES "Speed"). UI: preset buttons + free field in the clip Inspector; ×N badge on the timeline block. _Limitations: audio-lane clips (incl. the auto-extracted pair and "Extract audio", which is disabled at ≠1×) always play 1× — AudioClip has no tempo; speed curves/ramps within a clip are the remaining large piece._ _Unverified: not yet smoke-tested through `npm run dev` with real media (drag-trim feel at ≠1×, A/V sync on a real clip's unmuted audio)._
+- [~] **Speed ramping — keyframed speed CURVES shipped (on top of constant per-clip speed).**
+  `VideoContent.speedRamp` (`SpeedKeyframe[]`, migration v13): speed keyframes are
+  SOURCE-time anchored (like freezes, so trims/splits keep the motion), piecewise-
+  linear between keyframes, held flat outside. The timeline↔source mapping is the
+  closed-form log/exp integral of 1/speed in the NEW shared `src/shared/speed.ts`
+  (`playedBetween`/`sourceAfterPlayed`/`videoSpeedAtSource`, unit-tested incl.
+  numeric-integration cross-check); `videoSourceTime`/`playedVideoDuration`/
+  `videoTimelineTime`, trim/split, and the edge-drag delta conversion all resolve
+  through it (invariant `window = playedBetween(in,out) + Σholds`). Preview:
+  per-tick `playbackRate` from the profile. Export: quoted piecewise
+  `setpts='(C_i+log(v(x)/v_i)/m_i …)/TB'` via `speedRampPlayedExpr`
+  (`ffmpegFilters.ts`) composing with freeze `gte()` terms — frame-exact against
+  ffmpeg 8.1.1 through the full compositor chain (FFMPEG-NOTES "Speed ramps").
+  UI: "＋ Speed keyframe at playhead" + per-keyframe speed list in the clip
+  Inspector (constant-speed controls disable under a ramp); `×~` timeline badge.
+  e2e: `e2e/speedRamp.spec.ts` (Inspector flow + ramped trim-drag invariant).
+  _Limitations: a ramped clip's own audio is muted in preview AND dropped from
+  the export mix (no variable-tempo audio path — atempo is fixed per instance);
+  easing is linear-only._ _Unverified: not yet smoke-tested through
+  `npm run dev` with real media (ramp feel during playback, export A/B against
+  preview motion)._
+  Previous constant-speed notes: `VideoContent.speed` (0.25×–4×, absent = 1, migration v11): the timeline↔source mapping is generalized in the SHARED helpers — `videoSpeed`/`playedVideoDuration` (`shared/project.ts`/`layers.ts`), `videoSourceTime`/`isFrozenAt` scale by speed while freeze holds stay wall-clock, and `trimVideoStart`/`trimVideoEnd`/`splitVideoLayer` (`lib/timeline.ts`) keep the invariant `window=(out−in)/speed+Σholds` (edge-drag deltas are played time × speed). Preview: `<video>.playbackRate` (Chromium time-stretches like atempo). Export: `setpts=(PTS-STARTPTS)/S` composing with the freeze expression (source-time thresholds, wall-clock holds) + `atempoChain` for an unmuted layer's own audio — all verified against ffmpeg 8.1.1 frame dumps/durations (FFMPEG-NOTES "Speed"). UI: preset buttons + free field in the clip Inspector; ×N badge on the timeline block. _Limitations: audio-lane clips (incl. the auto-extracted pair and "Extract audio", which is disabled at ≠1×) always play 1× — AudioClip has no tempo; speed curves/ramps within a clip are the remaining large piece._ _Unverified: not yet smoke-tested through `npm run dev` with real media (drag-trim feel at ≠1×, A/V sync on a real clip's unmuted audio)._
 
 - [~] **Keyframe animation — position + scale shipped for video/image layers; opacity and text keyframes remain backlogged.** `Layer.keyframes` (`LayerKeyframe[]` — `tSec` relative to `startSec`, so moving the block keeps the motion; migration v12). Interpolation is LINEAR with hold outside the range, resolved through the shared `layerTransformAt` (+`upsertKeyframe`) in `shared/layers.ts`. Preview evaluates it per playhead tick; canvas drags / corner-resizes on a keyframed layer write a keyframe at the playhead. Export bakes the same ramps into per-frame `t` expressions: `scale=…:eval=frame` AFTER the setpts shift (so absolute timeline time, composing with speed/freezes) + `overlay` x/y with `overlay_w/2` centering; keyframed still images become `-loop 1` + `fps=30` frame streams — every mechanism verified against ffmpeg 8.1.1 frame dumps (FFMPEG-NOTES "Keyframed layer motion"). UI: Inspector ▸ Keyframes (add-at-playhead, list with seek/remove, clear); base X/Y/Zoom disable while keyframed. _Limitations: no opacity keyframes (no clean per-frame alpha path in one ffmpeg pass — needs sendcmd or a slow geq); text layers excluded (they animate via `TextContent.animation`); easing is linear-only._ _Unverified: not yet smoke-tested through `npm run dev` with real media (drag-writes-keyframe feel, export A/B against preview motion)._
 

@@ -85,6 +85,38 @@ exact compositor filter shapes and reading the counter off frame dumps:
   `atempo=2.000`); each instance only accepts 0.5–2, so arbitrary tempos chain
   (`atempoChain`, `services/audio.ts` — 4 → `2,2`, 0.25 → `0.5,0.5`).
 
+## Speed ramps (keyframed variable speed) (verified ffmpeg 8.1.1, 2026-07)
+
+Verified with a synthetic source whose per-frame LUMA equals its frame index
+(`geq=lum='min(N,255)'`), reading `signalstats` YAVG back per output frame —
+drives `speedRampPlayedExpr` (`ffmpegFilters.ts`) and the ramp branch in
+`buildExportArgs`:
+
+- **`log()` in ffmpeg expressions is the NATURAL log**, and `exp`/division/
+  nested `if(lt(...))` all evaluate inside a `setpts` value. The piecewise
+  log-integral of 1/speed (`C_i + log(v(x)/v_i)/m_i` per linear segment) maps
+  source→output time **frame-exactly** (sub-millisecond vs the closed form,
+  standalone and through the full compositor chain: base canvas + overlay
+  `enable='between(...)'` + `-r 30 -fps_mode cfr`).
+- **Single-quoting the whole setpts value (`setpts='(…)/TB'`) makes comma
+  escaping unnecessary** — `if(lt(t,…),…)` and `gte(T-STARTT,1.5)*2` ride
+  inside the quotes verbatim. (The unquoted constant-speed form keeps its
+  `\,` escapes; both parse.)
+- The ramp expression composes with the freeze `gte()*hold` sum and the
+  `+start` shift exactly as the constant-speed form does (thresholds in
+  source time, holds wall-clock).
+- **Hold the total played time past the last boundary** instead of letting the
+  last segment's `log` extrapolate — a decreasing ramp extrapolates `v(x)`
+  toward ≤ 0, and `log` of that is NaN (undefined PTS) if a stray end frame
+  lands past the trim.
+- cfr placement rounds a shifted pts to the NEAREST output slot (an
+  ungraded `-f null` run shows duplicate dts warnings for sub-slot spacing in
+  sped-up segments; the real `-r 30 -fps_mode cfr` output resolves them by
+  drop/dup — same as constant speed).
+- No variable-tempo AUDIO path exists (atempo is fixed per instance); a ramped
+  clip's own audio is dropped by the export planner and muted in the preview
+  so the two sides agree.
+
 ## Keyframed layer motion (verified ffmpeg 8.1.1, 2026-07)
 
 Verified with lavfi bases + frame dumps (drives `ExportKeyframe` handling in

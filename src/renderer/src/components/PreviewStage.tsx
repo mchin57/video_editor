@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type { AudioClip, CaptionSegment, Layer, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx, videoSpeed } from '@shared/project'
+import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
 import {
@@ -324,10 +325,17 @@ function VideoLayerView({
   const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
 
-  // Constant clip speed: the element plays at the same rate the shared time
-  // mapping advances, so the drift-resync stays quiet. Chromium time-stretches
-  // (preservesPitch) like the export's atempo.
-  const speed = videoSpeed(content)
+  // Clip speed: the element plays at the same rate the shared time mapping
+  // advances, so the drift-resync stays quiet. Constant speed sets the rate
+  // once; a RAMP re-derives the instantaneous rate from the profile at the
+  // current source position each tick (piecewise-linear, so it only actually
+  // changes while crossing a ramped segment). Chromium time-stretches
+  // (preservesPitch) like the export's atempo — but a ramped clip is muted on
+  // both sides (no variable-tempo export path).
+  const ramped = hasSpeedRamp(content)
+  const speed = ramped
+    ? videoSpeedAtSource(content, target)
+    : videoSpeed(content)
   useEffect(() => {
     const v = ref.current
     if (v && v.playbackRate !== speed) v.playbackRate = speed
@@ -355,14 +363,14 @@ function VideoLayerView({
       <video
         ref={ref}
         src={videoProxyUrl(asset)}
-        muted={content.mute}
+        muted={content.mute || ramped}
         playsInline
         style={fill}
         onLoadedMetadata={() => {
           const v = ref.current
           if (v) {
             v.currentTime = target
-            v.muted = content.mute
+            v.muted = content.mute || ramped
           }
         }}
       />

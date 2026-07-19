@@ -7,6 +7,7 @@ import { useProject } from './state/projectStore'
 import { useEditor } from './state/store'
 import { useUi } from './state/ui'
 import { usePlayback } from './state/playback'
+import { playedVideoDuration } from '@shared/layers'
 import './index.css'
 
 declare global {
@@ -20,10 +21,14 @@ declare global {
       useEditor: typeof useEditor
       useUi: typeof useUi
       usePlayback: typeof usePlayback
+      /** Shared duration invariant, exposed so specs can assert
+       *  `endSec − startSec === playedVideoDuration(content)` without
+       *  re-deriving the (nonlinear) math in the test. */
+      playedVideoDuration: typeof playedVideoDuration
     }
   }
 }
-window.__reelStores = { useProject, useEditor, useUi, usePlayback }
+window.__reelStores = { useProject, useEditor, useUi, usePlayback, playedVideoDuration }
 
 // Register the bundled-font @font-face rules before first paint so previews use
 // the same faces the export burns.

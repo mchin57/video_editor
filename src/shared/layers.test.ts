@@ -20,6 +20,7 @@ import {
   stretchedBox,
   upsertKeyframe,
   videoSourceTime,
+  videoTimelineTime,
   visualDuration
 } from './layers'
 import type { VideoContent } from './project'
@@ -182,6 +183,52 @@ describe('videoSourceTime with speed', () => {
   })
 })
 
+describe('videoSourceTime with a speed ramp', () => {
+  // in 0, out 4; speed ramps 1 → 2 across the whole clip. The played window is
+  // 4·ln(2) ≈ 2.7726 s; the closed-form inverse is s(p) = 4·(e^(p/4) − 1).
+  const l = makeVideoLayer('a', 'm', 1, 4)
+  const ramp = [
+    { atSec: 0, speed: 1 },
+    { atSec: 4, speed: 2 }
+  ]
+  const c = { ...(l.content as VideoContent), outSec: 4, speedRamp: ramp }
+
+  it('follows the log-integral mapping (ramp overrides the constant speed)', () => {
+    expect(videoSourceTime({ ...c, speed: 4 }, l, 1)).toBe(0)
+    expect(videoSourceTime(c, l, 2)).toBeCloseTo(4 * (Math.exp(0.25) - 1), 9)
+    expect(videoSourceTime(c, l, 1 + 4 * Math.log(2))).toBeCloseTo(4, 9)
+    expect(videoSourceTime(c, l, 100)).toBe(4) // clamped to outSec
+  })
+
+  it('keeps freeze holds wall-clock with source-time thresholds under a ramp', () => {
+    // Freeze at source 2: begins at played 4·ln(1.5), holds 1 s.
+    const cf = { ...c, freezes: [{ atSec: 2, holdSec: 1 }] }
+    const holdStart = 1 + 4 * Math.log(1.5)
+    expect(videoSourceTime(cf, l, holdStart + 0.5)).toBe(2) // mid-hold
+    expect(isFrozenAt(cf, l, holdStart + 0.5)).toBe(true)
+    expect(videoSourceTime(cf, l, holdStart + 1.001)).toBeCloseTo(2, 2) // just resumed
+    expect(isFrozenAt(cf, l, holdStart + 1.001)).toBe(false)
+    expect(playedVideoDuration(cf)).toBeCloseTo(4 * Math.log(2) + 1, 9)
+  })
+})
+
+describe('videoTimelineTime', () => {
+  it('inverts videoSourceTime (freeze holds land at the hold start)', () => {
+    const l = makeVideoLayer('a', 'm', 3, 10)
+    const c = {
+      ...(l.content as VideoContent),
+      speed: 2,
+      freezes: [{ atSec: 4, holdSec: 3 }]
+    }
+    expect(videoTimelineTime(c, l, 0)).toBe(3)
+    expect(videoTimelineTime(c, l, 2)).toBe(4) // 2 source s at 2× = 1 played s
+    expect(videoTimelineTime(c, l, 4)).toBe(5) // the hold's start
+    expect(videoTimelineTime(c, l, 6)).toBe(9) // past the hold: +3 wall-clock
+    // Round-trip through videoSourceTime away from the hold.
+    expect(videoSourceTime(c, l, videoTimelineTime(c, l, 7))).toBeCloseTo(7, 9)
+  })
+})
+
 describe('playedVideoDuration', () => {
   const l = makeVideoLayer('a', 'm', 0, 10)
   it('is source span / speed + wall-clock holds', () => {
@@ -190,6 +237,17 @@ describe('playedVideoDuration', () => {
     expect(playedVideoDuration({ ...c, speed: 2 })).toBe(5)
     expect(playedVideoDuration({ ...c, speed: 0.5 })).toBe(20)
     expect(playedVideoDuration({ ...c, speed: 2, freezes: [{ atSec: 3, holdSec: 2 }] })).toBe(7)
+  })
+  it('integrates a speed ramp', () => {
+    const c = {
+      ...(l.content as VideoContent),
+      outSec: 4,
+      speedRamp: [
+        { atSec: 0, speed: 1 },
+        { atSec: 4, speed: 2 }
+      ]
+    }
+    expect(playedVideoDuration(c)).toBeCloseTo(4 * Math.log(2), 9)
   })
 })
 

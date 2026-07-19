@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { AudioClip, CaptionSegment, Layer, ScriptLine } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
+import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
 import { assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
@@ -537,16 +538,17 @@ export function Timeline(): JSX.Element {
             if (layer.content.kind === 'video') {
               // Freeze-aware: drops holds trimmed past and keeps the window
               // invariant (computed from the drag-start snapshot). The pointer
-              // delta is PLAYED time — scale by speed to move the source point.
+              // delta is PLAYED time — walk the speed profile (nonlinear under
+              // a ramp) to move the source point.
               const c = layer.content
-              return trimVideoStart(layer, c, clamp(c.inSec + d * videoSpeed(c), 0, c.outSec - 0.1))
+              return trimVideoStart(layer, c, clamp(sourceAfterPlayed(c, c.inSec, d), 0, c.outSec - 0.1))
             }
             return { ...l, startSec: clamp(snapSec(startSec + d), 0, l.endSec - 0.2) }
           }
           // end
           if (layer.content.kind === 'video') {
             const c = layer.content
-            return trimVideoEnd(layer, c, clamp(c.outSec + d * videoSpeed(c), c.inSec + 0.1, srcDur))
+            return trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, d), c.inSec + 0.1, srcDur))
           }
           return { ...l, endSec: Math.max(l.startSec + 0.2, snapSec(endSec + d)) }
         })
@@ -710,14 +712,23 @@ export function Timeline(): JSX.Element {
           {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : '🎬'}&nbsp;
           {asset?.fileName ?? layerLabel(l)}
         </span>
-        {l.content.kind === 'video' && videoSpeed(l.content) !== 1 && (
+        {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
+          <span
+            className="pointer-events-none absolute left-8 top-0.5 rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
+            title={`Speed ramp (${sortedRamp(l.content)
+              .map((k) => `${k.speed}×`)
+              .join(' → ')})`}
+          >
+            ×~
+          </span>
+        ) : l.content.kind === 'video' && videoSpeed(l.content) !== 1 ? (
           <span
             className="pointer-events-none absolute left-8 top-0.5 rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
             title={`Playback speed ${videoSpeed(l.content)}×`}
           >
             {videoSpeed(l.content)}×
           </span>
-        )}
+        ) : null}
         {l.content.kind === 'video' && stabilizeOverridden(l.content) && (
           <span
             className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${

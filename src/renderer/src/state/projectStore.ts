@@ -15,8 +15,10 @@ import {
   layerTransformAt,
   makeVideoLayer,
   playedVideoDuration,
-  upsertKeyframe
+  upsertKeyframe,
+  videoSourceTime
 } from '@shared/layers'
+import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import type { PresetId } from '@shared/export'
 import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
 import { replaceAt, updateById } from '@/lib/arrays'
@@ -116,6 +118,16 @@ interface ProjectState {
   /** Set a video layer's constant playback speed, recomputing its timeline end
    *  from the shared duration invariant (source span / speed + holds). */
   setVideoSpeed: (id: string, speed: number) => void
+  /** Add (or update) a speed-ramp keyframe at the SOURCE time under timeline
+   *  time `atSec`, seeded with the profile's current speed there. Recomputes
+   *  the layer end from the shared duration invariant. */
+  addSpeedKeyframe: (id: string, atSec: number) => void
+  /** Change the speed of the ramp keyframe at `index` (in sorted order). */
+  updateSpeedKeyframe: (id: string, index: number, speed: number) => void
+  /** Remove the ramp keyframe at `index` (in sorted order). */
+  removeSpeedKeyframe: (id: string, index: number) => void
+  /** Drop the whole ramp; the clip returns to its constant `speed`. */
+  clearSpeedRamp: (id: string) => void
   /** Capture the layer's effective transform at timeline time `atSec` as a
    *  keyframe (upserting one already at that offset). Video/image layers only. */
   addLayerKeyframe: (id: string, atSec: number) => void
@@ -329,6 +341,59 @@ export const useProject = create<ProjectState>((set, get) => {
         })
       ),
 
+    addSpeedKeyframe: (id, atSec) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video') return l
+          const c = l.content
+          // Anchor at the SOURCE time under the playhead, seeded with the
+          // profile's current speed there — inserting a point on a linear
+          // segment leaves the profile (and so the duration) unchanged until
+          // the user edits its speed.
+          const src = videoSourceTime(c, l, atSec)
+          const speed = videoSpeedAtSource(c, src)
+          const kept = (c.speedRamp ?? []).filter((k) => Math.abs(k.atSec - src) > 0.02)
+          const speedRamp = [...kept, { atSec: src, speed }].sort((a, b) => a.atSec - b.atSec)
+          const content = { ...c, speedRamp }
+          return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
+        })
+      ),
+
+    updateSpeedKeyframe: (id, index, speed) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video') return l
+          const c = l.content
+          const kfs = [...(c.speedRamp ?? [])].sort((a, b) => a.atSec - b.atSec)
+          if (!kfs[index]) return l
+          kfs[index] = { ...kfs[index], speed }
+          const content = { ...c, speedRamp: kfs }
+          return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
+        })
+      ),
+
+    removeSpeedKeyframe: (id, index) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video') return l
+          const c = l.content
+          const kfs = [...(c.speedRamp ?? [])].sort((a, b) => a.atSec - b.atSec)
+          if (!kfs[index]) return l
+          const next = kfs.filter((_, i) => i !== index)
+          const content = { ...c, speedRamp: next.length ? next : undefined }
+          return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
+        })
+      ),
+
+    clearSpeedRamp: (id) =>
+      commit((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video' || !hasSpeedRamp(l.content)) return l
+          const content = { ...l.content, speedRamp: undefined }
+          return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
+        })
+      ),
+
     addLayerKeyframe: (id, atSec) =>
       commit((p) =>
         mapLayer(p, id, (l) => {
@@ -358,7 +423,7 @@ export const useProject = create<ProjectState>((set, get) => {
         if (!layer || layer.content.kind !== 'video') return p
         // A re-timed clip's audio can't be detached to the (1×) audio lane —
         // the AudioClip model has no tempo. The Inspector disables the action.
-        if (videoSpeed(layer.content) !== 1) return p
+        if (videoSpeed(layer.content) !== 1 || hasSpeedRamp(layer.content)) return p
         const c = layer.content
         // Freeze holds split the audio into pieces with silent gaps so the dialogue
         // cuts while a frame is held (and stays synced to the stretched video).

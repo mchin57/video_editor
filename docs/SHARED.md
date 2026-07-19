@@ -51,7 +51,8 @@ loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
 | `effectiveCaptionStyle`, `effectiveOut`, `contentOfKind`, `audioClipEnd` | `project.ts`/`layers.ts` | already-canonical; extend rather than add parallels |
 | `pillRadiusPx(padPx)` | `project.ts` | hard-coding the text-pill corner radius; preview (`PreviewStage`, in `cqw`) and export (`textImage`, in px) must agree on the shape |
 | Text animation timing/geometry (`textAnimStateAt`, `clampAnimWindows`, `typewriterSteps`, `splitWords`, slide/bounce/karaoke constants) | `textAnim.ts` | re-deriving entrance/exit animation math in the preview or the ASS builder. Preview computes per-frame state from the playhead; `assBuilder.overlayEvents` maps the SAME constants onto `\fad`/`\move`/`\t`/`\k`. Both must resolve through `effectiveTextAnimation` (rasterised text never animates) |
-| `videoSpeed(content)`, `playedVideoDuration(content)` | `project.ts`/`layers.ts` | reading `content.speed` raw or computing a video layer's timeline length inline. The invariant `endSec = startSec + (out−in)/speed + Σholds` is maintained by `setVideoSpeed`/trim/split — never re-derive it in a handler |
+| `videoSpeed(content)`, `playedVideoDuration(content)` | `project.ts`/`layers.ts` | reading `content.speed` raw or computing a video layer's timeline length inline. The invariant `endSec = startSec + playedBetween(in, out) + Σholds` is maintained by `setVideoSpeed`/the ramp actions/trim/split — never re-derive it in a handler |
+| `playedBetween(c, a, b)`, `sourceAfterPlayed(c, from, played, limit?)`, `videoSpeedAtSource(c, s)`, `hasSpeedRamp(c)`, `sortedRamp(c)`, `speedSegments(c, a, b)` | `speed.ts` | integrating a speed ramp (or dividing by a constant speed) inline. Played time is the log-closed-form integral of 1/speed; `sourceAfterPlayed` is its signed inverse (negative = backward, for edge-drags). `videoSourceTime`/`videoTimelineTime`/trim/split all resolve through these; the export twin is `speedRampPlayedExpr` (`ffmpegFilters.ts`) |
 | `layerTransformAt(layer, t)`, `upsertKeyframe(kfs, kf)` | `layers.ts` | lerping layer keyframes inline. Preview evaluates per tick; export bakes the SAME piecewise-linear ramps via `piecewiseLinearExpr` (`ffmpegFilters.ts`) into `scale=eval=frame`/`overlay` `t` expressions — keep the two interpolations identical |
 
 _Note:_ video-layer aspect is still a one-line ternary at each call site — the
@@ -63,7 +64,8 @@ missing), so it was deliberately **not** unified to keep behavior identical.
 | Concept | Home | Use instead of |
 | --- | --- | --- |
 | `cropFilter(rect)`, `eqFilter(color)` | `ffmpegFilters.ts` | hand-writing `crop=w:h:x:y` or `eq=brightness=…:contrast=…:saturation=…` |
-| `f3(n)` (`toFixed(3)`), `r(n)` (`Math.round`) | `ffmpegFilters.ts` | redefining the seconds/rounding formatters per module |
+| `f3(n)` (`toFixed(3)`), `f6(n)` (`toFixed(6)`), `r(n)` (`Math.round`) | `ffmpegFilters.ts` | redefining the seconds/rounding formatters per module |
+| `speedRampPlayedExpr(points, x?)` | `ffmpegFilters.ts` | hand-writing the piecewise log-integral `setpts` expression for a speed ramp — it must stay in lockstep with `playedBetween` (`shared/speed.ts`); the whole setpts value must be single-quoted (see FFMPEG-NOTES "Speed ramps") |
 | `runFfmpeg(ffmpeg, args, durationSec, onProgress?, cwd?)` | `ffmpegRun.ts` | re-rolling the spawn + stderr-tail + exit-code promise (with `-progress pipe:1` parsing) — proxy/thumbnail/still all go through it |
 | `alphaInputDecoder(video)` | `shared/media.ts` | decoding a VP8/VP9-alpha WebM without forcing `-c:v libvpx…` before `-i` (native decode silently drops alpha — see `docs/FFMPEG-NOTES.md`) |
 | `monoFoldPan(channel)` + `detectMonoFoldChannel`/`monoFoldFrom`/`parseChannelPeaks` | `audio.ts` | hand-writing a `pan=stereo\|c0=cN\|c1=cN` fold or re-parsing `astats` peaks to mirror a one-sided (dead-channel) source to both sides (see `AudioStreamInfo.monoFoldChannel`) |

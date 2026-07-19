@@ -12,7 +12,8 @@ import {
   isNeutralColor,
   videoSpeed
 } from '@shared/project'
-import { hookCovered, videoSourceTime } from '@shared/layers'
+import { hookCovered, videoSourceTime, videoTimelineTime } from '@shared/layers'
+import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import {
   DEFAULT_IN_SEC,
   DEFAULT_OUT_SEC,
@@ -423,7 +424,7 @@ function LayerEditor(): JSX.Element | null {
             <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
           )}
           {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
-          <SpeedControl layerId={id} content={c} />
+          <SpeedControl layer={layer} content={c} />
           <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
             <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
             Mute this layer
@@ -446,10 +447,10 @@ function LayerEditor(): JSX.Element | null {
             {asset?.probe.audio && (
               <button
                 onClick={() => extractAudio(id)}
-                disabled={videoSpeed(c) !== 1}
+                disabled={videoSpeed(c) !== 1 || hasSpeedRamp(c)}
                 className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title={
-                  videoSpeed(c) !== 1
+                  videoSpeed(c) !== 1 || hasSpeedRamp(c)
                     ? 'Not available on a re-timed clip — the audio track plays at 1× (reset speed first)'
                     : "Move this layer's audio onto the audio track and mute the layer"
                 }
@@ -672,44 +673,121 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
 
-/** Constant clip speed. Presets + a free field; committed through the
- *  `setVideoSpeed` store action so `endSec` keeps the shared duration
- *  invariant (source span / speed + freeze holds) and the change is one
- *  undo step. */
-function SpeedControl({ layerId, content }: { layerId: string; content: VideoContent }): JSX.Element {
+/** Clip speed: constant presets + a free field, plus a keyframed speed RAMP.
+ *  Everything commits through store actions so `endSec` keeps the shared
+ *  duration invariant (`playedBetween(in, out) + freeze holds`) and each
+ *  change is one undo step. With a ramp active the constant controls disable
+ *  (the ramp overrides them) and the clip's own audio is muted — no
+ *  variable-tempo audio path, preview and export agree. */
+function SpeedControl({ layer, content }: { layer: Layer; content: VideoContent }): JSX.Element {
+  const layerId = layer.id
   const setSpeed = useProject((s) => s.setVideoSpeed)
+  const addRampKf = useProject((s) => s.addSpeedKeyframe)
+  const updateRampKf = useProject((s) => s.updateSpeedKeyframe)
+  const removeRampKf = useProject((s) => s.removeSpeedKeyframe)
+  const clearRamp = useProject((s) => s.clearSpeedRamp)
+  const setTime = usePlayback((s) => s.setTime)
   const cur = videoSpeed(content)
+  const ramped = hasSpeedRamp(content)
+  const ramp = sortedRamp(content)
   return (
-    <Field label={`Speed · ${cur}×`}>
-      <div className="flex flex-wrap gap-1">
-        {SPEED_PRESETS.map((v) => (
-          <button
-            key={v}
-            onClick={() => setSpeed(layerId, v)}
-            className={`rounded px-1.5 py-0.5 text-[10px] ${
-              cur === v ? 'bg-sky-500/40 text-sky-100' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
-            }`}
-            title={v < 1 ? `Slow motion (${v}×)` : v > 1 ? `Speed up (${v}×)` : 'Normal speed'}
-          >
-            {v}×
-          </button>
-        ))}
-        <input
-          type="number"
-          min={MIN_VIDEO_SPEED}
-          max={MAX_VIDEO_SPEED}
-          step={0.05}
-          value={cur}
-          onChange={(e) => {
-            const v = Number(e.target.value)
-            if (Number.isFinite(v) && v > 0) {
-              setSpeed(layerId, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
-            }
-          }}
-          className={`${inputCls} w-16 flex-none`}
-        />
+    <>
+      <Field label={`Speed · ${ramped ? 'ramp' : `${cur}×`}`}>
+        <div className={`flex flex-wrap gap-1 ${ramped ? 'pointer-events-none opacity-40' : ''}`}>
+          {SPEED_PRESETS.map((v) => (
+            <button
+              key={v}
+              onClick={() => setSpeed(layerId, v)}
+              disabled={ramped}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                !ramped && cur === v ? 'bg-sky-500/40 text-sky-100' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
+              }`}
+              title={v < 1 ? `Slow motion (${v}×)` : v > 1 ? `Speed up (${v}×)` : 'Normal speed'}
+            >
+              {v}×
+            </button>
+          ))}
+          <input
+            type="number"
+            min={MIN_VIDEO_SPEED}
+            max={MAX_VIDEO_SPEED}
+            step={0.05}
+            value={cur}
+            disabled={ramped}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              if (Number.isFinite(v) && v > 0) {
+                setSpeed(layerId, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
+              }
+            }}
+            className={`${inputCls} w-16 flex-none`}
+          />
+        </div>
+      </Field>
+      <div className="mt-1">
+        <button
+          onClick={() => addRampKf(layerId, usePlayback.getState().time)}
+          className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+          title="Keyframe the playback speed at the playhead — speed ramps linearly between keyframes"
+        >
+          ＋ Speed keyframe at playhead
+        </button>
+        {ramped && (
+          <>
+            <ul className="mt-1.5 space-y-1">
+              {ramp.map((k, i) => (
+                <li
+                  key={`${k.atSec}-${i}`}
+                  className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[10px] text-zinc-300"
+                >
+                  <button
+                    onClick={() => setTime(videoTimelineTime(content, layer, k.atSec))}
+                    className="rounded bg-white/10 px-1 text-zinc-200 hover:bg-white/20"
+                    title="Jump the playhead to this speed keyframe"
+                  >
+                    ▸
+                  </button>
+                  <span className="w-10 font-mono">{k.atSec.toFixed(2)}s</span>
+                  <input
+                    type="number"
+                    min={MIN_VIDEO_SPEED}
+                    max={MAX_VIDEO_SPEED}
+                    step={0.05}
+                    value={k.speed}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      if (Number.isFinite(v) && v > 0) {
+                        updateRampKf(layerId, i, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
+                      }
+                    }}
+                    className={`${inputCls} w-14 flex-none`}
+                    title="Playback speed at this source point"
+                  />
+                  <span className="flex-1 text-zinc-500">×</span>
+                  <button
+                    onClick={() => removeRampKf(layerId, i)}
+                    className="text-zinc-500 hover:text-rose-400"
+                    title="Remove this speed keyframe"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => clearRamp(layerId)}
+              className="mt-1.5 w-full rounded bg-white/5 px-2 py-1 text-[10px] text-zinc-400 hover:bg-white/10"
+            >
+              Clear speed ramp
+            </button>
+            <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+              Speed ramps linearly between keyframes (times are source seconds) and holds flat
+              outside them. The clip&apos;s own audio is muted while a ramp is active.
+            </p>
+          </>
+        )}
       </div>
-    </Field>
+    </>
   )
 }
 
