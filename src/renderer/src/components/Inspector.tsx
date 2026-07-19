@@ -408,8 +408,8 @@ function LayerEditor(): JSX.Element | null {
         <CollapsibleSection id="layout" title="Layout">
           <LayoutCells layerId={id} content={c} />
           <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
-            Change the arrangement or aspect ratio from the <span className="text-zinc-400">Format</span>{' '}
-            menu. Cells fill their panel (center-cropped) and play at 1× from the layout&apos;s start.
+            The aspect ratio is set in the <span className="text-zinc-400">Format</span> menu. Cells
+            fill their panel (center-cropped) and play at 1× from the layout&apos;s start.
           </p>
         </CollapsibleSection>
       )}

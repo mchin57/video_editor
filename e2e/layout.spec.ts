@@ -14,7 +14,7 @@ import type { LayoutContent } from '../src/shared/project'
 
 const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
 
-test('Format menu picker adds a layout and reshapes it; block drags in time', async ({
+test('Format adds a layout; Inspector reshapes it; block drags in time', async ({
   appPage: page
 }) => {
   // Open the header FORMAT menu, then "Add layout" — which opens the visual
@@ -46,10 +46,9 @@ test('Format menu picker adds a layout and reshapes it; block drags in time', as
   // The preview outlines the empty cell slots while the layer is selected.
   await expect(page.locator('[data-resizebox] .border-dashed')).toHaveCount(2)
 
-  // Reshape: reopen the menu, click the live preview (change ▾) → picker in
-  // reshape mode, then pick the 2×2 grid.
-  await page.getByRole('button', { name: 'Format ▾' }).click()
-  await page.getByTitle('Change the arrangement').click()
+  // Reshape from the Inspector's Layout section (the layer is selected after
+  // adding): "Change layout" opens the picker; pick the 2×2 grid.
+  await page.getByTitle('Change the layout arrangement').click()
   await expect(picker).toBeVisible()
   await picker.getByTitle('2×2 grid (4 cells)').click()
   await expect(picker).toHaveCount(0)
@@ -58,8 +57,7 @@ test('Format menu picker adds a layout and reshapes it; block drags in time', as
   expect(s.c.cells).toHaveLength(4)
   await expect(page.locator('[data-resizebox] .border-dashed')).toHaveCount(4)
 
-  // Drag the block 2s right — a plain move, window preserved. (The menu closed
-  // when the picker opened, so nothing overlaps the timeline.)
+  // Drag the block 2s right — a plain move, window preserved.
   const scale = await page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)
   const bb = (await block.boundingBox())!
   const gx = bb.x + bb.width / 2

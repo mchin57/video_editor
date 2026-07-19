@@ -1,39 +1,27 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import type { LayoutContent } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { EXPORT_PRESETS } from '@shared/export'
-import { layoutPreset } from '@shared/layouts'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
-import { thumbUrl } from '@/ipc/client'
-import { LayoutPresetPreview } from './LayoutPresetPreview'
 import { LayoutPickerModal } from './LayoutPickerModal'
 import { Field, inputCls } from './ui'
 
 /**
- * FORMAT menu (header bar, next to File / View): how the frame is shaped and
- * divided — the project's aspect ratio (moved here from Project settings) and
- * the multi-clip layout tools. "Add layout" opens a visual preset picker; a
- * selected layout shows a live preview of its arrangement plus a card per cell.
- * Mirrors FileMenu's open/click-outside pattern.
+ * FORMAT menu (header bar, next to File / View): how the frame is shaped — the
+ * project's aspect ratio (moved here from Project settings) and "Add layout",
+ * which opens the visual preset picker and drops a new multi-clip layout at the
+ * playhead. Filling a layout's panels + reshaping it live in the Inspector's
+ * Layout section. Mirrors FileMenu's open/click-outside pattern.
  */
 export function FormatMenu(): JSX.Element | null {
   const hasProject = useProject((s) => !!s.project)
   const preset = useProject((s) => s.project?.preset ?? 'reel')
   const setPreset = useProject((s) => s.setPreset)
   const addLayoutLayer = useProject((s) => s.addLayoutLayer)
-  const setLayoutPreset = useProject((s) => s.setLayoutPreset)
-  const selectedLayerId = useUi((s) => s.selectedLayerId)
-  const selectedLayout = useProject((s) => {
-    const l = s.project?.layers.find((x) => x.id === selectedLayerId)
-    return l && l.content.kind === 'layout' ? l : null
-  })
 
   const [open, setOpen] = useState(false)
-  // The visual picker: 'add' creates a new layout, 'reshape' re-presets the
-  // selected one. null = closed.
-  const [picker, setPicker] = useState<'add' | 'reshape' | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -47,17 +35,11 @@ export function FormatMenu(): JSX.Element | null {
 
   if (!hasProject) return null
 
-  const layoutContent = selectedLayout?.content as LayoutContent | undefined
-
   const onPick = (presetId: string): void => {
-    if (picker === 'add') {
-      const id = crypto.randomUUID()
-      addLayoutLayer(id, presetId, usePlayback.getState().time)
-      useUi.getState().selectLayer(id)
-    } else if (picker === 'reshape' && selectedLayout) {
-      setLayoutPreset(selectedLayout.id, presetId)
-    }
-    setPicker(null)
+    const id = crypto.randomUUID()
+    addLayoutLayer(id, presetId, usePlayback.getState().time)
+    useUi.getState().selectLayer(id)
+    setPickerOpen(false)
   }
 
   return (
@@ -72,7 +54,7 @@ export function FormatMenu(): JSX.Element | null {
       {open && (
         <div
           data-testid="format-menu"
-          className="absolute left-0 top-full z-50 mt-1 max-h-[75vh] w-80 overflow-y-auto rounded-lg border border-white/10 bg-zinc-900 p-3 shadow-2xl"
+          className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-white/10 bg-zinc-900 p-3 shadow-2xl"
         >
           <Field label="Aspect ratio">
             <select
@@ -96,7 +78,7 @@ export function FormatMenu(): JSX.Element | null {
           </div>
           <button
             onClick={() => {
-              setPicker('add')
+              setPickerOpen(true)
               setOpen(false)
             }}
             className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
@@ -104,74 +86,19 @@ export function FormatMenu(): JSX.Element | null {
           >
             ▦ Add layout at playhead
           </button>
-
-          {selectedLayout && layoutContent ? (
-            <div className="mt-2">
-              <LayoutArrangement
-                content={layoutContent}
-                aspect={EXPORT_PRESETS[preset].width / EXPORT_PRESETS[preset].height}
-                onReshape={() => {
-                  setPicker('reshape')
-                  setOpen(false)
-                }}
-              />
-            </div>
-          ) : (
-            <p className="mt-2 text-[10px] leading-snug text-zinc-500">
-              Select a layout block on the timeline to change its arrangement and fill its cells.
-            </p>
-          )}
+          <p className="mt-2 text-[10px] leading-snug text-zinc-500">
+            Fill the panels and change the arrangement from the{' '}
+            <span className="text-zinc-400">Inspector</span> once a layout is selected.
+          </p>
         </div>
       )}
 
       <LayoutPickerModal
-        open={picker !== null}
-        title={picker === 'reshape' ? 'Change arrangement' : 'Choose a layout'}
-        activePresetId={picker === 'reshape' ? layoutContent?.presetId : undefined}
+        open={pickerOpen}
+        title="Choose a layout"
         onPick={onPick}
-        onClose={() => setPicker(null)}
+        onClose={() => setPickerOpen(false)}
       />
     </div>
-  )
-}
-
-/** The selected layout's live arrangement preview: a mini-frame drawn at the
- *  current aspect ratio with each assigned cell thumbnailed. Click to reshape
- *  via the picker. Filling the cells with clips happens in the Inspector's
- *  Layout section (`LayoutCells`). */
-function LayoutArrangement({
-  content,
-  aspect,
-  onReshape
-}: {
-  content: LayoutContent
-  aspect: number
-  onReshape: () => void
-}): JSX.Element {
-  const preset = layoutPreset(content.presetId)
-  return (
-    <>
-      <button
-        onClick={onReshape}
-        title="Change the arrangement"
-        className="flex w-full flex-col items-center gap-1 rounded-lg border border-white/10 bg-white/[0.02] p-2 hover:border-white/25 hover:bg-white/5"
-      >
-        <LayoutPresetPreview
-          preset={preset}
-          aspect={aspect}
-          height={120}
-          thumb={(i) => {
-            const mediaId = content.cells[i]?.mediaId
-            if (!mediaId) return null
-            return <img src={thumbUrl(mediaId)} alt="" className="h-full w-full object-cover" />
-          }}
-        />
-        <span className="text-[10px] font-medium text-zinc-400">{preset.label} · change ▾</span>
-      </button>
-      <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
-        Fill the panels with clips from the <span className="text-zinc-400">Inspector</span> (drag a
-        library clip onto a cell, or pick one).
-      </p>
-    </>
   )
 }

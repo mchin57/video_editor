@@ -1,8 +1,10 @@
 import { useState, type JSX } from 'react'
 import type { LayoutContent } from '@shared/project'
+import { layoutPreset } from '@shared/layouts'
 import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { ClipCard } from './ClipCard'
+import { LayoutPickerModal } from './LayoutPickerModal'
 import { inputCls } from './ui'
 
 /** Matches the Library drag payload and the Timeline's `DND_MIME`. */
@@ -28,8 +30,11 @@ export function LayoutCells({
 }): JSX.Element {
   const { data: assets = [] } = useLibrary()
   const updateCell = useProject((s) => s.updateLayoutCell)
+  const setLayoutPreset = useProject((s) => s.setLayoutPreset)
   const [dropCell, setDropCell] = useState<number | null>(null)
+  const [reshapeOpen, setReshapeOpen] = useState(false)
   const videoAssets = assets.filter((a) => a.probe.video)
+  const preset = layoutPreset(content.presetId)
 
   // Assign (overwriting) a clip to a cell, seeding the trim to its full source.
   const assign = (i: number, mediaId: string): void => {
@@ -39,7 +44,16 @@ export function LayoutCells({
   }
 
   return (
-    <ul className="space-y-2">
+    <>
+      <button
+        onClick={() => setReshapeOpen(true)}
+        title="Change the layout arrangement"
+        className="mb-2 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+      >
+        ▦ Change layout · {preset.label}
+      </button>
+
+      <ul className="space-y-2">
       {content.cells.map((cell, i) => {
         const cellAsset = cell.mediaId ? assets.find((a) => a.id === cell.mediaId) : undefined
         const over = dropCell === i
@@ -147,6 +161,18 @@ export function LayoutCells({
           </li>
         )
       })}
-    </ul>
+      </ul>
+
+      <LayoutPickerModal
+        open={reshapeOpen}
+        title="Change arrangement"
+        activePresetId={content.presetId}
+        onPick={(presetId) => {
+          setLayoutPreset(layerId, presetId)
+          setReshapeOpen(false)
+        }}
+        onClose={() => setReshapeOpen(false)}
+      />
+    </>
   )
 }

@@ -84,12 +84,13 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   identically). UI: the header **Format ▾ menu** (next to File/View; also holds
   the project aspect-ratio picker, moved out of Project settings). "Add layout"
   opens a **visual preset picker** (`LayoutPickerModal` — every preset drawn at
-  the current aspect ratio; click to add, or reshape the selected layout via the
-  Format menu's live `LayoutPresetPreview` "change ▾"). Filling the panels lives
-  in **Inspector ▸ Layout** (`LayoutCells`): each cell has an assign/change/clear
-  picker, is a **drop target** (drag a library clip onto it — same payload as the
-  timeline — to assign, overwriting), and once filled shows the shared `ClipCard`
-  (thumbnail + hover preview, no add-to-timeline) with trim + mute. A fuchsia Layout timeline lane appears
+  the current aspect ratio). The Format menu holds only the aspect ratio + "Add
+  layout at playhead". Everything else lives in **Inspector ▸ Layout**
+  (`LayoutCells`): a "Change layout" button reopens the picker to reshape, and
+  each cell has an assign/change/clear picker, is a **drop target** (drag a
+  library clip onto it — same payload as the timeline — to assign, overwriting),
+  and once filled shows the shared `ClipCard` (thumbnail + hover preview, no
+  add-to-timeline) with trim + mute. A fuchsia Layout timeline lane appears
   when one exists; corner-only resize handles (cells ignore stretch); preview
   outlines empty slots while selected. e2e: `e2e/layout.spec.ts`.
   _Limitations: no keyframes on layout layers; start-edge trim shifts the window
