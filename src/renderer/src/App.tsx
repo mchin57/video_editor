@@ -7,6 +7,7 @@ import { ImageEditPopout } from '@/components/ImageEditPopout'
 import { ExportButton } from '@/components/ExportButton'
 import { FileMenu } from '@/components/FileMenu'
 import { ViewMenu } from '@/components/ViewMenu'
+import { FormatMenu } from '@/components/FormatMenu'
 import { ProjectSettingsMenu } from '@/components/ProjectSettingsMenu'
 import { CaptionAudioButton } from '@/components/CaptionAudioButton'
 import { SettingsModal } from '@/components/SettingsModal'
@@ -170,6 +171,7 @@ export default function App(): JSX.Element {
         <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
         <FileMenu />
         <ViewMenu />
+        <FormatMenu />
         <ProjectSettingsMenu />
         <div className="flex-1" />
         <button

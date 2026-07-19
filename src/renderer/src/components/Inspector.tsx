@@ -401,7 +401,7 @@ function LayerEditor(): JSX.Element | null {
         </CollapsibleSection>
       )}
 
-      {/* Layout cells/arrangement are edited in the FORMAT dock panel. */}
+      {/* Layout cells/arrangement are edited in the header's FORMAT menu. */}
 
       {/* Video-specific controls */}
       {c.kind === 'video' && (

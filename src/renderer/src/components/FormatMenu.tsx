@@ -1,4 +1,4 @@
-import type { JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import type { LayoutContent } from '@shared/project'
 import type { PresetId } from '@shared/export'
 import { EXPORT_PRESETS } from '@shared/export'
@@ -10,12 +10,12 @@ import { useUi } from '@/state/ui'
 import { Field, inputCls } from './ui'
 
 /**
- * The FORMAT panel: how the frame is shaped and divided — the project's aspect
- * ratio (moved here from the Project settings menu) and the multi-clip layout
- * tools (add a layout; edit the selected layout's arrangement and cells).
- * Registered as a dock panel (`format`) in `lib/dockLayout.ts` / `Dock.tsx`.
+ * FORMAT menu (header bar, next to File / View): how the frame is shaped and
+ * divided — the project's aspect ratio (moved here from Project settings) and
+ * the multi-clip layout tools (add a layout; edit the selected layout's
+ * arrangement and cells). Mirrors FileMenu's open/click-outside pattern.
  */
-export function FormatPanel(): JSX.Element {
+export function FormatMenu(): JSX.Element | null {
   const hasProject = useProject((s) => !!s.project)
   const preset = useProject((s) => s.project?.preset ?? 'reel')
   const setPreset = useProject((s) => s.setPreset)
@@ -26,9 +26,19 @@ export function FormatPanel(): JSX.Element {
     return l && l.content.kind === 'layout' ? l : null
   })
 
-  if (!hasProject) {
-    return <div className="p-3 text-xs text-zinc-500">Open a project to set its format.</div>
-  }
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  if (!hasProject) return null
 
   const addLayout = (): void => {
     const id = crypto.randomUUID()
@@ -37,45 +47,56 @@ export function FormatPanel(): JSX.Element {
   }
 
   return (
-    <div className="p-1 text-xs">
-      <Field label="Aspect ratio">
-        <select
-          value={preset}
-          onChange={(e) => setPreset(e.target.value as PresetId)}
-          title="Sets the preview shape and the exported output size."
-          className={inputCls}
-        >
-          {Object.values(EXPORT_PRESETS).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      <div className="my-2 h-px bg-white/10" />
-
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-        Multi-clip layout
-      </div>
+    <div ref={ref} className="relative">
       <button
-        onClick={addLayout}
-        className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-        title="Add a multi-clip layout (split screen / panels) at the playhead"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
       >
-        ▦ Add layout at playhead
+        Format ▾
       </button>
-      {selectedLayout ? (
-        <div className="mt-2">
-          <LayoutControls
-            layerId={selectedLayout.id}
-            content={selectedLayout.content as LayoutContent}
-          />
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-white/10 bg-zinc-900 p-3 shadow-2xl">
+          <Field label="Aspect ratio">
+            <select
+              value={preset}
+              onChange={(e) => setPreset(e.target.value as PresetId)}
+              title="Sets the preview shape and the exported output size."
+              className={inputCls}
+            >
+              {Object.values(EXPORT_PRESETS).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <div className="my-2 h-px bg-white/10" />
+
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            Multi-clip layout
+          </div>
+          <button
+            onClick={addLayout}
+            className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+            title="Add a multi-clip layout (split screen / panels) at the playhead"
+          >
+            ▦ Add layout at playhead
+          </button>
+          {selectedLayout ? (
+            <div className="mt-2">
+              <LayoutControls
+                layerId={selectedLayout.id}
+                content={selectedLayout.content as LayoutContent}
+              />
+            </div>
+          ) : (
+            <p className="mt-2 text-[10px] leading-snug text-zinc-500">
+              Select a layout block on the timeline to change its arrangement and fill its cells.
+            </p>
+          )}
         </div>
-      ) : (
-        <p className="mt-2 text-[10px] leading-snug text-zinc-500">
-          Select a layout block on the timeline to change its arrangement and fill its cells.
-        </p>
       )}
     </div>
   )

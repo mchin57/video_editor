@@ -7,12 +7,12 @@
 import { test, expect } from './fixtures'
 import type { LayoutContent } from '../src/shared/project'
 
-test('Format panel adds a layout and switches presets; block drags in time', async ({
+test('Format menu adds a layout and switches presets; block drags in time', async ({
   appPage: page
 }) => {
-  // The layout tools live in the FORMAT dock panel, tabbed (inactive) behind
-  // the Inspector by default — front it first, then create via the real button.
-  await page.locator('.dv-default-tab', { hasText: 'Format' }).click()
+  // The layout tools live in the header's FORMAT menu — open it, then create
+  // via the real button. The dropdown stays open for the follow-up edits.
+  await page.getByRole('button', { name: 'Format ▾' }).click()
   await page.getByTitle('Add a multi-clip layout (split screen / panels) at the playhead').click()
 
   const state = (): Promise<{ startSec: number; endSec: number; c: LayoutContent }> =>
@@ -33,12 +33,15 @@ test('Format panel adds a layout and switches presets; block drags in time', asy
   // The preview outlines the empty cell slots while the layer is selected.
   await expect(page.locator('[data-resizebox] .border-dashed')).toHaveCount(2)
 
-  // Reshape to the 2×2 grid via the Inspector preset buttons.
+  // Reshape to the 2×2 grid via the menu's preset buttons.
   await page.getByTitle('2×2 grid (4 cells)').click()
   s = await state()
   expect(s.c.presetId).toBe('grid-2x2')
   expect(s.c.cells).toHaveLength(4)
   await expect(page.locator('[data-resizebox] .border-dashed')).toHaveCount(4)
+
+  // Close the menu (toggle) so its dropdown can't sit over the timeline block.
+  await page.getByRole('button', { name: 'Format ▾' }).click()
 
   // Drag the block 2s right — a plain move, window preserved.
   const scale = await page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)

@@ -8,7 +8,7 @@
 import { test, expect } from './fixtures'
 
 // The manifest panels, by tab title (keep in sync with lib/dockLayout.ts).
-const ALL_TABS = ['Preview', 'Library', 'Layers', 'Inspector', 'Format', 'Timeline']
+const ALL_TABS = ['Preview', 'Library', 'Layers', 'Inspector', 'Timeline']
 
 test('close a panel via its tab, reopen it from the View menu', async ({ appPage: page }) => {
   const timelineTab = page.locator('.dv-default-tab', { hasText: 'Timeline' })
@@ -96,6 +96,6 @@ test('reset layout restores all panels and rewrites the saved layout', async ({
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('dockLayout') ?? 'null'))
   expect(saved?.v).toBe(1)
   expect(Object.keys(saved?.layout?.panels ?? {}).sort()).toEqual(
-    ['format', 'inspector', 'layers', 'library', 'preview', 'timeline']
+    ['inspector', 'layers', 'library', 'preview', 'timeline']
   )
 })

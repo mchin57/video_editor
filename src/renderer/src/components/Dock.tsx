@@ -10,7 +10,6 @@ import { Library } from '@/components/Library'
 import { PreviewStage } from '@/components/PreviewStage'
 import { LayersPanel } from '@/components/LayersPanel'
 import { Inspector } from '@/components/Inspector'
-import { FormatPanel } from '@/components/FormatPanel'
 import { Timeline } from '@/components/Timeline'
 import { loadDefaultLayout, loadDockLayout, saveDockLayout } from '@/lib/dockLayout'
 import { applyLayout, useDock } from '@/state/dock'
@@ -48,11 +47,6 @@ export const DOCK_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPa
   inspector: () => (
     <DockPanel>
       <Inspector />
-    </DockPanel>
-  ),
-  format: () => (
-    <DockPanel>
-      <FormatPanel />
     </DockPanel>
   ),
   timeline: () => (

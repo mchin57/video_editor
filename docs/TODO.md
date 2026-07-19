@@ -81,8 +81,8 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   crop→scale→overlay chain; zero new ffmpeg mechanisms), and empty cells let lower
   layers show through rather than forcing a background color._ Cells play 1× from
   the layout's start, time-gated to `min(cell span, layer window)` (audio clamps
-  identically). UI: the **Format dock panel** (tabbed behind the Inspector; also
-  holds the project aspect-ratio picker, moved out of Project settings) owns the
+  identically). UI: the header **Format ▾ menu** (next to File/View; also holds
+  the project aspect-ratio picker, moved out of Project settings) owns the
   add-layout button + preset/cell controls; a fuchsia Layout timeline lane
   appears when one exists; corner-only resize handles (cells ignore stretch);
   preview outlines empty slots while selected. e2e: `e2e/layout.spec.ts`.

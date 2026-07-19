@@ -7,7 +7,7 @@ import { StabilizeSliders } from './Inspector'
  * Project settings dropdown (next to the File menu): project-wide export
  * defaults — reduce noise, stabilize — plus the global caption visibility
  * toggle. Per-clip overrides still live in each clip's Inspector; this is only
- * the project-wide layer. (Aspect ratio moved to the FORMAT dock panel.)
+ * the project-wide layer. (Aspect ratio moved to the FORMAT menu.)
  * Mirrors FileMenu's open/click-outside pattern.
  */
 export function ProjectSettingsMenu(): JSX.Element | null {

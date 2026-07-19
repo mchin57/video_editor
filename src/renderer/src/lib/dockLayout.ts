@@ -41,13 +41,6 @@ export const DOCK_PANELS: PanelSpec[] = [
     title: 'Inspector',
     defaultPlacement: { direction: 'below', referencePanel: 'layers', initialHeight: 360 }
   },
-  // Frame shape & division: aspect ratio + multi-clip layout tools. Tabs with
-  // the Inspector by default.
-  {
-    id: 'format',
-    title: 'Format',
-    defaultPlacement: { direction: 'within', referencePanel: 'inspector' }
-  },
   // No referencePanel: docks against the container's bottom edge, spanning
   // the full width like the old fixed timeline row.
   { id: 'timeline', title: 'Timeline', defaultPlacement: { direction: 'below', initialHeight: 176 } }

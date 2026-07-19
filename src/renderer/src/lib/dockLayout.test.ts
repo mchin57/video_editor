@@ -41,7 +41,7 @@ describe('buildDefaultLayout', () => {
   it('adds every manifest panel in order with the default arrangement', () => {
     const api = recordingApi()
     buildDefaultLayout(api)
-    expect(api.calls.map((c) => c.id)).toEqual(['preview', 'library', 'layers', 'inspector', 'format', 'timeline'])
+    expect(api.calls.map((c) => c.id)).toEqual(['preview', 'library', 'layers', 'inspector', 'timeline'])
 
     const byId = Object.fromEntries(api.calls.map((c) => [c.id, c]))
     expect(byId.preview.position).toBeUndefined()
@@ -49,8 +49,6 @@ describe('buildDefaultLayout', () => {
     expect(byId.library.initialWidth).toBe(256)
     expect(byId.layers.position).toEqual({ direction: 'right', referencePanel: 'preview' })
     expect(byId.inspector.position).toEqual({ direction: 'below', referencePanel: 'layers' })
-    // Format tabs into the Inspector's group.
-    expect(byId.format.position).toEqual({ direction: 'within', referencePanel: 'inspector' })
     // Timeline docks to the container edge (no reference) so it spans full width.
     expect(byId.timeline.position).toEqual({ direction: 'below' })
     expect(byId.timeline.initialHeight).toBe(176)
@@ -62,11 +60,22 @@ describe('buildDefaultLayout', () => {
     for (const c of api.calls) {
       expect(c.minimumWidth).toBe(PANEL_MIN_PX)
       expect(c.minimumHeight).toBe(PANEL_MIN_PX)
-      // `inactive` on a panel that creates a NEW group renders the watermark;
-      // it's only safe (and wanted) when tabbing into an existing group, so
-      // the group's reference panel stays the front tab.
-      expect('inactive' in c && c.inactive).toBe(c.id === 'format')
+      // No current manifest panel tabs `within` another, so none may pass
+      // `inactive` (on a NEW group it renders the watermark). A future
+      // within-group panel gets it automatically so its reference stays the
+      // front tab.
+      expect('inactive' in c && c.inactive).toBe(false)
     }
+  })
+
+  it('a within-group panel is added inactive so its reference stays the front tab', () => {
+    const api = recordingApi()
+    buildDefaultLayout(api, [
+      { id: 'a', title: 'A', defaultPlacement: {} },
+      { id: 'b', title: 'B', defaultPlacement: { direction: 'within', referencePanel: 'a' } }
+    ])
+    expect(api.calls[0].inactive).toBeUndefined()
+    expect(api.calls[1].inactive).toBe(true)
   })
 })
 
