@@ -30,6 +30,7 @@ import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
+import { LayoutCells } from './LayoutCells'
 import { Field, Row, dangerBtnCls, inputCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
@@ -401,7 +402,17 @@ function LayerEditor(): JSX.Element | null {
         </CollapsibleSection>
       )}
 
-      {/* Layout cells/arrangement are edited in the header's FORMAT menu. */}
+      {/* Layout cells: assign a clip per panel (drag a library clip onto a cell,
+          or pick it). The arrangement/aspect are chosen in the header FORMAT menu. */}
+      {c.kind === 'layout' && (
+        <CollapsibleSection id="layout" title="Layout">
+          <LayoutCells layerId={id} content={c} />
+          <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
+            Change the arrangement or aspect ratio from the <span className="text-zinc-400">Format</span>{' '}
+            menu. Cells fill their panel (center-cropped) and play at 1× from the layout&apos;s start.
+          </p>
+        </CollapsibleSection>
+      )}
 
       {/* Video-specific controls */}
       {c.kind === 'video' && (
