@@ -157,5 +157,6 @@ theme. Shared-homes catalog: [`SHARED.md`](SHARED.md); reuse guardrails: root
   layer/caption/audio block drags now use `startPointerDrag`, with `edgeAutoScroll`
   stopped in the `onUp` callback.
 
-_Follow-up:_ `Popout.tsx`/`LayersPanel.tsx`/`Splitter.tsx` still hand-roll the drag
-listeners (small, no edge-scroll) — see TODO ▸ Codebase health.
+_Follow-up:_ `Popout.tsx`/`LayersPanel.tsx` still hand-roll the drag
+listeners (small, no edge-scroll) — see TODO ▸ Codebase health. (`Splitter.tsx`
+was deleted when the fixed layout became a dockview-based dock.)

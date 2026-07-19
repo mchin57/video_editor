@@ -58,3 +58,8 @@ it can be deleted silently). Push it back into `lib/`.
 - **Caption gutter bubble:** clicking it selects the lane-wide caption style.
 - **Persistence:** lane heights/collapse (`timelineView`) and zoom
   (`timelinePps`) survive an app reload.
+- **Container:** the Timeline is a dockview panel (`lib/dockLayout.ts` manifest);
+  its height/position live in the dock layout (`dockLayout` localStorage key,
+  not the retired `panelSizes`). It must always sit in a sized flex container —
+  it fills whatever box the dock gives it, including after drag-redocking.
+  Closing the panel unmounts it; zoom/lanes state survives via localStorage.

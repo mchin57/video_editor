@@ -8,6 +8,9 @@ import { useEditor } from './state/store'
 import { useUi } from './state/ui'
 import { usePlayback } from './state/playback'
 import { playedVideoDuration } from '@shared/layers'
+import { useDock } from './state/dock'
+// dockview's stylesheet first so index.css overrides win at equal specificity.
+import 'dockview-react/dist/styles/dockview.css'
 import './index.css'
 
 declare global {
@@ -21,6 +24,7 @@ declare global {
       useEditor: typeof useEditor
       useUi: typeof useUi
       usePlayback: typeof usePlayback
+      useDock: typeof useDock
       /** Shared duration invariant, exposed so specs can assert
        *  `endSec − startSec === playedVideoDuration(content)` without
        *  re-deriving the (nonlinear) math in the test. */
@@ -28,7 +32,7 @@ declare global {
     }
   }
 }
-window.__reelStores = { useProject, useEditor, useUi, usePlayback, playedVideoDuration }
+window.__reelStores = { useProject, useEditor, useUi, usePlayback, useDock, playedVideoDuration }
 
 // Register the bundled-font @font-face rules before first paint so previews use
 // the same faces the export burns.

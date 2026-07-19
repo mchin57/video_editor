@@ -17,3 +17,30 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   overflow: hidden;
 }
+
+/* Dock panel chrome — map dockview's abyss theme onto the app palette
+   (#0b0b0f base, white/10 borders, zinc text, sky accents). */
+.dockview-theme-abyss {
+  --dv-group-view-background-color: #0b0b0f;
+  --dv-tabs-and-actions-container-background-color: #0b0b0f;
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tab-font-size: 11px;
+  --dv-activegroup-visiblepanel-tab-background-color: rgba(255, 255, 255, 0.08);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: rgba(255, 255, 255, 0.04);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: #e7e7ea;
+  --dv-activegroup-hiddenpanel-tab-color: #a1a1aa;
+  --dv-inactivegroup-visiblepanel-tab-color: #a1a1aa;
+  --dv-inactivegroup-hiddenpanel-tab-color: #71717a;
+  --dv-separator-border: rgba(255, 255, 255, 0.1);
+  --dv-paneview-header-border-color: rgba(255, 255, 255, 0.1);
+  --dv-drag-over-background-color: rgba(56, 189, 248, 0.12);
+  --dv-drag-over-border-color: rgba(56, 189, 248, 0.5);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: rgba(56, 189, 248, 0.5);
+  --dv-icon-hover-background-color: rgba(255, 255, 255, 0.1);
+  --dv-scrollbar-background-color: rgba(255, 255, 255, 0.15);
+  --dv-tab-divider-color: transparent;
+}

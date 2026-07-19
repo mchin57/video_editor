@@ -4,9 +4,10 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ## Codebase health
 
-- [ ] **Finish the drag-helper sweep.** `Popout.tsx`, `LayersPanel.tsx`, and `Splitter.tsx`
+- [ ] **Finish the drag-helper sweep.** `Popout.tsx` and `LayersPanel.tsx`
   still hand-roll the pointermove/pointerup dance (small, no edge-scroll) — convert to
-  `startPointerDrag` when next touched.
+  `startPointerDrag` when next touched. (`Splitter.tsx` was deleted with the dockable-panel
+  refactor — the dock's sashes replaced it.)
 - [ ] **IPC hardening pass (pre-distribution).** The renderer-facing IPC surface is
   unvalidated: `writeProjectFile(project, path)` is an arbitrary-path write primitive,
   `importPaths` an arbitrary read, and the window runs `sandbox: false`. Fine for a
@@ -210,6 +211,37 @@ Hands-on steps that can't be done in code — needed to actually ship the macOS 
 - [x] **Convert `Timeline.tsx` drag handlers to `startPointerDrag`.** The playhead scrub
   + the layer/caption/audio block drags now use the shared helper; the `edgeAutoScroll`
   rAF loop is stopped in the `onUp` callback and the live `scrollLeft` folding is preserved.
+## Open
+
+### Dockable panels (`feature/hard-batch-wt` branch)
+
+- [~] **VS Code-style dockable panel system.** Library / Preview / Layers /
+  Inspector / Timeline are dockview-react panels: resizable (40px soft min),
+  drag-rearrangeable (splits + tab groups), closable, reopenable via the new
+  **View ▾** header menu. Layout persists in the versioned `dockLayout`
+  localStorage key (old `panelSizes` retired). Panel manifest + persistence in
+  `lib/dockLayout.ts` (add-a-panel recipe: `docs/SHARED.md`); host
+  `components/Dock.tsx`; chrome wrapper `components/DockPanel.tsx`.
+  **View ▸ Set default layout** captures the current arrangement as the user's
+  own default (`dockDefaultLayout` key); **Reset layout** restores it (falling
+  back to the built-in arrangement) and **Forget saved default** discards it.
+  Startup resolves session → user default → built-in, all through `applyLayout`
+  (`state/dock.ts`). Verified: unit tests (manifest/persistence/registry
+  parity, both layout keys independent), e2e (`e2e/dock.spec.ts`: tab-close →
+  View-menu reopen, reset-to-saved-default vs built-in, forget default; full
+  suite green), scripted app runs (default layout matches the old arrangement,
+  timeline spans full width at the bottom, close/reflow, reset, session +
+  saved default both survive an app restart and Reset in a fresh process
+  restores the saved default). **Unverified — needs a human `npm run dev` pass
+  with real media:** pointer drag-rearranging tabs into splits/stacks, HTML5
+  drags (library→timeline, OS-file drop) crossing dockview tab bars (mitigate
+  via `onUnhandledDragOver` if drop targets light up), preview aspect-fit at
+  extreme panel shapes, resize-to-extreme sashes, and whether the manifest's
+  per-panel minimum sizes survive a `fromJSON` restore. Note: closing the
+  Preview panel unmounts its media elements — playback clock keeps running,
+  audio is silent until reopened.
+
+### Freeze frames, stills & image editing (`feature/freeze-stills-image-edit` branch)
 
 ### Freeze frames, stills & image editing
 - [x] **Freeze / pause a clip.** A video layer carries source-time `freezes`

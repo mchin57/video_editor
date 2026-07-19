@@ -1,16 +1,12 @@
-import { useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
+import { useEffect, useRef, type DragEvent, type JSX } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Library } from '@/components/Library'
-import { PreviewStage } from '@/components/PreviewStage'
-import { Inspector } from '@/components/Inspector'
-import { LayersPanel } from '@/components/LayersPanel'
-import { Timeline } from '@/components/Timeline'
+import { Dock } from '@/components/Dock'
 import { CropEditor } from '@/components/CropEditor'
 import { StillsPopout } from '@/components/StillsPopout'
 import { ImageEditPopout } from '@/components/ImageEditPopout'
-import { Splitter } from '@/components/Splitter'
 import { ExportButton } from '@/components/ExportButton'
 import { FileMenu } from '@/components/FileMenu'
+import { ViewMenu } from '@/components/ViewMenu'
 import { ProjectSettingsMenu } from '@/components/ProjectSettingsMenu'
 import { CaptionAudioButton } from '@/components/CaptionAudioButton'
 import { SettingsModal } from '@/components/SettingsModal'
@@ -26,23 +22,6 @@ import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { makeTextLayer } from '@shared/layers'
 
-const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
-
-interface PanelSizes {
-  libW: number
-  inspW: number
-  tlH: number
-}
-
-function loadPanelSizes(): PanelSizes {
-  try {
-    const saved = JSON.parse(localStorage.getItem('panelSizes') ?? '{}')
-    return { libW: saved.libW ?? 256, inspW: saved.inspW ?? 256, tlH: saved.tlH ?? 176 }
-  } catch {
-    return { libW: 256, inspW: 256, tlH: 176 }
-  }
-}
-
 export default function App(): JSX.Element {
   const queryClient = useQueryClient()
   const importMedia = useImportMedia()
@@ -55,11 +34,6 @@ export default function App(): JSX.Element {
   // leave the overlay stuck (library-item drags carry a custom type and are
   // filtered out here; the Timeline handles those).
   const fileDrag = useDragDepth((types) => types.includes('Files'))
-  const [panels, setPanels] = useState<PanelSizes>(loadPanelSizes)
-
-  useEffect(() => {
-    localStorage.setItem('panelSizes', JSON.stringify(panels))
-  }, [panels])
 
   // Load the persisted project once on startup; flush any pending debounced
   // autosave on window unload so quitting inside the 400ms window can't lose
@@ -195,6 +169,7 @@ export default function App(): JSX.Element {
         <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
         <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
         <FileMenu />
+        <ViewMenu />
         <ProjectSettingsMenu />
         <div className="flex-1" />
         <button
@@ -229,41 +204,8 @@ export default function App(): JSX.Element {
         </button>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <aside style={{ width: panels.libW }} className="shrink-0 border-r border-white/10">
-          <Library />
-        </aside>
-        <Splitter
-          orientation="vertical"
-          onDrag={(d) => setPanels((p) => ({ ...p, libW: clamp(p.libW + d, 180, 520) }))}
-        />
-
-        <main className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <div className="h-full max-h-[78vh]">
-            <PreviewStage />
-          </div>
-        </main>
-
-        <Splitter
-          orientation="vertical"
-          onDrag={(d) => setPanels((p) => ({ ...p, inspW: clamp(p.inspW - d, 180, 520) }))}
-        />
-        <aside style={{ width: panels.inspW }} className="shrink-0 border-l border-white/10">
-          <div className="flex h-full flex-col">
-            <LayersPanel />
-            <div className="min-h-0 flex-1">
-              <Inspector />
-            </div>
-          </div>
-        </aside>
-      </div>
-
-      <Splitter
-        orientation="horizontal"
-        onDrag={(d) => setPanels((p) => ({ ...p, tlH: clamp(p.tlH - d, 120, 460) }))}
-      />
-      <div style={{ height: panels.tlH }} className="shrink-0 border-t border-white/10 bg-black/20">
-        <Timeline />
+      <div className="min-h-0 flex-1">
+        <Dock />
       </div>
 
       <StatusFooter />
