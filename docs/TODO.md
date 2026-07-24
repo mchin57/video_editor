@@ -68,7 +68,19 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls. _The natural unit to save/apply is `TextStyleBase` (`shared/project.ts`) — the shape `TextContent` and `CaptionStyle` already share via `TextStyleControls`._
 - [ ] **Text-behind-subject effect** — composite a text layer between the subject and background using the auto background removal mask (see subject-aware crop item). Requires the segmentation feature to be built first.
 
-### Not planned / missing features
+### Insert menu & shapes
+
+- [ ] **"Insert" menu + basic shapes** — add an "Insert" dropdown to the menu bar (alongside File / Edit) with options to place primitive shapes onto the timeline as visual layers. Each shape is a new `ShapeContent` layer kind in `shared/project.ts`. The layer sits in the Image lane and supports the same move/resize/restack/keyframe controls as image layers. Preview renders via inline SVG in `PreviewStage`; export rasterises the SVG to a transparent PNG overlay burned before the ASS pass (most reliable cross-shape ffmpeg path).
+  - **Shapes to include:**
+    - **Rectangle** — width + height independently adjustable; corner radius slider for rounded variant.
+    - **Square** — constrained equal width/height; corner radius slider.
+    - **Circle** — uniform diameter.
+    - **Oval / ellipse** — independent width + height axes.
+    - **Arrow** — direction (up/down/left/right + diagonal variants), head size, shaft width.
+  - **Per-shape Inspector controls:** fill color + opacity, stroke color + width, overall layer opacity. Width/height shown as logical px (1080×1920 space) with a lock-aspect toggle.
+  - "Insert" menu items each drop a shape at the playhead centered in frame with a 2s default duration and white fill.
+
+
 
 - [~] **Multi-clip layout formats (split screen, panels) — shipped as a `layout` LAYER kind.**
   All 7 planned presets (`split-lr`/`split-tb`/`cols-3`/`rows-3`/`big-left`/
@@ -137,6 +149,11 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   easing is linear-only._ _Unverified: not yet smoke-tested through
   `npm run dev` with real media (ramp feel during playback, export A/B against
   preview motion)._
+- [ ] **Audio clips should support the full clip feature set** — `AudioClip` currently only has basic gain/fade/duck/denoise. All temporal and playback features available to video clips should be mirrored on audio clips and baked into the exported audio asset:
+  - **Constant speed** — `atempo` chain (0.25×–4×; chain multiple filters since a single `atempo` only supports 0.5×–2×).
+  - **Keyframed tempo ramps** — piecewise-linear tempo keyframes matching the video speed-ramp model (`src/shared/speed.ts`); each segment encoded with its own `atempo` value on export. Preview via `AudioBufferSourceNode.playbackRate` or a pitch-preserving worklet.
+  - **Freeze holds** — hold the audio at a source timestamp for a given duration (silence or loop the held moment); mirrors `VideoContent.freezes` in behavior.
+  - All settings should be stored directly on the `AudioClip` object in `project.json` (no separate sidecar) so the clip is fully self-contained. The natural time to build this is alongside video speed-ramp easing curves, since both need the same variable-tempo audio pipeline.
   Previous constant-speed notes: `VideoContent.speed` (0.25×–4×, absent = 1, migration v11): the timeline↔source mapping is generalized in the SHARED helpers — `videoSpeed`/`playedVideoDuration` (`shared/project.ts`/`layers.ts`), `videoSourceTime`/`isFrozenAt` scale by speed while freeze holds stay wall-clock, and `trimVideoStart`/`trimVideoEnd`/`splitVideoLayer` (`lib/timeline.ts`) keep the invariant `window=(out−in)/speed+Σholds` (edge-drag deltas are played time × speed). Preview: `<video>.playbackRate` (Chromium time-stretches like atempo). Export: `setpts=(PTS-STARTPTS)/S` composing with the freeze expression (source-time thresholds, wall-clock holds) + `atempoChain` for an unmuted layer's own audio — all verified against ffmpeg 8.1.1 frame dumps/durations (FFMPEG-NOTES "Speed"). UI: preset buttons + free field in the clip Inspector; ×N badge on the timeline block. _Limitations: audio-lane clips (incl. the auto-extracted pair and "Extract audio", which is disabled at ≠1×) always play 1× — AudioClip has no tempo; speed curves/ramps within a clip are the remaining large piece._ _Unverified: not yet smoke-tested through `npm run dev` with real media (drag-trim feel at ≠1×, A/V sync on a real clip's unmuted audio)._
 
 - [~] **Keyframe animation — position + scale + OPACITY shipped for video/image layers; text keyframes remain backlogged.**
