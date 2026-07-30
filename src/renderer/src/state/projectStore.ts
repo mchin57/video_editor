@@ -122,7 +122,7 @@ interface ProjectState {
   toggleLayerHidden: (id: string) => void
   /** Reapply a new front→back order of the *visible* layers to the full stack. */
   reorderLayers: (visibleFrontToBack: string[]) => void
-  /** Split a video layer at an absolute timeline time. */
+  /** Split one layer (video / text / image) at an absolute timeline time. */
   splitLayerAt: (id: string, atSec: number) => void
 
   // --- Link groups (tiles that move / split / delete as one; lib/links.ts) ---

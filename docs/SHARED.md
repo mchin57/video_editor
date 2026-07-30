@@ -33,7 +33,7 @@ Refactor for the per-theme history.)
 | `ClipCard`, `ClipThumb`, `AudioThumb`, `ClipBadges` | `components/ClipCard.tsx` | re-building a media card (thumbnail + hover **preview screen** + name/meta) per surface. The parent both callers implement slightly differently: the Library (`ClipRow`) makes it selectable+draggable with add/remove `trailing`; a layout cell (`FormatMenu`) passes trim/mute in the `footer` and no add-to-timeline. Preserves the `data-testid` popout hooks |
 | `LayoutPresetPreview`, `LayoutPickerModal` | `components/LayoutPresetPreview.tsx` / `LayoutPickerModal.tsx` | drawing a layout arrangement (cells normalised from `FRAME` → the current aspect) or a preset gallery inline. The picker adds a layout (or reshapes the selected one via `activePresetId`); the preview takes a `thumb(i)` render-prop to fill assigned cells |
 | `LayoutCells` | `components/LayoutCells.tsx` | the per-cell editor (Inspector ▸ Layout): a "Change layout" button (reopens `LayoutPickerModal` to reshape), assign/change/clear a clip, a drop target for the `application/x-reel-asset` payload (overwrites), and the `ClipCard` preview + trim/mute. The Format menu keeps only aspect ratio + "Add layout" |
-| `trimVideoStart` / `trimVideoEnd` / `splitVideoLayer` | `lib/timeline.ts` | inlining timeline↔source math in a trim/split handler — freeze holds make the mapping **nonlinear**; these keep the window invariant `endSec − startSec = (out − in) + Σ holds` |
+| `trimVideoStart` / `trimVideoEnd` / `splitVideoLayer` / `splitStaticLayer` / `splitCaptionSegment` / `splitAudioClip` | `lib/timeline.ts` | inlining timeline↔source math in a trim/split handler — freeze holds make the mapping **nonlinear**; these keep the window invariant `endSec − startSec = (out − in) + Σ holds`. **One splitter per tile kind, all with the same shape** (`(tile, atSec, makeId) → [left, right] | null`, `null` = the cut misses): video divides the source trim + freezes, `splitStaticLayer` (text/image) divides window-anchored motion instead, `splitCaptionSegment` divides the word timings. Both layer splitters partition transform keyframes through the same internal helper, which re-bases the right half and pins the interpolated transform at the seam — skip that and the motion jumps where the pieces meet |
 | `timelineTiles`/`tileOf`, `expandGroup`/`expandSelection`, `canLinkItems`/`linkItems`/`unlinkItems`, `moveItemsBy`, `splittableAt`/`canSplitItems`/`splitItemsAt`, `removeItems`, `pruneLinkGroups` | `lib/links.ts` | treating the timeline's three arrays as three things. **`timelineTiles` is the tile "base class"** — one flat `{ref, startSec, endSec, linkGroupId, linkable, splittable}` record per layer/caption/audio clip, which is what lets one code path select, move, split, delete and link them uniformly. Anything operating on "whatever tiles the user picked" belongs here, not inlined in `Timeline.tsx` (see LINK GROUPS below) |
 | `useUi().selection` + `selectItems(refs, primary)` / `selectTile(project, ref)` | `state/ui.ts` | reading `selected{Layer,Caption,Audio}Id` to decide what an action applies to. Those three are the **primary** (what the Inspector edits); `selection` is every selected tile. Selecting a tile outside the timeline goes through `selectTile` so it picks the whole link group |
 | `packRows`, `layoutLanes`, `resizeRowH` | `lib/lanes.ts` | computing timeline lane rows / vertical stack (top/height/collapse) / resize height **inline** in `Timeline.tsx`, where a refactor can delete it untested (see `docs/TIMELINE.md`) |
@@ -62,10 +62,12 @@ The rules the module enforces (and `lib/links.test.ts` pins):
   tile's own duration are preserved exactly. The timeline drag applies it to the
   pre-drag snapshot every pointermove (idempotent), then commits once.
 - **Splitting happens at the playhead, per member** — `splitItemsAt` cuts the
-  members the playhead crosses and leaves the ones it misses whole. The
-  right-hand halves get a NEW group id so the two sides of a cut are independent
-  afterwards. `canSplitItems` (the toolbar's disabled state) and the split share
-  `splittableAt`, and a test asserts the predicate and the operation agree.
+  members the playhead crosses and leaves the ones it misses whole, dispatching to
+  the splitter for each tile kind (video / text+image / caption / audio — every
+  tile except a layout can be cut). The right-hand halves get a NEW group id so
+  the two sides of a cut are independent afterwards. `canSplitItems` (the
+  toolbar's disabled state) and the split share `splittableAt`, and a test asserts
+  the predicate and the operation agree.
 - **A group with <2 surviving members is unlinked** — `pruneLinkGroups` runs after
   any structural edit, so a dangling id can never change behavior.
 - **Layout layers are never members** (`timelineTiles().linkable`), and anything

@@ -39,10 +39,15 @@ import type {
   TimelineItemRef
 } from '@shared/project'
 import { audioClipEnd } from '@shared/project'
-import { splitAudioClip, splitVideoLayer } from './timeline'
+import {
+  splitAudioClip,
+  splitCaptionSegment,
+  splitStaticLayer,
+  splitVideoLayer
+} from './timeline'
 
-/** Cut tolerance — mirrors the guards in `splitVideoLayer` / `splitAudioClip`
- *  so `splittableAt` can't claim a cut those refuse to make. */
+/** Cut tolerance — mirrors the guards in the `split*` helpers so `splittableAt`
+ *  can't claim a cut they refuse to make (a test pins that they agree). */
 const EPS = 1e-3
 
 /** Stable identity of a tile across the three arrays (ids are only unique
@@ -74,8 +79,13 @@ export interface Tile {
   linkGroupId?: string
   /** Whether this tile may join a link group (layout layers may not). */
   linkable: boolean
-  /** Whether a cut strictly inside it yields two tiles (video layers + audio
-   *  clips today; text/image layers and captions have no split op). */
+  /**
+   * Whether a cut strictly inside it yields two tiles. True for everything but a
+   * layout (whose cells carry their own trims) — video layers via
+   * `splitVideoLayer`, text/image via `splitStaticLayer`, captions via
+   * `splitCaptionSegment`, audio via `splitAudioClip`. Coincides with `linkable`
+   * today, but they answer different questions: keep them apart.
+   */
   splittable: boolean
 }
 
@@ -98,7 +108,7 @@ export function timelineTiles(p: Project, srcDur: SourceDuration = () => 0): Til
       endSec: l.endSec,
       linkGroupId: l.linkGroupId,
       linkable: l.content.kind !== 'layout',
-      splittable: l.content.kind === 'video'
+      splittable: l.content.kind !== 'layout'
     })
   }
   for (const s of p.captions.segments) {
@@ -108,7 +118,7 @@ export function timelineTiles(p: Project, srcDur: SourceDuration = () => 0): Til
       endSec: s.endSec,
       linkGroupId: s.linkGroupId,
       linkable: true,
-      splittable: false
+      splittable: true
     })
   }
   for (const a of p.audioClips) {
@@ -371,7 +381,12 @@ export function splitItemsAt(
       layers.push(l)
       continue
     }
-    const res = splitVideoLayer(l, atSec, makeId)
+    // Video carries a source trim through the cut; text/image are the same
+    // content over two windows (with window-anchored motion/animation split).
+    const res =
+      l.content.kind === 'video'
+        ? splitVideoLayer(l, atSec, makeId)
+        : splitStaticLayer(l, atSec, makeId)
     if (!res) {
       layers.push(uncut(l))
       continue
@@ -380,9 +395,20 @@ export function splitItemsAt(
     layers.push(res[0], withGroup(res[1], rightGroup(l.linkGroupId)))
   }
 
-  const segments: CaptionSegment[] = p.captions.segments.map((s) =>
-    keys.has(refKey({ kind: 'caption', id: s.id })) ? uncut(s) : s
-  )
+  const segments: CaptionSegment[] = []
+  for (const s of p.captions.segments) {
+    if (!keys.has(refKey({ kind: 'caption', id: s.id }))) {
+      segments.push(s)
+      continue
+    }
+    const res = splitCaptionSegment(s, atSec, makeId)
+    if (!res) {
+      segments.push(uncut(s))
+      continue
+    }
+    changed = true
+    segments.push(res[0], withGroup(res[1], rightGroup(s.linkGroupId)))
+  }
 
   const audioClips: AudioClip[] = []
   for (const a of p.audioClips) {

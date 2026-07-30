@@ -178,6 +178,49 @@ test('a linked tile the playhead misses is left whole', async ({ appPage: page }
   expect(cut.audio[0]).toMatchObject({ startSec: 2, inSec: 0, outSec: 6 })
 })
 
+/**
+ * Regression: a group of a clip + a TEXT tile used to split only the clip —
+ * text/image layers and captions had no split op at all, so the group silently
+ * cut one member and left the other spanning both halves.
+ */
+test('a linked text tile splits at the playhead like everything else', async ({
+  appPage: page
+}) => {
+  await page.evaluate(() => {
+    window.__reelStores.useProject.getState().addVideoLayer('L1', 'no-such-media', 0, 10, false)
+    window.__reelStores.useUi.getState().clearSelection()
+  })
+  await page.keyboard.press('t') // text layer over 0..3s at the playhead, selected
+  const textId = await page.evaluate(
+    () =>
+      window.__reelStores.useProject
+        .getState()
+        .project!.layers.find((l) => l.content.kind === 'text')!.id
+  )
+  // The text tile is already selected, so Ctrl-click only the clip to add it.
+  await page.getByTestId('tile-layer-L1').click({ modifiers: ['Control'] })
+  await page.getByRole('button', { name: '🔗 Link' }).click()
+
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1.5))
+  await page.keyboard.press('s')
+
+  const kinds = await page.evaluate(() =>
+    window.__reelStores.useProject
+      .getState()
+      .project!.layers.map((l) => [l.content.kind, l.startSec, l.endSec, l.linkGroupId])
+  )
+  // Both tiles cut at the playhead, each keeping its own length either side.
+  expect(kinds).toEqual([
+    ['video', 0, 1.5, kinds[0][3]],
+    ['video', 1.5, 10, kinds[1][3]],
+    ['text', 0, 1.5, kinds[0][3]],
+    ['text', 1.5, 3, kinds[1][3]]
+  ])
+  expect(kinds[0][3]).toBeTruthy()
+  expect(kinds[0][3]).not.toBe(kinds[1][3]) // the two sides are separate groups
+  expect(textId).toBeTruthy()
+})
+
 test('Unlink hands the tiles back their independence', async ({ appPage: page }) => {
   await arrangePair(page)
   await linkPair(page)

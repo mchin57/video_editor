@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { extractAudioPieces, reorder, splitAudioClip, splitVideoLayer, trimVideoEnd, trimVideoStart } from './timeline'
-import { makeVideoLayer, playedVideoDuration } from '@shared/layers'
-import type { AudioClip, Layer, VideoContent } from '@shared/project'
+import {
+  extractAudioPieces,
+  reorder,
+  splitAudioClip,
+  splitCaptionSegment,
+  splitStaticLayer,
+  splitVideoLayer,
+  trimVideoEnd,
+  trimVideoStart
+} from './timeline'
+import { layerTransformAt, makeVideoLayer, playedVideoDuration } from '@shared/layers'
+import type { AudioClip, CaptionSegment, Layer, TextContent, VideoContent } from '@shared/project'
 
 function audio(over: Partial<AudioClip> = {}): AudioClip {
   return {
@@ -276,6 +285,179 @@ describe('splitAudioClip', () => {
     expect(splitAudioClip(audio({ outSec: 0 }), 0, 0, makeId)).toBeNull()
     const res = splitAudioClip(audio({ outSec: 0 }), 4, 0, makeId)
     expect(res?.[0].outSec).toBe(4)
+  })
+})
+
+describe('splitStaticLayer', () => {
+  const makeId = (): string => 'new'
+  /** A text layer over [start, end] with an optional animation / keyframes. */
+  function text(over: Partial<Layer> = {}, content: Partial<TextContent> = {}): Layer {
+    return {
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 10,
+      x: 540,
+      y: 960,
+      scale: 1,
+      ...over,
+      content: {
+        kind: 'text',
+        text: 'hello',
+        fontFamily: 'inter',
+        fontSizePx: 76,
+        color: '#fff',
+        pill: { enabled: false, color: '#000', padPx: 18 },
+        ...content
+      } as TextContent
+    }
+  }
+
+  it('splits into two adjacent windows over the same content', () => {
+    const res = splitStaticLayer(text(), 4, makeId)
+    const [left, right] = res!
+    expect([left.startSec, left.endSec]).toEqual([0, 4])
+    expect([right.startSec, right.endSec]).toEqual([4, 10])
+    expect(right.id).toBe('new')
+    expect(right.content).toEqual(left.content) // same text, no trim to divide
+  })
+
+  it('refuses to split at or outside the span, or on a video/layout layer', () => {
+    expect(splitStaticLayer(text(), 0, makeId)).toBeNull()
+    expect(splitStaticLayer(text(), 10, makeId)).toBeNull()
+    expect(splitStaticLayer(text(), 12, makeId)).toBeNull()
+    expect(splitStaticLayer(makeVideoLayer('a', 'm', 0, 10), 4, makeId)).toBeNull()
+  })
+
+  it('gives the entrance to the left half and the exit to the right', () => {
+    const anim = { in: 'fadeIn' as const, inSec: 0.3, out: 'fadeOut' as const, outSec: 0.4 }
+    const [left, right] = splitStaticLayer(text({}, { animation: anim }), 4, makeId)!
+    expect((left.content as TextContent).animation).toEqual({ ...anim, out: 'none' })
+    expect((right.content as TextContent).animation).toEqual({ ...anim, in: 'none' })
+  })
+
+  it('keeps a wordHighlight on both halves (it spans the window, not the entrance)', () => {
+    const anim = { in: 'wordHighlight' as const, inSec: 0.3, out: 'none' as const, outSec: 0.3 }
+    const [left, right] = splitStaticLayer(text({}, { animation: anim }), 4, makeId)!
+    expect((left.content as TextContent).animation?.in).toBe('wordHighlight')
+    expect((right.content as TextContent).animation?.in).toBe('wordHighlight')
+  })
+
+  it('partitions keyframes and pins the interpolated transform at the seam', () => {
+    // x ramps 0 → 100 over 0..10s, so the cut at 4s sits at x = 40.
+    const layer = text({
+      keyframes: [
+        { tSec: 0, x: 0, y: 960, scale: 1 },
+        { tSec: 10, x: 100, y: 960, scale: 1 }
+      ]
+    })
+    const [left, right] = splitStaticLayer(layer, 4, makeId)!
+    expect(left.keyframes).toEqual([
+      { tSec: 0, x: 0, y: 960, scale: 1 },
+      { tSec: 4, x: 40, y: 960, scale: 1 }
+    ])
+    // Re-based onto the new start, and the motion continues from x = 40.
+    expect(right.keyframes).toEqual([
+      { tSec: 0, x: 40, y: 960, scale: 1 },
+      { tSec: 6, x: 100, y: 960, scale: 1 }
+    ])
+    // The seam is invisible: both halves report the same transform there.
+    expect(layerTransformAt(left, 4)).toEqual(layerTransformAt(right, 4))
+  })
+
+  it('carries a keyframed opacity across the seam', () => {
+    // A 0 → 1 fade over 0..4s, cut at 2s: both seam keyframes sit at 0.5.
+    const layer = text({
+      keyframes: [
+        { tSec: 0, x: 540, y: 960, scale: 1, opacity: 0 },
+        { tSec: 4, x: 540, y: 960, scale: 1, opacity: 1 }
+      ],
+      endSec: 8
+    })
+    const [left, right] = splitStaticLayer(layer, 2, makeId)!
+    expect(left.keyframes?.[1]).toMatchObject({ tSec: 2, opacity: 0.5 })
+    expect(right.keyframes?.[0]).toMatchObject({ tSec: 0, opacity: 0.5 })
+    // Keyframes on the far side are copied verbatim (only re-based) — an
+    // explicit opacity the user set is never rewritten.
+    expect(right.keyframes?.[1]).toEqual({ tSec: 2, x: 540, y: 960, scale: 1, opacity: 1 })
+  })
+
+  it('stores a synthesized seam keyframe at full opacity as ABSENCE', () => {
+    // No opacity anywhere → the seam keyframes must not sprout `opacity: 1`,
+    // which would push the layer onto the export's per-frame alpha path.
+    const [left, right] = splitStaticLayer(
+      text({ keyframes: [{ tSec: 0, x: 0, y: 960, scale: 1 }, { tSec: 10, x: 100, y: 960, scale: 1 }] }),
+      4,
+      makeId
+    )!
+    expect(left.keyframes?.every((k) => !('opacity' in k))).toBe(true)
+    expect(right.keyframes?.every((k) => !('opacity' in k))).toBe(true)
+  })
+})
+
+describe('splitVideoLayer keyframes', () => {
+  it('re-bases the right half so its motion does not restart at the cut', () => {
+    const base = makeVideoLayer('a', 'm', 0, 10)
+    const layer: Layer = {
+      ...base,
+      keyframes: [
+        { tSec: 0, x: 0, y: 960, scale: 1 },
+        { tSec: 10, x: 100, y: 960, scale: 1 }
+      ]
+    }
+    const [left, right] = splitVideoLayer(layer, 4, () => 'new')!
+    expect(left.keyframes?.at(-1)).toEqual({ tSec: 4, x: 40, y: 960, scale: 1 })
+    expect(right.keyframes?.[0]).toEqual({ tSec: 0, x: 40, y: 960, scale: 1 })
+    expect(layerTransformAt(left, 4)).toEqual(layerTransformAt(right, 4))
+  })
+  it('leaves a layer without keyframes alone', () => {
+    const [left, right] = splitVideoLayer(makeVideoLayer('a', 'm', 0, 10), 4, () => 'new')!
+    expect(left.keyframes).toBeUndefined()
+    expect(right.keyframes).toBeUndefined()
+  })
+})
+
+describe('splitCaptionSegment', () => {
+  const makeId = (): string => 'new'
+  const seg = (over: Partial<CaptionSegment> = {}): CaptionSegment => ({
+    id: 'C1',
+    startSec: 0,
+    endSec: 4,
+    text: 'one two three four',
+    words: [
+      { text: 'one', startSec: 0, endSec: 1 },
+      { text: 'two', startSec: 1, endSec: 2 },
+      { text: 'three', startSec: 2, endSec: 3 },
+      { text: 'four', startSec: 3, endSec: 4 }
+    ],
+    enabled: true,
+    ...over
+  })
+
+  it('splits the words at the cut and rebuilds each half’s text', () => {
+    const [left, right] = splitCaptionSegment(seg(), 2, makeId)!
+    expect(left).toMatchObject({ startSec: 0, endSec: 2, text: 'one two' })
+    expect(right).toMatchObject({ id: 'new', startSec: 2, endSec: 4, text: 'three four' })
+    expect(left.words.map((w) => w.text)).toEqual(['one', 'two'])
+    expect(right.words.map((w) => w.text)).toEqual(['three', 'four'])
+  })
+
+  it('gives a word straddling the cut to the side holding more of it', () => {
+    const [left, right] = splitCaptionSegment(seg(), 1.6, makeId)! // 'two' spans 1..2
+    expect(left.words.map((w) => w.text)).toEqual(['one', 'two'])
+    expect(right.words.map((w) => w.text)).toEqual(['three', 'four'])
+  })
+
+  it('keeps the full text on both halves when there are no word timings', () => {
+    const [left, right] = splitCaptionSegment(seg({ words: [] }), 2, makeId)!
+    expect(left.text).toBe('one two three four')
+    expect(right.text).toBe('one two three four')
+  })
+
+  it('refuses to split at or outside the span', () => {
+    expect(splitCaptionSegment(seg(), 0, makeId)).toBeNull()
+    expect(splitCaptionSegment(seg(), 4, makeId)).toBeNull()
+    expect(splitCaptionSegment(seg({ startSec: 2, endSec: 5 }), 1, makeId)).toBeNull()
   })
 })
 

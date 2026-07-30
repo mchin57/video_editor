@@ -26,10 +26,12 @@ item, move it into the guarded table below.
 | Boundary snapping (`snap`) | `lib/lanes.test.ts` |
 | Time-scale tick spacing/labels | `lib/timescale.test.ts` |
 | Freeze-aware trim/split — holds survive edge trims, splits partition holds, window invariant (`trimVideoStart`/`trimVideoEnd`/`splitVideoLayer`) | `lib/timeline.test.ts` |
+| Splitting a text/image layer (`splitStaticLayer`) — entrance goes left, exit goes right, `wordHighlight` stays on both — and a caption (`splitCaptionSegment`) — words partition, text rebuilt | `lib/timeline.test.ts` |
+| Keyframes survive a split — right half re-based, interpolated transform pinned at the seam, full opacity stays absent (video + static layers) | `lib/timeline.test.ts` |
 | Block move drag + right-edge trim drag on the real timeline (incl. frozen-clip regression) | `e2e/freezeTrim.spec.ts` |
 | S-keybind split at the playhead | `e2e/freezeTrim.spec.ts` |
 | Link groups — expand/link/unlink/prune, shared-delta move (offsets + durations kept, clamp on the earliest tile), playhead split incl. the uncut-member and re-grouping rules, group delete | `lib/links.test.ts` |
-| Linked tiles on the real timeline — Ctrl-click multi-select → 🔗 Link, group drag keeps the offset, clamp at 0, S/✂ splits every crossed member (and only those), ⛓ Unlink, click narrows a multi-selection, Del removes the group in one undo step, trim handles hidden while linked | `e2e/link.spec.ts` |
+| Linked tiles on the real timeline — Ctrl-click multi-select → 🔗 Link, group drag keeps the offset, clamp at 0, S/✂ splits every crossed member (and only those, **incl. a text tile**), ⛓ Unlink, click narrows a multi-selection, Del removes the group in one undo step, trim handles hidden while linked | `e2e/link.spec.ts` |
 | T/Ctrl+Z/Ctrl+Shift+Z/Delete keybind flow | `e2e/keybinds.spec.ts` |
 | OS-file import overlay can't get stuck (depth counter; the Timeline drop-ring shares the hook) | `e2e/dropOverlay.spec.ts` |
 

@@ -135,9 +135,15 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     stops the group on its earliest tile instead of squashing it. Dragging a
     multi-selection of *unlinked* tiles moves them together too.
   - **Split** happens at the playhead for every member it crosses; members it
-    misses (offset in time) are left whole, and members with no split op (text /
-    image layers, captions) are never cut. The right-hand halves become their own
-    group so the two sides of a cut can be edited apart.
+    misses (offset in time) are left whole. The right-hand halves become their own
+    group so the two sides of a cut can be edited apart. Every tile kind except a
+    layout can now be cut — video (source trim + freezes), text/image
+    (`splitStaticLayer`: entrance animation left, exit right) and captions
+    (`splitCaptionSegment`: word timings partition, text rebuilt) — which also
+    means the ✂ Split button and **S** now work on a lone text/image/caption tile.
+    Transform keyframes are partitioned across any layer split, re-basing the
+    right half and pinning the transform at the seam (this also fixes a video
+    split silently restarting a keyframed layer's motion at the cut).
   - **Delete** takes the whole group (the old open question, answered: one undo
     step, always both — a group is only ever removed as a whole).
   - **Per-tile ops that can't translate are disabled while linked:** edge trim
@@ -146,8 +152,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     why. A linked audio clip's **Start (s)** DOES work: for audio that's a move,
     so it shifts the group. **Layout layers can't be linked at all.**
   - _Not done:_ auto-linking a dropped clip to its extracted audio (today the
-    pair lands unlinked — link it by hand); splitting text/image/caption tiles at
-    all; ripple/roll trim across a group.
+    pair lands unlinked — link it by hand); ripple/roll trim across a group.
   - _Unverified:_ not yet smoke-tested through `npm run dev` — the interaction
     guarantees are Playwright-covered against the real app, but the visuals
     (badge, banner, disabled states) and the manual items added to

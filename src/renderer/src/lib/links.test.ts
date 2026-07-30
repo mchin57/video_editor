@@ -42,6 +42,12 @@ function layer(id: string, startSec: number, dur: number, gid?: string): Layer {
   return gid ? { ...l, linkGroupId: gid } : l
 }
 
+/** A text layer over [startSec, startSec + dur]. */
+function textLayer(id: string, startSec: number, dur: number, gid?: string): Layer {
+  const l = layer(id, startSec, dur, gid)
+  return { ...l, content: { kind: 'text', text: id } as Layer['content'] }
+}
+
 function audio(id: string, startSec: number, dur: number, gid?: string): AudioClip {
   return {
     id,
@@ -245,13 +251,34 @@ describe('splitItemsAt', () => {
     expect(right.linkGroupId).toBeDefined()
   })
 
-  it('never cuts a text/image layer or a caption, and no-ops when nothing is cut', () => {
+  it('cuts a linked text layer and caption at the playhead too', () => {
     const p = project({
-      layers: [{ ...layer('L1', 0, 10, 'g1'), content: { kind: 'text', text: 'hi' } as Layer['content'] }],
+      layers: [textLayer('T1', 0, 10, 'g1')],
       segments: [caption('C1', 0, 10, 'g1')]
     })
-    expect(splitItemsAt(p, [L('L1'), C('C1')], 5, srcDur, ids())).toBe(p)
-    expect(canSplitItems(p, [L('L1'), C('C1')], 5, srcDur)).toBe(false)
+    expect(canSplitItems(p, [L('T1'), C('C1')], 5, srcDur)).toBe(true)
+    const next = splitItemsAt(p, [L('T1'), C('C1')], 5, srcDur, ids('n'))
+    expect(next.layers.map((l) => [l.startSec, l.endSec])).toEqual([
+      [0, 5],
+      [5, 10]
+    ])
+    expect(next.captions.segments.map((s) => [s.startSec, s.endSec])).toEqual([
+      [0, 5],
+      [5, 10]
+    ])
+    // Each side is one group spanning both lanes.
+    expect(next.layers[0].linkGroupId).toBe(next.captions.segments[0].linkGroupId)
+    expect(next.layers[1].linkGroupId).toBe(next.captions.segments[1].linkGroupId)
+    expect(next.layers[0].linkGroupId).not.toBe(next.layers[1].linkGroupId)
+  })
+
+  it('never cuts a layout, and no-ops when nothing is cut', () => {
+    const p = project({ layers: [makeLayoutLayer('LO', '2-portrait', 0)] })
+    expect(canSplitItems(p, [L('LO')], 1, srcDur)).toBe(false)
+    expect(splitItemsAt(p, [L('LO')], 1, srcDur, ids())).toBe(p)
+    // Nor outside a tile's span.
+    const q = pair()
+    expect(splitItemsAt(q, [L('L1'), A('A1')], 20, srcDur, ids())).toBe(q)
   })
 
   it('agrees with `splittableAt` about what a cut would do', () => {
@@ -317,23 +344,17 @@ describe('removeItems', () => {
 })
 
 describe('timelineTiles', () => {
-  it('marks layouts unlinkable and only video/audio splittable', () => {
+  it('marks the layout — and only the layout — neither linkable nor splittable', () => {
     const p = project({
-      layers: [
-        layer('L1', 0, 10),
-        makeLayoutLayer('LO', '2-portrait', 0),
-        { ...layer('T1', 0, 3), content: { kind: 'text', text: 'x' } as Layer['content'] }
-      ],
+      layers: [layer('L1', 0, 10), makeLayoutLayer('LO', '2-portrait', 0), textLayer('T1', 0, 3)],
       audioClips: [audio('A1', 0, 4)],
       segments: [caption('C1', 0, 2)]
     })
-    expect(
-      timelineTiles(p).map((t) => [t.ref.id, t.linkable, t.splittable])
-    ).toEqual([
+    expect(timelineTiles(p).map((t) => [t.ref.id, t.linkable, t.splittable])).toEqual([
       ['L1', true, true],
       ['LO', false, false],
-      ['T1', true, false],
-      ['C1', true, false],
+      ['T1', true, true],
+      ['C1', true, true],
       ['A1', true, true]
     ])
   })
