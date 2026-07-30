@@ -43,7 +43,12 @@ import {
   splitAudioClip,
   splitCaptionSegment,
   splitStaticLayer,
-  splitVideoLayer
+  splitVideoLayer,
+  trimAudioEdge,
+  trimCaptionEdge,
+  trimLayerEdge,
+  type Trimmed,
+  type TrimEdge
 } from './timeline'
 
 /** Cut tolerance — mirrors the guards in the `split*` helpers so `splittableAt`
@@ -303,6 +308,63 @@ export function moveItemsBy(p: Project, refs: TimelineItemRef[], delta: number):
     audioClips: p.audioClips.map((a) =>
       keys.has(refKey({ kind: 'audio', id: a.id })) ? { ...a, startSec: a.startSec + d } : a
     )
+  }
+}
+
+/**
+ * Trim the same `edge` of every tile in `refs` by the same TIMELINE delta — the
+ * trim counterpart of `moveItemsBy`. Each member converts that delta through its
+ * own mapping (a video walks its speed profile and freeze holds, an audio clip
+ * moves its in/out point), so members of different lengths and speeds stay in
+ * step: a 3s trim off the right edge takes 3s off every member.
+ *
+ * The delta is clamped to what the most constrained member can give, measured by
+ * trimming each once and reading back how far its edge actually moved. Letting
+ * each member clamp itself would silently desync the group the moment one ran out
+ * of source — the same reason `moveItemsBy` clamps the SET at 0.
+ */
+export function trimItemsBy(
+  p: Project,
+  refs: TimelineItemRef[],
+  edge: TrimEdge,
+  delta: number,
+  srcDur: SourceDuration = () => 0
+): Project {
+  const keys = refKeys(refs)
+  if (keys.size === 0 || delta === 0) return p
+  const has = (kind: TimelineItemKind, id: string): boolean => keys.has(refKey({ kind, id }))
+  const layerSrc = (l: Layer): number =>
+    l.content.kind === 'video' ? srcDur(l.content.mediaId) : 0
+  const trimLayer = (l: Layer, d: number): Trimmed<Layer> =>
+    trimLayerEdge(l, edge, d, layerSrc(l))
+  const trimAudio = (a: AudioClip, d: number): Trimmed<AudioClip> =>
+    trimAudioEdge(a, edge, d, srcDur(a.mediaId))
+
+  // Pass 1 — the delta every member can absorb (smallest magnitude wins; a
+  // member that can't move at all pins the group at 0).
+  let d = delta
+  const narrow = (achieved: number): void => {
+    if (Math.abs(achieved) < Math.abs(d)) d = achieved
+  }
+  for (const l of p.layers) if (has('layer', l.id)) narrow(trimLayer(l, delta).achieved)
+  for (const s of p.captions.segments) {
+    if (has('caption', s.id)) narrow(trimCaptionEdge(s, edge, delta).achieved)
+  }
+  for (const a of p.audioClips) if (has('audio', a.id)) narrow(trimAudio(a, delta).achieved)
+  if (d === 0) return p
+
+  // Pass 2 — apply it. Every member reaches exactly `d` (each trim is monotone
+  // in the delta, and `d` is within every member's capacity by construction).
+  return {
+    ...p,
+    layers: p.layers.map((l) => (has('layer', l.id) ? trimLayer(l, d).tile : l)),
+    captions: {
+      ...p.captions,
+      segments: p.captions.segments.map((s) =>
+        has('caption', s.id) ? trimCaptionEdge(s, edge, d).tile : s
+      )
+    },
+    audioClips: p.audioClips.map((a) => (has('audio', a.id) ? trimAudio(a, d).tile : a))
   }
 }
 

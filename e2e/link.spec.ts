@@ -86,6 +86,56 @@ async function dragTile(page: Page, testId: string, seconds: number): Promise<vo
   await page.mouse.up()
 }
 
+/** Drag a tile's left/right trim handle horizontally by `seconds`. */
+async function dragEdge(
+  page: Page,
+  testId: string,
+  which: 'left' | 'right',
+  seconds: number
+): Promise<void> {
+  const scale = await pps(page)
+  const tile = page.getByTestId(testId)
+  await tile.scrollIntoViewIfNeeded()
+  const handles = tile.locator('div.cursor-ew-resize')
+  const handle = which === 'left' ? handles.first() : handles.last()
+  const box = (await handle.boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + seconds * scale, y, { steps: 5 })
+  await page.mouse.up()
+}
+
+test('a clip with audio is added LINKED, and trimming either trims both', async ({
+  appPage: page
+}) => {
+  // The store action behind a timeline drop and the Library's ＋ PH / ＋ End.
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().addVideoLayer('L1', 'no-such-media', 0, 10, true)
+  )
+  const added = await tiles(page)
+  expect(added.layers[0].gid).toBeTruthy()
+  expect(added.audio[0].gid).toBe(added.layers[0].gid) // the pair lands linked
+  const audioId = added.audio[0].id
+
+  // Trim 2s off the clip's right edge → the audio loses the same 2s.
+  await dragEdge(page, 'tile-layer-L1', 'right', -2)
+  const trimmed = await tiles(page)
+  expect(trimmed.layers[0].endSec).toBeCloseTo(8, 1)
+  expect(trimmed.audio[0].outSec).toBeCloseTo(8, 1)
+  expect(trimmed.audio[0].startSec).toBe(0) // the other edge stayed put
+
+  // And from the audio side: 1s off its left edge moves both starts + in-points.
+  await dragEdge(page, `tile-audio-${audioId}`, 'left', 1)
+  const both = await tiles(page)
+  expect(both.layers[0].startSec).toBeCloseTo(1, 1)
+  expect(both.audio[0].startSec).toBeCloseTo(1, 1)
+  expect(both.audio[0].inSec).toBeCloseTo(1, 1)
+  // Neither tile's far edge moved, so they still end together.
+  expect(both.layers[0].endSec).toBeCloseTo(8, 1)
+})
+
 test('Ctrl-click + Link makes tiles move as one, keeping their offset', async ({
   appPage: page
 }) => {
@@ -103,8 +153,9 @@ test('Ctrl-click + Link makes tiles move as one, keeping their offset', async ({
     { kind: 'audio', id: 'A1' }
   ])
 
-  // Trimming can't translate across a group, so the edge handles are gone.
-  await expect(page.getByTestId('tile-layer-L1').locator('div.cursor-ew-resize')).toHaveCount(0)
+  // The edge handles stay — on a linked tile they trim the whole group (covered
+  // by the "added LINKED" test above).
+  await expect(page.getByTestId('tile-layer-L1').locator('div.cursor-ew-resize')).toHaveCount(2)
 
   // Drag the layer 3s right: the audio follows by the same delta (offset stays 2s)
   // and neither tile changes length.
@@ -236,13 +287,17 @@ test('Unlink hands the tiles back their independence', async ({ appPage: page })
   await page.getByTestId('tile-layer-L1').click()
   expect(await selection(page)).toEqual([{ kind: 'layer', id: 'L1' }])
 
-  // Now dragging the layer leaves the audio where it was — and its trim handles
-  // are back.
-  await expect(page.getByTestId('tile-layer-L1').locator('div.cursor-ew-resize')).toHaveCount(2)
+  // Now dragging the layer leaves the audio where it was...
   await dragTile(page, 'tile-layer-L1', 3)
   const moved = await tiles(page)
   expect(moved.layers[0].startSec).toBeCloseTo(3, 1)
   expect(moved.audio[0].startSec).toBe(2)
+
+  // ...and so does trimming it (the trim no longer travels to the audio).
+  await dragEdge(page, 'tile-layer-L1', 'right', -1)
+  const trimmed = await tiles(page)
+  expect(trimmed.layers[0].endSec).toBeCloseTo(12, 1)
+  expect(trimmed.audio[0].outSec).toBe(6)
 })
 
 test('Delete removes the whole group in one undo step', async ({ appPage: page }) => {

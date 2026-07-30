@@ -61,9 +61,9 @@ function useLinkGroupSize(kind: TimelineItemKind, id: string | null): number {
 function LinkedNote({ size }: { size: number }): JSX.Element {
   return (
     <p className="mb-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] leading-snug text-sky-300/90">
-      🔗 Linked to {size - 1} other {size === 2 ? 'tile' : 'tiles'} — they move, split and delete
-      together. Timing controls are disabled; use <span className="text-sky-200">⛓ Unlink</span> on
-      the timeline bar to edit them.
+      🔗 Linked to {size - 1} other {size === 2 ? 'tile' : 'tiles'} — they move, trim, split and
+      delete together. Drag an edge on the timeline to trim the whole group; re-timing just this
+      tile needs <span className="text-sky-200">⛓ Unlink</span>.
     </p>
   )
 }

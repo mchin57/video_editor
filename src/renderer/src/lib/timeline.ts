@@ -13,13 +13,36 @@ import type {
   LayerKeyframe,
   VideoContent
 } from '@shared/project'
-import { audioClipEnd } from '@shared/project'
+import { audioClipEnd, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
 import { playedBetween, sourceAfterPlayed } from '@shared/speed'
 
 /** Cut tolerance shared by every split below (and mirrored by
  *  `splittableAt` in `lib/links.ts`, which decides whether to offer the cut). */
 const EPS = 1e-3
+
+/** Shortest window a trim may leave behind, per tile kind (seconds). These are
+ *  the guards the timeline's edge drags have always applied; they live here now
+ *  so the group trim clamps identically. */
+const MIN_LAYER_SEC = 0.2
+const MIN_CAPTION_SEC = 0.1
+const MIN_SOURCE_SEC = 0.1
+
+/** Which end of a tile an edge drag moves. */
+export type TrimEdge = 'start' | 'end'
+
+/**
+ * A trimmed tile plus the TIMELINE delta its edge actually moved — a trim can be
+ * cut short by the source running out or by the minimum window. Group trims use
+ * `achieved` to find the one delta every member can absorb, which is what keeps a
+ * linked pair in step (see `trimItemsBy` in `lib/links.ts`).
+ */
+export interface Trimmed<T> {
+  tile: T
+  achieved: number
+}
+
+const clampTo = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 /**
  * Partition a layer's keyframes across a cut at absolute time `atSec`, returning
@@ -219,6 +242,87 @@ export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
   const keptHold = kept.reduce((s, f) => s + Math.max(0, f.holdSec), 0)
   const endSec = layer.startSec + playedBetween(c, c.inSec, no) + keptHold
   return { ...layer, endSec, content: { ...c, outSec: no, freezes: kept.length ? kept : undefined } }
+}
+
+/**
+ * Trim one LAYER's `edge` by `deltaSec` timeline seconds, clamped to what the
+ * layer can actually give: a video is bounded by its source (`srcDurSec`, or its
+ * own out-point when the duration isn't known yet), text/image by a minimum
+ * window. `startSec`/`endSec` moves; the opposite edge stays put.
+ *
+ * The delta is TIMELINE (played) time for every kind — a video converts it
+ * through its own speed profile and freeze holds (`sourceAfterPlayed` +
+ * `trimVideoStart`/`trimVideoEnd`), so a group trim can hand every member the
+ * same number and each honors its own mapping. That's the whole reason this is
+ * one function per kind with a shared signature.
+ */
+export function trimLayerEdge(
+  layer: Layer,
+  edge: TrimEdge,
+  deltaSec: number,
+  srcDurSec = 0
+): Trimmed<Layer> {
+  const c = layer.content
+  let tile = layer
+  if (c.kind === 'video') {
+    const maxSrc = srcDurSec > 0 ? srcDurSec : c.outSec
+    tile =
+      edge === 'start'
+        ? trimVideoStart(
+            layer,
+            c,
+            clampTo(sourceAfterPlayed(c, c.inSec, deltaSec), 0, c.outSec - MIN_SOURCE_SEC)
+          )
+        : trimVideoEnd(
+            layer,
+            c,
+            clampTo(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc)
+          )
+  } else if (edge === 'start') {
+    tile = { ...layer, startSec: clampTo(layer.startSec + deltaSec, 0, layer.endSec - MIN_LAYER_SEC) }
+  } else {
+    tile = { ...layer, endSec: Math.max(layer.startSec + MIN_LAYER_SEC, layer.endSec + deltaSec) }
+  }
+  const achieved = edge === 'start' ? tile.startSec - layer.startSec : tile.endSec - layer.endSec
+  return { tile, achieved }
+}
+
+/** Trim a caption segment's `edge` by `deltaSec`, keeping a minimum window.
+ *  Word timings are left alone — they're absolute, and a trimmed caption simply
+ *  shows fewer of them. */
+export function trimCaptionEdge(
+  seg: CaptionSegment,
+  edge: TrimEdge,
+  deltaSec: number
+): Trimmed<CaptionSegment> {
+  const tile: CaptionSegment =
+    edge === 'start'
+      ? { ...seg, startSec: clampTo(seg.startSec + deltaSec, 0, seg.endSec - MIN_CAPTION_SEC) }
+      : { ...seg, endSec: Math.max(seg.startSec + MIN_CAPTION_SEC, seg.endSec + deltaSec) }
+  return { tile, achieved: edge === 'start' ? tile.startSec - seg.startSec : tile.endSec - seg.endSec }
+}
+
+/**
+ * Trim an audio clip's `edge` by `deltaSec`. The LEFT edge moves the in-point and
+ * the clip's start together (the audio behind it doesn't slide); the RIGHT edge
+ * moves the out-point, bounded by the source duration (`srcDurSec`, falling back
+ * to the clip's own out-point the way the timeline's edge drag does).
+ */
+export function trimAudioEdge(
+  clip: AudioClip,
+  edge: TrimEdge,
+  deltaSec: number,
+  srcDurSec = 0
+): Trimmed<AudioClip> {
+  const maxOut = srcDurSec > 0 ? srcDurSec : clip.outSec > 0 ? clip.outSec : 1
+  const effOut = effectiveOut(clip, maxOut)
+  if (edge === 'start') {
+    const ni = clampTo(clip.inSec + deltaSec, 0, effOut - MIN_SOURCE_SEC)
+    const tile = { ...clip, inSec: ni, startSec: Math.max(0, clip.startSec + (ni - clip.inSec)) }
+    return { tile, achieved: tile.startSec - clip.startSec }
+  }
+  const no = clampTo(effOut + deltaSec, clip.inSec + MIN_SOURCE_SEC, maxOut)
+  return { tile: { ...clip, outSec: no }, achieved: no - effOut }
 }
 
 /**

@@ -38,6 +38,7 @@ import {
   refKeys,
   tileOf,
   timelineTiles,
+  trimItemsBy,
   type SourceDuration
 } from '@/lib/links'
 import { startPointerDrag } from '@/lib/pointerDrag'
@@ -221,8 +222,8 @@ export function Timeline(): JSX.Element {
   const script = project?.script ?? EMPTY_SCRIPT
 
   const selectLayer = useUi((s) => s.selectLayer)
-  const selectCaption = useUi((s) => s.selectCaption)
   const selectAudio = useUi((s) => s.selectAudio)
+  const selectTile = useUi((s) => s.selectTile)
   const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
   const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
   // The FULL selection (a link group, or a Ctrl-click multi-selection). Every
@@ -527,7 +528,8 @@ export function Timeline(): JSX.Element {
       selectAudio(nid)
     } else {
       addVideoLayer(nid, id, startSec, asset.probe.durationSec, !!asset.probe.audio)
-      selectLayer(nid)
+      // A clip with audio lands as a LINKED pair — select the whole group.
+      selectTile(useProject.getState().project, { kind: 'layer', id: nid })
     }
   }
   const onDragOver = (e: ReactDragEvent): void => {
@@ -623,16 +625,64 @@ export function Timeline(): JSX.Element {
     })
   }
 
-  // Trim a layer block's left/right edge. Moving it is `startTileDrag`; trimming
-  // is per-tile (it changes ONE tile's duration), so it's disabled for a tile in
-  // a link group — the handles aren't rendered there.
+  /** The tiles an edge drag applies to: the pressed tile's link group, or the
+   *  whole multi-selection when the pressed tile is part of one. Same rule as a
+   *  move — one tile means the single-tile trim path below. */
+  const edgeRefs = (p: Project, ref: TimelineItemRef): TimelineItemRef[] =>
+    selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(p, ref)
+
+  /**
+   * Trim one edge of EVERY tile in `refs` by the same timeline delta
+   * (`trimItemsBy`), so a 3s trim takes 3s off each member — each converting the
+   * delta through its own speed profile / in-out points, and the group clamped to
+   * what its most constrained member can give. `edge0` is the pressed tile's
+   * current edge position, which is what the pointer (and snapping) follows.
+   */
+  const startGroupTrim = (
+    e: ReactPointerEvent,
+    before: Project,
+    refs: TimelineItemRef[],
+    mode: 'start' | 'end',
+    edge0: number
+  ): void => {
+    const startX = e.clientX
+    const sc = scrollRef.current
+    const startScroll = sc?.scrollLeft ?? 0
+    const targets = collectSnapTargets(refKeys(refs))
+    let dragged = false
+    let last: PointerEvent | null = null
+    let scroller: { setX: (x: number) => void; stop: () => void } | null = null
+    const onMove = (ev: PointerEvent): void => {
+      last = ev
+      scroller?.setX(ev.clientX)
+      const dx = ev.clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)
+      if (!dragged && Math.abs(dx) <= CLICK_SLOP) return
+      dragged = true
+      const snapped = snap(edge0 + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
+      useProject.getState().liveUpdate(() => trimItemsBy(before, refs, mode, snapped - edge0, srcDur))
+    }
+    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    startPointerDrag(onMove, () => {
+      scroller?.stop()
+      if (dragged) useProject.getState().commitLive(before)
+    })
+  }
+
+  // Trim a layer block's left/right edge. Moving it is `startTileDrag`. A tile in
+  // a link group (or a multi-selection) trims the whole set through
+  // `startGroupTrim`; alone, it takes the freeze/speed-aware single-tile path.
   const startLayerDrag = (e: ReactPointerEvent, layer: Layer, mode: 'start' | 'end'): void => {
     e.stopPropagation()
     e.preventDefault()
     setPlaying(false)
-    selectLayer(layer.id)
     const before = useProject.getState().project
     if (!before) return
+    const ref: TimelineItemRef = { kind: 'layer', id: layer.id }
+    const refs = edgeRefs(before, ref)
+    selectItems(refs, ref)
+    if (refs.length > 1) {
+      return startGroupTrim(e, before, refs, mode, mode === 'start' ? layer.startSec : layer.endSec)
+    }
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
@@ -684,9 +734,14 @@ export function Timeline(): JSX.Element {
   const startCaptionDrag = (e: ReactPointerEvent, seg: CaptionSegment, mode: 'start' | 'end'): void => {
     e.stopPropagation()
     e.preventDefault()
-    selectCaption(seg.id)
     const before = useProject.getState().project
     if (!before) return
+    const ref: TimelineItemRef = { kind: 'caption', id: seg.id }
+    const refs = edgeRefs(before, ref)
+    selectItems(refs, ref)
+    if (refs.length > 1) {
+      return startGroupTrim(e, before, refs, mode, mode === 'start' ? seg.startSec : seg.endSec)
+    }
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
@@ -723,16 +778,23 @@ export function Timeline(): JSX.Element {
   const startAudioDrag = (e: ReactPointerEvent, clip: AudioClip, mode: 'start' | 'end', maxOut: number): void => {
     e.stopPropagation()
     e.preventDefault()
-    selectAudio(clip.id)
     const before = useProject.getState().project
     if (!before) return
+    const { startSec, inSec } = clip
+    const effOut = effectiveOut(clip, maxOut)
+    const ref: TimelineItemRef = { kind: 'audio', id: clip.id }
+    const refs = edgeRefs(before, ref)
+    selectItems(refs, ref)
+    if (refs.length > 1) {
+      // The right edge sits at the clip's timeline end; the left edge at its start.
+      const edge0 = mode === 'start' ? startSec : startSec + (effOut - inSec)
+      return startGroupTrim(e, before, refs, mode, edge0)
+    }
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
     const deltaFor = (clientX: number): number =>
       (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
-    const { startSec, inSec } = clip
-    const effOut = effectiveOut(clip, maxOut)
     let last: PointerEvent | null = null
     let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
@@ -849,12 +911,8 @@ export function Timeline(): JSX.Element {
             S
           </span>
         )}
-        {!linked && (
-          <>
-            <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
-            <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
-          </>
-        )}
+        <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+        <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
       </div>
     )
   }
@@ -1066,12 +1124,8 @@ export function Timeline(): JSX.Element {
                   <span className="truncate text-[9px] font-medium text-emerald-100">
                     {linked ? '🔗' : 'CC'}&nbsp;&nbsp;{seg.text}
                   </span>
-                  {!linked && (
-                    <>
-                      <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
-                      <div onPointerDown={(e) => startCaptionDrag(e, seg, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
-                    </>
-                  )}
+                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
+                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
                 </div>
               )
             })}
@@ -1124,12 +1178,8 @@ export function Timeline(): JSX.Element {
                       N
                     </span>
                   )}
-                  {!linked && (
-                    <>
-                      <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
-                      <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
-                    </>
-                  )}
+                  <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+                  <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
                 </div>
               )
             })}

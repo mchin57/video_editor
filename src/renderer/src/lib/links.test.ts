@@ -18,6 +18,7 @@ import {
   splitItemsAt,
   splittableAt,
   timelineTiles,
+  trimItemsBy,
   unlinkItems
 } from './links'
 import { makeLayoutLayer } from '@shared/layouts'
@@ -204,6 +205,72 @@ describe('moveItemsBy', () => {
     const next = moveItemsBy(p, [L('L1'), C('C1')], 3)
     expect(next.captions.segments[0]).toMatchObject({ startSec: 4, endSec: 6 })
     expect(next.layers[1].startSec).toBe(0) // untouched
+  })
+})
+
+describe('trimItemsBy', () => {
+  it('takes the same time off every member’s edge, whatever their lengths', () => {
+    // L1 0..10, A1 2..8 — trimming 3s off the right takes 3s off each.
+    const next = trimItemsBy(pair(), [L('L1'), A('A1')], 'end', -3)
+    expect(next.layers[0].endSec).toBe(7)
+    expect((next.layers[0].content as VideoContent).outSec).toBeCloseTo(7, 5)
+    expect(next.audioClips[0].outSec).toBeCloseTo(3, 5) // 6s − 3s of source
+    expect(next.audioClips[0].startSec).toBe(2) // the left edge never moved
+  })
+
+  it('trims the left edge of every member, moving each start with its in-point', () => {
+    const next = trimItemsBy(pair(), [L('L1'), A('A1')], 'start', 2)
+    expect(next.layers[0].startSec).toBe(2)
+    expect((next.layers[0].content as VideoContent).inSec).toBeCloseTo(2, 5)
+    expect(next.audioClips[0].startSec).toBe(4)
+    expect(next.audioClips[0].inSec).toBeCloseTo(2, 5)
+  })
+
+  it('clamps the group to what its most constrained member can give', () => {
+    // A1 only has 6s of source, so a 7s right-trim stops at what BOTH can do:
+    // 6s − 0.1s minimum = 5.9s.
+    const next = trimItemsBy(pair(), [L('L1'), A('A1')], 'end', -7)
+    expect(next.audioClips[0].outSec).toBeCloseTo(0.1, 5)
+    expect(next.layers[0].endSec).toBeCloseTo(10 - 5.9, 5) // same delta, still in step
+  })
+
+  it('does not extend past a member’s source when the duration is known', () => {
+    // A1's source is 6s and it's fully used, so nothing can grow to the right.
+    const p = pair()
+    expect(trimItemsBy(p, [L('L1'), A('A1')], 'end', 5, () => 6)).toBe(p)
+  })
+
+  it('respects a 2× clip’s speed profile: the same TIMELINE delta, more source', () => {
+    // 10s of source at 2× plays for 5s; trimming 1s of timeline off the right
+    // gives back 2s of source, while the audio gives back 1s (it plays at 1×).
+    const base = layer('L1', 0, 10, 'g1')
+    const c: VideoContent = { ...(base.content as VideoContent), speed: 2 }
+    const p = project({
+      layers: [{ ...base, endSec: 5, content: c }],
+      audioClips: [audio('A1', 0, 6, 'g1')]
+    })
+    const next = trimItemsBy(p, [L('L1'), A('A1')], 'end', -1)
+    expect(next.layers[0].endSec).toBeCloseTo(4, 5)
+    expect((next.layers[0].content as VideoContent).outSec).toBeCloseTo(8, 5)
+    expect(next.audioClips[0].outSec).toBeCloseTo(5, 5)
+  })
+
+  it('keeps a minimum window on a text tile and no-ops for a zero delta', () => {
+    const p = project({ layers: [textLayer('T1', 0, 10, 'g1'), textLayer('T2', 0, 10, 'g1')] })
+    const next = trimItemsBy(p, [L('T1'), L('T2')], 'end', -20)
+    expect(next.layers.map((l) => l.endSec)).toEqual([0.2, 0.2])
+    expect(trimItemsBy(p, [L('T1'), L('T2')], 'end', 0)).toBe(p)
+    expect(trimItemsBy(p, [], 'end', -1)).toBe(p)
+  })
+
+  it('trims a caption member with the group', () => {
+    const p = project({
+      layers: [textLayer('T1', 0, 10, 'g1')],
+      segments: [caption('C1', 0, 10, 'g1')]
+    })
+    const next = trimItemsBy(p, [L('T1'), C('C1')], 'end', -4)
+    expect(next.layers[0].endSec).toBe(6)
+    expect(next.captions.segments[0].endSec).toBe(6)
   })
 })
 

@@ -317,7 +317,12 @@ export const useProject = create<ProjectState>((set, get) => {
 
     addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false) =>
       commit((p) => {
-        const layer = makeVideoLayer(id, mediaId, startSec, durationSec, { mute: hasAudio })
+        // A clip and the audio track pulled off it are ONE thing by default, so
+        // the pair lands LINKED: move/trim/split/delete either and the other
+        // follows (`lib/links.ts`). Unlink from the timeline bar to edit one.
+        const linkGroupId = hasAudio ? newId() : undefined
+        const base = makeVideoLayer(id, mediaId, startSec, durationSec, { mute: hasAudio })
+        const layer = linkGroupId ? { ...base, linkGroupId } : base
         const audioClips = hasAudio
           ? [
               ...p.audioClips,
@@ -331,6 +336,7 @@ export const useProject = create<ProjectState>((set, get) => {
                 fadeInSec: 0,
                 fadeOutSec: 0,
                 duck: false,
+                linkGroupId,
                 kind: 'extracted' as const
               }
             ]

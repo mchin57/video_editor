@@ -19,6 +19,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Font size input clamps on every keystroke** — the font size field in the Inspector prevents the user from clearing the value while typing (snaps back to the minimum on each change). Should allow any intermediate value including empty string while focused; clamp to the minimum only on `blur`. Fix: local draft string in component state on `onChange`, commit + clamp on `onBlur`.
 - [ ] **Edge-scroll speed accelerates instead of staying constant** — `edgeAutoScroll` in `Timeline.tsx` scales scroll speed with proximity to the edge. It should use a flat constant speed; proximity should only gate whether scrolling is active (within the ~40px zone) or not.
 - [ ] **Deleted files break the library until restart** — if a media file is deleted from disk via File Explorer while the app is running, the library doesn't detect the missing file. Unclear whether it crashes the entire library or just that one card. Two parts to fix: (1) **graceful missing-file handling** — when a media asset's original or proxy is not found on disk, show a "missing" badge on the library card and a placeholder on the timeline block instead of erroring; the rest of the library should continue working normally. (2) **optional file-watch** — use `fs.watch` or a periodic existence-check on import/project-load to detect deletions proactively and mark assets missing without requiring a restart. Missing assets should block export with a clear error listing which files need to be re-imported.
+- [ ] **Captions miss the first few words after a clip trim/split** — when captioning a clip (or audio clip) that has been trimmed or split, the first few spoken words are sometimes not captured. Suspected cause: the transcription is running against source-time word timestamps from whisper, but the mapping from source-time to the clip's new trimmed/split window may be off by the pre-trim offset — i.e. it may still be excluding words that fall before the *original* clip start rather than the *current* `inSec`, or rounding/truncating near the trim boundary. Needs investigation in the caption-audio pipeline (`CaptionAudioButton` → whichever service maps whisper's `transcript.json` word timestamps through clip `inSec`/`startSec` into timeline-time caption segments) — check the boundary condition where a word's timestamp is very close to `inSec` and confirm it isn't being excluded by a strict `>` instead of `>=`, and confirm re-transcription after a split re-anchors correctly to the new `inSec` rather than reusing a stale source-time window from before the cut.
 - [ ] **Preview can't play positive gain** — `HTMLMediaElement.volume` clamps at 1.0, so `gainDb > 0` is silent in preview but audible in the export (`volume=` filter). Needs WebAudio gain routing in `AudioFollower`/`VideoLayerView`. Noted in `docs/FFMPEG-NOTES.md` parity notes.
 
 ## Open
@@ -146,13 +147,26 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     split silently restarting a keyframed layer's motion at the cut).
   - **Delete** takes the whole group (the old open question, answered: one undo
     step, always both — a group is only ever removed as a whole).
-  - **Per-tile ops that can't translate are disabled while linked:** edge trim
-    handles (hidden), the Inspector's start/end + trim in/out, speed & speed
-    ramps, freeze holds, extract audio, split-on-silence — with a banner saying
-    why. A linked audio clip's **Start (s)** DOES work: for audio that's a move,
-    so it shifts the group. **Layout layers can't be linked at all.**
-  - _Not done:_ auto-linking a dropped clip to its extracted audio (today the
-    pair lands unlinked — link it by hand); ripple/roll trim across a group.
+  - **Trim** is a shared delta too (`trimItemsBy`): dragging either edge of any
+    member moves that edge on every member by the same TIMELINE delta, each
+    converting it through its own mapping (a 2× clip gives back 2s of source per
+    timeline second, an audio clip 1s; freeze holds stay wall-clock). The delta is
+    clamped to what the most constrained member can give — measured from the
+    `achieved` value the new per-kind `trimLayerEdge`/`trimCaptionEdge`/
+    `trimAudioEdge` helpers report — so a member running out of source can't
+    desync the group.
+  - **A clip added with audio lands LINKED** (`addVideoLayer`, so both a timeline
+    drop and the Library's ＋ PH / ＋ End): the video layer and the audio clip
+    extracted from it share a fresh group, and deleting the clip no longer orphans
+    its audio. `extractLayerAudio` deliberately doesn't link — extracting is how
+    you go get the audio to treat separately.
+  - **Per-tile ops that can't translate are still disabled while linked:** the
+    Inspector's absolute start/end + trim in/out, speed & speed ramps, freeze
+    holds, extract audio, split-on-silence — with a banner saying why. A linked
+    audio clip's **Start (s)** DOES work: for audio that's a move, so it shifts
+    the group. **Layout layers can't be linked at all.**
+  - _Not done:_ ripple/roll trim across a group (trimming a member's edge doesn't
+    push neighbouring tiles); no per-project toggle for the auto-link default.
   - _Unverified:_ not yet smoke-tested through `npm run dev` — the interaction
     guarantees are Playwright-covered against the real app, but the visuals
     (badge, banner, disabled states) and the manual items added to

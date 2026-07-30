@@ -24,6 +24,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const addLayer = useProject((s) => s.addLayer)
   const selectAudio = useUi((s) => s.selectAudio)
   const selectLayer = useUi((s) => s.selectLayer)
+  const selectTile = useUi((s) => s.selectTile)
   const onTrack = useProject((s) => s.project?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const removeMedia = useProject((s) => s.removeMedia)
 
@@ -39,7 +40,8 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
     if (!asset.proxyReady) return
     const id = crypto.randomUUID()
     addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio)
-    selectLayer(id)
+    // A clip with audio lands as a LINKED pair — select the whole group.
+    selectTile(useProject.getState().project, { kind: 'layer', id })
   }
   const addImageAt = (startSec: number): void => {
     if (!asset.proxyReady) return

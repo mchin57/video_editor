@@ -6,6 +6,9 @@ import {
   splitCaptionSegment,
   splitStaticLayer,
   splitVideoLayer,
+  trimAudioEdge,
+  trimCaptionEdge,
+  trimLayerEdge,
   trimVideoEnd,
   trimVideoStart
 } from './timeline'
@@ -285,6 +288,59 @@ describe('splitAudioClip', () => {
     expect(splitAudioClip(audio({ outSec: 0 }), 0, 0, makeId)).toBeNull()
     const res = splitAudioClip(audio({ outSec: 0 }), 4, 0, makeId)
     expect(res?.[0].outSec).toBe(4)
+  })
+})
+
+describe('edge trims report what they achieved', () => {
+  // `achieved` is what lets a group trim find the delta every member can absorb,
+  // so a trim cut short by the source/minimum window must say so.
+  it('gives back the full delta when there is room', () => {
+    const layer = makeVideoLayer('a', 'm', 0, 10) // 0..10, source 0..10
+    expect(trimLayerEdge(layer, 'end', -3, 10).achieved).toBeCloseTo(-3, 5)
+    expect(trimLayerEdge(layer, 'start', 2, 10).achieved).toBeCloseTo(2, 5)
+  })
+
+  it('reports the shortfall when the source runs out', () => {
+    const layer = makeVideoLayer('a', 'm', 0, 10)
+    // Growing the right edge past a 10s source achieves nothing.
+    expect(trimLayerEdge(layer, 'end', 5, 10).achieved).toBe(0)
+    // Shrinking past the minimum source span stops at 9.9s.
+    expect(trimLayerEdge(layer, 'end', -20, 10).achieved).toBeCloseTo(-9.9, 5)
+  })
+
+  it('converts the delta through a clip’s speed profile', () => {
+    const base = makeVideoLayer('a', 'm', 0, 10)
+    const layer: Layer = { ...base, endSec: 5, content: { ...(base.content as VideoContent), speed: 2 } }
+    const { tile, achieved } = trimLayerEdge(layer, 'end', -1, 10)
+    expect(achieved).toBeCloseTo(-1, 5) // one TIMELINE second...
+    expect((tile.content as VideoContent).outSec).toBeCloseTo(8, 5) // ...= 2s of source
+  })
+
+  it('keeps a minimum window on a text layer and a caption', () => {
+    const layer: Layer = {
+      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 0, y: 0, scale: 1,
+      content: { kind: 'text', text: 'x' } as Layer['content']
+    }
+    expect(trimLayerEdge(layer, 'end', -10).tile.endSec).toBe(0.2)
+    const seg: CaptionSegment = { id: 'C1', startSec: 0, endSec: 4, text: 'x', words: [], enabled: true }
+    expect(trimCaptionEdge(seg, 'end', -10).tile.endSec).toBe(0.1)
+    expect(trimCaptionEdge(seg, 'start', 10).tile.startSec).toBe(3.9)
+  })
+
+  it('moves an audio clip’s start with its in-point, and bounds its out by the source', () => {
+    const clip = audio({ startSec: 4, inSec: 2, outSec: 8 })
+    const left = trimAudioEdge(clip, 'start', 1, 10)
+    expect(left.tile).toMatchObject({ inSec: 3, startSec: 5 })
+    expect(left.achieved).toBe(1)
+    const right = trimAudioEdge(clip, 'end', 5, 10) // source ends at 10, out is 8
+    expect(right.tile.outSec).toBe(10)
+    expect(right.achieved).toBe(2)
+  })
+
+  it('falls back to the clip’s own out-point when the source duration is unknown', () => {
+    const clip = audio({ outSec: 6 })
+    expect(trimAudioEdge(clip, 'end', 3, 0).achieved).toBe(0) // can't grow past 6
+    expect(trimAudioEdge(clip, 'end', -2, 0).tile.outSec).toBe(4)
   })
 })
 

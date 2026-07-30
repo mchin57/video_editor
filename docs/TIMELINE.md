@@ -30,8 +30,9 @@ item, move it into the guarded table below.
 | Keyframes survive a split — right half re-based, interpolated transform pinned at the seam, full opacity stays absent (video + static layers) | `lib/timeline.test.ts` |
 | Block move drag + right-edge trim drag on the real timeline (incl. frozen-clip regression) | `e2e/freezeTrim.spec.ts` |
 | S-keybind split at the playhead | `e2e/freezeTrim.spec.ts` |
-| Link groups — expand/link/unlink/prune, shared-delta move (offsets + durations kept, clamp on the earliest tile), playhead split incl. the uncut-member and re-grouping rules, group delete | `lib/links.test.ts` |
-| Linked tiles on the real timeline — Ctrl-click multi-select → 🔗 Link, group drag keeps the offset, clamp at 0, S/✂ splits every crossed member (and only those, **incl. a text tile**), ⛓ Unlink, click narrows a multi-selection, Del removes the group in one undo step, trim handles hidden while linked | `e2e/link.spec.ts` |
+| Link groups — expand/link/unlink/prune, shared-delta move (offsets + durations kept, clamp on the earliest tile), shared-delta TRIM (per-member mapping incl. a 2× clip, clamped to the most constrained member), playhead split incl. the uncut-member and re-grouping rules, group delete | `lib/links.test.ts` |
+| Per-tile edge trims report the delta they `achieved` (source limits, minimum window, speed conversion) — what the group clamp is built on | `lib/timeline.test.ts` |
+| Linked tiles on the real timeline — a clip with audio is **added linked**, edge drags trim the whole group (from either side), Ctrl-click multi-select → 🔗 Link, group drag keeps the offset, clamp at 0, S/✂ splits every crossed member (and only those, **incl. a text tile**), ⛓ Unlink restores independent move AND trim, click narrows a multi-selection, Del removes the group in one undo step | `e2e/link.spec.ts` |
 | T/Ctrl+Z/Ctrl+Shift+Z/Delete keybind flow | `e2e/keybinds.spec.ts` |
 | OS-file import overlay can't get stuck (depth counter; the Timeline drop-ring shares the hook) | `e2e/dropOverlay.spec.ts` |
 
@@ -62,11 +63,15 @@ it can be deleted silently). Push it back into `lib/`.
 - **Caption gutter bubble:** clicking it selects the lane-wide caption style.
 - **Link groups (visuals + the paths e2e can't reach):** the 🔗 badge and
   `· linked` tooltip on a linked tile; the Inspector's "Linked to N other tiles"
-  banner with its greyed-out timing controls (start/end, trim in/out, speed,
+  banner with its greyed-out re-timing controls (start/end, trim in/out, speed,
   freeze, extract audio, split on silence); a linked audio clip's **Start (s)**
   field moving the whole group; Ctrl-clicking a **layout** tile selecting it alone
   (layouts can't be linked); selecting a linked layer on the **stage** or in the
   **Layers panel** highlighting its whole group in the timeline.
+- **Dropping a real clip with audio:** it lands as a linked pair (both tiles show
+  🔗 and highlight together), trimming either edge trims both, and A/V stays in
+  sync on playback after a group trim/move — the thing only real media can tell
+  you. A clip with no audio track still lands as a single unlinked tile.
 - **Persistence:** lane heights/collapse (`timelineView`) and zoom
   (`timelinePps`) survive an app reload.
 - **Container:** the Timeline is a dockview panel (`lib/dockLayout.ts` manifest);
