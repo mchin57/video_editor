@@ -24,6 +24,10 @@ export const subtleBtnCls = 'rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-40
 /** Destructive button (delete/remove). */
 export const dangerBtnCls = 'rounded bg-rose-500/20 px-2 py-1.5 text-xs text-rose-300 hover:bg-rose-500/30'
 
+/** Appended to an input/button disabled for a STRUCTURAL reason (a tile in a
+ *  link group, a re-timed clip) — one home for the greyed-out + not-allowed look. */
+export const disabledCls = 'disabled:cursor-not-allowed disabled:opacity-40'
+
 /** On/off pill (segmented toggle, flip-state button). */
 export const toggleCls = (on: boolean): string =>
   `rounded px-2 py-1.5 text-xs ${on ? 'bg-sky-500 text-white' : 'bg-white/10 text-zinc-200 hover:bg-white/20'}`

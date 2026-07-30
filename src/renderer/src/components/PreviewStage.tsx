@@ -577,7 +577,9 @@ export function PreviewStage(): JSX.Element {
   const startLayerMove = (e: ReactPointerEvent, layer: Layer): void => {
     e.stopPropagation()
     e.preventDefault()
-    useUi.getState().selectLayer(layer.id)
+    // Picks the whole link group, like the timeline — a group is never partly
+    // selected, or the next timeline drag would move one member on its own.
+    useUi.getState().selectTile(useProject.getState().project, { kind: 'layer', id: layer.id })
     const stage = stageRef.current
     if (!stage) return
     const scale = LOGICAL.width / stage.getBoundingClientRect().width

@@ -29,6 +29,25 @@ export interface CropRect {
 }
 
 /**
+ * Which array a timeline tile lives in. Ids are only unique within their own
+ * array, so anything that treats the timeline as ONE surface (selection, link
+ * groups) has to carry the kind alongside the id.
+ */
+export type TimelineItemKind = 'layer' | 'caption' | 'audio'
+
+/**
+ * A reference to one timeline tile — the unit of selection and of link groups.
+ * The tile types themselves stay in their own arrays (`layers` /
+ * `captions.segments` / `audioClips`); this is the common handle the timeline
+ * uses to move, split, delete and link them uniformly. Group logic lives in
+ * `renderer/lib/links.ts`.
+ */
+export interface TimelineItemRef {
+  kind: TimelineItemKind
+  id: string
+}
+
+/**
  * A crop expressed as 0..1 fractions of the element it applies to (rather than
  * source pixels). Used for image layers, where the on-disk display PNG is capped
  * at 1920px so a pixel rect would be ambiguous; fractions stay correct in preview
@@ -340,6 +359,9 @@ export interface Layer {
    * text layers ignore them (they animate via `TextContent.animation`).
    */
   keyframes?: LayerKeyframe[]
+  /** Link group this tile belongs to (absent = unlinked). @see linkGroupId docs
+   *  on `CaptionSegment`/`AudioClip` — one id space across all three arrays. */
+  linkGroupId?: string
   content: LayerContent
 }
 
@@ -383,6 +405,17 @@ export interface CaptionSegment {
   /** Per-segment style override. When set, this block is exempt from the lane-wide
    *  caption style and uses this instead; absent/null = follow the global style. */
   style?: CaptionStyle | null
+  /**
+   * LINK GROUP this tile belongs to (absent = unlinked). Tiles sharing an id
+   * move, split and delete together and are always selected as a whole — see
+   * `renderer/lib/links.ts`, the single home for that logic. The id space is
+   * shared by `Layer`, `CaptionSegment` and `AudioClip` (a group typically spans
+   * lanes, e.g. a clip + its extracted audio). Layout layers are never members.
+   * A group with fewer than two surviving members is treated as unlinked and
+   * pruned (`pruneLinkGroups`), so a dangling id can never change behavior.
+   * Nothing downstream of the timeline reads this — export is unaffected.
+   */
+  linkGroupId?: string
 }
 
 export interface CaptionsConfig {
@@ -431,6 +464,8 @@ export interface AudioClip {
   denoise?: boolean
   /** Skip this clip when captioning the audio lane (e.g. a music bed). */
   excludeFromCaptions?: boolean
+  /** Link group this tile belongs to (absent = unlinked). @see `CaptionSegment.linkGroupId`. */
+  linkGroupId?: string
   kind: AudioKind
 }
 
@@ -543,7 +578,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 15,
+    version: 16,
     preset: 'reel',
     layers: [],
     captions: {
@@ -778,7 +813,10 @@ export function migrateProject(raw: unknown): Project {
   // v14 adds the `layout` layer content kind (multi-clip split screen/panels) —
   // purely additive, old projects simply have none.
   // v15 adds absence-tolerant keyframe `opacity` (absent = 1, no transform).
-  if (typeof p.version !== 'number' || p.version < 15) p.version = 15
+  // v16 adds absence-tolerant `linkGroupId` on layers/captions/audio clips
+  // (absent = unlinked) — old projects simply have no link groups. Groups left
+  // with a single member behave as unlinked, so no data transform is needed.
+  if (typeof p.version !== 'number' || p.version < 16) p.version = 16
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

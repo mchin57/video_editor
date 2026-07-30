@@ -95,34 +95,19 @@ export default function App(): JSX.Element {
         e.preventDefault()
         project.redo()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Delete whatever is selected, matching the Inspector's priority.
-        const ui = useUi.getState()
-        if (ui.selectedLayerId) {
+        // Delete the whole selection (one tile, or every tile of a link group).
+        const { selection } = useUi.getState()
+        if (selection.length) {
           e.preventDefault()
-          project.removeLayer(ui.selectedLayerId)
-        } else if (ui.selectedCaptionId) {
-          e.preventDefault()
-          project.removeCaption(ui.selectedCaptionId)
-          ui.selectCaption(null)
-        } else if (ui.selectedAudioId) {
-          e.preventDefault()
-          project.removeAudioClip(ui.selectedAudioId)
-          ui.selectAudio(null)
+          project.removeItems(selection)
         }
       } else if (e.key.toLowerCase() === 's') {
-        const t = usePlayback.getState().time
-        const ui = useUi.getState()
-        if (ui.selectedAudioId) {
-          // An audio clip is selected — split it at the playhead.
-          const a = project.project?.audioClips.find((x) => x.id === ui.selectedAudioId)
-          if (a) {
-            const dur = assetsRef.current.find((m) => m.id === a.mediaId)?.probe.durationSec ?? a.outSec
-            project.splitAudioAt(a.id, t, dur)
-          }
-        } else if (ui.selectedLayerId) {
-          // A video layer is selected — split it at the playhead.
-          const l = project.project?.layers.find((x) => x.id === ui.selectedLayerId)
-          if (l && l.content.kind === 'video') project.splitLayerAt(l.id, t)
+        // Split the selection at the playhead — every selected tile it crosses.
+        const { selection } = useUi.getState()
+        if (selection.length) {
+          project.splitItemsAt(selection, usePlayback.getState().time, (mediaId) =>
+            assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
+          )
         }
       } else if (e.key.toLowerCase() === 't') {
         const id = crypto.randomUUID()

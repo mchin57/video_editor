@@ -24,7 +24,7 @@ Refactor for the per-theme history.)
 | Concept | Home | Use instead of |
 | --- | --- | --- |
 | `Field`, `Row`, `Check` | `components/ui.tsx` | re-declaring a labelled `<label>`/value-row/checkbox per component |
-| `inputCls`, `colorCls`, `btnCls`, `subtleBtnCls`, `dangerBtnCls`, `toggleCls(on)` | `components/ui.tsx` | pasting the `rounded bg-white/10 …` / rose / color-input class strings inline |
+| `inputCls`, `colorCls`, `btnCls`, `subtleBtnCls`, `dangerBtnCls`, `toggleCls(on)`, `disabledCls` | `components/ui.tsx` | pasting the `rounded bg-white/10 …` / rose / color-input class strings inline. `disabledCls` is the greyed-out + not-allowed pair for a control disabled for a STRUCTURAL reason (linked tile, re-timed clip) |
 | `startPointerDrag(onMove, onUp?)` | `lib/pointerDrag.ts` | hand-rolling `window.addEventListener('pointermove'/'pointerup')` + cleanup |
 | `startDragWithUndo((ev, before) => …)` | `lib/pointerDrag.ts` | the snapshot-project → liveUpdate → `commitLive(before)` dance for canvas drags |
 | `OverrideToggle`, `StabilizeSliders` | `components/Inspector.tsx` | re-rendering the Default/On/Off segmented control or the shakiness/smoothing sliders a second time |
@@ -34,6 +34,8 @@ Refactor for the per-theme history.)
 | `LayoutPresetPreview`, `LayoutPickerModal` | `components/LayoutPresetPreview.tsx` / `LayoutPickerModal.tsx` | drawing a layout arrangement (cells normalised from `FRAME` → the current aspect) or a preset gallery inline. The picker adds a layout (or reshapes the selected one via `activePresetId`); the preview takes a `thumb(i)` render-prop to fill assigned cells |
 | `LayoutCells` | `components/LayoutCells.tsx` | the per-cell editor (Inspector ▸ Layout): a "Change layout" button (reopens `LayoutPickerModal` to reshape), assign/change/clear a clip, a drop target for the `application/x-reel-asset` payload (overwrites), and the `ClipCard` preview + trim/mute. The Format menu keeps only aspect ratio + "Add layout" |
 | `trimVideoStart` / `trimVideoEnd` / `splitVideoLayer` | `lib/timeline.ts` | inlining timeline↔source math in a trim/split handler — freeze holds make the mapping **nonlinear**; these keep the window invariant `endSec − startSec = (out − in) + Σ holds` |
+| `timelineTiles`/`tileOf`, `expandGroup`/`expandSelection`, `canLinkItems`/`linkItems`/`unlinkItems`, `moveItemsBy`, `splittableAt`/`canSplitItems`/`splitItemsAt`, `removeItems`, `pruneLinkGroups` | `lib/links.ts` | treating the timeline's three arrays as three things. **`timelineTiles` is the tile "base class"** — one flat `{ref, startSec, endSec, linkGroupId, linkable, splittable}` record per layer/caption/audio clip, which is what lets one code path select, move, split, delete and link them uniformly. Anything operating on "whatever tiles the user picked" belongs here, not inlined in `Timeline.tsx` (see LINK GROUPS below) |
+| `useUi().selection` + `selectItems(refs, primary)` / `selectTile(project, ref)` | `state/ui.ts` | reading `selected{Layer,Caption,Audio}Id` to decide what an action applies to. Those three are the **primary** (what the Inspector edits); `selection` is every selected tile. Selecting a tile outside the timeline goes through `selectTile` so it picks the whole link group |
 | `packRows`, `layoutLanes`, `resizeRowH` | `lib/lanes.ts` | computing timeline lane rows / vertical stack (top/height/collapse) / resize height **inline** in `Timeline.tsx`, where a refactor can delete it untested (see `docs/TIMELINE.md`) |
 | `DOCK_PANELS`, `buildDefaultLayout`, `placementFor`, `load/saveDockLayout`, `load/save/clearDefaultLayout` | `lib/dockLayout.ts` | hardcoding panel arrangement/persistence anywhere — the manifest drives the dock (see below) |
 | `applyLayout(api, layout)` | `state/dock.ts` | re-rolling the restore-or-fall-back-to-built-in dance; startup and Reset both go through it |
@@ -42,6 +44,37 @@ Refactor for the per-theme history.)
 `Timeline.tsx`'s block drags use `startPointerDrag` with the `edgeAutoScroll` rAF
 loop stopped in the `onUp` callback. _Not yet converted:_ `Popout.tsx`,
 `LayersPanel.tsx` (small, no edge-scroll) — fold in when next touched.
+
+### LINK GROUPS — tiles that behave as one
+
+`Layer`/`CaptionSegment`/`AudioClip` each carry an optional **`linkGroupId`**
+(one id space across all three arrays; schema v16). Tiles sharing one are
+selected, moved, split and deleted together. All of that logic lives in
+**`lib/links.ts`** — the renderer is the only consumer, since the exporter sees
+only final positions.
+
+The rules the module enforces (and `lib/links.test.ts` pins):
+
+- **Selection is all-or-nothing** — `expandGroup`/`expandSelection`. Every place
+  a tile is picked (timeline press, stage, Layers panel) expands first.
+- **Movement is one shared delta** — `moveItemsBy` shifts each member by the same
+  amount and clamps the SET on its earliest tile, so relative offsets and each
+  tile's own duration are preserved exactly. The timeline drag applies it to the
+  pre-drag snapshot every pointermove (idempotent), then commits once.
+- **Splitting happens at the playhead, per member** — `splitItemsAt` cuts the
+  members the playhead crosses and leaves the ones it misses whole. The
+  right-hand halves get a NEW group id so the two sides of a cut are independent
+  afterwards. `canSplitItems` (the toolbar's disabled state) and the split share
+  `splittableAt`, and a test asserts the predicate and the operation agree.
+- **A group with <2 surviving members is unlinked** — `pruneLinkGroups` runs after
+  any structural edit, so a dangling id can never change behavior.
+- **Layout layers are never members** (`timelineTiles().linkable`), and anything
+  that would re-time ONE member (edge trim, speed, freezes, extract audio, split
+  on silence, the Inspector's start/end/trim fields) is disabled while linked.
+
+When adding a timeline operation, ask whether it applies to `selection` (link it
+through `lib/links.ts`) or to the primary tile only (per-tile looks: crop, colour,
+gain, style) — and if it re-times a single tile, disable it for linked tiles.
 
 ### Dockable panels — how to add one
 

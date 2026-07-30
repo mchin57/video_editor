@@ -8,6 +8,7 @@ import type {
   Project,
   ScriptLine,
   TextContent,
+  TimelineItemRef,
   VideoContent
 } from '@shared/project'
 import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
@@ -22,9 +23,11 @@ import {
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import { applyLayoutPreset, makeLayoutLayer } from '@shared/layouts'
 import type { PresetId } from '@shared/export'
-import { extractAudioPieces, splitAudioClip, splitVideoLayer } from '@/lib/timeline'
+import { extractAudioPieces } from '@/lib/timeline'
+// Namespaced: the group ops keep the same names as the actions that expose them.
+import * as links from '@/lib/links'
 import { replaceAt, updateById } from '@/lib/arrays'
-import { useUi } from '@/state/ui'
+import { primaryRef, useUi } from '@/state/ui'
 import {
   loadProject,
   openProjectFile,
@@ -121,6 +124,25 @@ interface ProjectState {
   reorderLayers: (visibleFrontToBack: string[]) => void
   /** Split a video layer at an absolute timeline time. */
   splitLayerAt: (id: string, atSec: number) => void
+
+  // --- Link groups (tiles that move / split / delete as one; lib/links.ts) ---
+  /** Link every (linkable) tile in `refs` into one group, merging the groups
+   *  they already belong to. Layout layers are never linked. */
+  linkItems: (refs: TimelineItemRef[]) => void
+  /** Break every link group represented in `refs`, member tiles included. */
+  unlinkItems: (refs: TimelineItemRef[]) => void
+  /** Delete every tile in `refs` (any lane) as one undo step. */
+  removeItems: (refs: TimelineItemRef[]) => void
+  /** Shift every tile in `refs` by `delta` seconds as one undo step, preserving
+   *  their relative offsets and durations (the timeline drag applies the same
+   *  helper live, then commits once). */
+  moveItemsBy: (refs: TimelineItemRef[], delta: number) => void
+  /**
+   * Split every tile in `refs` that the playhead at `atSec` crosses — tiles it
+   * misses are left whole. `srcDur` resolves an audio source's duration (only
+   * whole-source clips need it). The right-hand halves become their own group.
+   */
+  splitItemsAt: (refs: TimelineItemRef[], atSec: number, srcDur: links.SourceDuration) => void
   /** Pull a video layer's audio onto the audio track and mute the layer. */
   extractLayerAudio: (id: string) => void
   /** Set a video layer's constant playback speed, recomputing its timeline end
@@ -345,7 +367,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     removeLayer: (id) => {
-      commit((p) => ({ ...p, layers: p.layers.filter((l) => l.id !== id) }))
+      commit((p) => links.removeItems(p, [{ kind: 'layer', id }]))
       if (useUi.getState().selectedLayerId === id) useUi.getState().selectLayer(null)
     },
 
@@ -354,14 +376,32 @@ export const useProject = create<ProjectState>((set, get) => {
     reorderLayers: (visibleFrontToBack) =>
       commit((p) => ({ ...p, layers: applyVisibleOrder(p.layers, [...visibleFrontToBack].reverse()) })),
 
-    splitLayerAt: (id, atSec) =>
-      commit((p) => {
-        const idx = p.layers.findIndex((l) => l.id === id)
-        if (idx < 0) return p
-        const res = splitVideoLayer(p.layers[idx], atSec, newId)
-        if (!res) return p
-        return { ...p, layers: replaceAt(p.layers, idx, 1, res[0], res[1]) }
-      }),
+    // Both single-tile splits go through the group path so there is exactly one
+    // split implementation (a lone tile is just a group of one).
+    splitLayerAt: (id, atSec) => get().splitItemsAt([{ kind: 'layer', id }], atSec, () => 0),
+
+    linkItems: (refs) => commit((p) => links.linkItems(p, refs, newId)),
+
+    unlinkItems: (refs) => commit((p) => links.unlinkItems(p, refs)),
+
+    removeItems: (refs) => {
+      commit((p) => links.removeItems(p, refs))
+      useUi.getState().clearSelection() // everything selected is gone
+    },
+
+    moveItemsBy: (refs, delta) => commit((p) => links.moveItemsBy(p, refs, delta)),
+
+    splitItemsAt: (refs, atSec, srcDur) => {
+      commit((p) => links.splitItemsAt(p, refs, atSec, srcDur, newId))
+      // A split re-groups the two sides, so the selection has to re-resolve
+      // around the tile the user actually clicked (its left half keeps its id).
+      const p = get().project
+      const ui = useUi.getState()
+      const primary = primaryRef(ui)
+      if (p && primary && links.tileOf(p, primary)) {
+        ui.selectItems(links.expandGroup(p, primary), primary)
+      }
+    },
 
     setVideoSpeed: (id, speed) =>
       commit((p) =>
@@ -532,11 +572,7 @@ export const useProject = create<ProjectState>((set, get) => {
         captions: { ...p.captions, segments: updateById(p.captions.segments, id, (s) => ({ ...s, ...patch })) }
       })),
 
-    removeCaption: (id) =>
-      commit((p) => ({
-        ...p,
-        captions: { ...p.captions, segments: p.captions.segments.filter((s) => s.id !== id) }
-      })),
+    removeCaption: (id) => commit((p) => links.removeItems(p, [{ kind: 'caption', id }])),
 
     setCaptionStyle: (patch) =>
       commit((p) => ({ ...p, captions: { ...p.captions, style: { ...p.captions.style, ...patch } } })),
@@ -567,8 +603,7 @@ export const useProject = create<ProjectState>((set, get) => {
     updateAudioClip: (id, patch) =>
       commit((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => ({ ...a, ...patch })) })),
 
-    removeAudioClip: (id) =>
-      commit((p) => ({ ...p, audioClips: p.audioClips.filter((a) => a.id !== id) })),
+    removeAudioClip: (id) => commit((p) => links.removeItems(p, [{ kind: 'audio', id }])),
 
     setDenoiseDefault: (on) => commit((p) => (p.denoiseDefault === on ? p : { ...p, denoiseDefault: on })),
 
@@ -592,13 +627,7 @@ export const useProject = create<ProjectState>((set, get) => {
       }),
 
     splitAudioAt: (audioId, atSec, sourceDurationSec) =>
-      commit((p) => {
-        const idx = p.audioClips.findIndex((a) => a.id === audioId)
-        if (idx < 0) return p
-        const res = splitAudioClip(p.audioClips[idx], atSec, sourceDurationSec, newId)
-        if (!res) return p
-        return { ...p, audioClips: replaceAt(p.audioClips, idx, 1, res[0], res[1]) }
-      }),
+      get().splitItemsAt([{ kind: 'audio', id: audioId }], atSec, () => sourceDurationSec),
 
     undo: () => {
       const { past, project, future } = get()

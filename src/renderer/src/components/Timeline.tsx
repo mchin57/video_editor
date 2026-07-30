@@ -7,7 +7,7 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, CaptionSegment, Layer, ScriptLine } from '@shared/project'
+import type { AudioClip, CaptionSegment, Layer, Project, ScriptLine, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
 import { assetKind } from '@shared/media'
@@ -27,6 +27,19 @@ import {
   type Span
 } from '@/lib/lanes'
 import { useDragDepth } from '@/lib/dragDepth'
+import {
+  canLinkItems,
+  canSplitItems,
+  canUnlinkItems,
+  expandGroup,
+  expandSelection,
+  moveItemsBy,
+  refKey,
+  refKeys,
+  tileOf,
+  timelineTiles,
+  type SourceDuration
+} from '@/lib/links'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
@@ -36,6 +49,8 @@ import { thumbUrl, waveformUrl } from '@/ipc/client'
 const DEFAULT_PPS = 48
 const HOOK_SEC = 3
 const SNAP_PX = 7
+/** Pointer slop (px) below which a press+release counts as a click, not a drag. */
+const CLICK_SLOP = 2
 const GUTTER = 84
 const RULER_H = 20
 const ROW_H = 26
@@ -205,23 +220,26 @@ export function Timeline(): JSX.Element {
   const audioClips = project?.audioClips ?? EMPTY_AUDIO
   const script = project?.script ?? EMPTY_SCRIPT
 
-  const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectLayer = useUi((s) => s.selectLayer)
-  const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectCaption = useUi((s) => s.selectCaption)
-  const selectedAudioId = useUi((s) => s.selectedAudioId)
   const selectAudio = useUi((s) => s.selectAudio)
   const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
   const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
+  // The FULL selection (a link group, or a Ctrl-click multi-selection). Every
+  // tile in it highlights and moves together; `selected*Id` is just the primary.
+  const selection = useUi((s) => s.selection)
+  const selectItems = useUi((s) => s.selectItems)
+  const selKeys = useMemo(() => refKeys(selection), [selection])
+  const isSelected = (kind: TimelineItemRef['kind'], id: string): boolean =>
+    selKeys.has(refKey({ kind, id }))
 
   const addLayer = useProject((s) => s.addLayer)
   const addVideoLayer = useProject((s) => s.addVideoLayer)
   const addAudioClip = useProject((s) => s.addAudioClip)
-  const removeLayer = useProject((s) => s.removeLayer)
-  const removeCaption = useProject((s) => s.removeCaption)
-  const removeAudioClip = useProject((s) => s.removeAudioClip)
-  const splitLayerAt = useProject((s) => s.splitLayerAt)
-  const splitAudioAt = useProject((s) => s.splitAudioAt)
+  const removeItems = useProject((s) => s.removeItems)
+  const splitItemsAt = useProject((s) => s.splitItemsAt)
+  const linkItems = useProject((s) => s.linkItems)
+  const unlinkItems = useProject((s) => s.unlinkItems)
   const canUndo = useProject((s) => s.past.length > 0)
   const canRedo = useProject((s) => s.future.length > 0)
   const undo = useProject((s) => s.undo)
@@ -375,20 +393,29 @@ export function Timeline(): JSX.Element {
     })
   }
 
-  // Snap targets: layer + audio boundaries, playhead, 0, end.
-  const snapTargets = useMemo(() => {
+  // Snap targets: layer + audio boundaries, playhead, 0, end. `skip` (ref keys)
+  // drops the tiles currently being dragged, so a moving group never snaps to
+  // its own members.
+  const collectSnapTargets = (skip?: Set<string>): number[] => {
     const t = new Set<number>([0, total])
     for (const l of layers) {
+      if (skip?.has(refKey({ kind: 'layer', id: l.id }))) continue
       t.add(l.startSec)
       t.add(l.endSec)
     }
     for (const a of audioClips) {
+      if (skip?.has(refKey({ kind: 'audio', id: a.id }))) continue
       t.add(a.startSec)
       t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
     }
     return [...t]
-  }, [layers, audioClips, assetById, total])
+  }
+  const snapTargets = useMemo(() => collectSnapTargets(), [layers, audioClips, assetById, total])
   const snapSec = (v: number): number => snap(v, snapTargets, SNAP_PX / pxPerSec)
+
+  /** Source duration of a library asset (0 = unknown, the convention the split
+   *  helpers use) — only whole-source audio clips need it. */
+  const srcDur: SourceDuration = (mediaId) => assetById.get(mediaId)?.probe.durationSec ?? 0
 
   // Ctrl/Cmd + scroll = horizontal zoom anchored at the cursor.
   useEffect(() => {
@@ -509,8 +536,97 @@ export function Timeline(): JSX.Element {
     e.dataTransfer.dropEffect = 'copy'
   }
 
-  // Drag a layer block: move in time, or trim its left/right edge.
-  const startLayerDrag = (e: ReactPointerEvent, layer: Layer, mode: 'move' | 'start' | 'end'): void => {
+  /**
+   * Press on ANY timeline tile (layer / caption / audio) — the one entry point
+   * for selecting and moving a tile, so linked tiles behave identically in every
+   * lane. Ctrl/Cmd-click toggles the tile's group in the multi-selection without
+   * dragging; a plain press selects (whole group) and starts a group move.
+   */
+  const startTileDrag = (e: ReactPointerEvent, ref: TimelineItemRef): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    const before = useProject.getState().project
+    if (!before) return
+    const tile = tileOf(before, ref)
+    if (!tile) return
+    if ((e.ctrlKey || e.metaKey) && tile.linkable) {
+      toggleSelected(before, ref)
+      return
+    }
+    setPlaying(false)
+    // Grabbing something that's already part of a multi-selection drags the whole
+    // set; otherwise the press selects this tile's group (or just this tile).
+    const refs = selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(before, ref)
+    selectItems(refs, ref)
+    startGroupMove(e, before, refs, ref)
+  }
+
+  /** Ctrl/Cmd-click: add this tile's whole group to the selection, or drop it if
+   *  it's already in there. Layout layers never join a multi-selection (they
+   *  can't be linked), so they fall through to a plain select. */
+  const toggleSelected = (p: Project, ref: TimelineItemRef): void => {
+    const group = expandGroup(p, ref)
+    const groupKeys = refKeys(group)
+    if (selKeys.has(refKey(ref))) {
+      const rest = selection.filter((r) => !groupKeys.has(refKey(r)))
+      if (rest.length === 0) useUi.getState().clearSelection()
+      else selectItems(rest, rest[rest.length - 1])
+      return
+    }
+    selectItems(expandSelection(p, [...selection, ...group]), ref)
+  }
+
+  /**
+   * Drag the whole selection in time: ONE shared delta applied to every tile
+   * (`moveItemsBy`), so relative offsets and each tile's own duration survive
+   * exactly — the earliest tile clamps at 0 and the rest keep their spacing.
+   * Snapping follows the tile you grabbed, with the moving tiles' own edges
+   * excluded so the group can't snap to itself.
+   */
+  const startGroupMove = (
+    e: ReactPointerEvent,
+    before: Project,
+    refs: TimelineItemRef[],
+    primary: TimelineItemRef
+  ): void => {
+    const startSec = tileOf(before, primary)?.startSec ?? 0
+    const startX = e.clientX
+    const sc = scrollRef.current
+    const startScroll = sc?.scrollLeft ?? 0
+    const targets = collectSnapTargets(refKeys(refs))
+    let dragged = false
+    let last: PointerEvent | null = null
+    let scroller: { setX: (x: number) => void; stop: () => void } | null = null
+    const onMove = (ev: PointerEvent): void => {
+      last = ev
+      scroller?.setX(ev.clientX)
+      const dx = ev.clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)
+      if (!dragged && Math.abs(dx) <= CLICK_SLOP) return // still a click, not a drag
+      dragged = true
+      const snapped = snap(startSec + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
+      // Always recomputed from the pre-drag snapshot, so the delta can't accumulate.
+      useProject.getState().liveUpdate(() => moveItemsBy(before, refs, snapped - startSec))
+    }
+    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    startPointerDrag(onMove, () => {
+      scroller?.stop()
+      if (!dragged) {
+        // Released without moving = a plain click: collapse the selection onto
+        // the tile that was clicked (its group). Without this a Ctrl-built
+        // multi-selection could never be narrowed back down — pressing a member
+        // has to keep the whole set alive so the set can be dragged.
+        const p = useProject.getState().project
+        if (p) selectItems(expandGroup(p, primary), primary)
+        return
+      }
+      useProject.getState().commitLive(before)
+    })
+  }
+
+  // Trim a layer block's left/right edge. Moving it is `startTileDrag`; trimming
+  // is per-tile (it changes ONE tile's duration), so it's disabled for a tile in
+  // a link group — the handles aren't rendered there.
+  const startLayerDrag = (e: ReactPointerEvent, layer: Layer, mode: 'start' | 'end'): void => {
     e.stopPropagation()
     e.preventDefault()
     setPlaying(false)
@@ -523,8 +639,7 @@ export function Timeline(): JSX.Element {
     const deltaFor = (clientX: number): number =>
       (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, endSec } = layer
-    const dur = endSec - startSec
-    const srcDur =
+    const srcOut =
       layer.content.kind === 'video'
         ? assetById.get(layer.content.mediaId)?.probe.durationSec ?? layer.content.outSec
         : 0
@@ -538,10 +653,6 @@ export function Timeline(): JSX.Element {
         ...p,
         layers: p.layers.map((l) => {
           if (l.id !== layer.id) return l
-          if (mode === 'move') {
-            const ns = Math.max(0, snapSec(startSec + d))
-            return { ...l, startSec: ns, endSec: ns + dur }
-          }
           if (mode === 'start') {
             if (layer.content.kind === 'video') {
               // Freeze-aware: drops holds trimmed past and keeps the window
@@ -556,7 +667,7 @@ export function Timeline(): JSX.Element {
           // end
           if (layer.content.kind === 'video') {
             const c = layer.content
-            return trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, d), c.inSec + 0.1, srcDur))
+            return trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, d), c.inSec + 0.1, srcOut))
           }
           return { ...l, endSec: Math.max(l.startSec + 0.2, snapSec(endSec + d)) }
         })
@@ -569,7 +680,8 @@ export function Timeline(): JSX.Element {
     })
   }
 
-  const startCaptionDrag = (e: ReactPointerEvent, seg: CaptionSegment, mode: 'move' | 'start' | 'end'): void => {
+  // Trim a caption block's left/right edge (moving it is `startTileDrag`).
+  const startCaptionDrag = (e: ReactPointerEvent, seg: CaptionSegment, mode: 'start' | 'end'): void => {
     e.stopPropagation()
     e.preventDefault()
     selectCaption(seg.id)
@@ -581,7 +693,6 @@ export function Timeline(): JSX.Element {
     const deltaFor = (clientX: number): number =>
       (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, endSec } = seg
-    const dur = endSec - startSec
     let last: PointerEvent | null = null
     let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
@@ -594,10 +705,6 @@ export function Timeline(): JSX.Element {
           ...p.captions,
           segments: p.captions.segments.map((s) => {
             if (s.id !== seg.id) return s
-            if (mode === 'move') {
-              const ns = Math.max(0, snapSec(startSec + d))
-              return { ...s, startSec: ns, endSec: ns + dur }
-            }
             if (mode === 'start') return { ...s, startSec: clamp(snapSec(startSec + d), 0, s.endSec - 0.1) }
             return { ...s, endSec: Math.max(s.startSec + 0.1, snapSec(endSec + d)) }
           })
@@ -611,7 +718,9 @@ export function Timeline(): JSX.Element {
     })
   }
 
-  const startAudioDrag = (e: ReactPointerEvent, clip: AudioClip, mode: 'move' | 'start' | 'end', maxOut: number): void => {
+  // Trim an audio clip's left/right edge (moving it is `startTileDrag`). The left
+  // edge moves the in-point, so the clip's start follows it.
+  const startAudioDrag = (e: ReactPointerEvent, clip: AudioClip, mode: 'start' | 'end', maxOut: number): void => {
     e.stopPropagation()
     e.preventDefault()
     selectAudio(clip.id)
@@ -624,9 +733,6 @@ export function Timeline(): JSX.Element {
       (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, inSec } = clip
     const effOut = effectiveOut(clip, maxOut)
-    const ownEnd = startSec + (effOut - inSec)
-    const others = snapTargets.filter((t) => Math.abs(t - startSec) > 1e-6 && Math.abs(t - ownEnd) > 1e-6)
-    const audioSnap = (v: number): number => snap(v, others, SNAP_PX / pxPerSec)
     let last: PointerEvent | null = null
     let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
@@ -637,7 +743,6 @@ export function Timeline(): JSX.Element {
         ...p,
         audioClips: p.audioClips.map((a) => {
           if (a.id !== clip.id) return a
-          if (mode === 'move') return { ...a, startSec: Math.max(0, audioSnap(startSec + d)) }
           if (mode === 'start') {
             const ni = clamp(inSec + d, 0, effOut - 0.1)
             return { ...a, inSec: ni, startSec: Math.max(0, startSec + (ni - inSec)) }
@@ -653,35 +758,30 @@ export function Timeline(): JSX.Element {
     })
   }
 
-  const selectedLayer = layers.find((l) => l.id === selectedLayerId)
-  const selectedAudio = audioClips.find((a) => a.id === selectedAudioId)
-  const selectedAudioDur = selectedAudio
-    ? assetById.get(selectedAudio.mediaId)?.probe.durationSec ?? selectedAudio.outSec
-    : 0
-  const canSplit =
-    (!!selectedLayer &&
-      selectedLayer.content.kind === 'video' &&
-      time > selectedLayer.startSec + 0.01 &&
-      time < selectedLayer.endSec - 0.01) ||
-    (!!selectedAudio && time > selectedAudio.startSec && time < audioClipEnd(selectedAudio, selectedAudioDur))
-  const splitSelected = (): void => {
-    if (selectedLayer && selectedLayer.content.kind === 'video') splitLayerAt(selectedLayer.id, time)
-    else if (selectedAudio) splitAudioAt(selectedAudio.id, time, selectedAudioDur)
-  }
+  // Split / delete / link act on the WHOLE selection (a single tile, a link
+  // group, or a Ctrl-built set) — one undo step each.
+  const canSplit = !!project && canSplitItems(project, selection, time, srcDur)
+  const splitSelected = (): void => splitItemsAt(selection, time, srcDur)
 
-  // Delete whatever is selected, mirroring the Del keybind's priority (App.tsx):
-  // layer → caption → audio.
-  const canDelete = !!(selectedLayerId || selectedCaptionId || selectedAudioId)
-  const deleteSelected = (): void => {
-    if (selectedLayerId) removeLayer(selectedLayerId)
-    else if (selectedCaptionId) {
-      removeCaption(selectedCaptionId)
-      selectCaption(null)
-    } else if (selectedAudioId) {
-      removeAudioClip(selectedAudioId)
-      selectAudio(null)
+  const canDelete = selection.length > 0
+  const deleteSelected = (): void => removeItems(selection)
+
+  const canLink = !!project && canLinkItems(project, selection)
+  const canUnlink = !!project && canUnlinkItems(project, selection)
+  const linkSelected = (): void => linkItems(selection)
+  const unlinkSelected = (): void => unlinkItems(selection)
+  // Group ids that actually bind two or more tiles (a leftover single-member id
+  // reads as unlinked everywhere). Tiles in one can't be trimmed on their own —
+  // nothing about a one-tile trim translates to the rest of the group — so their
+  // edge handles aren't rendered and they show a 🔗 badge instead.
+  const linkedGroups = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const t of project ? timelineTiles(project) : []) {
+      if (t.linkGroupId) counts.set(t.linkGroupId, (counts.get(t.linkGroupId) ?? 0) + 1)
     }
-  }
+    return new Set([...counts].filter(([, n]) => n > 1).map(([gid]) => gid))
+  }, [project])
+  const isLinkedTile = (gid: string | undefined): boolean => !!gid && linkedGroups.has(gid)
 
   const addText = (): void => {
     const id = crypto.randomUUID()
@@ -694,15 +794,17 @@ export function Timeline(): JSX.Element {
   const layerBlock = (l: Layer, laneKey: 'clips' | 'layout' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
     const left = l.startSec * pxPerSec
     const width = Math.max(12, (l.endSec - l.startSec) * pxPerSec)
-    const selected = l.id === selectedLayerId
+    const selected = isSelected('layer', l.id)
+    const linked = isLinkedTile(l.linkGroupId)
     const asset = l.content.kind === 'video' || l.content.kind === 'image' ? assetById.get(l.content.mediaId) : undefined
     const st = LANE_STYLE[laneKey]
     const rowH = laneRowHeight(laneKey)
     return (
       <div
         key={l.id}
-        onPointerDown={(e) => startLayerDrag(e, l, 'move')}
-        title={layerLabel(l)}
+        data-testid={`tile-layer-${l.id}`}
+        onPointerDown={(e) => startTileDrag(e, { kind: 'layer', id: l.id })}
+        title={linked ? `${layerLabel(l)} · linked` : layerLabel(l)}
         className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
           selected ? st.sel : st.block
         } ${l.hidden ? 'opacity-40' : ''}`}
@@ -717,7 +819,7 @@ export function Timeline(): JSX.Element {
           />
         )}
         <span className="truncate text-[9px] font-medium text-zinc-100">
-          {l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🎬'}&nbsp;
+          {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🎬'}&nbsp;
           {asset?.fileName ?? layerLabel(l)}
         </span>
         {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
@@ -747,8 +849,12 @@ export function Timeline(): JSX.Element {
             S
           </span>
         )}
-        <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
-        <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+        {!linked && (
+          <>
+            <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+            <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+          </>
+        )}
       </div>
     )
   }
@@ -771,13 +877,32 @@ export function Timeline(): JSX.Element {
           {tc(time)} / {tc(Math.max(total, previewDur))}
         </span>
         <div className="mx-1 h-4 w-px bg-white/10" />
-        <ToolbarButton title="Split selected video layer or audio at the playhead (S)" onClick={splitSelected} disabled={!canSplit}>
+        <ToolbarButton
+          title="Link the selected tiles so they move, split and delete together (Ctrl/Cmd-click tiles to multi-select). Layouts can't be linked."
+          onClick={linkSelected}
+          disabled={!canLink}
+        >
+          🔗 Link
+        </ToolbarButton>
+        <ToolbarButton
+          title="Unlink the selected tiles — the whole group they belong to"
+          onClick={unlinkSelected}
+          disabled={!canUnlink}
+        >
+          ⛓ Unlink
+        </ToolbarButton>
+        <div className="mx-1 h-4 w-px bg-white/10" />
+        <ToolbarButton
+          title="Split the selection at the playhead (S) — every linked tile the playhead crosses"
+          onClick={splitSelected}
+          disabled={!canSplit}
+        >
           ✂ Split
         </ToolbarButton>
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
         </ToolbarButton>
-        <ToolbarButton title="Delete the selected layer, caption, or audio clip (Del)" onClick={deleteSelected} disabled={!canDelete}>
+        <ToolbarButton title="Delete the selection — every selected tile (Del)" onClick={deleteSelected} disabled={!canDelete}>
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />
@@ -924,21 +1049,29 @@ export function Timeline(): JSX.Element {
             {!laneCollapsed('caption') && captionSegs.map((seg) => {
               const left = seg.startSec * pxPerSec
               const width = Math.max(10, (seg.endSec - seg.startSec) * pxPerSec)
-              const selected = seg.id === selectedCaptionId
+              const selected = isSelected('caption', seg.id)
+              const linked = isLinkedTile(seg.linkGroupId)
               const rowH = laneRowHeight('caption')
               return (
                 <div
                   key={seg.id}
-                  onPointerDown={(e) => startCaptionDrag(e, seg, 'move')}
-                  title={seg.text}
+                  data-testid={`tile-caption-${seg.id}`}
+                  onPointerDown={(e) => startTileDrag(e, { kind: 'caption', id: seg.id })}
+                  title={linked ? `${seg.text} · linked` : seg.text}
                   className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
                     selected ? LANE_STYLE.caption.sel : seg.enabled ? LANE_STYLE.caption.block : 'border-zinc-500/40 bg-zinc-600/30'
                   }`}
                   style={{ left, width, top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * rowH, height: rowH - 2 }}
                 >
-                  <span className="truncate text-[9px] font-medium text-emerald-100">CC&nbsp;&nbsp;{seg.text}</span>
-                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
-                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
+                  <span className="truncate text-[9px] font-medium text-emerald-100">
+                    {linked ? '🔗' : 'CC'}&nbsp;&nbsp;{seg.text}
+                  </span>
+                  {!linked && (
+                    <>
+                      <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
+                      <div onPointerDown={(e) => startCaptionDrag(e, seg, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
+                    </>
+                  )}
                 </div>
               )
             })}
@@ -950,13 +1083,15 @@ export function Timeline(): JSX.Element {
               const eo = effectiveOut(a, maxOut)
               const left = a.startSec * pxPerSec
               const width = Math.max(12, (eo - a.inSec) * pxPerSec)
-              const selected = a.id === selectedAudioId
+              const selected = isSelected('audio', a.id)
+              const linked = isLinkedTile(a.linkGroupId)
               const rowH = laneRowHeight('audio')
               return (
                 <div
                   key={a.id}
-                  onPointerDown={(e) => startAudioDrag(e, a, 'move', maxOut)}
-                  title={asset?.fileName}
+                  data-testid={`tile-audio-${a.id}`}
+                  onPointerDown={(e) => startTileDrag(e, { kind: 'audio', id: a.id })}
+                  title={linked ? `${asset?.fileName ?? a.mediaId} · linked` : asset?.fileName}
                   className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
                     selected ? LANE_STYLE.audio.sel : LANE_STYLE.audio.block
                   }`}
@@ -977,7 +1112,7 @@ export function Timeline(): JSX.Element {
                     />
                   )}
                   <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
-                    {a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;{asset?.fileName ?? a.mediaId}
+                    {linked ? '🔗' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;{asset?.fileName ?? a.mediaId}
                   </span>
                   {denoiseOverridden(a) && (
                     <span
@@ -989,8 +1124,12 @@ export function Timeline(): JSX.Element {
                       N
                     </span>
                   )}
-                  <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
-                  <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+                  {!linked && (
+                    <>
+                      <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+                      <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+                    </>
+                  )}
                 </div>
               )
             })}

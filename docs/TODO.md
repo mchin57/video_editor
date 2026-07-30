@@ -119,8 +119,39 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 - [ ] **Custom layout editor** — a drag-and-drop canvas for creating and saving custom multi-clip layouts beyond the built-in presets. User can add cells, resize/reposition them freely within the 1080×1920 frame, set a background color or image, and save the result as a named preset that appears alongside the built-in ones. Saved presets stored in `settings.json` under `customLayouts[]`. Implementation: a `LayoutEditor` modal with a scaled-down 1080×1920 canvas; cells are resizable/draggable divs; outputs a `LayoutPreset` definition identical in shape to the built-ins so the rest of the pipeline is unaffected.
 
-- [ ] **Clip-audio locking** — allow a video clip to be locked to an audio clip so they move and split together. When locked, dragging either clip moves both by the same delta; splitting either at the playhead splits both at the same timeline position. UI: a small lock icon between the video and audio lanes on overlapping clips; click to toggle. Data model: add an optional `lockedAudioId` field on `Clip` (and `lockedClipId` on `MusicTrack`) referencing the paired asset. Logic lives in `timelineMath.ts` — move/split ops check for a lock and apply the same operation to the paired track before returning the new project state. Undo/redo snapshots capture both changes atomically.
-  - **Open question:** when one locked clip is deleted, should the other be deleted automatically, or just unlocked and left in place? Could be a preference (always delete both / always just unlock / ask each time).
+- [~] **Clip-audio locking — shipped as LINK GROUPS over every timeline tile (not just a clip↔audio pair).**
+  `linkGroupId` on `Layer`/`CaptionSegment`/`AudioClip` (one id space, migration
+  v16) makes any set of tiles behave as one; the whole model lives in the new
+  `src/renderer/src/lib/links.ts` (`timelineTiles` is the flat per-tile record
+  every op works against) with `lib/links.test.ts` + `e2e/link.spec.ts` covering
+  it. UI: **Ctrl/Cmd-click** tiles to multi-select, **🔗 Link** / **⛓ Unlink** on
+  the timeline bar next to play/pause (Link needs ≥2 linkable tiles; Unlink needs
+  one linked tile and breaks that whole group); linked tiles show a 🔗 badge.
+  - **Selection is all-or-nothing** — clicking one member selects the group,
+    everywhere (timeline, stage, Layers panel → `useUi.selectTile`). A click
+    without a drag narrows a Ctrl-built multi-selection back to one tile.
+  - **Move** = one shared delta (`moveItemsBy`): relative offsets AND each tile's
+    own duration are preserved; the clamp applies to the set, so dragging into 0
+    stops the group on its earliest tile instead of squashing it. Dragging a
+    multi-selection of *unlinked* tiles moves them together too.
+  - **Split** happens at the playhead for every member it crosses; members it
+    misses (offset in time) are left whole, and members with no split op (text /
+    image layers, captions) are never cut. The right-hand halves become their own
+    group so the two sides of a cut can be edited apart.
+  - **Delete** takes the whole group (the old open question, answered: one undo
+    step, always both — a group is only ever removed as a whole).
+  - **Per-tile ops that can't translate are disabled while linked:** edge trim
+    handles (hidden), the Inspector's start/end + trim in/out, speed & speed
+    ramps, freeze holds, extract audio, split-on-silence — with a banner saying
+    why. A linked audio clip's **Start (s)** DOES work: for audio that's a move,
+    so it shifts the group. **Layout layers can't be linked at all.**
+  - _Not done:_ auto-linking a dropped clip to its extracted audio (today the
+    pair lands unlinked — link it by hand); splitting text/image/caption tiles at
+    all; ripple/roll trim across a group.
+  - _Unverified:_ not yet smoke-tested through `npm run dev` — the interaction
+    guarantees are Playwright-covered against the real app, but the visuals
+    (badge, banner, disabled states) and the manual items added to
+    `docs/TIMELINE.md` still want a human pass.
 
 - [~] **Auto mono-fold one-sided audio (mic-on-one-channel)** — footage from a mic wired to a single side imports as stereo with one dead channel, so it plays out of one ear (and reads as silent). **Shortcut shipped:** at import, stereo sources get a one-shot per-channel peak probe (`astats`, `detectMonoFoldChannel` in `audio.ts`); when exactly one channel is live, `AudioStreamInfo.monoFoldChannel` records it and both the preview proxies (`buildProxyArgs`/`buildAudioProxyArgs`) and the export mix (`buildAudioGraph`/`ExportAudio.foldChannel`) mirror that channel to both sides via `monoFoldPan` (`pan=stereo|c0=cN|c1=cN`, verified ffmpeg 8.1.1 — see FFMPEG-NOTES). Automatic, non-toggleable, no UI. _Unverified: not yet smoke-tested through `npm run dev` end-to-end (import → listen); the ffmpeg commands are verified but the live app wiring (persisted `monoFoldChannel` → `ensureProxy` → preview) needs a human audio check._ **Full version (backlog):** make it a per-source override — `channelMode: 'auto' | 'stereo' | 'fold'` on the audio clip/asset using the existing `resolveOverride`/`OverrideToggle` pattern, default `auto` = current behavior, with a Default/On/Off control in the Inspector. Live-toggleable preview needs a WebAudio route (`MediaElementSource → ChannelSplitter/Merger`) in `AudioFollower`/`VideoLayerView` since today volume is set straight on the element and the proxy fold is baked per-asset (not reversible without a re-transcode).
 

@@ -1,7 +1,27 @@
 import { create } from 'zustand'
+import type { Project, TimelineItemRef } from '@shared/project'
+import { expandGroup } from '@/lib/links'
 
 /** Transient editor UI selection that doesn't belong in the project document. */
 interface UiState {
+  /**
+   * EVERY selected timeline tile, across lanes — one entry for a plain click,
+   * the whole link group when a linked tile is clicked, and any Ctrl/Cmd-built
+   * multi-selection. The timeline highlights and moves exactly this set; the
+   * three `selected*Id` fields below name the PRIMARY (last clicked) tile, which
+   * is what the Inspector and the stage handles edit.
+   */
+  selection: TimelineItemRef[]
+  /** Select a whole set of tiles at once, with `primary` driving the Inspector. */
+  selectItems: (refs: TimelineItemRef[], primary: TimelineItemRef) => void
+  /**
+   * Select ONE tile the way the timeline does — including every tile linked to
+   * it, since a link group is never partially selected. Use this anywhere a tile
+   * is picked outside the timeline (the stage, the Layers panel). The project is
+   * a parameter rather than an import so this store stays free of a cycle with
+   * `projectStore`.
+   */
+  selectTile: (project: Project | null, ref: TimelineItemRef) => void
   /** Currently selected visual layer (video/image/text) — drives the inspector,
    *  on-canvas handles, and the Layers menu highlight. */
   selectedLayerId: string | null
@@ -38,19 +58,65 @@ interface UiState {
   clearSelection: () => void
 }
 
+/** The primary (last clicked) tile as a ref, or null when nothing is selected.
+ *  The three `selected*Id` fields are mutually exclusive, so this is total. */
+export function primaryRef(s: UiState): TimelineItemRef | null {
+  if (s.selectedLayerId) return { kind: 'layer', id: s.selectedLayerId }
+  if (s.selectedCaptionId) return { kind: 'caption', id: s.selectedCaptionId }
+  if (s.selectedAudioId) return { kind: 'audio', id: s.selectedAudioId }
+  return null
+}
+
+/** Selecting one tile of a given kind: the primary AND the whole selection.
+ *  Keeps the single-selection actions below as thin sugar over `selectItems`. */
+const single = (
+  kind: TimelineItemRef['kind'],
+  id: string | null
+): Pick<UiState, 'selection' | 'selectedLayerId' | 'selectedCaptionId' | 'selectedAudioId'> & {
+  captionsGlobalSelected: boolean
+} => ({
+  selection: id ? [{ kind, id }] : [],
+  selectedLayerId: kind === 'layer' ? id : null,
+  selectedCaptionId: kind === 'caption' ? id : null,
+  selectedAudioId: kind === 'audio' ? id : null,
+  captionsGlobalSelected: false
+})
+
 export const useUi = create<UiState>((set) => ({
+  selection: [],
+  selectItems: (refs, primary) =>
+    set({
+      selection: refs,
+      selectedLayerId: primary.kind === 'layer' ? primary.id : null,
+      selectedCaptionId: primary.kind === 'caption' ? primary.id : null,
+      selectedAudioId: primary.kind === 'audio' ? primary.id : null,
+      captionsGlobalSelected: false
+    }),
+  selectTile: (project, ref) => {
+    const refs = project ? expandGroup(project, ref) : []
+    set({
+      selection: refs.length ? refs : [ref],
+      selectedLayerId: ref.kind === 'layer' ? ref.id : null,
+      selectedCaptionId: ref.kind === 'caption' ? ref.id : null,
+      selectedAudioId: ref.kind === 'audio' ? ref.id : null,
+      captionsGlobalSelected: false
+    })
+  },
   selectedLayerId: null,
-  selectLayer: (id) =>
-    set({ selectedLayerId: id, selectedCaptionId: null, selectedAudioId: null, captionsGlobalSelected: false }),
+  selectLayer: (id) => set(single('layer', id)),
   selectedCaptionId: null,
-  selectCaption: (id) =>
-    set({ selectedCaptionId: id, selectedLayerId: null, selectedAudioId: null, captionsGlobalSelected: false }),
+  selectCaption: (id) => set(single('caption', id)),
   selectedAudioId: null,
-  selectAudio: (id) =>
-    set({ selectedAudioId: id, selectedLayerId: null, selectedCaptionId: null, captionsGlobalSelected: false }),
+  selectAudio: (id) => set(single('audio', id)),
   captionsGlobalSelected: false,
   selectCaptionsGlobal: () =>
-    set({ captionsGlobalSelected: true, selectedLayerId: null, selectedCaptionId: null, selectedAudioId: null }),
+    set({
+      captionsGlobalSelected: true,
+      selection: [],
+      selectedLayerId: null,
+      selectedCaptionId: null,
+      selectedAudioId: null
+    }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
   stillsOpen: false,
@@ -64,5 +130,11 @@ export const useUi = create<UiState>((set) => ({
   scriptOpen: false,
   setScriptOpen: (v) => set({ scriptOpen: v }),
   clearSelection: () =>
-    set({ selectedLayerId: null, selectedCaptionId: null, selectedAudioId: null, captionsGlobalSelected: false })
+    set({
+      selection: [],
+      selectedLayerId: null,
+      selectedCaptionId: null,
+      selectedAudioId: null,
+      captionsGlobalSelected: false
+    })
 }))

@@ -28,6 +28,8 @@ item, move it into the guarded table below.
 | Freeze-aware trim/split — holds survive edge trims, splits partition holds, window invariant (`trimVideoStart`/`trimVideoEnd`/`splitVideoLayer`) | `lib/timeline.test.ts` |
 | Block move drag + right-edge trim drag on the real timeline (incl. frozen-clip regression) | `e2e/freezeTrim.spec.ts` |
 | S-keybind split at the playhead | `e2e/freezeTrim.spec.ts` |
+| Link groups — expand/link/unlink/prune, shared-delta move (offsets + durations kept, clamp on the earliest tile), playhead split incl. the uncut-member and re-grouping rules, group delete | `lib/links.test.ts` |
+| Linked tiles on the real timeline — Ctrl-click multi-select → 🔗 Link, group drag keeps the offset, clamp at 0, S/✂ splits every crossed member (and only those), ⛓ Unlink, click narrows a multi-selection, Del removes the group in one undo step, trim handles hidden while linked | `e2e/link.spec.ts` |
 | T/Ctrl+Z/Ctrl+Shift+Z/Delete keybind flow | `e2e/keybinds.spec.ts` |
 | OS-file import overlay can't get stuck (depth counter; the Timeline drop-ring shares the hook) | `e2e/dropOverlay.spec.ts` |
 
@@ -56,6 +58,13 @@ it can be deleted silently). Push it back into `lib/`.
 - **Collapse/expand:** the ▾/▸ chevron and double-clicking the bubble both
   toggle; collapsed lanes become a thin strip with blocks + resize handle hidden.
 - **Caption gutter bubble:** clicking it selects the lane-wide caption style.
+- **Link groups (visuals + the paths e2e can't reach):** the 🔗 badge and
+  `· linked` tooltip on a linked tile; the Inspector's "Linked to N other tiles"
+  banner with its greyed-out timing controls (start/end, trim in/out, speed,
+  freeze, extract audio, split on silence); a linked audio clip's **Start (s)**
+  field moving the whole group; Ctrl-clicking a **layout** tile selecting it alone
+  (layouts can't be linked); selecting a linked layer on the **stage** or in the
+  **Layers panel** highlighting its whole group in the timeline.
 - **Persistence:** lane heights/collapse (`timelineView`) and zoom
   (`timelinePps`) survive an app reload.
 - **Container:** the Timeline is a dockview panel (`lib/dockLayout.ts` manifest);

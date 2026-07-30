@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import type { CaptionStyle, Layer, Project, Stabilize, TextContent, VideoContent } from '@shared/project'
+import type {
+  CaptionStyle,
+  Layer,
+  Project,
+  Stabilize,
+  TextContent,
+  TimelineItemKind,
+  VideoContent
+} from '@shared/project'
 import {
   DEFAULT_STABILIZE,
   MAX_VIDEO_SPEED,
@@ -23,6 +31,7 @@ import {
 } from '@shared/textAnim'
 import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
+import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
@@ -31,9 +40,44 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { Field, Row, dangerBtnCls, inputCls } from './ui'
+import { Field, Row, dangerBtnCls, disabledCls, inputCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
+
+/**
+ * Link-group awareness for the editor panels. A tile in a link group moves,
+ * splits and deletes with its partners (`lib/links.ts`), so the controls that
+ * would silently DESYNC the group — anything that re-times just this tile
+ * (start/end, source trim, speed, freezes, detaching audio) — are disabled while
+ * it's linked; per-tile looks (crop, colour, gain, style) stay live. Returns the
+ * group's size, 1 when the tile is unlinked (the primitive keeps the zustand
+ * selector cheap to compare).
+ */
+function useLinkGroupSize(kind: TimelineItemKind, id: string | null): number {
+  return useProject((s) => (s.project && id ? expandGroup(s.project, { kind, id }).length : 1))
+}
+
+/** The banner explaining why this panel's timing controls are greyed out. */
+function LinkedNote({ size }: { size: number }): JSX.Element {
+  return (
+    <p className="mb-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] leading-snug text-sky-300/90">
+      🔗 Linked to {size - 1} other {size === 2 ? 'tile' : 'tiles'} — they move, split and delete
+      together. Timing controls are disabled; use <span className="text-sky-200">⛓ Unlink</span> on
+      the timeline bar to edit them.
+    </p>
+  )
+}
+
+/** Delete this tile — or, when it's linked, its whole group (a group is only
+ *  ever removed as a whole). Shared by the three editor panels. */
+function useDeleteTile(kind: TimelineItemKind, id: string | null): () => void {
+  const removeItems = useProject((s) => s.removeItems)
+  return () => {
+    const p = useProject.getState().project
+    if (!p || !id) return
+    removeItems(expandGroup(p, { kind, id }))
+  }
+}
 
 /** The shared Default / On / Off segmented control for a tri-state per-clip
  *  override (noise reduction, stabilization). `mode` is the active segment;
@@ -235,8 +279,17 @@ const setLayer = (id: string) => (p: Project, fn: (l: Layer) => Layer): Project 
 })
 
 /** Freeze-frame controls: hold the current frame for a chosen duration, and list
- *  existing holds. Adding a freeze extends only this clip (no ripple). */
-function FreezeFrames({ layer, content }: { layer: Layer; content: VideoContent }): JSX.Element {
+ *  existing holds. Adding a freeze extends only this clip (no ripple) — which is
+ *  why `disabled` (a linked tile) locks both adding and removing. */
+function FreezeFrames({
+  layer,
+  content,
+  disabled
+}: {
+  layer: Layer
+  content: VideoContent
+  disabled?: boolean
+}): JSX.Element {
   const addFreeze = useProject((s) => s.addFreeze)
   const removeFreeze = useProject((s) => s.removeFreeze)
   const [hold, setHold] = useState(2)
@@ -257,8 +310,13 @@ function FreezeFrames({ layer, content }: { layer: Layer; content: VideoContent 
         </Field>
         <button
           onClick={() => addFreeze(layer.id, videoSourceTime(content, layer, usePlayback.getState().time), hold)}
-          className="mb-2 flex-1 rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-          title="Hold the frame at the playhead for the chosen duration"
+          disabled={disabled}
+          className={`mb-2 flex-1 rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
+          title={
+            disabled
+              ? 'Not available on a linked tile — a freeze would stretch only this one (unlink first)'
+              : 'Hold the frame at the playhead for the chosen duration'
+          }
         >
           ⏸ Pause clip here
         </button>
@@ -274,7 +332,8 @@ function FreezeFrames({ layer, content }: { layer: Layer; content: VideoContent 
               </span>
               <button
                 onClick={() => removeFreeze(layer.id, i)}
-                className="rounded px-1 text-rose-300 hover:bg-rose-500/20"
+                disabled={disabled}
+                className={`rounded px-1 text-rose-300 hover:bg-rose-500/20 ${disabledCls}`}
                 title="Remove this freeze"
               >
                 ✕
@@ -292,7 +351,9 @@ function LayerEditor(): JSX.Element | null {
   const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
   const update = useProject((s) => s.updateLayer)
   const updateContent = useProject((s) => s.updateLayerContent)
-  const remove = useProject((s) => s.removeLayer)
+  const groupSize = useLinkGroupSize('layer', selectedLayerId)
+  const linked = groupSize > 1
+  const remove = useDeleteTile('layer', selectedLayerId)
   const extractAudio = useProject((s) => s.extractLayerAudio)
   const setCropEditing = useUi((s) => s.setCropEditing)
   const setStillsOpen = useUi((s) => s.setStillsOpen)
@@ -325,7 +386,11 @@ function LayerEditor(): JSX.Element | null {
         </div>
       )}
 
+      {linked && <LinkedNote size={groupSize} />}
+
       <CollapsibleSection id="transform" title="Transform">
+      {/* Start/End each move ONE edge (a trim, not a move), so they'd change this
+          tile's length out from under the rest of its group. */}
       <div className="flex gap-2">
         <Field label="Start (s)">
           <input
@@ -333,8 +398,9 @@ function LayerEditor(): JSX.Element | null {
             step="0.1"
             min="0"
             value={layer.startSec.toFixed(1)}
+            disabled={linked}
             onChange={(e) => update(id, { startSec: Math.max(0, Number(e.target.value)) })}
-            className={inputCls}
+            className={`${inputCls} ${disabledCls}`}
           />
         </Field>
         <Field label="End (s)">
@@ -342,8 +408,9 @@ function LayerEditor(): JSX.Element | null {
             type="number"
             step="0.1"
             value={layer.endSec.toFixed(1)}
+            disabled={linked}
             onChange={(e) => update(id, { endSec: Math.max(layer.startSec + 0.2, Number(e.target.value)) })}
-            className={inputCls}
+            className={`${inputCls} ${disabledCls}`}
           />
         </Field>
       </div>
@@ -425,10 +492,11 @@ function LayerEditor(): JSX.Element | null {
                 step="0.1"
                 min="0"
                 value={c.inSec.toFixed(1)}
+                disabled={linked}
                 onChange={(e) =>
                   updateContent(id, { inSec: Math.max(0, Math.min(Number(e.target.value), c.outSec - 0.05)) })
                 }
-                className={inputCls}
+                className={`${inputCls} ${disabledCls}`}
               />
             </Field>
             <Field label="Trim out (s)">
@@ -436,8 +504,9 @@ function LayerEditor(): JSX.Element | null {
                 type="number"
                 step="0.1"
                 value={c.outSec.toFixed(1)}
+                disabled={linked}
                 onChange={(e) => updateContent(id, { outSec: Math.max(c.inSec + 0.05, Number(e.target.value)) })}
-                className={inputCls}
+                className={`${inputCls} ${disabledCls}`}
               />
             </Field>
           </div>
@@ -445,7 +514,7 @@ function LayerEditor(): JSX.Element | null {
             <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
           )}
           {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
-          <SpeedControl layer={layer} content={c} />
+          <SpeedControl layer={layer} content={c} disabled={linked} />
           <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
             <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
             Mute this layer
@@ -468,12 +537,14 @@ function LayerEditor(): JSX.Element | null {
             {asset?.probe.audio && (
               <button
                 onClick={() => extractAudio(id)}
-                disabled={videoSpeed(c) !== 1 || hasSpeedRamp(c)}
-                className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={videoSpeed(c) !== 1 || hasSpeedRamp(c) || linked}
+                className={`rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
                 title={
                   videoSpeed(c) !== 1 || hasSpeedRamp(c)
                     ? 'Not available on a re-timed clip — the audio track plays at 1× (reset speed first)'
-                    : "Move this layer's audio onto the audio track and mute the layer"
+                    : linked
+                      ? 'Not available on a linked tile — the new audio clip would not be part of the group (unlink first)'
+                      : "Move this layer's audio onto the audio track and mute the layer"
                 }
               >
                 ♪ Extract audio
@@ -490,7 +561,7 @@ function LayerEditor(): JSX.Element | null {
           </CollapsibleSection>
 
           <CollapsibleSection id="freeze" title="Freeze frames">
-            <FreezeFrames layer={layer} content={c} />
+            <FreezeFrames layer={layer} content={c} disabled={linked} />
           </CollapsibleSection>
 
           <CollapsibleSection
@@ -621,11 +692,8 @@ function LayerEditor(): JSX.Element | null {
         </CollapsibleSection>
       )}
 
-      <button
-        onClick={() => remove(id)}
-        className={`mt-3 w-full ${dangerBtnCls}`}
-      >
-        Delete layer
+      <button onClick={remove} className={`mt-3 w-full ${dangerBtnCls}`}>
+        {linked ? `Delete linked group (${groupSize})` : 'Delete layer'}
       </button>
     </div>
   )
@@ -714,8 +782,17 @@ const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
  *  duration invariant (`playedBetween(in, out) + freeze holds`) and each
  *  change is one undo step. With a ramp active the constant controls disable
  *  (the ramp overrides them) and the clip's own audio is muted — no
- *  variable-tempo audio path, preview and export agree. */
-function SpeedControl({ layer, content }: { layer: Layer; content: VideoContent }): JSX.Element {
+ *  variable-tempo audio path, preview and export agree. `disabled` locks the
+ *  whole section for a LINKED tile: re-timing one member would desync the group. */
+function SpeedControl({
+  layer,
+  content,
+  disabled
+}: {
+  layer: Layer
+  content: VideoContent
+  disabled?: boolean
+}): JSX.Element {
   const layerId = layer.id
   const setSpeed = useProject((s) => s.setVideoSpeed)
   const addRampKf = useProject((s) => s.addSpeedKeyframe)
@@ -727,7 +804,13 @@ function SpeedControl({ layer, content }: { layer: Layer; content: VideoContent 
   const ramped = hasSpeedRamp(content)
   const ramp = sortedRamp(content)
   return (
-    <>
+    // Outer wrapper keeps pointer events so the "why" tooltip still shows.
+    <div
+      title={
+        disabled ? 'Not available on a linked tile — re-timing one member would desync the group' : undefined
+      }
+    >
+    <div className={disabled ? 'pointer-events-none opacity-40' : ''}>
       <Field label={`Speed · ${ramped ? 'ramp' : `${cur}×`}`}>
         <div className={`flex flex-wrap gap-1 ${ramped ? 'pointer-events-none opacity-40' : ''}`}>
           {SPEED_PRESETS.map((v) => (
@@ -823,7 +906,8 @@ function SpeedControl({ layer, content }: { layer: Layer; content: VideoContent 
           </>
         )}
       </div>
-    </>
+    </div>
+    </div>
   )
 }
 
@@ -1008,10 +1092,11 @@ function CaptionEditor(): JSX.Element | null {
   const captions = useProject((s) => s.project?.captions)
   const seg = useProject((s) => s.project?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null)
   const update = useProject((s) => s.updateCaption)
-  const remove = useProject((s) => s.removeCaption)
+  const groupSize = useLinkGroupSize('caption', selectedCaptionId)
+  const linked = groupSize > 1
+  const remove = useDeleteTile('caption', selectedCaptionId)
   const setSegStyle = useProject((s) => s.setCaptionSegmentStyle)
   const clearSegStyle = useProject((s) => s.clearCaptionSegmentStyle)
-  const selectCaption = useUi((s) => s.selectCaption)
   const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
   if (!seg || !captions) return null
   const overridden = !!seg.style
@@ -1020,6 +1105,7 @@ function CaptionEditor(): JSX.Element | null {
   return (
     <div>
       <div className="mb-2 text-sm font-medium text-zinc-200">Caption</div>
+      {linked && <LinkedNote size={groupSize} />}
       <Field label="Text">
         <textarea value={seg.text} rows={2} onChange={(e) => update(seg.id, { text: e.target.value })} className={inputCls} />
       </Field>
@@ -1030,8 +1116,9 @@ function CaptionEditor(): JSX.Element | null {
             step="0.1"
             min="0"
             value={seg.startSec.toFixed(1)}
+            disabled={linked}
             onChange={(e) => update(seg.id, { startSec: Math.max(0, Number(e.target.value)) })}
-            className={inputCls}
+            className={`${inputCls} ${disabledCls}`}
           />
         </Field>
         <Field label="End (s)">
@@ -1039,8 +1126,9 @@ function CaptionEditor(): JSX.Element | null {
             type="number"
             step="0.1"
             value={seg.endSec.toFixed(1)}
+            disabled={linked}
             onChange={(e) => update(seg.id, { endSec: Math.max(seg.startSec + 0.1, Number(e.target.value)) })}
-            className={inputCls}
+            className={`${inputCls} ${disabledCls}`}
           />
         </Field>
       </div>
@@ -1072,14 +1160,8 @@ function CaptionEditor(): JSX.Element | null {
         <CaptionStyleFields style={style} onPatch={(patch) => setSegStyle(seg.id, patch)} />
       </CollapsibleSection>
 
-      <button
-        onClick={() => {
-          remove(seg.id)
-          selectCaption(null)
-        }}
-        className={`mt-3 w-full ${dangerBtnCls}`}
-      >
-        Delete caption
+      <button onClick={remove} className={`mt-3 w-full ${dangerBtnCls}`}>
+        {linked ? `Delete linked group (${groupSize})` : 'Delete caption'}
       </button>
     </div>
   )
@@ -1089,10 +1171,12 @@ function AudioClipEditor(): JSX.Element | null {
   const selectedAudioId = useUi((s) => s.selectedAudioId)
   const clip = useProject((s) => s.project?.audioClips.find((a) => a.id === selectedAudioId) ?? null)
   const update = useProject((s) => s.updateAudioClip)
-  const remove = useProject((s) => s.removeAudioClip)
+  const groupSize = useLinkGroupSize('audio', selectedAudioId)
+  const linked = groupSize > 1
+  const remove = useDeleteTile('audio', selectedAudioId)
+  const moveItems = useProject((s) => s.moveItemsBy)
   const denoiseDefault = useProject((s) => s.project?.denoiseDefault ?? false)
   const splitOnSilence = useProject((s) => s.splitAudioOnSilence)
-  const selectAudio = useUi((s) => s.selectAudio)
   const { data: assets = [] } = useLibrary()
   const [splitting, setSplitting] = useState(false)
   const [splitNote, setSplitNote] = useState<string | null>(null)
@@ -1120,6 +1204,7 @@ function AudioClipEditor(): JSX.Element | null {
       <div className="mb-3 truncate text-xs text-zinc-400" title={asset?.fileName}>
         {asset?.fileName ?? clip.mediaId} · {clip.kind}
       </div>
+      {linked && <LinkedNote size={groupSize} />}
       <Field label={`Volume · ${clip.gainDb} dB`}>
         <input
           type="range"
@@ -1131,13 +1216,20 @@ function AudioClipEditor(): JSX.Element | null {
           className="w-full accent-sky-400"
         />
       </Field>
-      <Field label="Start (s)">
+      {/* An audio clip's Start is a MOVE (its trim doesn't change), so unlike a
+          layer's it translates onto a group: the whole group shifts by the delta. */}
+      <Field label={linked ? 'Start (s) · moves the group' : 'Start (s)'}>
         <input
           type="number"
           step="0.1"
           min="0"
           value={clip.startSec.toFixed(1)}
-          onChange={(e) => update(clip.id, { startSec: Math.max(0, Number(e.target.value)) })}
+          onChange={(e) => {
+            const next = Math.max(0, Number(e.target.value))
+            if (!linked) return update(clip.id, { startSec: next })
+            const p = useProject.getState().project
+            if (p) moveItems(expandGroup(p, { kind: 'audio', id: clip.id }), next - clip.startSec)
+          }}
           className={inputCls}
         />
       </Field>
@@ -1188,22 +1280,20 @@ function AudioClipEditor(): JSX.Element | null {
 
       <button
         onClick={() => void runSplitOnSilence()}
-        disabled={splitting}
-        className="mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
-        title="Detect silence and split this clip into its speech segments"
+        disabled={splitting || linked}
+        className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50 ${disabledCls}`}
+        title={
+          linked
+            ? 'Not available on a linked tile — the pieces would cut only this one (unlink first)'
+            : 'Detect silence and split this clip into its speech segments'
+        }
       >
         {splitting ? 'Detecting…' : '✂ Split on silence'}
       </button>
       {splitNote && <p className="mb-2 text-[11px] text-zinc-500">{splitNote}</p>}
 
-      <button
-        onClick={() => {
-          remove(clip.id)
-          selectAudio(null)
-        }}
-        className={`mt-2 w-full ${dangerBtnCls}`}
-      >
-        Remove audio clip
+      <button onClick={remove} className={`mt-2 w-full ${dangerBtnCls}`}>
+        {linked ? `Delete linked group (${groupSize})` : 'Remove audio clip'}
       </button>
     </div>
   )
