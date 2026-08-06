@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { CropRect } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { clampCrop, defaultCrop, isFullFrame, resizeCrop } from '@/lib/crop'
 import { startPointerDrag } from '@/lib/pointerDrag'
@@ -16,7 +16,7 @@ export function CropEditor(): JSX.Element | null {
   const cropEditing = useUi((s) => s.cropEditing)
   const setCropEditing = useUi((s) => s.setCropEditing)
   const selectedLayerId = useUi((s) => s.selectedLayerId)
-  const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
+  const layer = useProject((s) => activeComp(s)?.layers.find((l) => l.id === selectedLayerId) ?? null)
   const updateLayerContent = useProject((s) => s.updateLayerContent)
   const content = layer && layer.content.kind === 'video' ? layer.content : null
   const { data: assets = [] } = useLibrary()

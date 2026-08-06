@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Project, TimelineItemRef } from '@shared/project'
+import type { Composition, TimelineItemRef } from '@shared/project'
 import { expandGroup } from '@/lib/links'
 
 /** Transient editor UI selection that doesn't belong in the project document. */
@@ -21,7 +21,7 @@ interface UiState {
    * a parameter rather than an import so this store stays free of a cycle with
    * `projectStore`.
    */
-  selectTile: (project: Project | null, ref: TimelineItemRef) => void
+  selectTile: (project: Composition | null, ref: TimelineItemRef) => void
   /** Currently selected visual layer (video/image/text) — drives the inspector,
    *  on-canvas handles, and the Layers menu highlight. */
   selectedLayerId: string | null

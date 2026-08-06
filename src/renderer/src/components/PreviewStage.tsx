@@ -34,7 +34,7 @@ import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 
@@ -511,7 +511,7 @@ function LayoutLayerView({
  * cropped by the stage; uncovered areas are black.
  */
 export function PreviewStage(): JSX.Element {
-  const project = useProject((s) => s.project)
+  const project = useProject(activeComp)
   const layers = project?.layers ?? EMPTY_LAYERS
   const audioClips = project?.audioClips ?? EMPTY_AUDIO
   const captions = project?.captions

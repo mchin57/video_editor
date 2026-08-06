@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerE
 import type { Layer } from '@shared/project'
 import { layerLabel, layersAtTime } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 
@@ -26,7 +26,7 @@ interface Drag {
  * layer of the whole stack is the Background and stays pinned at the bottom.
  */
 export function LayersPanel(): JSX.Element {
-  const layers = useProject((s) => s.project?.layers)
+  const layers = useProject((s) => activeComp(s)?.layers)
   const reorderLayers = useProject((s) => s.reorderLayers)
   const toggleHidden = useProject((s) => s.toggleLayerHidden)
   const selectedLayerId = useUi((s) => s.selectedLayerId)

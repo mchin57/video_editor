@@ -4,7 +4,7 @@ import type { MediaAsset } from '@shared/media'
 import type { StillRequest } from '@shared/ipc'
 import { videoSourceTime } from '@shared/layers'
 import { Popout } from './Popout'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { captureStillToDisk, captureStillToLibrary, imageUrl } from '@/ipc/client'
@@ -19,7 +19,7 @@ export function StillsPopout(): JSX.Element | null {
   const open = useUi((s) => s.stillsOpen)
   const setOpen = useUi((s) => s.setStillsOpen)
   const selectedLayerId = useUi((s) => s.selectedLayerId)
-  const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
+  const layer = useProject((s) => activeComp(s)?.layers.find((l) => l.id === selectedLayerId) ?? null)
   const addMedia = useProject((s) => s.addMedia)
   const addLayer = useProject((s) => s.addLayer)
   const queryClient = useQueryClient()

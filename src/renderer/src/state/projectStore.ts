@@ -88,6 +88,20 @@ function saveSession(filePath: string | null, dirty: boolean): void {
 
 const DISCARD_PROMPT = 'Discard unsaved changes to the current project?'
 
+/**
+ * Selector: the composition the editor is pointed at — the root project when
+ * `editPath` is empty, else the nested comp it addresses. A pure walk of the
+ * current document (stable references, so zustand won't re-render spuriously).
+ * Every timeline-rendering surface reads through this, so entering a comp
+ * automatically re-targets the whole editor. Null only when no project (or,
+ * transiently, if the path fails mid-update — callers treat it like "empty").
+ */
+export const activeComp = (s: Pick<ProjectState, 'project' | 'editPath'>): Composition | null =>
+  s.project ? resolveCompAtPath(s.project, s.editPath) : null
+
+/** Imperative twin of the `activeComp` selector, for event handlers. */
+export const getActiveComp = (): Composition | null => activeComp(useProject.getState())
+
 interface ProjectState {
   project: Project | null
   past: Project[]

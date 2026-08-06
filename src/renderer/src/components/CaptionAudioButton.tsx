@@ -4,7 +4,7 @@ import type { CaptionSegment } from '@shared/project'
 import { transcribeMedia, whisperAvailable } from '@/ipc/client'
 import { buildTimelineCaptions, type CaptionSource } from '@/lib/captions'
 import { useLibrary } from '@/hooks/useMedia'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 
 /**
  * Caption the whole audio lane: transcribe every audio clip that isn't excluded
@@ -14,8 +14,8 @@ import { useProject } from '@/state/projectStore'
  * own placed clip). Regenerates the caption track idempotently.
  */
 export function CaptionAudioButton(): JSX.Element | null {
-  const audioClips = useProject((s) => s.project?.audioClips)
-  const captions = useProject((s) => s.project?.captions)
+  const audioClips = useProject((s) => activeComp(s)?.audioClips)
+  const captions = useProject((s) => activeComp(s)?.captions)
   const setCaptions = useProject((s) => s.setCaptions)
   const { data: assets = [] } = useLibrary()
   const [available, setAvailable] = useState(true)

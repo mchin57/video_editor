@@ -7,13 +7,13 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, CaptionSegment, Layer, Project, ScriptLine, TimelineItemRef } from '@shared/project'
+import type { AudioClip, CaptionSegment, Composition, Layer, Project, ScriptLine, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
 import { assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { useProject } from '@/state/projectStore'
+import { activeComp, getActiveComp, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
@@ -215,10 +215,13 @@ function loadTimelineView(): TimelineView {
 }
 
 export function Timeline(): JSX.Element {
+  // The timeline renders the ACTIVE composition (the root, or the nested comp
+  // being edited); only the script markers are root-scoped.
+  const comp = useProject(activeComp)
   const project = useProject((s) => s.project)
-  const layers = project?.layers ?? EMPTY_LAYERS
-  const captionSegs = project?.captions.enabled ? project.captions.segments : EMPTY_CAPTIONS
-  const audioClips = project?.audioClips ?? EMPTY_AUDIO
+  const layers = comp?.layers ?? EMPTY_LAYERS
+  const captionSegs = comp?.captions.enabled ? comp.captions.segments : EMPTY_CAPTIONS
+  const audioClips = comp?.audioClips ?? EMPTY_AUDIO
   const script = project?.script ?? EMPTY_SCRIPT
 
   const selectLayer = useUi((s) => s.selectLayer)
@@ -530,7 +533,7 @@ export function Timeline(): JSX.Element {
     } else {
       addVideoLayer(nid, id, startSec, asset.probe.durationSec, !!asset.probe.audio)
       // A clip with audio lands as a LINKED pair — select the whole group.
-      selectTile(useProject.getState().project, { kind: 'layer', id: nid })
+      selectTile(getActiveComp(), { kind: 'layer', id: nid })
     }
   }
   const onDragOver = (e: ReactDragEvent): void => {
@@ -548,26 +551,30 @@ export function Timeline(): JSX.Element {
   const startTileDrag = (e: ReactPointerEvent, ref: TimelineItemRef): void => {
     e.stopPropagation()
     e.preventDefault()
+    // Two snapshots: the ROOT document for commitLive (undo restores the whole
+    // doc), and the ACTIVE comp for tile math — inside a nested comp the tiles
+    // live there, and the group transforms must produce a comp, not a root.
     const before = useProject.getState().project
-    if (!before) return
-    const tile = tileOf(before, ref)
+    const comp0 = getActiveComp()
+    if (!before || !comp0) return
+    const tile = tileOf(comp0, ref)
     if (!tile) return
     if ((e.ctrlKey || e.metaKey) && tile.linkable) {
-      toggleSelected(before, ref)
+      toggleSelected(comp0, ref)
       return
     }
     setPlaying(false)
     // Grabbing something that's already part of a multi-selection drags the whole
     // set; otherwise the press selects this tile's group (or just this tile).
-    const refs = selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(before, ref)
+    const refs = selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(comp0, ref)
     selectItems(refs, ref)
-    startGroupMove(e, before, refs, ref)
+    startGroupMove(e, before, comp0, refs, ref)
   }
 
   /** Ctrl/Cmd-click: add this tile's whole group to the selection, or drop it if
    *  it's already in there. Layout layers never join a multi-selection (they
    *  can't be linked), so they fall through to a plain select. */
-  const toggleSelected = (p: Project, ref: TimelineItemRef): void => {
+  const toggleSelected = (p: Composition, ref: TimelineItemRef): void => {
     const group = expandGroup(p, ref)
     const groupKeys = refKeys(group)
     if (selKeys.has(refKey(ref))) {
@@ -589,10 +596,11 @@ export function Timeline(): JSX.Element {
   const startGroupMove = (
     e: ReactPointerEvent,
     before: Project,
+    comp0: Composition,
     refs: TimelineItemRef[],
     primary: TimelineItemRef
   ): void => {
-    const startSec = tileOf(before, primary)?.startSec ?? 0
+    const startSec = tileOf(comp0, primary)?.startSec ?? 0
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
@@ -607,8 +615,9 @@ export function Timeline(): JSX.Element {
       if (!dragged && Math.abs(dx) <= CLICK_SLOP) return // still a click, not a drag
       dragged = true
       const snapped = snap(startSec + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
-      // Always recomputed from the pre-drag snapshot, so the delta can't accumulate.
-      useProject.getState().liveUpdate(() => moveItemsBy(before, refs, snapped - startSec))
+      // Always recomputed from the pre-drag COMP snapshot, so the delta can't
+      // accumulate (and the transform yields a comp, spliced back at editPath).
+      useProject.getState().liveUpdate(() => moveItemsBy(comp0, refs, snapped - startSec))
     }
     scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
@@ -618,7 +627,7 @@ export function Timeline(): JSX.Element {
         // the tile that was clicked (its group). Without this a Ctrl-built
         // multi-selection could never be narrowed back down — pressing a member
         // has to keep the whole set alive so the set can be dragged.
-        const p = useProject.getState().project
+        const p = getActiveComp()
         if (p) selectItems(expandGroup(p, primary), primary)
         return
       }
@@ -629,7 +638,7 @@ export function Timeline(): JSX.Element {
   /** The tiles an edge drag applies to: the pressed tile's link group, or the
    *  whole multi-selection when the pressed tile is part of one. Same rule as a
    *  move — one tile means the single-tile trim path below. */
-  const edgeRefs = (p: Project, ref: TimelineItemRef): TimelineItemRef[] =>
+  const edgeRefs = (p: Composition, ref: TimelineItemRef): TimelineItemRef[] =>
     selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(p, ref)
 
   /**
@@ -642,6 +651,7 @@ export function Timeline(): JSX.Element {
   const startGroupTrim = (
     e: ReactPointerEvent,
     before: Project,
+    comp0: Composition,
     refs: TimelineItemRef[],
     mode: 'start' | 'end',
     edge0: number
@@ -660,7 +670,7 @@ export function Timeline(): JSX.Element {
       if (!dragged && Math.abs(dx) <= CLICK_SLOP) return
       dragged = true
       const snapped = snap(edge0 + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
-      useProject.getState().liveUpdate(() => trimItemsBy(before, refs, mode, snapped - edge0, srcDur))
+      useProject.getState().liveUpdate(() => trimItemsBy(comp0, refs, mode, snapped - edge0, srcDur))
     }
     scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
@@ -677,12 +687,13 @@ export function Timeline(): JSX.Element {
     e.preventDefault()
     setPlaying(false)
     const before = useProject.getState().project
-    if (!before) return
+    const comp0 = getActiveComp()
+    if (!before || !comp0) return
     const ref: TimelineItemRef = { kind: 'layer', id: layer.id }
-    const refs = edgeRefs(before, ref)
+    const refs = edgeRefs(comp0, ref)
     selectItems(refs, ref)
     if (refs.length > 1) {
-      return startGroupTrim(e, before, refs, mode, mode === 'start' ? layer.startSec : layer.endSec)
+      return startGroupTrim(e, before, comp0, refs, mode, mode === 'start' ? layer.startSec : layer.endSec)
     }
     const startX = e.clientX
     const sc = scrollRef.current
@@ -736,12 +747,13 @@ export function Timeline(): JSX.Element {
     e.stopPropagation()
     e.preventDefault()
     const before = useProject.getState().project
-    if (!before) return
+    const comp0 = getActiveComp()
+    if (!before || !comp0) return
     const ref: TimelineItemRef = { kind: 'caption', id: seg.id }
-    const refs = edgeRefs(before, ref)
+    const refs = edgeRefs(comp0, ref)
     selectItems(refs, ref)
     if (refs.length > 1) {
-      return startGroupTrim(e, before, refs, mode, mode === 'start' ? seg.startSec : seg.endSec)
+      return startGroupTrim(e, before, comp0, refs, mode, mode === 'start' ? seg.startSec : seg.endSec)
     }
     const startX = e.clientX
     const sc = scrollRef.current
@@ -780,16 +792,17 @@ export function Timeline(): JSX.Element {
     e.stopPropagation()
     e.preventDefault()
     const before = useProject.getState().project
-    if (!before) return
+    const comp0 = getActiveComp()
+    if (!before || !comp0) return
     const { startSec, inSec } = clip
     const effOut = effectiveOut(clip, maxOut)
     const ref: TimelineItemRef = { kind: 'audio', id: clip.id }
-    const refs = edgeRefs(before, ref)
+    const refs = edgeRefs(comp0, ref)
     selectItems(refs, ref)
     if (refs.length > 1) {
       // The right edge sits at the clip's timeline end; the left edge at its start.
       const edge0 = mode === 'start' ? startSec : startSec + (effOut - inSec)
-      return startGroupTrim(e, before, refs, mode, edge0)
+      return startGroupTrim(e, before, comp0, refs, mode, edge0)
     }
     const startX = e.clientX
     const sc = scrollRef.current
@@ -823,14 +836,14 @@ export function Timeline(): JSX.Element {
 
   // Split / delete / link act on the WHOLE selection (a single tile, a link
   // group, or a Ctrl-built set) — one undo step each.
-  const canSplit = !!project && canSplitItems(project, selection, time, srcDur)
+  const canSplit = !!comp && canSplitItems(comp, selection, time, srcDur)
   const splitSelected = (): void => splitItemsAt(selection, time, srcDur)
 
   const canDelete = selection.length > 0
   const deleteSelected = (): void => removeItems(selection)
 
-  const canLink = !!project && canLinkItems(project, selection)
-  const canUnlink = !!project && canUnlinkItems(project, selection)
+  const canLink = !!comp && canLinkItems(comp, selection)
+  const canUnlink = !!comp && canUnlinkItems(comp, selection)
   const linkSelected = (): void => linkItems(selection)
   const unlinkSelected = (): void => unlinkItems(selection)
   // Group ids that actually bind two or more tiles (a leftover single-member id
@@ -839,11 +852,11 @@ export function Timeline(): JSX.Element {
   // edge handles aren't rendered and they show a 🔗 badge instead.
   const linkedGroups = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const t of project ? timelineTiles(project) : []) {
+    for (const t of comp ? timelineTiles(comp) : []) {
       if (t.linkGroupId) counts.set(t.linkGroupId, (counts.get(t.linkGroupId) ?? 0) + 1)
     }
     return new Set([...counts].filter(([, n]) => n > 1).map(([gid]) => gid))
-  }, [project])
+  }, [comp])
   const isLinkedTile = (gid: string | undefined): boolean => !!gid && linkedGroups.has(gid)
 
   const addText = (): void => {

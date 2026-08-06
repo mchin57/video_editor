@@ -3,7 +3,7 @@ import type { MediaAsset } from '@shared/media'
 import { isImageAsset } from '@shared/media'
 import { useLibrary, useImportMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { makeImageLayer, visualDuration } from '@shared/layers'
@@ -25,7 +25,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const selectAudio = useUi((s) => s.selectAudio)
   const selectLayer = useUi((s) => s.selectLayer)
   const selectTile = useUi((s) => s.selectTile)
-  const onTrack = useProject((s) => s.project?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
+  const onTrack = useProject((s) => activeComp(s)?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const removeMedia = useProject((s) => s.removeMedia)
 
   const isImage = isImageAsset(asset)

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DEFAULT_STABILIZE } from '@shared/project'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { StabilizeSliders } from './Inspector'
 
 /**
@@ -16,7 +16,7 @@ export function ProjectSettingsMenu(): JSX.Element | null {
   const setDenoiseDefault = useProject((s) => s.setDenoiseDefault)
   const stabilizeDefault = useProject((s) => s.project?.stabilizeDefault ?? null)
   const setStabilizeDefault = useProject((s) => s.setStabilizeDefault)
-  const captions = useProject((s) => s.project?.captions)
+  const captions = useProject((s) => activeComp(s)?.captions)
   const setCaptions = useProject((s) => s.setCaptions)
 
   const [open, setOpen] = useState(false)

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointe
 import type { NormCrop } from '@shared/project'
 import { Popout } from './Popout'
 import { btnCls as btn, toggleCls as toggle } from './ui'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { imageUrl } from '@/ipc/client'
@@ -20,7 +20,7 @@ export function ImageEditPopout(): JSX.Element | null {
   const open = useUi((s) => s.imageEditOpen)
   const setOpen = useUi((s) => s.setImageEditOpen)
   const selectedLayerId = useUi((s) => s.selectedLayerId)
-  const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
+  const layer = useProject((s) => activeComp(s)?.layers.find((l) => l.id === selectedLayerId) ?? null)
   const updateContent = useProject((s) => s.updateLayerContent)
   const content = layer && layer.content.kind === 'image' ? layer.content : null
   const wrapRef = useRef<HTMLDivElement>(null)

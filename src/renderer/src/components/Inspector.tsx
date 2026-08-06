@@ -34,7 +34,7 @@ import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
@@ -55,7 +55,7 @@ type TriMode = 'default' | 'on' | 'off'
  * selector cheap to compare).
  */
 function useLinkGroupSize(kind: TimelineItemKind, id: string | null): number {
-  return useProject((s) => (s.project && id ? expandGroup(s.project, { kind, id }).length : 1))
+  return useProject((s) => { const c = activeComp(s); return c && id ? expandGroup(c, { kind, id }).length : 1 })
 }
 
 /** The banner explaining why this panel's timing controls are greyed out. */
@@ -351,7 +351,7 @@ function FreezeFrames({
 
 function LayerEditor(): JSX.Element | null {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
-  const layer = useProject((s) => s.project?.layers.find((l) => l.id === selectedLayerId) ?? null)
+  const layer = useProject((s) => activeComp(s)?.layers.find((l) => l.id === selectedLayerId) ?? null)
   const update = useProject((s) => s.updateLayer)
   const updateContent = useProject((s) => s.updateLayerContent)
   const groupSize = useLinkGroupSize('layer', selectedLayerId)
@@ -1069,7 +1069,7 @@ function CaptionStyleFields({
 /** Editing the lane-wide caption style (selected via the "Captions" gutter label):
  *  every caption without its own override updates live. */
 function CaptionStyleEditor(): JSX.Element | null {
-  const captions = useProject((s) => s.project?.captions)
+  const captions = useProject((s) => activeComp(s)?.captions)
   const setCaptionStyle = useProject((s) => s.setCaptionStyle)
   if (!captions) return null
   const overrides = captions.segments.filter((s) => s.style).length
@@ -1092,8 +1092,8 @@ function CaptionStyleEditor(): JSX.Element | null {
 
 function CaptionEditor(): JSX.Element | null {
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
-  const captions = useProject((s) => s.project?.captions)
-  const seg = useProject((s) => s.project?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null)
+  const captions = useProject((s) => activeComp(s)?.captions)
+  const seg = useProject((s) => activeComp(s)?.captions.segments.find((c) => c.id === selectedCaptionId) ?? null)
   const update = useProject((s) => s.updateCaption)
   const groupSize = useLinkGroupSize('caption', selectedCaptionId)
   const linked = groupSize > 1
@@ -1172,7 +1172,7 @@ function CaptionEditor(): JSX.Element | null {
 
 function AudioClipEditor(): JSX.Element | null {
   const selectedAudioId = useUi((s) => s.selectedAudioId)
-  const clip = useProject((s) => s.project?.audioClips.find((a) => a.id === selectedAudioId) ?? null)
+  const clip = useProject((s) => activeComp(s)?.audioClips.find((a) => a.id === selectedAudioId) ?? null)
   const update = useProject((s) => s.updateAudioClip)
   const groupSize = useLinkGroupSize('audio', selectedAudioId)
   const linked = groupSize > 1
@@ -1307,7 +1307,7 @@ export function Inspector(): JSX.Element {
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const selectedAudioId = useUi((s) => s.selectedAudioId)
   const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
-  const layers = useProject((s) => s.project?.layers)
+  const layers = useProject((s) => activeComp(s)?.layers)
   const hookOk = hookCovered(layers ?? [])
 
   return (
