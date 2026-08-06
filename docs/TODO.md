@@ -83,6 +83,36 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 
 
+- [~] **Nested compositions (compound clips) — edit any clip or panel as its own
+  timeline.** A `Composition` (`layers`+`audioClips`+`captions`) is the editable
+  core `Project` now extends; a **compound layer** (`CompoundContent`) or a
+  **layout cell** (`LayoutCell.comp`) carries one inline (migration v17,
+  absence-tolerant). ONE implementation serves every depth: the store's
+  `editPath` + `commitComp` mean all ~40 timeline actions edit the ACTIVE
+  composition (empty path = the root, byte-identical to before), every panel
+  renders through the `activeComp` selector, the preview recurses via
+  `StackLayer`/`CompFill`, and the exporter's `renderComposition` calls itself
+  for nested comps. Traversal lives in `src/shared/compositions.ts`
+  (`resolveCompAtPath`/`updateCompAtPath`/`compositionDuration`/
+  `syncCompoundWindows`/depth cap — inline ownership makes cycles impossible).
+  Export pre-renders each comp to a **transparent VP9/WebM** intermediate
+  (verified: FFMPEG-NOTES "Nested-composition intermediates") so a comp
+  composites over lower layers exactly like the preview instead of a black box;
+  intermediates are content-hash cached. UI: ✎ Edit on a layout cell, "🧩 Edit
+  as compound clip" on any unlinked tile, a breadcrumb to step back out.
+  _Unverified: not yet smoke-tested through `npm run dev` — a real nested
+  EXPORT with media (the export IPC opens a save dialog, so it can't be driven
+  headlessly). Preview/edit/navigation are covered by 6 e2e specs._
+  _Known gaps (deliberate, v1): an un-entered comp previews VIDEO only — its
+  audio and captions appear in the export (baked into the pre-render) but not
+  in the live preview; comps are untrimmed (the block window IS the comp
+  duration, kept in sync by `syncCompoundWindows`); compound layers ignore
+  transform keyframes; nested pre-renders don't drive the export progress bar
+  (needs weighting across the N+1 passes); the intermediate cache is per-export
+  (a cross-export cache keyed on comp content would skip re-renders); "bake a
+  comp to a flat library asset" and a shared/reusable comp registry (edit once,
+  update everywhere) remain future work._
+
 - [~] **Multi-clip layout formats (split screen, panels) — shipped as a `layout` LAYER kind.**
   All 7 planned presets (`split-lr`/`split-tb`/`cols-3`/`rows-3`/`big-left`/
   `big-right`/`grid-2x2`) live in `src/shared/layouts.ts` with the pure geometry

@@ -117,6 +117,40 @@ export function compositionDuration(comp: Composition, srcDur: SourceDuration = 
 }
 
 /**
+ * Re-sync every compound layer's timeline window to its composition's duration,
+ * recursively (deepest first, so a change ripples all the way up). V1 comps are
+ * untrimmed — the window IS the comp's length — so editing inside a compound
+ * has to grow/shrink the block that stands for it, or the parent would clip or
+ * pad the result. Returns the input unchanged when nothing moved, so callers
+ * can use it on every commit without churning undo history.
+ *
+ * (Layout CELLS need no equivalent: their span is read from
+ * `compositionDuration` at render time rather than stored.)
+ */
+export function syncCompoundWindows(comp: Composition, srcDur: SourceDuration = () => 0): Composition {
+  let changed = false
+  const layers = comp.layers.map((l) => {
+    if (l.content.kind === 'layout') {
+      const cells = l.content.cells.map((cell) => {
+        if (!cell.comp) return cell
+        const next = syncCompoundWindows(cell.comp, srcDur)
+        if (next === cell.comp) return cell
+        changed = true
+        return { ...cell, comp: next }
+      })
+      return changed ? { ...l, content: { ...l.content, cells } } : l
+    }
+    if (l.content.kind !== 'compound') return l
+    const inner = syncCompoundWindows(l.content.comp, srcDur)
+    const end = l.startSec + Math.max(0.1, compositionDuration(inner, srcDur))
+    if (inner === l.content.comp && Math.abs(end - l.endSec) < 1e-6) return l
+    changed = true
+    return { ...l, endSec: end, content: { ...l.content, comp: inner } }
+  })
+  return changed ? { ...comp, layers } : comp
+}
+
+/**
  * Human labels for each step of a path, resolved against the document — the
  * breadcrumb's text ("Compound clip", "Layout · Cell 2", …). Unresolvable
  * steps label as "?" so a transient stale path can't crash the header.

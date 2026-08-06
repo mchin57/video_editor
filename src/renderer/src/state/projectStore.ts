@@ -19,6 +19,7 @@ import {
   makeCompFromCell,
   makeCompFromLayer,
   resolveCompAtPath,
+  syncCompoundWindows,
   updateCompAtPath,
   type CompPath,
   type CompStep
@@ -270,7 +271,10 @@ export const useProject = create<ProjectState>((set, get) => {
   function commit(transform: (p: Project) => Project): void {
     const current = get().project
     if (!current) return
-    const next = transform(current)
+    // Editing inside a compound changes how long it plays, so its parent block
+    // has to follow (v1 comps are untrimmed — the window IS the duration).
+    // A no-op sync returns the same object, so this can't churn history.
+    const next = syncCompoundWindows(transform(current)) as Project
     if (next === current) return
     set({ project: next, past: [...get().past, current].slice(-HISTORY_LIMIT), future: [] })
     scheduleSave(next)

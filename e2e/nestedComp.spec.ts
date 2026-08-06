@@ -155,6 +155,48 @@ test('a timeline clip converts to a compound clip and opens (real UI)', async ({
   await expect(page.getByTestId('comp-breadcrumb')).toContainText('Compound clip')
 })
 
+test("editing inside a compound resizes its block in the parent timeline", async ({
+  appPage: page
+}) => {
+  await page.evaluate(() => {
+    const { useProject, useUi } = window.__reelStores
+    useProject.getState().addVideoLayer('V1', 'no-such-media', 0, 6, false)
+    useUi.getState().selectLayer('V1')
+  })
+  await page.getByRole('button', { name: '🧩 Edit as compound clip' }).click()
+  await expect(page.getByTestId('comp-breadcrumb')).toBeVisible()
+
+  // Inside: add a text layer running to 10s, past the comp's current 6s.
+  await page.evaluate(() => {
+    const { useProject, usePlayback } = window.__reelStores
+    usePlayback.getState().setTime(7)
+    useProject.getState().addLayer({
+      id: 'T1',
+      hidden: false,
+      startSec: 7,
+      endSec: 10,
+      x: 540,
+      y: 600,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'later',
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 60,
+        color: '#fff',
+        pill: { enabled: false, color: '#000', padPx: 0 }
+      }
+    })
+  })
+
+  // The parent block grew to match the comp (v1 comps are untrimmed), so the
+  // extra content can't be clipped by a stale window.
+  const end = await page.evaluate(
+    () => window.__reelStores.useProject.getState().project!.layers[0].endSec
+  )
+  expect(end).toBeCloseTo(10, 5)
+})
+
 test('undo while inside a comp pops the edit path instead of dangling', async ({
   appPage: page
 }) => {

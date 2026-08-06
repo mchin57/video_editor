@@ -10,6 +10,7 @@ import {
   makeCompFromLayer,
   resolveCompAtPath,
   stepInto,
+  syncCompoundWindows,
   updateCompAtPath
 } from './compositions'
 
@@ -186,5 +187,43 @@ describe('referencedMediaIds recursion', () => {
     const p = createEmptyProject('p', 't')
     p.layers = [layoutLayer('lay', { mediaId: 'm-old', comp: clipComp('m-new', 2) })]
     expect(referencedMediaIds(p)).toEqual(['m-new'])
+  })
+})
+
+describe('syncCompoundWindows', () => {
+  it("grows/shrinks a compound layer's window to its comp duration", () => {
+    const comp = clipComp('m', 4)
+    const root = createEmptyProject('p', 't')
+    root.layers = [compoundLayer('cmp', comp, 2, 99)] // deliberately stale end
+    const next = syncCompoundWindows(root)
+    expect(next.layers[0].endSec).toBeCloseTo(6, 9) // start 2 + duration 4
+  })
+
+  it('ripples through nesting, deepest first', () => {
+    // outer compound → comp holding an inner compound → comp with a 3s clip.
+    const inner = clipComp('m', 3)
+    const mid: Composition = {
+      ...createEmptyComposition(),
+      layers: [compoundLayer('in', inner, 0, 99)]
+    }
+    const root = createEmptyProject('p', 't')
+    root.layers = [compoundLayer('out', mid, 0, 99)]
+    const next = syncCompoundWindows(root)
+    const outer = next.layers[0]
+    const innerLayer = (outer.content as { comp: Composition }).comp.layers[0]
+    expect(innerLayer.endSec).toBeCloseTo(3, 9) // inner fixed first…
+    expect(outer.endSec).toBeCloseTo(3, 9) // …then the outer follows it
+  })
+
+  it('is identity when every window already matches (no undo churn)', () => {
+    const root = createEmptyProject('p', 't')
+    root.layers = [compoundLayer('cmp', clipComp('m', 4), 0, 4)]
+    expect(syncCompoundWindows(root)).toBe(root)
+  })
+
+  it('leaves plain and layout layers alone', () => {
+    const root = createEmptyProject('p', 't')
+    root.layers = [makeVideoLayer('v', 'm', 0, 5), layoutLayer('lay', { mediaId: 'm' })]
+    expect(syncCompoundWindows(root)).toBe(root)
   })
 })
