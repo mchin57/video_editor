@@ -352,7 +352,7 @@ async function runExport(
           })
         }
       }
-    } else {
+    } else if (c.kind === 'text') {
       if (c.text.trim().length === 0) continue
       const fontSizePx = c.fontSizePx * l.scale * sy
       // A gradient (libass can't do it) OR an explicit wrap width (libass can't

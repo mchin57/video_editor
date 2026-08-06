@@ -291,6 +291,14 @@ export interface LayoutCell {
   outSec: number
   mute: boolean
   rect: CellRect
+  /**
+   * Nested composition filling this cell instead of a single clip. When present
+   * it OVERRIDES `mediaId`: the panel is a whole sub-timeline (own layers /
+   * audio / captions) edited with the same editor and pre-rendered on export.
+   * Plays from its local t=0 for `compositionDuration` seconds (no in/out trim
+   * on comps in v1). Traverse via `shared/compositions.ts` — never walk inline.
+   */
+  comp?: Composition | null
 }
 
 /**
@@ -307,7 +315,21 @@ export interface LayoutContent {
   cells: LayoutCell[]
 }
 
-export type LayerContent = VideoContent | ImageContent | TextContent | LayoutContent
+/**
+ * A COMPOUND CLIP: a nested composition composited as one full-frame layer.
+ * The comp plays from its local t=0 at the layer's `startSec` (no in/out trim
+ * on comps in v1 — the layer window `[startSec, endSec)` gates visibility, with
+ * `endSec` maintained as `startSec + compositionDuration(comp)` by the store
+ * actions). Like layouts, compound layers ignore transform keyframes. Edited by
+ * ENTERING it (the whole editor re-targets to the nested comp); exported by
+ * pre-rendering it to an intermediate. Traverse via `shared/compositions.ts`.
+ */
+export interface CompoundContent {
+  kind: 'compound'
+  comp: Composition
+}
+
+export type LayerContent = VideoContent | ImageContent | TextContent | LayoutContent | CompoundContent
 export type LayerKind = LayerContent['kind']
 
 /**
@@ -477,16 +499,29 @@ export interface ScriptLine {
   atSec: number | null
 }
 
-export interface Project {
+/**
+ * The editable core of a timeline document: a visual layer stack + audio track
+ * + captions. The top-level `Project` IS a Composition (plus file/identity
+ * fields); a compound clip or a layout cell carries a nested one. Everything
+ * that EDITS a timeline (store actions, `lib/links.ts` ops) or RENDERS one
+ * (preview stack, exporter) should operate on a Composition, so the same code
+ * serves the root document and any nested comp. Nesting is INLINE (a comp owns
+ * its children by value), which makes reference cycles impossible by
+ * construction — only a depth cap is enforced (`shared/compositions.ts`).
+ */
+export interface Composition {
+  /** The visual stack, back (index 0 = background) → front (last). */
+  layers: Layer[]
+  captions: CaptionsConfig
+  audioClips: AudioClip[]
+}
+
+export interface Project extends Composition {
   id: string
   name: string
   /** Schema version for forward-compatible migrations. */
   version: number
   preset: PresetId
-  /** The visual stack, back (index 0 = background) → front (last). */
-  layers: Layer[]
-  captions: CaptionsConfig
-  audioClips: AudioClip[]
   /**
    * Project-wide default for the audio noise filter (FFT denoise on export).
    * Off by default. Individual clips can override it via `AudioClip.denoise`.
@@ -510,14 +545,21 @@ export interface Project {
   updatedAt: string
 }
 
-/** Every media id this project references through its layers/audio. */
+/** Every media id this document references through its layers/audio, RECURSING
+ *  into nested compositions (compound layers and layout-cell comps). A
+ *  `Composition` satisfies the parameter shape, so this is also the canonical
+ *  media walker for nested comps — don't write a parallel one. */
 export function referencedMediaIds(p: Pick<Project, 'layers' | 'audioClips'>): string[] {
   const ids: string[] = []
   for (const l of p.layers) {
     if (l.content.kind === 'video' || l.content.kind === 'image') ids.push(l.content.mediaId)
     if (l.content.kind === 'layout') {
-      for (const cell of l.content.cells) if (cell.mediaId) ids.push(cell.mediaId)
+      for (const cell of l.content.cells) {
+        if (cell.comp) ids.push(...referencedMediaIds(cell.comp))
+        else if (cell.mediaId) ids.push(cell.mediaId)
+      }
     }
+    if (l.content.kind === 'compound') ids.push(...referencedMediaIds(l.content.comp))
   }
   for (const a of p.audioClips) ids.push(a.mediaId)
   return [...new Set(ids)]
@@ -573,13 +615,10 @@ export function audioClipEnd(c: AudioClip, sourceDurationSec: number): number {
   return c.startSec + Math.max(0, effectiveOut(c, sourceDurationSec) - c.inSec)
 }
 
-export function createEmptyProject(id: string, name: string): Project {
-  const now = new Date().toISOString()
+/** An empty timeline core — the seed for a new project AND for a fresh nested
+ *  composition (compound clip / layout-cell comp). One source of defaults. */
+export function createEmptyComposition(): Composition {
   return {
-    id,
-    name,
-    version: 16,
-    preset: 'reel',
     layers: [],
     captions: {
       enabled: false,
@@ -588,7 +627,18 @@ export function createEmptyProject(id: string, name: string): Project {
       style: { ...DEFAULT_CAPTION_STYLE },
       segments: []
     },
-    audioClips: [],
+    audioClips: []
+  }
+}
+
+export function createEmptyProject(id: string, name: string): Project {
+  const now = new Date().toISOString()
+  return {
+    id,
+    name,
+    version: 17,
+    preset: 'reel',
+    ...createEmptyComposition(),
     denoiseDefault: false,
     stabilizeDefault: null,
     script: [],
@@ -816,7 +866,10 @@ export function migrateProject(raw: unknown): Project {
   // v16 adds absence-tolerant `linkGroupId` on layers/captions/audio clips
   // (absent = unlinked) — old projects simply have no link groups. Groups left
   // with a single member behave as unlinked, so no data transform is needed.
-  if (typeof p.version !== 'number' || p.version < 16) p.version = 16
+  // v17 adds nested compositions: the `compound` layer content kind and the
+  // absence-tolerant `LayoutCell.comp` — purely additive, old projects simply
+  // have none.
+  if (typeof p.version !== 'number' || p.version < 17) p.version = 17
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

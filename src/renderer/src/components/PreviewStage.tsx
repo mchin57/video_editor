@@ -878,6 +878,10 @@ export function PreviewStage(): JSX.Element {
           )
         }
 
+        // Compound clips render via CompositionView (Stage 2); until then an
+        // un-entered compound shows nothing rather than crashing the switch.
+        if (layer.content.kind === 'compound') return null
+
         // Text layer. Position via transform (left/top = 0) so the wrap width is
         // independent of x — anchoring by `left:x%` made the box narrower as it
         // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap

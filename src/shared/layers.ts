@@ -305,6 +305,7 @@ export function layerLabel(layer: Layer): string {
   if (c.kind === 'text') return c.text.trim() || 'Text'
   if (c.kind === 'image') return 'Image'
   if (c.kind === 'layout') return 'Layout'
+  if (c.kind === 'compound') return 'Compound clip'
   return 'Video'
 }
 

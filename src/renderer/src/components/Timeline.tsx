@@ -311,8 +311,9 @@ export function Timeline(): JSX.Element {
   const total = Math.max(visualDuration(layers), audioEnd)
 
   // Group the unified stack into typed lanes (a visual grouping only).
+  // Compound clips are clip-like, so they ride in the Clips lane.
   const grouped = useMemo(() => {
-    const video = layers.filter((l) => l.content.kind === 'video')
+    const video = layers.filter((l) => l.content.kind === 'video' || l.content.kind === 'compound')
     const layout = layers.filter((l) => l.content.kind === 'layout')
     const text = layers.filter((l) => l.content.kind === 'text')
     const image = layers.filter((l) => l.content.kind === 'image')
@@ -881,7 +882,7 @@ export function Timeline(): JSX.Element {
           />
         )}
         <span className="truncate text-[9px] font-medium text-zinc-100">
-          {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🎬'}&nbsp;
+          {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : l.content.kind === 'compound' ? '🧩' : '🎬'}&nbsp;
           {asset?.fileName ?? layerLabel(l)}
         </span>
         {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
