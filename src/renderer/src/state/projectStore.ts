@@ -17,6 +17,7 @@ import {
   MAX_COMP_DEPTH,
   compDepth,
   makeCompFromCell,
+  makeCompFromLayer,
   resolveCompAtPath,
   updateCompAtPath,
   type CompPath,
@@ -24,6 +25,7 @@ import {
 } from '@shared/compositions'
 import {
   applyVisibleOrder,
+  FRAME,
   layerTransformAt,
   makeVideoLayer,
   playedVideoDuration,
@@ -167,6 +169,11 @@ interface ProjectState {
    *  cell already carries a comp or the depth cap would be exceeded. The
    *  caller then typically `enterComposition({ layerId, cellIndex })`. */
   convertCellToComp: (layerId: string, cellIndex: number) => void
+  /** Convert a timeline LAYER into a compound clip: the layer moves into a new
+   *  nested composition (zero-based) and is replaced in place by a compound
+   *  layer spanning the same window. No-op past the depth cap, on a layer that
+   *  is already a compound, or on a linked tile (the group would be split). */
+  convertLayerToComp: (layerId: string) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
   updateLayerContent: (id: string, patch: ContentPatch) => void
   removeLayer: (id: string) => void
@@ -483,6 +490,31 @@ export const useProject = create<ProjectState>((set, get) => {
             i === cellIndex ? { ...c, comp, mediaId: null } : c
           )
           return { ...l, content: { ...l.content, cells } }
+        })
+      )
+    },
+
+    convertLayerToComp: (layerId) => {
+      if (get().editPath.length + 2 > MAX_COMP_DEPTH) return
+      commitComp((p) =>
+        mapLayer(p, layerId, (l) => {
+          if (l.content.kind === 'compound') return l
+          // A linked tile moves with partners that would stay behind.
+          if (l.linkGroupId && links.isLinked(p, { kind: 'layer', id: layerId })) return l
+          const comp = makeCompFromLayer(l)
+          if (compDepth(comp) + get().editPath.length + 1 > MAX_COMP_DEPTH) return l
+          // Same window and stack slot; the transform resets because the comp
+          // renders as a full frame (its inner layer keeps the old transform).
+          return {
+            id: l.id,
+            hidden: l.hidden,
+            startSec: l.startSec,
+            endSec: l.endSec,
+            x: FRAME.width / 2,
+            y: FRAME.height / 2,
+            scale: 1,
+            content: { kind: 'compound', comp }
+          }
         })
       )
     },

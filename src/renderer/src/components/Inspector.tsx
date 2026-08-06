@@ -462,11 +462,32 @@ function LayerEditor(): JSX.Element | null {
         <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
         Visible
       </label>
+
+      {/* Any ordinary tile can become a compound clip: it moves into a nested
+          timeline you then edit on its own. Linked tiles are excluded — their
+          partners would be left behind in the parent. */}
+      {c.kind !== 'compound' && (
+        <button
+          onClick={() => {
+            useProject.getState().convertLayerToComp(id)
+            useProject.getState().enterComposition({ layerId: id })
+          }}
+          disabled={linked}
+          className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
+          title={
+            linked
+              ? 'Not available on a linked tile — its partners would stay behind (unlink first)'
+              : 'Move this into its own nested timeline and open it'
+          }
+        >
+          🧩 Edit as compound clip
+        </button>
+      )}
       </CollapsibleSection>
 
       {/* Keyframed motion (video/image; text animates via its own presets;
-          layouts have no export keyframe path) */}
-      {c.kind !== 'text' && c.kind !== 'layout' && (
+          layouts and compounds have no export keyframe path) */}
+      {c.kind !== 'text' && c.kind !== 'layout' && c.kind !== 'compound' && (
         <CollapsibleSection id="keyframes" title="Keyframes">
           <KeyframesSection layer={layer} />
         </CollapsibleSection>
@@ -481,6 +502,13 @@ function LayerEditor(): JSX.Element | null {
             The aspect ratio is set in the <span className="text-zinc-400">Format</span> menu. Cells
             fill their panel (center-cropped) and play at 1× from the layout&apos;s start.
           </p>
+        </CollapsibleSection>
+      )}
+
+      {/* Compound clip: a whole nested timeline standing in for one clip. */}
+      {c.kind === 'compound' && (
+        <CollapsibleSection id="compound" title="Compound clip">
+          <CompoundControls layerId={id} />
         </CollapsibleSection>
       )}
 
@@ -777,6 +805,28 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
   )
 }
 
+
+/** A compound clip's only control: open its nested timeline. Everything else
+ *  about it (what's inside) is edited by entering it — that's the whole point
+ *  of the compound. Its window/transform stay in the Placement section above. */
+function CompoundControls({ layerId }: { layerId: string }): JSX.Element {
+  const enterComposition = useProject((s) => s.enterComposition)
+  return (
+    <>
+      <button
+        onClick={() => enterComposition({ layerId })}
+        className="w-full rounded bg-fuchsia-500/20 px-2 py-1.5 text-xs font-semibold text-fuchsia-200 hover:bg-fuchsia-500/40"
+        title="Open this compound clip as its own timeline"
+      >
+        ✎ Edit contents
+      </button>
+      <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
+        A compound clip is a whole timeline standing in for one clip — cut it, mix its audio,
+        colour-grade it, layer text over it. Its result plays here from this block&apos;s start.
+      </p>
+    </>
+  )
+}
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
 

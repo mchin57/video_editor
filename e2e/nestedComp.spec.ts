@@ -96,6 +96,65 @@ test('an un-entered cell comp renders inside its panel in the preview', async ({
   await expect(page.getByTestId('comp-fill')).toHaveCount(0)
 })
 
+test('the cell Edit button converts + enters in one click (real UI)', async ({ appPage: page }) => {
+  await arrangeLayoutWithCell(page)
+  // Select the layout so the Inspector shows its Layout section.
+  await page.evaluate(() => window.__reelStores.useUi.getState().selectLayer('LAY'))
+
+  // One click on the cell's ✎ Edit: converts the single clip to a composition
+  // and steps in (the two store actions the Stage-1 e2e drove by hand).
+  await page.getByTestId('layout-cell-0').getByRole('button', { name: '✎ Edit' }).click()
+
+  await expect(page.getByTestId('comp-breadcrumb')).toContainText('Cell 1')
+  await expect(page.locator('div[title="Video"]')).toBeVisible() // the seeded clip
+  const s = await page.evaluate(() => {
+    const st = window.__reelStores.useProject.getState()
+    const lay = st.project!.layers.find((l) => l.id === 'LAY')!
+    const cell = (lay.content as LayoutContent).cells[0]
+    return { hasComp: !!cell.comp, mediaId: cell.mediaId, editPath: st.editPath }
+  })
+  expect(s.hasComp).toBe(true)
+  expect(s.mediaId).toBeNull() // the comp took over the cell
+  expect(s.editPath).toHaveLength(1)
+})
+
+test('a timeline clip converts to a compound clip and opens (real UI)', async ({
+  appPage: page
+}) => {
+  // A plain clip with NO audio, so it isn't linked (linked tiles are excluded).
+  await page.evaluate(() => {
+    const { useProject, useUi } = window.__reelStores
+    useProject.getState().addVideoLayer('V1', 'no-such-media', 0, 6, false)
+    useUi.getState().selectLayer('V1')
+  })
+
+  await page.getByRole('button', { name: '🧩 Edit as compound clip' }).click()
+
+  // We're inside the new comp, and the clip moved in (zero-based).
+  await expect(page.getByTestId('comp-breadcrumb')).toContainText('Compound clip')
+  const inside = await page.evaluate(() => {
+    const st = window.__reelStores.useProject.getState()
+    const l = st.project!.layers[0]
+    const comp = (l.content as { kind: string; comp?: Composition }).comp!
+    return {
+      rootKind: l.content.kind,
+      rootWindow: [l.startSec, l.endSec],
+      innerKinds: comp.layers.map((x) => x.content.kind),
+      innerWindow: [comp.layers[0].startSec, comp.layers[0].endSec]
+    }
+  })
+  expect(inside.rootKind).toBe('compound')
+  expect(inside.rootWindow).toEqual([0, 6]) // parent block keeps its window
+  expect(inside.innerKinds).toEqual(['video'])
+  expect(inside.innerWindow).toEqual([0, 6]) // the clip is zero-based inside
+
+  // Exit, and the block is now a compound whose Inspector opens it again.
+  await page.getByTestId('comp-breadcrumb').getByRole('button', { name: 'Timeline' }).click()
+  await page.evaluate(() => window.__reelStores.useUi.getState().selectLayer('V1'))
+  await page.getByRole('button', { name: '✎ Edit contents' }).click()
+  await expect(page.getByTestId('comp-breadcrumb')).toContainText('Compound clip')
+})
+
 test('undo while inside a comp pops the edit path instead of dangling', async ({
   appPage: page
 }) => {
