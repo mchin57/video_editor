@@ -85,6 +85,30 @@ exact compositor filter shapes and reading the counter off frame dumps:
   `atempo=2.000`); each instance only accepts 0.5–2, so arbitrary tempos chain
   (`atempoChain`, `services/audio.ts` — 4 → `2,2`, 0.25 → `0.5,0.5`).
 
+## Nested-composition intermediates (alpha pre-render) (verified ffmpeg 8.1.1, 2026-08)
+
+A compound clip / layout-cell composition is exported by PRE-RENDERING it to an
+intermediate the parent then composites as an ordinary video input. The
+intermediate must carry ALPHA, or the comp would paint a black box over the
+layers beneath it — the preview's `CompFill` is transparent wherever the comp
+draws nothing, so an opaque intermediate breaks preview/export parity.
+
+- **Transparent base canvas**: `color=c=black@0.0:s=WxH:r=30:d=N,format=yuva420p`
+  as lavfi input 0, encoded out with `-c:v libvpx-vp9 -pix_fmt yuva420p`
+  (`-b:v 0 -crf 24 -row-mt 1`). Verified the result carries real alpha:
+  `alpha_mode=1` on the stream (ffprobe still reports `pix_fmt=yuv420p` — see
+  the VP9/VP8 alpha entry above; that tag is the only signal).
+- **Round-trip verified**: compositing that intermediate over a green base with
+  `-c:v libvpx-vp9` forced before its `-i` gives red (`fd0000`) where the comp
+  drew and **green (`007f00`) where it was transparent** — the parent shows
+  through, matching the preview. Without the forced decoder the alpha plane is
+  silently dropped and the uncovered area would come out black.
+- Consequences baked into `buildExportArgs({ alpha: true })`: NVENC is skipped
+  (H.264 has no alpha), `-pix_fmt yuv420p` is NOT appended (the encoder already
+  sets `yuva420p`), audio goes out as **libopus** (WebM has no AAC), and
+  `-movflags +faststart` is dropped (an mp4 moov-atom option; WebM has no such
+  box).
+
 ## Speed ramps (keyframed variable speed) (verified ffmpeg 8.1.1, 2026-07)
 
 Verified with a synthetic source whose per-frame LUMA equals its frame index

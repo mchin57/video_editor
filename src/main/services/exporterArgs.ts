@@ -175,6 +175,16 @@ export interface ExportPlan {
   fontsDir?: string
   caps: FfmpegCapabilities
   preferNvenc: boolean
+  /**
+   * Render for use as a NESTED COMPOSITION intermediate: a TRANSPARENT base
+   * canvas encoded as VP9/WebM `yuva420p`, so the parent composites the comp
+   * over its lower layers exactly like the preview's `CompFill` (which is
+   * transparent where the comp draws nothing) instead of over a black box.
+   * Read back with `-c:v libvpx-vp9` before its `-i` (see FFMPEG-NOTES
+   * "VP9/VP8 alpha"), i.e. `inputDecoder: alphaInputDecoder(...)`.
+   * Absent/false = the ordinary opaque H.264 project export.
+   */
+  alpha?: boolean
 }
 
 /**
@@ -277,7 +287,7 @@ export function escapeFilterPath(p: string): string {
  * `assFile` references are resolved relative to ffmpeg's cwd (the temp dir).
  */
 export function buildExportArgs(plan: ExportPlan, output: string): string[] {
-  const { target, totalDur, visuals, audio, captionsAss, fontsDir, caps, preferNvenc } = plan
+  const { target, totalDur, visuals, audio, captionsAss, fontsDir, caps, preferNvenc, alpha } = plan
   const W = target.width
   const H = target.height
   // Appended to every `ass=` filter so libass finds the bundled faces. The value
@@ -285,8 +295,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
   // rejects a bare/escaped-only Windows path here ("No option name near '/...'").
   const assOpts = fontsDir ? `:fontsdir='${escapeFilterPath(fontsDir)}'` : ''
 
-  // Input indices: 0 = black base, then videos, then images, then top overlays,
-  // then audio.
+  // Input indices: 0 = base canvas (black, or transparent for a nested-comp
+  // intermediate), then videos, then images, then top overlays, then audio.
   const videos = visuals.flatMap((v) => (v.kind === 'video' ? [v.video] : []))
   const images = visuals.flatMap((v) => (v.kind === 'image' ? [v.image] : []))
   const topImages = plan.topOverlays ?? []
@@ -298,7 +308,12 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
   for (const im of topImages) imageIdx.set(im, idx++)
   const audioBase = idx
 
-  const inputs: string[] = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=${f3(totalDur)}`]
+  // A nested comp's base is fully TRANSPARENT so the parent sees through the
+  // areas the comp doesn't cover (matching the preview's CompFill); the format
+  // has to carry alpha all the way through the overlay chain.
+  const inputs: string[] = alpha
+    ? ['-f', 'lavfi', '-i', `color=c=black@0.0:s=${W}x${H}:r=30:d=${f3(totalDur)},format=yuva420p`]
+    : ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=${f3(totalDur)}`]
   for (const v of videos) {
     if (v.inputDecoder) inputs.push('-c:v', v.inputDecoder)
     inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
@@ -467,10 +482,14 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, null) : null
   if (graph) chains.push(graph.filter)
 
-  const nvenc = preferNvenc && caps.encoders.h264_nvenc
-  const videoArgs = nvenc
-    ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0']
-    : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20']
+  const nvenc = !alpha && preferNvenc && caps.encoders.h264_nvenc
+  // An alpha intermediate must go out as VP9/WebM `yuva420p` — H.264 has no
+  // alpha, and NVENC is skipped entirely for it.
+  const videoArgs = alpha
+    ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '24', '-row-mt', '1']
+    : nvenc
+      ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0']
+      : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20']
 
   const mapArgs = ['-map', videoMap]
   if (graph) mapArgs.push('-map', `[${graph.outLabel}]`)
@@ -488,11 +507,11 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     '30',
     '-fps_mode',
     'cfr',
-    '-pix_fmt',
-    'yuv420p',
-    ...(graph ? ['-c:a', 'aac', '-b:a', '192k'] : []),
-    '-movflags',
-    '+faststart',
+    // yuva420p is already set inside `videoArgs` for the alpha path.
+    ...(alpha ? [] : ['-pix_fmt', 'yuv420p']),
+    ...(graph ? (alpha ? ['-c:a', 'libopus', '-b:a', '192k'] : ['-c:a', 'aac', '-b:a', '192k']) : []),
+    // faststart is an mp4 moov-atom optimisation; WebM has no such box.
+    ...(alpha ? [] : ['-movflags', '+faststart']),
     '-progress',
     'pipe:1',
     '-nostats',

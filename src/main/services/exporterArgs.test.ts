@@ -412,3 +412,36 @@ describe('buildVidstabTransformArgs', () => {
     expect(s).toContain('-vf tonemapX,vidstabtransform=input=stab_0.trf')
   })
 })
+
+describe('nested-composition intermediates (alpha)', () => {
+  const alphaPlan = (over: Partial<ExportPlan> = {}): ExportPlan =>
+    plan({ alpha: true, visuals: [{ kind: 'video', video: vid }], ...over })
+
+  it('renders onto a TRANSPARENT base so the parent shows through', () => {
+    const s = buildExportArgs(alphaPlan(), 'o.webm').join(' ')
+    expect(s).toContain('-i color=c=black@0.0:s=1080x1920:r=30:d=10.000,format=yuva420p')
+    // The opaque project export keeps its black canvas.
+    const opaque = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o.mp4').join(' ')
+    expect(opaque).toContain('-i color=c=black:s=1080x1920:r=30:d=10.000')
+    expect(opaque).not.toContain('black@0.0')
+  })
+
+  it('encodes VP9 yuva420p — never NVENC/H.264, which have no alpha', () => {
+    const s = buildExportArgs(alphaPlan({ caps: caps(true), preferNvenc: true }), 'o.webm').join(' ')
+    expect(s).toContain('-c:v libvpx-vp9 -pix_fmt yuva420p')
+    expect(s).not.toContain('h264_nvenc')
+    expect(s).not.toContain('libx264')
+    // The encoder sets the pixel format; no second opaque -pix_fmt is appended.
+    expect(s).not.toContain('-pix_fmt yuv420p')
+  })
+
+  it('drops mp4-only options and uses opus for a WebM intermediate', () => {
+    const audio = [
+      { path: 'a.m4a', inSec: 0, outSec: 3, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }
+    ]
+    const s = buildExportArgs(alphaPlan({ audio }), 'o.webm').join(' ')
+    expect(s).toContain('-c:a libopus')
+    expect(s).not.toContain('-c:a aac')
+    expect(s).not.toContain('+faststart') // no moov atom in WebM
+  })
+})

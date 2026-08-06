@@ -7,10 +7,21 @@
  * media. Progress is the single encode's progress over the project duration.
  */
 
+import { createHash } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { CaptionStyle, PillStyle, Project, ShadowStyle, StrokeStyle, Stabilize } from '@shared/project'
+import type {
+  CaptionStyle,
+  Composition,
+  PillStyle,
+  Project,
+  ShadowStyle,
+  StrokeStyle,
+  Stabilize
+} from '@shared/project'
 import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
+import type { FfmpegCapabilities } from '@shared/ffmpeg'
+import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { cellSpan, coverCrop, layoutCellRect } from '@shared/layouts'
 import { effectiveTextAnimation } from '@shared/textAnim'
@@ -83,6 +94,29 @@ export async function exportProject(
   }
 }
 
+/**
+ * Everything a composition render needs that is NOT part of the composition
+ * itself: the output target, the binaries, and the ROOT-level settings nested
+ * clips still resolve against (a clip inside a comp inherits the project's
+ * denoise/stabilize defaults, which only exist on the root document).
+ */
+interface RenderCtx {
+  target: Target
+  caps: FfmpegCapabilities
+  ffmpeg: string
+  jobId: string
+  opts: ExportOptions
+  denoiseDefault: boolean
+  stabilizeDefault: Stabilize | null
+  /** Root temp dir; each composition render gets a numbered subdir under it. */
+  tmpRoot: string
+  /** Pre-rendered comp intermediates, keyed by content hash — an identical comp
+   *  (e.g. the same clip in two cells) is rendered once per export. */
+  cache: Map<string, string>
+  /** Monotonic counter for unique per-render temp subdirs. */
+  n: { v: number }
+}
+
 async function runExport(
   project: Project,
   opts: ExportOptions,
@@ -92,11 +126,80 @@ async function runExport(
   const target = targetForPreset(opts.preset)
   const caps = await getCapabilities()
   const { ffmpeg } = await getBinaries()
+  const tmpRoot = join(getSubdir('tmp'), jobId)
+  await fsp.mkdir(tmpRoot, { recursive: true })
+  const ctx: RenderCtx = {
+    target,
+    caps,
+    ffmpeg,
+    jobId,
+    opts,
+    denoiseDefault: project.denoiseDefault,
+    stabilizeDefault: project.stabilizeDefault,
+    tmpRoot,
+    cache: new Map(),
+    n: { v: 0 }
+  }
+  const out = await renderComposition(project, ctx, output, { alpha: false, depth: 1 })
+  await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
+  return out
+}
+
+/**
+ * Render ONE composition to a file — the single implementation used for the
+ * root project export AND (recursively, with `alpha`) for every nested comp
+ * intermediate. Nested comps are pre-rendered to transparent VP9/WebM and fed
+ * back in as ordinary video inputs (see FFMPEG-NOTES "Nested-composition
+ * intermediates"), so the compositor itself never needs to know about nesting.
+ */
+async function renderComposition(
+  comp: Composition,
+  ctx: RenderCtx,
+  output: string,
+  o: { alpha: boolean; depth: number }
+): Promise<string> {
+  const { target, caps, ffmpeg, jobId, opts } = ctx
   const sx = target.width / FRAME.width
   const sy = target.height / FRAME.height
 
-  const tmp = join(getSubdir('tmp'), jobId)
+  const tmp = join(ctx.tmpRoot, `r${ctx.n.v++}`)
   await fsp.mkdir(tmp, { recursive: true })
+
+  /**
+   * Pre-render a nested composition to a transparent intermediate and hand back
+   * an `ExportVideo` fragment the caller positions. Cached by comp content, so
+   * the same comp used twice renders once. Returns null past the depth cap or
+   * for an empty comp (nothing to composite).
+   */
+  const prerenderComp = async (
+    nested: Composition
+  ): Promise<{ path: string; len: number; hasAudio: boolean } | null> => {
+    if (o.depth >= MAX_COMP_DEPTH) return null
+    // Whole-source audio clips (`outSec <= 0`) end at their source duration,
+    // which only the media store knows — resolve just those before measuring.
+    const durs = new Map<string, number>()
+    for (const a of nested.audioClips) {
+      if (a.outSec <= 0 && !durs.has(a.mediaId)) {
+        durs.set(a.mediaId, (await getAsset(a.mediaId))?.probe.durationSec ?? 0)
+      }
+    }
+    const len = compositionDuration(nested, (id) => durs.get(id) ?? 0)
+    if (len <= 0.01) return null
+    const key = createHash('sha1')
+      .update(JSON.stringify(nested))
+      .update(`|${target.width}x${target.height}`)
+      .digest('hex')
+    let file = ctx.cache.get(key)
+    if (!file) {
+      file = join(ctx.tmpRoot, `comp_${key.slice(0, 12)}.webm`)
+      await renderComposition(nested, ctx, file, { alpha: true, depth: o.depth + 1 })
+      ctx.cache.set(key, file)
+    }
+    // The intermediate carries the comp's own audio (its clips + unmuted layer
+    // audio, mixed by the nested render) whenever the comp had any.
+    const hasAudio = nested.audioClips.length > 0 || nested.layers.some((l) => hasOwnAudio(l))
+    return { path: file, len, hasAudio }
+  }
 
   // A layer's position/scale keyframes, resolved for the compositor: display
   // box per keyframe (same stretchedBox math as the static path) in output px,
@@ -189,7 +292,7 @@ async function runExport(
     opN++
     return { cmdFile, id: oid, initial: scaled[0].o }
   }
-  for (const l of project.layers) {
+  for (const l of comp.layers) {
     if (l.hidden) continue
     const c = l.content
     if (c.kind === 'video') {
@@ -209,7 +312,7 @@ async function runExport(
       let hdrChain = v?.isHdr ? hdrToSdrChain(v) : ''
       let hasAlpha = !!v?.hasAlpha
       let inputDecoder = alphaInputDecoder(v)
-      const stab = effectiveStabilize(c, project.stabilizeDefault)
+      const stab = effectiveStabilize(c, ctx.stabilizeDefault)
       if (stab) {
         srcPath = await stabilizeClip(asset.originalPath, c.inSec, trimLen, hdrChain, stab)
         srcInSec = 0
@@ -309,6 +412,54 @@ async function runExport(
       // z-slot; empty cells let lower layers show through.
       const window = Math.max(0, l.endSec - l.startSec)
       for (const cell of c.cells) {
+        // A cell carrying a composition renders that comp (pre-rendered to a
+        // transparent intermediate) cover-cropped into the panel, exactly like
+        // a single clip would be — the comp OVERRIDES mediaId.
+        if (cell.comp) {
+          const pre = await prerenderComp(cell.comp)
+          if (!pre) continue
+          const rect = layoutCellRect(l, cell.rect)
+          if (rect.w <= 0 || rect.h <= 0) continue
+          const effSpan = Math.min(pre.len, window)
+          if (effSpan <= 0.01) continue
+          visuals.push({
+            kind: 'video',
+            video: {
+              path: pre.path,
+              inSec: 0,
+              len: effSpan,
+              hdrChain: '',
+              hasAlpha: true,
+              inputDecoder: 'libvpx-vp9',
+              // The comp renders at the full logical frame, so cover-crop it to
+              // the cell the same way a source clip is cropped.
+              crop: coverCrop(target.width, target.height, rect.w / rect.h),
+              colorEq: '',
+              boxW: rect.w * sx,
+              boxH: rect.h * sy,
+              x: r(rect.x * sx),
+              y: r(rect.y * sy),
+              startSec: l.startSec,
+              endSec: l.startSec + effSpan,
+              freezes: [],
+              speed: 1
+            }
+          })
+          if (!cell.mute && pre.hasAudio) {
+            audio.push({
+              path: pre.path,
+              inSec: 0,
+              outSec: effSpan,
+              startSec: l.startSec,
+              gainDb: 0,
+              fadeInSec: 0,
+              fadeOutSec: 0,
+              duck: false,
+              foldChannel: null
+            })
+          }
+          continue
+        }
         if (!cell.mediaId) continue
         const effSpan = Math.min(cellSpan(cell), window)
         if (effSpan <= 0.01) continue
@@ -351,6 +502,53 @@ async function runExport(
             foldChannel: asset.probe.audio.monoFoldChannel ?? null
           })
         }
+      }
+    } else if (c.kind === 'compound') {
+      // A compound clip is its composition, pre-rendered to a transparent
+      // intermediate and composited as an ordinary full-frame video input —
+      // the same geometry rule as a layout (the layer transform moves/zooms
+      // the whole comp frame), matching the preview's CompFill.
+      const pre = await prerenderComp(c.comp)
+      if (!pre) continue
+      const rect = layoutCellRect(l, { x: 0, y: 0, w: FRAME.width, h: FRAME.height })
+      if (rect.w <= 0 || rect.h <= 0) continue
+      const window = Math.max(0, l.endSec - l.startSec)
+      const effSpan = Math.min(pre.len, window)
+      if (effSpan <= 0.01) continue
+      visuals.push({
+        kind: 'video',
+        video: {
+          path: pre.path,
+          inSec: 0,
+          len: effSpan,
+          hdrChain: '',
+          hasAlpha: true,
+          // VP9 alpha is a side-band the native decoder drops — force libvpx.
+          inputDecoder: 'libvpx-vp9',
+          crop: null,
+          colorEq: '',
+          boxW: rect.w * sx,
+          boxH: rect.h * sy,
+          x: r(rect.x * sx),
+          y: r(rect.y * sy),
+          startSec: l.startSec,
+          endSec: l.startSec + effSpan,
+          freezes: [],
+          speed: 1
+        }
+      })
+      if (pre.hasAudio) {
+        audio.push({
+          path: pre.path,
+          inSec: 0,
+          outSec: effSpan,
+          startSec: l.startSec,
+          gainDb: 0,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false,
+          foldChannel: null
+        })
       }
     } else if (c.kind === 'text') {
       if (c.text.trim().length === 0) continue
@@ -412,7 +610,7 @@ async function runExport(
   }
 
   // Audio clips (music / voiceover / extracted), trimmed + placed by the graph.
-  for (const a of project.audioClips) {
+  for (const a of comp.audioClips) {
     const asset = await getAsset(a.mediaId)
     if (!asset) continue
     const proxy = join(getSubdir('media'), a.mediaId, 'audio.m4a')
@@ -425,7 +623,7 @@ async function runExport(
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
       duck: a.duck,
-      denoise: effectiveDenoise(a, project.denoiseDefault),
+      denoise: effectiveDenoise(a, ctx.denoiseDefault),
       foldChannel: asset.probe.audio?.monoFoldChannel ?? null
     })
   }
@@ -434,7 +632,7 @@ async function runExport(
   // (lane-wide + any per-segment overrides) from logical into output px.
   let captionsAss: string | undefined
   const captionOverlays: ExportImage[] = []
-  if (project.captions.enabled && project.captions.segments.some((s) => s.enabled)) {
+  if (comp.captions.enabled && comp.captions.segments.some((s) => s.enabled)) {
     captionsAss = 'captions.ass'
     const scaleStyle = (st: CaptionStyle): CaptionStyle => ({
       ...st,
@@ -449,9 +647,9 @@ async function runExport(
     // composited ON TOP of the caption track. Track which rendered so the ASS
     // builder skips them (and a failed render falls back to a flat burn).
     const renderedGrad = new Set<string>()
-    for (const seg of project.captions.segments) {
+    for (const seg of comp.captions.segments) {
       if (!seg.enabled || seg.text.trim().length === 0) continue
-      const eff = seg.style ?? project.captions.style
+      const eff = seg.style ?? comp.captions.style
       if (!eff.gradient) continue
       const st = scaleStyle(eff)
       try {
@@ -479,9 +677,9 @@ async function runExport(
       }
     }
     const scaled = {
-      ...project.captions,
-      style: scaleStyle(project.captions.style),
-      segments: project.captions.segments.map((s) => {
+      ...comp.captions,
+      style: scaleStyle(comp.captions.style),
+      segments: comp.captions.segments.map((s) => {
         if (!s.style) return s
         const sc = scaleStyle(s.style)
         // Keep gradient only if rasterised (buildAss skips gradient segments);
@@ -492,7 +690,7 @@ async function runExport(
     await fsp.writeFile(join(tmp, captionsAss), buildAss([], target, scaled), 'utf8')
   }
 
-  const visEnd = project.layers.reduce((m, l) => (l.hidden ? m : Math.max(m, l.endSec)), 0)
+  const visEnd = comp.layers.reduce((m, l) => (l.hidden ? m : Math.max(m, l.endSec)), 0)
   const audioEnd = audio.reduce((m, a) => Math.max(m, a.startSec + Math.max(0.01, a.outSec - a.inSec)), 0)
   const totalDur = Math.max(visEnd, audioEnd, 0.1)
 
@@ -511,12 +709,23 @@ async function runExport(
       topOverlays: captionOverlays,
       fontsDir: fontsDir ?? undefined,
       caps,
-      preferNvenc: opts.preferNvenc
+      preferNvenc: opts.preferNvenc,
+      alpha: o.alpha
     },
     output
   )
-  await runFfmpeg(ffmpeg, args, totalDur, (p) => setProgress(jobId, p), tmp)
+  // Only the top-level render drives the job bar; nested pre-renders would
+  // rewind it (weighting them across N+1 passes is a Stage 5 item).
+  await runFfmpeg(ffmpeg, args, totalDur, o.depth === 1 ? (pr) => setProgress(jobId, pr) : undefined, tmp)
 
-  await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {})
   return output
+}
+
+/** Whether a layer contributes its own audio to a composition's mix (used to
+ *  decide if a pre-rendered intermediate has an audio stream to map). */
+function hasOwnAudio(l: Layer): boolean {
+  if (l.content.kind === 'video') return !l.content.mute
+  if (l.content.kind === 'layout') return l.content.cells.some((cell) => !cell.mute && !!cell.mediaId)
+  if (l.content.kind === 'compound') return true // resolved by its own render
+  return false
 }
