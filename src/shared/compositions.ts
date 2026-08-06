@@ -15,7 +15,7 @@
 
 import type { Composition, Layer, LayoutCell } from './project'
 import { audioClipEnd, createEmptyComposition } from './project'
-import { FRAME, visualDuration } from './layers'
+import { FRAME, layerLabel, visualDuration } from './layers'
 
 /** Maximum nesting depth (root = 1). Deeper enter/convert actions must refuse. */
 export const MAX_COMP_DEPTH = 4
@@ -114,6 +114,23 @@ export function compositionDuration(comp: Composition, srcDur: SourceDuration = 
     0
   )
   return Math.max(visualDuration(comp.layers), audioEnd)
+}
+
+/**
+ * Human labels for each step of a path, resolved against the document — the
+ * breadcrumb's text ("Compound clip", "Layout · Cell 2", …). Unresolvable
+ * steps label as "?" so a transient stale path can't crash the header.
+ */
+export function compPathLabels(root: Composition, path: CompPath): string[] {
+  const labels: string[] = []
+  let comp: Composition | null = root
+  for (const step of path) {
+    const layer = comp?.layers.find((l) => l.id === step.layerId)
+    const base = layer ? layerLabel(layer) : '?'
+    labels.push(step.cellIndex === undefined ? base : `${base} · Cell ${step.cellIndex + 1}`)
+    comp = comp ? stepInto(comp, step) : null
+  }
+  return labels
 }
 
 /** Depth of the composition tree (a comp with no nesting = 1). The enter /

@@ -15,6 +15,8 @@ import type {
 import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
 import {
   MAX_COMP_DEPTH,
+  compDepth,
+  makeCompFromCell,
   resolveCompAtPath,
   updateCompAtPath,
   type CompPath,
@@ -160,6 +162,11 @@ interface ProjectState {
   setLayoutPreset: (id: string, presetId: string) => void
   /** Patch one cell of a layout layer (media / trim / mute). */
   updateLayoutCell: (id: string, cellIndex: number, patch: Partial<LayoutCell>) => void
+  /** Convert a layout cell into a nested composition ("edit this panel"),
+   *  seeded from the cell's clip (empty cell → empty comp). No-op when the
+   *  cell already carries a comp or the depth cap would be exceeded. The
+   *  caller then typically `enterComposition({ layerId, cellIndex })`. */
+  convertCellToComp: (layerId: string, cellIndex: number) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
   updateLayerContent: (id: string, patch: ContentPatch) => void
   removeLayer: (id: string) => void
@@ -458,6 +465,27 @@ export const useProject = create<ProjectState>((set, get) => {
           return { ...l, content: { ...l.content, cells } }
         })
       ),
+
+    convertCellToComp: (layerId, cellIndex) => {
+      // Depth check against where the comp will LIVE (one below the active
+      // comp): active depth = editPath.length + 1; the new comp sits one deeper.
+      if (get().editPath.length + 2 > MAX_COMP_DEPTH) return
+      commitComp((p) =>
+        mapLayer(p, layerId, (l) => {
+          if (l.content.kind !== 'layout') return l
+          const cell = l.content.cells[cellIndex]
+          if (!cell || cell.comp) return l
+          const comp = makeCompFromCell(cell, newId)
+          if (compDepth(comp) + get().editPath.length + 1 > MAX_COMP_DEPTH) return l
+          const cells = l.content.cells.map((c, i) =>
+            // The comp now owns the content; the single-clip fields stay behind
+            // only as the seed's provenance (comp overrides them everywhere).
+            i === cellIndex ? { ...c, comp, mediaId: null } : c
+          )
+          return { ...l, content: { ...l.content, cells } }
+        })
+      )
+    },
 
     updateLayer: (id, patch) => commitComp((p) => mapLayer(p, id, (l) => ({ ...l, ...patch }))),
 

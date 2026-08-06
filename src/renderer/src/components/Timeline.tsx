@@ -27,6 +27,7 @@ import {
   type Span
 } from '@/lib/lanes'
 import { useDragDepth } from '@/lib/dragDepth'
+import { CompBreadcrumb } from '@/components/CompBreadcrumb'
 import {
   canLinkItems,
   canSplitItems,
@@ -937,6 +938,7 @@ export function Timeline(): JSX.Element {
     <div className="flex h-full flex-col">
       {/* Transport / edit toolbar */}
       <div className="flex items-center gap-1 border-b border-white/10 px-3 py-1.5">
+        <CompBreadcrumb />
         <button
           onClick={togglePlay}
           disabled={!canPlay}
