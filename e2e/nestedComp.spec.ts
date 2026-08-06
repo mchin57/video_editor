@@ -68,6 +68,34 @@ test('convert a cell to a comp, enter it, edit inside, breadcrumb exits', async 
   expect((await rootState(page)).editPath).toEqual([])
 })
 
+test('an un-entered cell comp renders inside its panel in the preview', async ({
+  appPage: page
+}) => {
+  await arrangeLayoutWithCell(page)
+  // Convert the cell WITHOUT entering it, then add a text layer inside the comp
+  // (enter → edit → exit), so the comp has something with visible DOM.
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.convertCellToComp('LAY', 0)
+    s.enterComposition({ layerId: 'LAY', cellIndex: 0 })
+  })
+  await page.keyboard.press('t')
+  await page.evaluate(() => window.__reelStores.useProject.getState().exitComposition())
+  await expect(page.getByTestId('comp-breadcrumb')).toHaveCount(0)
+
+  // Back at the root with the playhead inside the layout window, the cell's
+  // comp renders through CompFill — its own stack composited into the panel.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1))
+  const fill = page.getByTestId('comp-fill')
+  await expect(fill).toHaveCount(1)
+  // The nested text layer really renders (the comp's stack, not a placeholder).
+  await expect(fill.getByText('Your hook here')).toBeVisible()
+
+  // Past the comp's span the panel empties again (lower layers show through).
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(4.5))
+  await expect(page.getByTestId('comp-fill')).toHaveCount(0)
+})
+
 test('undo while inside a comp pops the edit path instead of dangling', async ({
   appPage: page
 }) => {

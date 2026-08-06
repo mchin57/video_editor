@@ -8,9 +8,19 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, CaptionSegment, Layer, LayoutContent, PillStyle, TextStyleBase, VideoContent } from '@shared/project'
+import type {
+  AudioClip,
+  CaptionSegment,
+  Composition,
+  Layer,
+  LayoutContent,
+  PillStyle,
+  TextStyleBase,
+  VideoContent
+} from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
+import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { cellSpan, layoutCellRect } from '@shared/layouts'
 import type { MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
@@ -445,7 +455,8 @@ function LayoutLayerView({
   playing,
   selected,
   boxStyle,
-  onMoveDown
+  onMoveDown,
+  depth = 1
 }: {
   layer: Layer
   content: LayoutContent
@@ -455,6 +466,8 @@ function LayoutLayerView({
   selected: boolean
   boxStyle: CSSProperties
   onMoveDown: (e: ReactPointerEvent) => void
+  /** Comp nesting level of the composition this layout lives in. */
+  depth?: number
 }): JSX.Element {
   const local = time - layer.startSec
   const window = Math.max(0, layer.endSec - layer.startSec)
@@ -472,6 +485,29 @@ function LayoutLayerView({
           top: pct(cell.rect.y, LOGICAL.height),
           width: pct(cell.rect.w, LOGICAL.width),
           height: pct(cell.rect.h, LOGICAL.height)
+        }
+        // A cell carrying a nested composition IS that comp: it renders the
+        // whole sub-timeline (cover-cropped into the panel) instead of a single
+        // clip, and overrides `mediaId`. Its span is the comp's own duration.
+        if (cell.comp) {
+          const compSpan = Math.min(
+            compositionDuration(cell.comp, (id) => assetById.get(id)?.probe.durationSec ?? 0),
+            window
+          )
+          if (local < 0 || local >= compSpan) {
+            return selected ? <div key={i} style={rel} className="border border-dashed border-white/25" /> : null
+          }
+          return (
+            <div key={i} style={{ ...rel, overflow: 'hidden', containerType: 'size' }}>
+              <CompFill
+                comp={cell.comp}
+                time={local}
+                playing={playing}
+                assetById={assetById}
+                depth={depth + 1}
+              />
+            </div>
+          )
         }
         const asset = cell.mediaId ? assetById.get(cell.mediaId) : undefined
         const effSpan = Math.min(cellSpan(cell), window)
@@ -500,6 +536,306 @@ function LayoutLayerView({
           <div key={i} style={rel} className="border border-dashed border-white/25" />
         ) : null
       })}
+    </div>
+  )
+}
+
+/**
+ * ONE layer of a composition stack. The single implementation of how a layer
+ * looks: the interactive root stage renders it with a real selection and drag
+ * handler, and a nested composition renders the SAME component read-only
+ * (`selected={false}`, no-op pointer handler) through `CompFill` — so nesting
+ * can never drift from the root rendering.
+ *
+ * `time` is LOCAL to the composition this layer lives in; `depth` is the comp
+ * nesting level, carried down so recursion can be capped.
+ */
+function StackLayer({
+  rawLayer,
+  z,
+  time,
+  playing,
+  assetById,
+  selected,
+  onMoveDown,
+  depth = 1
+}: {
+  rawLayer: Layer
+  z: number
+  time: number
+  playing: boolean
+  assetById: Map<string, MediaAsset>
+  selected: boolean
+  onMoveDown: (e: ReactPointerEvent) => void
+  depth?: number
+}): JSX.Element | null {
+  const layer = withKeyframedTransform(rawLayer, time)
+
+        // Keyframed opacity (video/image): same shared interpolation the export
+        // bakes into its sendcmd `aa` ramp — applied on the layer box.
+        const kfOp = layerTransformAt(rawLayer, time).opacity
+
+        if (layer.content.kind === 'video') {
+          const content = layer.content
+          const asset = assetById.get(content.mediaId)
+          const box = {
+            ...mediaBox(layer, mediaAspect(asset, content)),
+            zIndex: z,
+            ...(kfOp < 1 ? { opacity: kfOp } : {})
+          }
+          if (!asset?.proxyReady || !asset.probe.video) {
+            return (
+              <div
+                key={layer.id}
+                style={box}
+                onPointerDown={onMoveDown}
+                data-resizebox={selected ? '' : undefined}
+                className={`flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500 ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : ''}`}
+              >
+                {asset ? (
+                  <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
+                ) : (
+                  'missing'
+                )}
+              </div>
+            )
+          }
+          return (
+            <VideoLayerView
+              key={layer.id}
+              layer={layer}
+              content={content}
+              asset={asset}
+              time={time}
+              playing={playing}
+              selected={selected}
+              boxStyle={box}
+              onMoveDown={onMoveDown}
+            />
+          )
+        }
+
+        if (layer.content.kind === 'image') {
+          const content = layer.content
+          const asset = assetById.get(content.mediaId)
+          // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
+          const base = mediaAspect(asset, {})
+          const cr = content.crop
+          const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
+          const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
+          const odd = q === 1 || q === 3
+          const box = {
+            ...mediaBox(layer, aspect),
+            zIndex: z,
+            containerType: 'size' as const,
+            ...(kfOp < 1 ? { opacity: kfOp } : {})
+          }
+          // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
+          // box, so swap its width/height (cqw/cqh resolve to the box via its
+          // container context) for odd quarter-turns.
+          const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
+          const imgStyle: CSSProperties = cr
+            ? {
+                position: 'absolute',
+                width: `${100 / cr.w}%`,
+                height: `${100 / cr.h}%`,
+                left: `${-(cr.x / cr.w) * 100}%`,
+                top: `${-(cr.y / cr.h) * 100}%`,
+                objectFit: 'fill',
+                maxWidth: 'none',
+                opacity: content.opacity
+              }
+            : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
+          return (
+            <div
+              key={layer.id}
+              style={box}
+              onPointerDown={onMoveDown}
+              data-resizebox={selected ? '' : undefined}
+              className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: odd ? '100cqh' : '100cqw',
+                  height: odd ? '100cqw' : '100cqh',
+                  transform: `translate(-50%, -50%) rotate(${q * 90}deg) ${flip}`,
+                  overflow: 'hidden'
+                }}
+              >
+                <img src={imageUrl(content.mediaId)} alt="" draggable={false} style={imgStyle} />
+              </div>
+            </div>
+          )
+        }
+
+        if (layer.content.kind === 'layout') {
+          const content = layer.content
+          // The wrapper is the layer's transformed FULL-FRAME rect; cells sit
+          // inside at their plain preset fractions (the wrapper carries the
+          // move/zoom) — same numbers `layoutCellRect` gives the export.
+          const frameRect = layoutCellRect(layer, { x: 0, y: 0, w: LOGICAL.width, h: LOGICAL.height })
+          const box: CSSProperties = {
+            position: 'absolute',
+            left: pct(frameRect.x, LOGICAL.width),
+            top: pct(frameRect.y, LOGICAL.height),
+            width: pct(frameRect.w, LOGICAL.width),
+            height: pct(frameRect.h, LOGICAL.height),
+            zIndex: z
+          }
+          return (
+            <LayoutLayerView
+              key={layer.id}
+              layer={layer}
+              content={content}
+              assetById={assetById}
+              time={time}
+              playing={playing}
+              selected={selected}
+              boxStyle={box}
+              onMoveDown={onMoveDown}
+              depth={depth}
+            />
+          )
+        }
+
+        if (layer.content.kind === 'compound') {
+          // Like a layout, the box is the layer-transformed FULL-FRAME rect;
+          // the nested comp fills it on its own local clock (comp t=0 at the
+          // layer start). Compounds ignore transform keyframes (v1 rule).
+          const frameRect = layoutCellRect(layer, { x: 0, y: 0, w: LOGICAL.width, h: LOGICAL.height })
+          const box: CSSProperties = {
+            position: 'absolute',
+            left: pct(frameRect.x, LOGICAL.width),
+            top: pct(frameRect.y, LOGICAL.height),
+            width: pct(frameRect.w, LOGICAL.width),
+            height: pct(frameRect.h, LOGICAL.height),
+            zIndex: z,
+            containerType: 'size' as const
+          }
+          return (
+            <div
+              style={box}
+              onPointerDown={onMoveDown}
+              data-resizebox={selected ? '' : undefined}
+              className={`overflow-hidden ${
+                selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'
+              }`}
+            >
+              <CompFill
+                comp={layer.content.comp}
+                time={time - layer.startSec}
+                playing={playing}
+                assetById={assetById}
+                depth={depth + 1}
+              />
+            </div>
+          )
+        }
+
+        // Text layer. Position via transform (left/top = 0) so the wrap width is
+        // independent of x — anchoring by `left:x%` made the box narrower as it
+        // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap
+        // width; otherwise it hugs content up to a position-independent max.
+        // Animation state comes from the shared per-frame helper (playhead-
+        // driven, so scrub/pause stay exact — never CSS animations).
+        const content = layer.content
+        const anim = textAnimStateAt(
+          effectiveTextAnimation(content),
+          layer.startSec,
+          layer.endSec,
+          content.text,
+          time
+        )
+        return (
+          <div
+            key={layer.id}
+            onPointerDown={onMoveDown}
+            data-resizebox={selected ? '' : undefined}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              transform: `translate(calc(${cqw(layer.x)} - 50%), calc(${cqh(layer.y + anim.dy)} - 50%)) scale(${layer.scale * anim.scale})`,
+              transformOrigin: 'center',
+              opacity: anim.opacity < 1 ? anim.opacity : undefined,
+              fontSize: cqw(content.fontSizePx),
+              fontFamily: fontCssFamily(content.fontFamily),
+              fontWeight: 'normal',
+              width: content.widthPx != null ? cqw(content.widthPx) : undefined,
+              maxWidth: content.widthPx != null ? undefined : '92%',
+              zIndex: z
+            }}
+            className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
+              selected ? 'outline-dashed outline-2 outline-sky-400' : ''
+            }`}
+          >
+            <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
+          </div>
+        )
+}
+
+/** Read-only stacks need a handler; hoisted so the identity stays stable. */
+const noopPointer = (): void => {}
+
+/**
+ * A nested composition rendered inside a rect. The comp keeps its own
+ * 1080×1920 canvas, sized to COVER the container (center-crop — the comp twin
+ * of a layout cell's `object-fit: cover`, matching what the export's
+ * pre-render + coverCrop produce), and its stack renders recursively through
+ * `StackLayer` on the LOCAL clock (comp time 0 = the parent window start).
+ *
+ * Read-only: enter the comp to edit it. A comp shown here plays its VIDEO
+ * only — nested audio and captions arrive with the export's pre-render
+ * (Stage 5 closes the preview gap). Renders nothing outside the comp span or
+ * past `MAX_COMP_DEPTH`.
+ */
+function CompFill({
+  comp,
+  time,
+  playing,
+  assetById,
+  depth
+}: {
+  comp: Composition
+  time: number
+  playing: boolean
+  assetById: Map<string, MediaAsset>
+  depth: number
+}): JSX.Element | null {
+  if (depth > MAX_COMP_DEPTH) return null
+  const srcDur = (id: string): number => assetById.get(id)?.probe.durationSec ?? 0
+  if (time < 0 || time >= compositionDuration(comp, srcDur)) return null
+  const active = layersAtTime(comp.layers, time).filter((l) => !l.hidden)
+  return (
+    <div
+      data-testid="comp-fill"
+      style={{
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: `max(100cqw, calc(100cqh * ${LOGICAL.width / LOGICAL.height}))`,
+        aspectRatio: `${LOGICAL.width} / ${LOGICAL.height}`,
+        containerType: 'size',
+        overflow: 'hidden'
+      }}
+    >
+      {active.map((l, i) => (
+        <StackLayer
+          key={l.id}
+          rawLayer={l}
+          z={10 + i}
+          time={time}
+          playing={playing}
+          assetById={assetById}
+          selected={false}
+          onMoveDown={noopPointer}
+          depth={depth}
+        />
+      ))}
     </div>
   )
 }
@@ -743,186 +1079,18 @@ export function PreviewStage(): JSX.Element {
       })}
 
       {/* The composited layer stack, back (index 0) → front. */}
-      {activeLayers.map((rawLayer, i) => {
-        const layer = withKeyframedTransform(rawLayer, time)
-        const z = 10 + i
-        const selected = layer.id === selectedLayerId
-        const onMoveDown = (e: ReactPointerEvent): void => startLayerMove(e, layer)
-
-        // Keyframed opacity (video/image): same shared interpolation the export
-        // bakes into its sendcmd `aa` ramp — applied on the layer box.
-        const kfOp = layerTransformAt(rawLayer, time).opacity
-
-        if (layer.content.kind === 'video') {
-          const content = layer.content
-          const asset = assetById.get(content.mediaId)
-          const box = {
-            ...mediaBox(layer, mediaAspect(asset, content)),
-            zIndex: z,
-            ...(kfOp < 1 ? { opacity: kfOp } : {})
-          }
-          if (!asset?.proxyReady || !asset.probe.video) {
-            return (
-              <div
-                key={layer.id}
-                style={box}
-                onPointerDown={onMoveDown}
-                data-resizebox={selected ? '' : undefined}
-                className={`flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500 ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : ''}`}
-              >
-                {asset ? (
-                  <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
-                ) : (
-                  'missing'
-                )}
-              </div>
-            )
-          }
-          return (
-            <VideoLayerView
-              key={layer.id}
-              layer={layer}
-              content={content}
-              asset={asset}
-              time={time}
-              playing={playing}
-              selected={selected}
-              boxStyle={box}
-              onMoveDown={onMoveDown}
-            />
-          )
-        }
-
-        if (layer.content.kind === 'image') {
-          const content = layer.content
-          const asset = assetById.get(content.mediaId)
-          // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
-          const base = mediaAspect(asset, {})
-          const cr = content.crop
-          const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
-          const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
-          const odd = q === 1 || q === 3
-          const box = {
-            ...mediaBox(layer, aspect),
-            zIndex: z,
-            containerType: 'size' as const,
-            ...(kfOp < 1 ? { opacity: kfOp } : {})
-          }
-          // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
-          // box, so swap its width/height (cqw/cqh resolve to the box via its
-          // container context) for odd quarter-turns.
-          const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
-          const imgStyle: CSSProperties = cr
-            ? {
-                position: 'absolute',
-                width: `${100 / cr.w}%`,
-                height: `${100 / cr.h}%`,
-                left: `${-(cr.x / cr.w) * 100}%`,
-                top: `${-(cr.y / cr.h) * 100}%`,
-                objectFit: 'fill',
-                maxWidth: 'none',
-                opacity: content.opacity
-              }
-            : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
-          return (
-            <div
-              key={layer.id}
-              style={box}
-              onPointerDown={onMoveDown}
-              data-resizebox={selected ? '' : undefined}
-              className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '50%',
-                  width: odd ? '100cqh' : '100cqw',
-                  height: odd ? '100cqw' : '100cqh',
-                  transform: `translate(-50%, -50%) rotate(${q * 90}deg) ${flip}`,
-                  overflow: 'hidden'
-                }}
-              >
-                <img src={imageUrl(content.mediaId)} alt="" draggable={false} style={imgStyle} />
-              </div>
-            </div>
-          )
-        }
-
-        if (layer.content.kind === 'layout') {
-          const content = layer.content
-          // The wrapper is the layer's transformed FULL-FRAME rect; cells sit
-          // inside at their plain preset fractions (the wrapper carries the
-          // move/zoom) — same numbers `layoutCellRect` gives the export.
-          const frameRect = layoutCellRect(layer, { x: 0, y: 0, w: LOGICAL.width, h: LOGICAL.height })
-          const box: CSSProperties = {
-            position: 'absolute',
-            left: pct(frameRect.x, LOGICAL.width),
-            top: pct(frameRect.y, LOGICAL.height),
-            width: pct(frameRect.w, LOGICAL.width),
-            height: pct(frameRect.h, LOGICAL.height),
-            zIndex: z
-          }
-          return (
-            <LayoutLayerView
-              key={layer.id}
-              layer={layer}
-              content={content}
-              assetById={assetById}
-              time={time}
-              playing={playing}
-              selected={selected}
-              boxStyle={box}
-              onMoveDown={onMoveDown}
-            />
-          )
-        }
-
-        // Compound clips render via CompositionView (Stage 2); until then an
-        // un-entered compound shows nothing rather than crashing the switch.
-        if (layer.content.kind === 'compound') return null
-
-        // Text layer. Position via transform (left/top = 0) so the wrap width is
-        // independent of x — anchoring by `left:x%` made the box narrower as it
-        // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap
-        // width; otherwise it hugs content up to a position-independent max.
-        // Animation state comes from the shared per-frame helper (playhead-
-        // driven, so scrub/pause stay exact — never CSS animations).
-        const content = layer.content
-        const anim = textAnimStateAt(
-          effectiveTextAnimation(content),
-          layer.startSec,
-          layer.endSec,
-          content.text,
-          time
-        )
-        return (
-          <div
-            key={layer.id}
-            onPointerDown={onMoveDown}
-            data-resizebox={selected ? '' : undefined}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              transform: `translate(calc(${cqw(layer.x)} - 50%), calc(${cqh(layer.y + anim.dy)} - 50%)) scale(${layer.scale * anim.scale})`,
-              transformOrigin: 'center',
-              opacity: anim.opacity < 1 ? anim.opacity : undefined,
-              fontSize: cqw(content.fontSizePx),
-              fontFamily: fontCssFamily(content.fontFamily),
-              fontWeight: 'normal',
-              width: content.widthPx != null ? cqw(content.widthPx) : undefined,
-              maxWidth: content.widthPx != null ? undefined : '92%',
-              zIndex: z
-            }}
-            className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
-              selected ? 'outline-dashed outline-2 outline-sky-400' : ''
-            }`}
-          >
-            <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
-          </div>
-        )
-      })}
+      {activeLayers.map((rawLayer, i) => (
+        <StackLayer
+          key={rawLayer.id}
+          rawLayer={rawLayer}
+          z={10 + i}
+          time={time}
+          playing={playing}
+          assetById={assetById}
+          selected={rawLayer.id === selectedLayerId}
+          onMoveDown={(e) => startLayerMove(e, withKeyframedTransform(rawLayer, time))}
+        />
+      ))}
 
       {/* Edge/corner resize handles on the selected layer (corners scale
           uniformly, edges stretch media / re-wrap text). */}
