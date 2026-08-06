@@ -57,24 +57,26 @@ export function resolveCompAtPath(root: Composition, path: CompPath): Compositio
   return comp
 }
 
-/** The `Composition` slice of a larger document (e.g. the root `Project`). */
-function compOf(c: Composition): Composition {
-  return { layers: c.layers, captions: c.captions, audioClips: c.audioClips }
-}
-
 /**
  * Immutably apply `fn` to the composition at `path`, returning a new root with
  * every ancestor rebuilt along the way — the bridge that lets the existing
  * root-level `commit`/undo machinery record edits made INSIDE a nested comp.
  * A path that doesn't resolve leaves the document unchanged (callers validate
  * with `resolveCompAtPath`; the no-op keeps a stale path from corrupting data).
+ *
+ * CONTRACT: `fn` must derive its result by SPREADING its input (`{ ...c, … }`,
+ * the codebase-wide convention) or returning it unchanged. At the empty path
+ * `fn` is applied to the root document itself (a `Project` IS a Composition),
+ * so a spread preserves the root's identity fields and returning the input
+ * unchanged preserves reference identity (the store's no-op guard relies on
+ * it). Constructing a fresh object from scratch would drop the root's fields.
  */
 export function updateCompAtPath<T extends Composition>(
   root: T,
   path: CompPath,
   fn: (comp: Composition) => Composition
 ): T {
-  if (path.length === 0) return { ...root, ...fn(compOf(root)) }
+  if (path.length === 0) return fn(root) as T
   const [step, ...rest] = path
   return {
     ...root,

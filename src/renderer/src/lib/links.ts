@@ -27,14 +27,14 @@
  * and `linkItems` drops them.
  *
  * Nothing outside the timeline reads link groups: the exporter sees only the
- * final positions, so this is renderer-only (like `lib/timeline.ts`).
+ * final positions, so this is renderer-only (like `lib/timeline.ts`). Typed against `Composition`, so the SAME ops serve the root timeline and any nested comp.
  */
 
 import type {
   AudioClip,
   CaptionSegment,
   Layer,
-  Project,
+  Composition,
   TimelineItemKind,
   TimelineItemRef
 } from '@shared/project'
@@ -104,7 +104,7 @@ function audioTileEnd(a: AudioClip, sourceDurationSec: number): number {
 
 /** Every timeline tile in document order: layers (stack order), then captions,
  *  then audio clips. `srcDur` is only needed to bound audio tiles. */
-export function timelineTiles(p: Project, srcDur: SourceDuration = () => 0): Tile[] {
+export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0): Tile[] {
   const tiles: Tile[] = []
   for (const l of p.layers) {
     tiles.push({
@@ -141,7 +141,7 @@ export function timelineTiles(p: Project, srcDur: SourceDuration = () => 0): Til
 
 /** The tile a ref points at, or null if it no longer exists. */
 export function tileOf(
-  p: Project,
+  p: Composition,
   ref: TimelineItemRef,
   srcDur?: SourceDuration
 ): Tile | null {
@@ -153,7 +153,7 @@ export function tileOf(
  * ref is replaced by all members of its group. Refs that no longer exist drop
  * out, and a group with only one surviving member contributes just that tile.
  */
-export function expandSelection(p: Project, refs: TimelineItemRef[]): TimelineItemRef[] {
+export function expandSelection(p: Composition, refs: TimelineItemRef[]): TimelineItemRef[] {
   const tiles = timelineTiles(p)
   const wanted = new Set<string>()
   for (const ref of refs) {
@@ -168,24 +168,24 @@ export function expandSelection(p: Project, refs: TimelineItemRef[]): TimelineIt
 
 /** Every member of the group `ref` belongs to (including `ref`), in document
  *  order; just `[ref]` when it's unlinked, and `[]` if it no longer exists. */
-export function expandGroup(p: Project, ref: TimelineItemRef): TimelineItemRef[] {
+export function expandGroup(p: Composition, ref: TimelineItemRef): TimelineItemRef[] {
   return expandSelection(p, [ref])
 }
 
 /** Whether this tile is in a link group with at least one other member. */
-export function isLinked(p: Project, ref: TimelineItemRef): boolean {
+export function isLinked(p: Composition, ref: TimelineItemRef): boolean {
   return expandGroup(p, ref).length > 1
 }
 
 /** The linkable tiles among `refs`, deduped (drops layouts and stale refs). */
-function linkTargets(p: Project, refs: TimelineItemRef[]): Tile[] {
+function linkTargets(p: Composition, refs: TimelineItemRef[]): Tile[] {
   const keys = refKeys(refs)
   return timelineTiles(p).filter((t) => t.linkable && keys.has(refKey(t.ref)))
 }
 
 /** Whether Link would change anything: at least two linkable tiles that aren't
  *  already exactly one group. */
-export function canLinkItems(p: Project, refs: TimelineItemRef[]): boolean {
+export function canLinkItems(p: Composition, refs: TimelineItemRef[]): boolean {
   const targets = linkTargets(p, refs)
   if (targets.length < 2) return false
   const gids = new Set(targets.map((t) => t.linkGroupId))
@@ -198,7 +198,7 @@ export function canLinkItems(p: Project, refs: TimelineItemRef[]): boolean {
 }
 
 /** Whether any of `refs` is actually linked (so Unlink has something to do). */
-export function canUnlinkItems(p: Project, refs: TimelineItemRef[]): boolean {
+export function canUnlinkItems(p: Composition, refs: TimelineItemRef[]): boolean {
   return refs.some((r) => isLinked(p, r))
 }
 
@@ -208,9 +208,9 @@ export function canUnlinkItems(p: Project, refs: TimelineItemRef[]): boolean {
  * no-op for free (and can't push an empty undo step).
  */
 function setGroupIds(
-  p: Project,
+  p: Composition,
   next: (ref: TimelineItemRef, current: string | undefined) => string | undefined
-): Project {
+): Composition {
   let changed = false
   const apply = <T extends { id: string; linkGroupId?: string }>(
     item: T,
@@ -232,7 +232,7 @@ function setGroupIds(
 }
 
 /** Clear `linkGroupId` wherever a group has fewer than two surviving members. */
-export function pruneLinkGroups(p: Project): Project {
+export function pruneLinkGroups(p: Composition): Composition {
   const counts = new Map<string, number>()
   for (const t of timelineTiles(p)) {
     if (t.linkGroupId) counts.set(t.linkGroupId, (counts.get(t.linkGroupId) ?? 0) + 1)
@@ -247,10 +247,10 @@ export function pruneLinkGroups(p: Project): Project {
  * fewer than two linkable tiles remain — layout layers are never linked.
  */
 export function linkItems(
-  p: Project,
+  p: Composition,
   refs: TimelineItemRef[],
   makeId: () => string
-): Project {
+): Composition {
   // `canLinkItems` is the single authority for "would this change anything", so
   // the disabled Link button and this action can't drift apart (and re-linking
   // one existing group doesn't churn its id into a pointless undo step).
@@ -266,7 +266,7 @@ export function linkItems(
 
 /** Unlink every group represented in `refs` — all of their members, not just
  *  the tiles passed in (a group is only ever broken as a whole). */
-export function unlinkItems(p: Project, refs: TimelineItemRef[]): Project {
+export function unlinkItems(p: Composition, refs: TimelineItemRef[]): Composition {
   const keys = refKeys(refs)
   const dropped = new Set(
     timelineTiles(p)
@@ -284,7 +284,7 @@ export function unlinkItems(p: Project, refs: TimelineItemRef[]): Project {
  * earliest tile stops at 0 and the rest keep their relative placement, so a
  * group can't be squashed by dragging it into the start of the timeline.
  */
-export function moveItemsBy(p: Project, refs: TimelineItemRef[], delta: number): Project {
+export function moveItemsBy(p: Composition, refs: TimelineItemRef[], delta: number): Composition {
   const keys = refKeys(refs)
   const moving = timelineTiles(p).filter((t) => keys.has(refKey(t.ref)))
   if (moving.length === 0) return p
@@ -324,12 +324,12 @@ export function moveItemsBy(p: Project, refs: TimelineItemRef[], delta: number):
  * of source — the same reason `moveItemsBy` clamps the SET at 0.
  */
 export function trimItemsBy(
-  p: Project,
+  p: Composition,
   refs: TimelineItemRef[],
   edge: TrimEdge,
   delta: number,
   srcDur: SourceDuration = () => 0
-): Project {
+): Composition {
   const keys = refKeys(refs)
   if (keys.size === 0 || delta === 0) return p
   const has = (kind: TimelineItemKind, id: string): boolean => keys.has(refKey({ kind, id }))
@@ -371,7 +371,7 @@ export function trimItemsBy(
 /** Whether a cut at `atSec` falls strictly inside this tile and the tile
  *  supports splitting at all. */
 export function splittableAt(
-  p: Project,
+  p: Composition,
   ref: TimelineItemRef,
   atSec: number,
   srcDur?: SourceDuration
@@ -382,7 +382,7 @@ export function splittableAt(
 
 /** Whether a split at `atSec` would cut at least one of `refs`. */
 export function canSplitItems(
-  p: Project,
+  p: Composition,
   refs: TimelineItemRef[],
   atSec: number,
   srcDur?: SourceDuration
@@ -412,12 +412,12 @@ function withGroup<T extends { linkGroupId?: string }>(item: T, gid: string | un
  * unchanged when nothing was actually cut.
  */
 export function splitItemsAt(
-  p: Project,
+  p: Composition,
   refs: TimelineItemRef[],
   atSec: number,
   srcDur: SourceDuration,
   makeId: () => string
-): Project {
+): Composition {
   const keys = refKeys(refs)
   if (keys.size === 0) return p
   let changed = false
@@ -493,7 +493,7 @@ export function splitItemsAt(
 }
 
 /** Delete every tile in `refs`, pruning any group left with a single member. */
-export function removeItems(p: Project, refs: TimelineItemRef[]): Project {
+export function removeItems(p: Composition, refs: TimelineItemRef[]): Composition {
   const keys = refKeys(refs)
   if (keys.size === 0) return p
   const layers = p.layers.filter((l) => !keys.has(refKey({ kind: 'layer', id: l.id })))

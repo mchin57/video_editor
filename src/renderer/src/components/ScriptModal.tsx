@@ -44,7 +44,8 @@ function ScriptLineRow({ line }: { line: ScriptLine }): JSX.Element {
         placeholder="Script line / talking point…"
         onFocus={() => (before.current = useProject.getState().project)}
         onChange={(e) =>
-          useProject.getState().liveUpdate((p) => ({
+          // Root-scoped: the script lives on the Project, not the active comp.
+          useProject.getState().liveUpdateRoot((p) => ({
             ...p,
             script: p.script.map((l) => (l.id === line.id ? { ...l, text: e.target.value } : l))
           }))

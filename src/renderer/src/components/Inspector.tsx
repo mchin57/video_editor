@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type {
   CaptionStyle,
+  Composition,
   Layer,
   Project,
   Stabilize,
@@ -226,7 +227,9 @@ function RemoveBackground({ mediaId }: { mediaId: string }): JSX.Element | null 
 }
 
 /** A range slider that previews live during the drag and records one undo step
- *  on release. `transform` maps (project, value) → next project. */
+ *  on release. `transform` maps (active composition, value) → next comp — the
+ *  same indirection every editing action uses, so sliders work inside nested
+ *  comps too. */
 function LiveRange({
   min,
   max,
@@ -238,7 +241,7 @@ function LiveRange({
   max: number
   step: number
   value: number
-  transform: (p: Project, v: number) => Project
+  transform: (c: Composition, v: number) => Composition
 }): JSX.Element {
   const before = useRef<Project | null>(null)
   return (
@@ -273,9 +276,9 @@ function LiveRange({
   )
 }
 
-const setLayer = (id: string) => (p: Project, fn: (l: Layer) => Layer): Project => ({
-  ...p,
-  layers: p.layers.map((l) => (l.id === id ? fn(l) : l))
+const setLayer = (id: string) => (c: Composition, fn: (l: Layer) => Layer): Composition => ({
+  ...c,
+  layers: c.layers.map((l) => (l.id === id ? fn(l) : l))
 })
 
 /** Freeze-frame controls: hold the current frame for a chosen duration, and list
@@ -582,7 +585,7 @@ function LayerEditor(): JSX.Element | null {
               const col = c.color ?? NEUTRAL_COLOR
               const setCol =
                 (prop: 'brightness' | 'contrast' | 'saturation') =>
-                (p: Project, v: number): Project =>
+                (p: Composition, v: number): Composition =>
                   mut(p, (l) =>
                     l.content.kind === 'video'
                       ? { ...l, content: { ...l.content, color: { ...(l.content.color ?? NEUTRAL_COLOR), [prop]: v } } }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   AudioClip,
   CaptionsConfig,
+  Composition,
   ImageContent,
   Layer,
   LayoutCell,
@@ -12,6 +13,13 @@ import type {
   VideoContent
 } from '@shared/project'
 import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
+import {
+  MAX_COMP_DEPTH,
+  resolveCompAtPath,
+  updateCompAtPath,
+  type CompPath,
+  type CompStep
+} from '@shared/compositions'
 import {
   applyVisibleOrder,
   layerTransformAt,
@@ -28,6 +36,7 @@ import { extractAudioPieces } from '@/lib/timeline'
 import * as links from '@/lib/links'
 import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
+import { usePlayback } from '@/state/playback'
 import {
   loadProject,
   openProjectFile,
@@ -88,6 +97,15 @@ interface ProjectState {
   filePath: string | null
   /** Whether there are edits since the last file Save/Open. */
   dirty: boolean
+  /**
+   * Which composition the editor is pointed at: `[]` = the root project
+   * (today's behavior), else the steps into nested comps (compound layers /
+   * layout cells). EVERY timeline-editing action operates on the composition at
+   * this path via `updateCompAtPath` — the same action code edits the root and
+   * any nested doc. Undo/redo/open revalidate it (a path the new document can't
+   * resolve pops to the root).
+   */
+  editPath: CompPath
 
   load: () => Promise<void>
   newProjectFile: () => void
@@ -97,10 +115,22 @@ interface ProjectState {
   setPreset: (preset: PresetId) => void
   addMedia: (ids: string[]) => void
   removeMedia: (id: string) => void
-  /** Update the project without recording history (for live drag previews). */
-  liveUpdate: (transform: (p: Project) => Project) => void
+  /** Update the ACTIVE composition without recording history (live drag
+   *  previews). The transform sees the active comp (the root when `editPath`
+   *  is empty) and must derive its result by spreading its input. */
+  liveUpdate: (transform: (c: Composition) => Composition) => void
+  /** Live update for ROOT-ONLY fields (script), bypassing the composition
+   *  indirection — a script marker drag must edit the root even while the
+   *  editor is inside a nested comp. */
+  liveUpdateRoot: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
   commitLive: (before: Project) => void
+  /** Step the editor INTO a nested composition (a compound layer, or a layout
+   *  cell that carries a comp). No-ops if the step doesn't resolve or the
+   *  depth cap is hit. Clears selection and rewinds the playhead. */
+  enterComposition: (step: CompStep) => void
+  /** Step back out one level (to the parent composition). */
+  exitComposition: () => void
   /** Flush a pending debounced autosave immediately (window unload can land
    *  inside the 400ms debounce window and lose the last edit). */
   flushSave: () => void
@@ -206,7 +236,9 @@ export const useProject = create<ProjectState>((set, get) => {
     saveSession(get().filePath, true)
   }
 
-  /** Apply a pure transform, recording undo history and autosaving. */
+  /** Apply a pure ROOT-document transform, recording undo history and
+   *  autosaving. Root-only actions (preset, media list, script, project-wide
+   *  defaults) use this directly; timeline edits go through `commitComp`. */
   function commit(transform: (p: Project) => Project): void {
     const current = get().project
     if (!current) return
@@ -217,17 +249,36 @@ export const useProject = create<ProjectState>((set, get) => {
     markDirty()
   }
 
+  /** Apply a pure transform to the ACTIVE composition (the root when
+   *  `editPath` is empty — then `transform` receives the project itself, so
+   *  behavior is byte-identical to `commit`). THE indirection that lets every
+   *  timeline action edit root and nested docs with one implementation. */
+  function commitComp(transform: (c: Composition) => Composition): void {
+    commit((p) => updateCompAtPath(p, get().editPath, transform))
+  }
+
   /** Switch to a different project document, resetting history and selection. */
   function adopt(project: Project, filePath: string | null): void {
     useUi.getState().clearSelection()
-    set({ project, past: [], future: [], filePath, dirty: false })
+    set({ project, past: [], future: [], filePath, dirty: false, editPath: [] })
     saveSession(filePath, false)
     scheduleSave(project)
   }
 
-  const mapLayer = (p: Project, id: string, fn: (l: Layer) => Layer): Project => ({
-    ...p,
-    layers: updateById(p.layers, id, fn)
+  /** After a history jump or reload, a stored `editPath` may point into a
+   *  composition the new document doesn't have (e.g. undoing the conversion
+   *  that created it) — pop to the root rather than dangle. */
+  function revalidateEditPath(project: Project): void {
+    const path = get().editPath
+    if (path.length && !resolveCompAtPath(project, path)) {
+      useUi.getState().clearSelection()
+      set({ editPath: [] })
+    }
+  }
+
+  const mapLayer = (c: Composition, id: string, fn: (l: Layer) => Layer): Composition => ({
+    ...c,
+    layers: updateById(c.layers, id, fn)
   })
 
   return {
@@ -237,6 +288,7 @@ export const useProject = create<ProjectState>((set, get) => {
     loaded: false,
     filePath: null,
     dirty: false,
+    editPath: [],
 
     load: async () => {
       const project = migrateProject(await loadProject())
@@ -291,7 +343,35 @@ export const useProject = create<ProjectState>((set, get) => {
     liveUpdate: (transform) => {
       const current = get().project
       if (!current) return
+      set({ project: updateCompAtPath(current, get().editPath, transform) })
+    },
+
+    liveUpdateRoot: (transform) => {
+      const current = get().project
+      if (!current) return
       set({ project: transform(current) })
+    },
+
+    enterComposition: (step) => {
+      const { project, editPath } = get()
+      if (!project) return
+      const path = [...editPath, step]
+      // The step must resolve, and the target must sit within the depth cap
+      // (root = depth 1, so a path of length L edits at depth L + 1).
+      if (path.length + 1 > MAX_COMP_DEPTH || !resolveCompAtPath(project, path)) return
+      useUi.getState().clearSelection()
+      usePlayback.getState().setPlaying(false)
+      usePlayback.getState().setTime(0)
+      set({ editPath: path })
+    },
+
+    exitComposition: () => {
+      const { editPath } = get()
+      if (editPath.length === 0) return
+      useUi.getState().clearSelection()
+      usePlayback.getState().setPlaying(false)
+      usePlayback.getState().setTime(0)
+      set({ editPath: editPath.slice(0, -1) })
     },
 
     commitLive: (before) => {
@@ -313,10 +393,10 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     // --- Layers ---
-    addLayer: (layer) => commit((p) => ({ ...p, layers: [...p.layers, layer] })),
+    addLayer: (layer) => commitComp((p) => ({ ...p, layers: [...p.layers, layer] })),
 
     addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false) =>
-      commit((p) => {
+      commitComp((p) => {
         // A clip and the audio track pulled off it are ONE thing by default, so
         // the pair lands LINKED: move/trim/split/delete either and the other
         // follows (`lib/links.ts`). Unlink from the timeline bar to edit one.
@@ -345,10 +425,10 @@ export const useProject = create<ProjectState>((set, get) => {
       }),
 
     addLayoutLayer: (id, presetId, startSec) =>
-      commit((p) => ({ ...p, layers: [...p.layers, makeLayoutLayer(id, presetId, startSec)] })),
+      commitComp((p) => ({ ...p, layers: [...p.layers, makeLayoutLayer(id, presetId, startSec)] })),
 
     setLayoutPreset: (id, presetId) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) =>
           l.content.kind === 'layout'
             ? { ...l, content: applyLayoutPreset(l.content, presetId) }
@@ -357,7 +437,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     updateLayoutCell: (id, cellIndex, patch) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'layout') return l
           const cells = l.content.cells.map((cell, i) => (i === cellIndex ? { ...cell, ...patch } : cell))
@@ -365,52 +445,54 @@ export const useProject = create<ProjectState>((set, get) => {
         })
       ),
 
-    updateLayer: (id, patch) => commit((p) => mapLayer(p, id, (l) => ({ ...l, ...patch }))),
+    updateLayer: (id, patch) => commitComp((p) => mapLayer(p, id, (l) => ({ ...l, ...patch }))),
 
     updateLayerContent: (id, patch) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))
       ),
 
     removeLayer: (id) => {
-      commit((p) => links.removeItems(p, [{ kind: 'layer', id }]))
+      commitComp((p) => links.removeItems(p, [{ kind: 'layer', id }]))
       if (useUi.getState().selectedLayerId === id) useUi.getState().selectLayer(null)
     },
 
-    toggleLayerHidden: (id) => commit((p) => mapLayer(p, id, (l) => ({ ...l, hidden: !l.hidden }))),
+    toggleLayerHidden: (id) => commitComp((p) => mapLayer(p, id, (l) => ({ ...l, hidden: !l.hidden }))),
 
     reorderLayers: (visibleFrontToBack) =>
-      commit((p) => ({ ...p, layers: applyVisibleOrder(p.layers, [...visibleFrontToBack].reverse()) })),
+      commitComp((p) => ({ ...p, layers: applyVisibleOrder(p.layers, [...visibleFrontToBack].reverse()) })),
 
     // Both single-tile splits go through the group path so there is exactly one
     // split implementation (a lone tile is just a group of one).
     splitLayerAt: (id, atSec) => get().splitItemsAt([{ kind: 'layer', id }], atSec, () => 0),
 
-    linkItems: (refs) => commit((p) => links.linkItems(p, refs, newId)),
+    linkItems: (refs) => commitComp((p) => links.linkItems(p, refs, newId)),
 
-    unlinkItems: (refs) => commit((p) => links.unlinkItems(p, refs)),
+    unlinkItems: (refs) => commitComp((p) => links.unlinkItems(p, refs)),
 
     removeItems: (refs) => {
-      commit((p) => links.removeItems(p, refs))
+      commitComp((p) => links.removeItems(p, refs))
       useUi.getState().clearSelection() // everything selected is gone
     },
 
-    moveItemsBy: (refs, delta) => commit((p) => links.moveItemsBy(p, refs, delta)),
+    moveItemsBy: (refs, delta) => commitComp((p) => links.moveItemsBy(p, refs, delta)),
 
     splitItemsAt: (refs, atSec, srcDur) => {
-      commit((p) => links.splitItemsAt(p, refs, atSec, srcDur, newId))
+      commitComp((p) => links.splitItemsAt(p, refs, atSec, srcDur, newId))
       // A split re-groups the two sides, so the selection has to re-resolve
-      // around the tile the user actually clicked (its left half keeps its id).
-      const p = get().project
+      // around the tile the user actually clicked (its left half keeps its id)
+      // — against the ACTIVE composition, where the tiles live.
+      const root = get().project
+      const comp = root ? resolveCompAtPath(root, get().editPath) : null
       const ui = useUi.getState()
       const primary = primaryRef(ui)
-      if (p && primary && links.tileOf(p, primary)) {
-        ui.selectItems(links.expandGroup(p, primary), primary)
+      if (comp && primary && links.tileOf(comp, primary)) {
+        ui.selectItems(links.expandGroup(comp, primary), primary)
       }
     },
 
     setVideoSpeed: (id, speed) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video') return l
           const content = { ...l.content, speed: speed === 1 ? undefined : speed }
@@ -419,7 +501,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     addSpeedKeyframe: (id, atSec) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video') return l
           const c = l.content
@@ -437,7 +519,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     updateSpeedKeyframe: (id, index, speed) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video') return l
           const c = l.content
@@ -450,7 +532,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     removeSpeedKeyframe: (id, index) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video') return l
           const c = l.content
@@ -463,7 +545,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     clearSpeedRamp: (id) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video' || !hasSpeedRamp(l.content)) return l
           const content = { ...l.content, speedRamp: undefined }
@@ -472,7 +554,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     addLayerKeyframe: (id, atSec) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           // Text animates via its own presets; layouts have no export keyframe path.
           if (l.content.kind === 'text' || l.content.kind === 'layout') return l
@@ -492,7 +574,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     removeLayerKeyframe: (id, index) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           const kfs = [...(l.keyframes ?? [])].sort((a, b) => a.tSec - b.tSec)
           if (!kfs[index]) return l
@@ -502,7 +584,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     setLayerKeyframeOpacity: (id, index, opacity) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           const kfs = [...(l.keyframes ?? [])].sort((a, b) => a.tSec - b.tSec)
           if (!kfs[index]) return l
@@ -514,10 +596,10 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     clearLayerKeyframes: (id) =>
-      commit((p) => mapLayer(p, id, (l) => ({ ...l, keyframes: undefined }))),
+      commitComp((p) => mapLayer(p, id, (l) => ({ ...l, keyframes: undefined }))),
 
     extractLayerAudio: (id) =>
-      commit((p) => {
+      commitComp((p) => {
         const layer = p.layers.find((l) => l.id === id)
         if (!layer || layer.content.kind !== 'video') return p
         // A re-timed clip's audio can't be detached to the (1×) audio lane —
@@ -534,7 +616,7 @@ export const useProject = create<ProjectState>((set, get) => {
       }),
 
     addFreeze: (id, atSrcSec, holdSec) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video' || holdSec <= 0) return l
           const c = l.content
@@ -545,7 +627,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     removeFreeze: (id, index) =>
-      commit((p) =>
+      commitComp((p) =>
         mapLayer(p, id, (l) => {
           if (l.content.kind !== 'video') return l
           const c = l.content
@@ -562,7 +644,7 @@ export const useProject = create<ProjectState>((set, get) => {
       ),
 
     // --- Captions / script / audio ---
-    setCaptions: (captions) => commit((p) => ({ ...p, captions })),
+    setCaptions: (captions) => commitComp((p) => ({ ...p, captions })),
 
     addScriptLine: (atSec) =>
       commit((p) => ({ ...p, script: [...p.script, { id: newId(), text: '', atSec }] })),
@@ -573,18 +655,18 @@ export const useProject = create<ProjectState>((set, get) => {
     removeScriptLine: (id) => commit((p) => ({ ...p, script: p.script.filter((l) => l.id !== id) })),
 
     updateCaption: (id, patch) =>
-      commit((p) => ({
+      commitComp((p) => ({
         ...p,
         captions: { ...p.captions, segments: updateById(p.captions.segments, id, (s) => ({ ...s, ...patch })) }
       })),
 
-    removeCaption: (id) => commit((p) => links.removeItems(p, [{ kind: 'caption', id }])),
+    removeCaption: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'caption', id }])),
 
     setCaptionStyle: (patch) =>
-      commit((p) => ({ ...p, captions: { ...p.captions, style: { ...p.captions.style, ...patch } } })),
+      commitComp((p) => ({ ...p, captions: { ...p.captions, style: { ...p.captions.style, ...patch } } })),
 
     setCaptionSegmentStyle: (id, patch) =>
-      commit((p) => ({
+      commitComp((p) => ({
         ...p,
         captions: {
           ...p.captions,
@@ -596,7 +678,7 @@ export const useProject = create<ProjectState>((set, get) => {
       })),
 
     clearCaptionSegmentStyle: (id) =>
-      commit((p) => ({
+      commitComp((p) => ({
         ...p,
         captions: {
           ...p.captions,
@@ -604,19 +686,19 @@ export const useProject = create<ProjectState>((set, get) => {
         }
       })),
 
-    addAudioClip: (clip) => commit((p) => ({ ...p, audioClips: [...p.audioClips, clip] })),
+    addAudioClip: (clip) => commitComp((p) => ({ ...p, audioClips: [...p.audioClips, clip] })),
 
     updateAudioClip: (id, patch) =>
-      commit((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => ({ ...a, ...patch })) })),
+      commitComp((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => ({ ...a, ...patch })) })),
 
-    removeAudioClip: (id) => commit((p) => links.removeItems(p, [{ kind: 'audio', id }])),
+    removeAudioClip: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'audio', id }])),
 
     setDenoiseDefault: (on) => commit((p) => (p.denoiseDefault === on ? p : { ...p, denoiseDefault: on })),
 
     setStabilizeDefault: (stab) => commit((p) => ({ ...p, stabilizeDefault: stab })),
 
     splitAudioOnSilence: (audioId, ranges) =>
-      commit((p) => {
+      commitComp((p) => {
         const idx = p.audioClips.findIndex((a) => a.id === audioId)
         if (idx < 0 || ranges.length === 0) return p
         const orig = p.audioClips[idx]
@@ -640,6 +722,7 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!project || past.length === 0) return
       const prev = past[past.length - 1]
       set({ project: prev, past: past.slice(0, -1), future: [project, ...future] })
+      revalidateEditPath(prev)
       scheduleSave(prev)
       markDirty()
     },
@@ -649,6 +732,7 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!project || future.length === 0) return
       const next = future[0]
       set({ project: next, future: future.slice(1), past: [...past, project] })
+      revalidateEditPath(next)
       scheduleSave(next)
       markDirty()
     }
