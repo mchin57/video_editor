@@ -83,10 +83,10 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 
 
-- [~] **Nested compositions (compound clips) — edit any clip or panel as its own
+- [x] **Nested compositions (compound clips) — edit any clip or panel as its own
   timeline.** A `Composition` (`layers`+`audioClips`+`captions`) is the editable
   core `Project` now extends; a **compound layer** (`CompoundContent`) or a
-  **layout cell** (`LayoutCell.comp`) carries one inline (migration v17,
+  **layout cell** (`LayoutCell.comp`) carries one inline (migrations v17/v18,
   absence-tolerant). ONE implementation serves every depth: the store's
   `editPath` + `commitComp` mean all ~40 timeline actions edit the ACTIVE
   composition (empty path = the root, byte-identical to before), every panel
@@ -100,12 +100,21 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   composites over lower layers exactly like the preview instead of a black box;
   intermediates are content-hash cached. UI: ✎ Edit on a layout cell, "🧩 Edit
   as compound clip" on any unlinked tile, a breadcrumb to step back out.
-  _Unverified: not yet smoke-tested through `npm run dev` — a real nested
-  EXPORT with media (the export IPC opens a save dialog, so it can't be driven
-  headlessly). Preview/edit/navigation are covered by 6 e2e specs._
-  _Known gaps (deliberate, v1): an un-entered comp previews VIDEO only — its
-  audio and captions appear in the export (baked into the pre-render) but not
-  in the live preview; comps are untrimmed (the block window IS the comp
+  Verified end-to-end in `npm run dev` with real media: editing a panel as its
+  own timeline, its picture AND audio reaching the master timeline, and a real
+  nested export. 7 e2e specs cover enter/exit, nested render, both Edit entry
+  points, the window ripple, and the nested audio track.
+  _A nested comp's audio track reaching the parent mix was the one real bug
+  found in testing: `CompFill` rendered the comp's layers but not its
+  `audioClips`, so a muted-clip + extracted-audio panel went silent one level
+  up (its video layers still carried their own audio, hence the confusing
+  asymmetry). Compounding it, layout cells default to `mute: true` — right for
+  a single clip, wrong for a comp that mixes its own audio — with no UI to
+  see it. Fixed by one shared `CompAudioTrack`, opening the cell gate on
+  conversion, a "mute this panel" toggle, and migration v18 for comps converted
+  before the fix._
+  _Known gaps (deliberate, v1): an un-entered comp's CAPTIONS don't preview
+  (they burn into the export's pre-render); comps are untrimmed (the block window IS the comp
   duration, kept in sync by `syncCompoundWindows`); compound layers ignore
   transform keyframes; nested pre-renders don't drive the export progress bar
   (needs weighting across the N+1 passes); the intermediate cache is per-export
