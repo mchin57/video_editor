@@ -636,7 +636,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 17,
+    version: 18,
     preset: 'reel',
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -869,7 +869,29 @@ export function migrateProject(raw: unknown): Project {
   // v17 adds nested compositions: the `compound` layer content kind and the
   // absence-tolerant `LayoutCell.comp` — purely additive, old projects simply
   // have none.
-  if (typeof p.version !== 'number' || p.version < 17) p.version = 17
+  // v18 OPENS the cell-level mute on every cell that carries a comp. Cells
+  // default to muted (four panels shouting at once is chaos), which is right
+  // for a single clip but wrong for a composition: a comp mixes its own audio,
+  // per clip and on its own lane, so the cell gate silently overrode those
+  // choices — audible while editing the comp, silent from the parent. Comps
+  // converted before this shipped kept `mute: true` with no way to see or
+  // change it, so re-open them all; a deliberate panel mute wasn't expressible
+  // before the "mute this panel" toggle existed, so nothing intentional is lost.
+  if ((p.version ?? 0) < 18 && Array.isArray(p.layers)) {
+    const openCompCells = (layers: Layer[]): void => {
+      for (const l of layers) {
+        if (l.content.kind === 'compound') openCompCells(l.content.comp.layers)
+        if (l.content.kind !== 'layout') continue
+        for (const cell of l.content.cells) {
+          if (!cell.comp) continue
+          cell.mute = false
+          openCompCells(cell.comp.layers)
+        }
+      }
+    }
+    openCompCells(p.layers)
+  }
+  if (typeof p.version !== 'number' || p.version < 18) p.version = 18
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

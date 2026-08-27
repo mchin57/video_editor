@@ -28,7 +28,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(17)
+    expect(p.version).toBe(18)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -100,7 +100,7 @@ describe('migrateProject — noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
-    expect(p.version).toBe(17)
+    expect(p.version).toBe(18)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
@@ -151,5 +151,72 @@ describe('effectiveCaptionStyle', () => {
   it('uses the override when present (exempt from the lane style)', () => {
     const s = seg({ style: { ...DEFAULT_CAPTION_STYLE, color: '#00ff00' } })
     expect(effectiveCaptionStyle(captions, s).color).toBe('#00ff00')
+  })
+})
+
+describe('migrateProject — comp cells un-mute (v18)', () => {
+  /** A layout layer with one comp cell (muted, as pre-v18 conversions left it). */
+  const layoutWithCompCell = (mute: boolean): unknown => ({
+    id: 'lay',
+    hidden: false,
+    startSec: 0,
+    endSec: 5,
+    x: 540,
+    y: 960,
+    scale: 1,
+    content: {
+      kind: 'layout',
+      presetId: 'split-lr',
+      cells: [
+        {
+          mediaId: null,
+          inSec: 0,
+          outSec: 5,
+          mute,
+          rect: { x: 0, y: 0, w: 540, h: 1920 },
+          comp: { layers: [], audioClips: [], captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, style: { ...DEFAULT_CAPTION_STYLE }, segments: [] } }
+        },
+        // A plain clip cell keeps its muted default — that rule is right for a
+        // single clip; only compositions mix their own audio.
+        { mediaId: 'm', inSec: 0, outSec: 5, mute: true, rect: { x: 540, y: 0, w: 540, h: 1920 } }
+      ]
+    }
+  })
+
+  it('opens the cell gate on a comp cell, leaving plain clip cells muted', () => {
+    const p = migrateProject({ version: 17, layers: [layoutWithCompCell(true)], audioClips: [] })
+    const cells = (p.layers[0].content as { cells: { mute: boolean }[] }).cells
+    expect(cells[0].mute).toBe(false) // the comp panel is audible again
+    expect(cells[1].mute).toBe(true) // the clip cell is untouched
+    expect(p.version).toBe(18)
+  })
+
+  it('reaches comp cells nested inside a compound layer', () => {
+    const p = migrateProject({
+      version: 17,
+      layers: [
+        {
+          id: 'cmp',
+          hidden: false,
+          startSec: 0,
+          endSec: 5,
+          x: 540,
+          y: 960,
+          scale: 1,
+          content: {
+            kind: 'compound',
+            comp: {
+              layers: [layoutWithCompCell(true)],
+              audioClips: [],
+              captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, style: { ...DEFAULT_CAPTION_STYLE }, segments: [] }
+            }
+          }
+        }
+      ],
+      audioClips: []
+    })
+    const inner = (p.layers[0].content as { comp: { layers: { content: { cells: { mute: boolean }[] } }[] } })
+      .comp.layers[0].content.cells
+    expect(inner[0].mute).toBe(false)
   })
 })
