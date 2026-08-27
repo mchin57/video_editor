@@ -303,7 +303,14 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 Hands-on steps that can't be done in code — needed to actually ship the macOS build and hand it to a friend.
 
-- [ ] **Push the repo to GitHub** so the macOS CI build can run. The `Build macOS` workflow (`.github/workflows/build-mac.yml`) runs on pushes to `main`/`prototype` and on demand via Actions → "Run workflow". Confirm the `mchin57/reel-editor` repo exists (it's also the auto-update `publish:` target).
+- [ ] **Push to GitHub** so the macOS CI build can run. The repo exists
+  (`mchin57/video_editor`) and is wired as `origin`; `electron-builder.yml`
+  `publish:` points at it. Nothing has been pushed yet — the owner runs every
+  `git push` (see CLAUDE.md). NOTE the `Build macOS` workflow triggers on
+  `push: [main, prototype]`, and **`prototype` no longer exists** (branch
+  cleanup) while the work lives on `feat/linked-timeline-groups` — so pushing
+  that branch builds nothing. Push `main` (it fast-forwards to the feature
+  branch cleanly), retarget the workflow, or use Actions → "Run workflow".
 - [ ] **Grab the DMG from the workflow artifacts** (Actions → the run → Artifacts → `ReelEditor-macOS-dmg`) and send it over. The build is **unsigned** and ships **no** ffmpeg.
 - [ ] **(Friend, on the Mac) `brew install ffmpeg`** — required. The Mac build bundles no engines, so without it the app reports no encoder. Homebrew installs to `/opt/homebrew/bin`, which runtime discovery probes directly even for a Finder-launched `.app`.
 - [ ] **(Friend, on the Mac) Clear the Gatekeeper quarantine** on the unsigned app — right-click → **Open** the first time, or `xattr -dr com.apple.quarantine "/Applications/Reel Editor.app"`.

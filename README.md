@@ -105,9 +105,10 @@ Built with `electron-updater`. On launch a packaged app polls its release feed
 downloads any newer version, and prompts to restart-and-install. In dev it's a
 no-op. Wiring lives in [`src/main/services/updater.ts`](src/main/services/updater.ts).
 
-> ⚠️ Confirm `publish.owner` / `publish.repo` in `electron-builder.yml` — they
-> currently default to `mchin57/reel-editor`. They must match the GitHub repo you
-> publish releases to, or clients won't find updates.
+> `publish.owner` / `publish.repo` in `electron-builder.yml` point at
+> `mchin57/video_editor`, matching the repo wired as `origin`. If you ever rename
+> or move the repo, update them together — a mismatch means clients silently
+> never find updates.
 
 To cut a release: bump `version` in `package.json`, then publish so the
 installer + `latest.yml` land on the repo's Releases:
