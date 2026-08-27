@@ -124,6 +124,43 @@ describe('buildExportArgs', () => {
     expect(s).not.toContain('eof_action=pass')
   })
 
+  // REGRESSION (mirror of the above): a hold at the clip's START would otherwise
+  // emit `gte(T-STARTT\,0.000)`, which catches frame 0 too — the whole stream
+  // shifts and no earlier frame is left for framesync to repeat, so the layer
+  // rendered BLACK for the hold. The threshold is nudged past frame 0 instead.
+  it('nudges a freeze at the clip start past frame 0 so it holds instead of blacking out', () => {
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, endSec: 9, freezes: [{ atLocal: 0, holdSec: 3 }] } }] }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('setpts=PTS-STARTPTS+(gte(T-STARTT\\,0.001)*3.000)/TB+1.000/TB[pv1]')
+    expect(s).not.toContain('gte(T-STARTT\\,0.000)')
+  })
+
+  it('nudges a start freeze in the ramped form too, leaving mid-clip thresholds exact', () => {
+    const ramp = [
+      { u: 0, v: 1 },
+      { u: 5, v: 1 }
+    ]
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: { ...vid, ramp, endSec: 9, freezes: [{ atLocal: 0, holdSec: 3 }] } }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('gte(T-STARTT,0.001)*3.000')
+    expect(s).not.toContain('gte(T-STARTT,0.000)')
+
+    // 1 ms is below f3's rounding, so an ordinary mid-clip hold is unchanged.
+    const mid = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, ramp, freezes: [{ atLocal: 1.5, holdSec: 2 }] } }] }),
+      'o'
+    ).join(' ')
+    expect(mid).toContain('gte(T-STARTT,1.500)*2.000')
+  })
+
   it('scales PTS for clip speed (slow-mo doubles the spacing) and composes with freezes', () => {
     const slow = buildExportArgs(
       plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5 } }] }),

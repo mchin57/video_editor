@@ -110,12 +110,24 @@ mechanism only works while there are frames LEFT to push:
   any reason now freezes on its last frame on both sides instead of diverging.
 - Mid-clip holds are unaffected: pixel dumps of a `setpts` freeze at
   `atLocal=2` of a 5s clip are byte-identical under `pass` and `repeat`.
-- **Still open — the mirror case at the START.** A hold at `atSec === inSec`
-  (`atLocal === 0`) shifts *every* frame forward, so nothing exists before
-  `startSec + holdSec` and framesync has no frame to repeat yet — `eof_action`
-  cannot help a gap at the head. Verified black for the hold. Fixing it needs
-  `tpad=start_mode=clone` plus a matching offset in the freeze thresholds and
-  the speed/ramp terms; not done.
+- **The mirror case at the START needs the threshold nudged off zero.** A hold
+  at `atSec === inSec` gives `atLocal === 0`, and frame 0's `T-STARTT` is
+  exactly 0 — so `gte(T-STARTT,0.000)` catches frame 0 too, the *whole* stream
+  shifts, and framesync has no earlier frame to repeat. `eof_action` cannot
+  help a gap at the HEAD, and neither can it be papered over downstream: the
+  layer renders black for the hold.
+  **`freezeAt` clamps every threshold to ≥ 1 ms** (`FIRST_FRAME_EPS`,
+  `exporterArgs.ts`), which leaves frame 0 in place and shifts frames 1..n — so
+  frame 0 becomes the held frame, matching the preview's `videoSourceTime`
+  clamp to `inSec`. 1 ms is below one frame interval at any plausible rate (up
+  to 1000 fps) and below `f3`'s rounding, so mid-clip thresholds are untouched.
+  Verified with a luma-ramp source (`g=min(40+N*3,255)`, so frame 0 ≠ black) at
+  a 3 s head hold: corner green 0/0/0 during the hold before, 39/39/39 (frame
+  0) after, and identical 56/219/255 afterwards. Holds at speed `2×` and under
+  a ramped `setpts` behave the same — the threshold is compared in SOURCE time,
+  so it is independent of the elapsed-PTS term. **`tpad=start_mode=clone` is
+  NOT needed** and would have to compensate the speed/ramp terms; don't reach
+  for it.
 
 ## Nested-composition intermediates (alpha pre-render) (verified ffmpeg 8.1.1, 2026-08)
 

@@ -46,6 +46,25 @@ export interface ExportKeyframe {
 const kfDimExpr = (kfs: ExportKeyframe[], dim: 'w' | 'h'): string =>
   `trunc((${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k[dim] })))})/2)*2`
 
+/**
+ * A freeze hold's `gte(T-STARTT,…)` threshold, nudged clear of the very first
+ * frame.
+ *
+ * A hold is a PTS gap: the threshold pushes every frame at/after it forward by
+ * `holdSec`, and the overlay's framesync repeats the last frame BEFORE the gap
+ * across it. A threshold of 0 catches frame 0 as well, so the whole stream
+ * moves and there is no earlier frame left to repeat — the layer renders BLACK
+ * for the length of the hold (`addFreeze` clamps `atSec` to `inSec`, so
+ * "freeze the first frame" lands exactly here). Nudging past frame 0 — whose
+ * `T-STARTT` is exactly 0 — makes frame 0 itself the held frame, which is also
+ * what the preview's `videoSourceTime` clamps to. 1 ms clears the first frame
+ * interval of any plausible source rate (up to 1000 fps) and is below `f3`'s
+ * rounding, so mid-clip thresholds are untouched. Verified — see FFMPEG-NOTES
+ * "Freeze holds & overlay EOF".
+ */
+const FIRST_FRAME_EPS = 0.001
+const freezeAt = (atLocal: number): number => Math.max(FIRST_FRAME_EPS, atLocal)
+
 /** Center-anchored per-frame overlay position expressions. */
 const kfPosExprs = (kfs: ExportKeyframe[]): { x: string; y: string } => ({
   x: `(${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k.cx })))})-overlay_w/2`,
@@ -368,14 +387,14 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         // backslash escaping (verified — see FFMPEG-NOTES "Speed ramps").
         const rampExpr = speedRampPlayedExpr(ramp)
         const freezeSum = v.freezes
-          .map((f) => `gte(T-STARTT,${f3(f.atLocal)})*${f3(f.holdSec)}`)
+          .map((f) => `gte(T-STARTT,${f3(freezeAt(f.atLocal))})*${f3(f.holdSec)}`)
           .join('+')
         const inner = freezeSum ? `${rampExpr}+${freezeSum}` : rampExpr
         setpts = `setpts='(${inner}+${f3(v.startSec)})/TB'`
       } else {
         const elapsed = speed !== 1 ? `(PTS-STARTPTS)/${f3(speed)}` : 'PTS-STARTPTS'
         const freezeSum = v.freezes
-          .map((f) => `gte(T-STARTT\\,${f3(f.atLocal)})*${f3(f.holdSec)}`)
+          .map((f) => `gte(T-STARTT\\,${f3(freezeAt(f.atLocal))})*${f3(f.holdSec)}`)
           .join('+')
         setpts = freezeSum
           ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
