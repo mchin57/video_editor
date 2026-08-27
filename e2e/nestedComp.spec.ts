@@ -5,9 +5,15 @@
  * edit path instead of dangling. ARRANGE via store actions, ACT with real
  * keys/clicks, ASSERT on store + DOM.
  */
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { test, expect } from './fixtures'
 import type { Page } from '@playwright/test'
 import type { Composition, LayoutContent } from '../src/shared/project'
+
+const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
 
 /** Root: one Split L|R layout at t=0 whose cell 0 holds a (fake) clip. */
 async function arrangeLayoutWithCell(page: Page): Promise<void> {
@@ -217,4 +223,80 @@ test('undo while inside a comp pops the edit path instead of dangling', async ({
   expect((s.cell0 as { comp?: unknown }).comp).toBeUndefined()
   // The editor is normal again: the layout block renders at the root.
   await expect(page.locator('div[title="Layout"]')).toBeVisible()
+})
+
+/**
+ * REGRESSION: a nested comp's AUDIO TRACK reaches the mix.
+ *
+ * The comp's video layers always carried their own audio (a `<video>` element
+ * plays it), but the comp's audioClips were never rendered as followers — so
+ * the standard workflow (mute the clip, extract its audio to the lane) went
+ * silent one level up, while text and pictures propagated fine.
+ */
+test('a nested comp plays its own audio track from the parent timeline', async ({
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+
+  // A real clip WITH an audio track (followers need a ready proxy to render).
+  const mp4 = join(mkdtempSync(join(tmpdir(), 'reel-na-')), 'av.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'testsrc=duration=3:size=270x480:rate=30',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest',
+    mp4
+  ])
+  const assetId = await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    window.__reelStores.useProject.getState().addMedia([asset.id])
+    return asset.id
+  }, mp4)
+  await expect
+    .poll(
+      () => page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0]?.proxyReady, assetId),
+      { timeout: 30_000 }
+    )
+    .toBe(true)
+
+  // A layout whose cell 0 is a comp; inside it, the user's usual shape: the
+  // clip muted, its audio living on the comp's own audio lane.
+  await page.evaluate((id) => {
+    const { useProject } = window.__reelStores
+    const s = useProject.getState()
+    s.addLayoutLayer('LAY', 'split-lr', 0)
+    s.updateLayoutCell('LAY', 0, { mediaId: id, inSec: 0, outSec: 3 })
+    s.convertCellToComp('LAY', 0)
+    s.enterComposition({ layerId: 'LAY', cellIndex: 0 })
+    const st = useProject.getState()
+    const comp = (st.project!.layers.find((l) => l.id === 'LAY')!.content as LayoutContent).cells[0]
+      .comp!
+    st.updateLayerContent(comp.layers[0].id, { mute: true })
+    st.addAudioClip({
+      id: 'NA1',
+      mediaId: id,
+      startSec: 0,
+      inSec: 0,
+      outSec: 3,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'extracted'
+    })
+    st.exitComposition()
+  }, assetId)
+
+  // Back at the ROOT, with the playhead inside the layout: the comp's audio
+  // clip must have a follower <audio> on the page (it had none before the fix).
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1))
+  await expect(page.getByTestId('comp-fill')).toHaveCount(1)
+  await expect.poll(() => page.locator('audio').count()).toBeGreaterThan(0)
+
+  // …and it is silenced when the cell holding the comp is muted, matching the
+  // export (which skips a muted cell's intermediate audio entirely).
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().updateLayoutCell('LAY', 0, { mute: true })
+  )
+  await expect.poll(() => page.locator('audio').count()).toBe(0)
 })

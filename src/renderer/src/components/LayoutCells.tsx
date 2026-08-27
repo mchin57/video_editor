@@ -138,11 +138,25 @@ export function LayoutCells({
             </div>
 
             {cell.comp ? (
-              <p className="px-1 pb-1 text-[10px] leading-snug text-zinc-500">
-                This panel is its own timeline. Press{' '}
-                <span className="text-fuchsia-300">✎ Edit</span> to open it; changes appear in the
-                panel live.
-              </p>
+              <div className="px-1 pb-1">
+                <p className="text-[10px] leading-snug text-zinc-500">
+                  This panel is its own timeline. Press{' '}
+                  <span className="text-fuchsia-300">✎ Edit</span> to open it; changes appear in the
+                  panel live.
+                </p>
+                {/* Master mute for the panel. A comp mixes its own audio, so
+                    this sits ABOVE those choices — it silences the whole
+                    nested timeline, lane and clips alike (the export skips a
+                    muted cell's audio the same way). */}
+                <label className="mt-1.5 flex items-center gap-1 text-[10px] text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={cell.mute}
+                    onChange={() => updateCell(layerId, i, { mute: !cell.mute })}
+                  />
+                  mute this panel
+                </label>
+              </div>
             ) : cellAsset ? (
               <ClipCard
                 asset={cellAsset}

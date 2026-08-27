@@ -491,7 +491,12 @@ export const useProject = create<ProjectState>((set, get) => {
           const cells = l.content.cells.map((c, i) =>
             // The comp now owns the content; the single-clip fields stay behind
             // only as the seed's provenance (comp overrides them everywhere).
-            i === cellIndex ? { ...c, comp, mediaId: null } : c
+            // The cell-level mute OPENS: cells default to muted (four panels
+            // shouting at once is chaos), but a comp mixes its own audio — per
+            // clip and on its own lane — so leaving it shut would be a second,
+            // invisible gate over those choices. The seeded clip keeps the old
+            // mute, so converting alone changes nothing you can hear.
+            i === cellIndex ? { ...c, comp, mediaId: null, mute: false } : c
           )
           return { ...l, content: { ...l.content, cells } }
         })

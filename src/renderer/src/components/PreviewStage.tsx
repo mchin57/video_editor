@@ -313,6 +313,38 @@ function AudioFollower({
   return <audio ref={ref} src={src} preload="auto" />
 }
 
+/**
+ * A composition's AUDIO TRACK: one follower `<audio>` per clip (the browser
+ * mixes them). The single implementation, used both for the composition being
+ * edited and — recursively, through `CompFill` — for every nested comp on
+ * screen: a comp's audio track has to reach the mix the same way its pictures
+ * reach the frame. `time` is LOCAL to that composition.
+ */
+function CompAudioTrack({
+  clips,
+  assetById,
+  time,
+  playing
+}: {
+  clips: AudioClip[]
+  assetById: Map<string, MediaAsset>
+  time: number
+  playing: boolean
+}): JSX.Element {
+  return (
+    <>
+      {clips.map((a) => {
+        const asset = assetById.get(a.mediaId)
+        if (!asset?.proxyReady) return null
+        const src = asset.probe.video ? videoProxyUrl(asset) : audioUrl(asset.id)
+        return (
+          <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
+        )
+      })}
+    </>
+  )
+}
+
 /** One composited video layer: a <video> that follows the master clock. */
 function VideoLayerView({
   layer,
@@ -322,7 +354,8 @@ function VideoLayerView({
   playing,
   selected,
   boxStyle,
-  onMoveDown
+  onMoveDown,
+  muted = false
 }: {
   layer: Layer
   content: VideoContent
@@ -332,6 +365,8 @@ function VideoLayerView({
   selected: boolean
   boxStyle: CSSProperties
   onMoveDown: (e: ReactPointerEvent) => void
+  /** Silenced by an ancestor (a muted layout cell the comp fills). */
+  muted?: boolean
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const target = videoSourceTime(content, layer, time)
@@ -378,14 +413,14 @@ function VideoLayerView({
       <video
         ref={ref}
         src={videoProxyUrl(asset)}
-        muted={content.mute || ramped}
+        muted={content.mute || ramped || muted}
         playsInline
         style={fill}
         onLoadedMetadata={() => {
           const v = ref.current
           if (v) {
             v.currentTime = target
-            v.muted = content.mute || ramped
+            v.muted = content.mute || ramped || muted
           }
         }}
       />
@@ -456,7 +491,8 @@ function LayoutLayerView({
   selected,
   boxStyle,
   onMoveDown,
-  depth = 1
+  depth = 1,
+  muted = false
 }: {
   layer: Layer
   content: LayoutContent
@@ -468,6 +504,8 @@ function LayoutLayerView({
   onMoveDown: (e: ReactPointerEvent) => void
   /** Comp nesting level of the composition this layout lives in. */
   depth?: number
+  /** Silenced by an ancestor comp (a muted cell above this one). */
+  muted?: boolean
 }): JSX.Element {
   const local = time - layer.startSec
   const window = Math.max(0, layer.endSec - layer.startSec)
@@ -505,6 +543,7 @@ function LayoutLayerView({
                 playing={playing}
                 assetById={assetById}
                 depth={depth + 1}
+                muted={muted || cell.mute}
               />
             </div>
           )
@@ -516,7 +555,7 @@ function LayoutLayerView({
             <LayoutCellVideo
               key={i}
               asset={asset}
-              mute={cell.mute}
+              mute={cell.mute || muted}
               target={cell.inSec + local}
               playing={playing}
               style={rel}
@@ -558,7 +597,8 @@ function StackLayer({
   assetById,
   selected,
   onMoveDown,
-  depth = 1
+  depth = 1,
+  muted = false
 }: {
   rawLayer: Layer
   z: number
@@ -568,6 +608,8 @@ function StackLayer({
   selected: boolean
   onMoveDown: (e: ReactPointerEvent) => void
   depth?: number
+  /** Silenced by an ancestor comp (a muted cell it fills). */
+  muted?: boolean
 }): JSX.Element | null {
   const layer = withKeyframedTransform(rawLayer, time)
 
@@ -611,6 +653,7 @@ function StackLayer({
               selected={selected}
               boxStyle={box}
               onMoveDown={onMoveDown}
+              muted={muted}
             />
           )
         }
@@ -697,6 +740,7 @@ function StackLayer({
               boxStyle={box}
               onMoveDown={onMoveDown}
               depth={depth}
+              muted={muted}
             />
           )
         }
@@ -730,6 +774,7 @@ function StackLayer({
                 playing={playing}
                 assetById={assetById}
                 depth={depth + 1}
+                muted={muted}
               />
             </div>
           )
@@ -797,13 +842,18 @@ function CompFill({
   time,
   playing,
   assetById,
-  depth
+  depth,
+  muted = false
 }: {
   comp: Composition
   time: number
   playing: boolean
   assetById: Map<string, MediaAsset>
   depth: number
+  /** Silenced by the parent (a muted layout cell). Mutes the comp's whole
+   *  mix — its audio track AND the clips inside it — matching the export,
+   *  which skips a muted cell's intermediate audio entirely. */
+  muted?: boolean
 }): JSX.Element | null {
   if (depth > MAX_COMP_DEPTH) return null
   const srcDur = (id: string): number => assetById.get(id)?.probe.durationSec ?? 0
@@ -823,6 +873,11 @@ function CompFill({
         overflow: 'hidden'
       }}
     >
+      {/* The comp's own audio track — without this a comp whose clips are
+          muted and extracted to its audio lane would play silent. */}
+      {!muted && (
+        <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />
+      )}
       {active.map((l, i) => (
         <StackLayer
           key={l.id}
@@ -834,6 +889,7 @@ function CompFill({
           selected={false}
           onMoveDown={noopPointer}
           depth={depth}
+          muted={muted}
         />
       ))}
     </div>
@@ -1070,13 +1126,9 @@ export function PreviewStage(): JSX.Element {
       }}
       className="relative isolate aspect-[9/16] h-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10"
     >
-      {/* Audio track: one follower <audio> per clip (the browser mixes them) */}
-      {audioClips.map((a) => {
-        const asset = assetById.get(a.mediaId)
-        if (!asset?.proxyReady) return null
-        const src = asset.probe.video ? videoProxyUrl(asset) : audioUrl(asset.id)
-        return <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
-      })}
+      {/* Audio track of the composition being edited. Nested comps render
+          their own through CompFill, so every level reaches the mix. */}
+      <CompAudioTrack clips={audioClips} assetById={assetById} time={time} playing={playing} />
 
       {/* The composited layer stack, back (index 0) → front. */}
       {activeLayers.map((rawLayer, i) => (
