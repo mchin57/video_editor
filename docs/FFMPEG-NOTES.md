@@ -85,6 +85,38 @@ exact compositor filter shapes and reading the counter off frame dumps:
   `atempo=2.000`); each instance only accepts 0.5–2, so arbitrary tempos chain
   (`atempoChain`, `services/audio.ts` — 4 → `2,2`, 0.25 → `0.5,0.5`).
 
+## Freeze holds & overlay EOF (verified ffmpeg 8.1.1, 2026-08)
+
+A freeze hold is not a filter — it is a PTS gap. `setpts` pushes every frame
+at/after the freeze's source point forward by `holdSec`, and the layer's
+`overlay` framesync repeats its last delivered frame across the gap. That
+mechanism only works while there are frames LEFT to push:
+
+- **A hold parked at the clip's end has nothing to shift.** `addFreeze` clamps
+  `atSec` to `outSec`, so "freeze the last frame" gives `atLocal === len` —
+  and the input is read with `-t len`, whose last frame lands at
+  `len − 1/fps`. `gte(T-STARTT,atLocal)` therefore never fires: the PTS shift
+  is 0 and the stream simply ENDS at `startSec + len`, well before the layer's
+  `endSec`.
+- **`eof_action` decides what the viewer sees for the rest of the window.**
+  With `pass` the main input (the black base canvas) is punched straight
+  through — the frozen layer goes BLACK for the whole hold. With `repeat` (the
+  ffmpeg default, and what the compositor now emits) the last frame is held
+  until `enable` closes the window. Verified on the real 4K source that
+  regressed: at t=8s of a 13s section with a 10.1s trailing hold, `pass` gave a
+  black frame under the overlay and `repeat` gave the held background frame.
+- `repeat` also matches the PREVIEW, whose `videoSourceTime` clamps to
+  `outSec` past the end of the footage — so a layer whose stream runs short for
+  any reason now freezes on its last frame on both sides instead of diverging.
+- Mid-clip holds are unaffected: pixel dumps of a `setpts` freeze at
+  `atLocal=2` of a 5s clip are byte-identical under `pass` and `repeat`.
+- **Still open — the mirror case at the START.** A hold at `atSec === inSec`
+  (`atLocal === 0`) shifts *every* frame forward, so nothing exists before
+  `startSec + holdSec` and framesync has no frame to repeat yet — `eof_action`
+  cannot help a gap at the head. Verified black for the hold. Fixing it needs
+  `tpad=start_mode=clone` plus a matching offset in the freeze thresholds and
+  the speed/ramp terms; not done.
+
 ## Nested-composition intermediates (alpha pre-render) (verified ffmpeg 8.1.1, 2026-08)
 
 A compound clip / layout-cell composition is exported by PRE-RENDERING it to an

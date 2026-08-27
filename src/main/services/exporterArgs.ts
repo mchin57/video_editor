@@ -395,10 +395,17 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       }
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
       const pos = kfs ? kfPosExprs(kfs) : null
+      // `eof_action=repeat` HOLDS the layer's last frame once its (`-t`-limited)
+      // input runs out, until `enable` closes the window at endSec. That is what
+      // makes a freeze hold sitting at the clip's END work: such a hold shifts no
+      // frames forward (nothing follows it), so the stream just stops early and
+      // only the repeat keeps the held frame on screen — `eof_action=pass` punched
+      // the base canvas (black) through instead. It also matches the preview,
+      // whose `videoSourceTime` clamps to `outSec` past the end of the footage.
       chains.push(
         pos
-          ? `[${prev}][pv${i}]overlay=x='${pos.x}':y='${pos.y}':enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`
-          : `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=pass[${out}]`
+          ? `[${prev}][pv${i}]overlay=x='${pos.x}':y='${pos.y}':enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
+          : `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
       )
     } else if (vis.kind === 'image') {
       const im = vis.image

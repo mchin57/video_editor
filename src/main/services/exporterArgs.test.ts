@@ -52,7 +52,7 @@ describe('buildExportArgs', () => {
     const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'out.mp4').join(' ')
     expect(s).toContain('-ss 2.000 -t 5.000 -i C:/v/a.mov') // input 1
     expect(s).toContain('[1:v]scale=1080:1920:flags=bicubic,setsar=1,format=yuv420p,setpts=PTS-STARTPTS+1.000/TB[pv1]')
-    expect(s).toContain("[0:v][pv1]overlay=0:0:enable='between(t,1.000,6.000)':eof_action=pass[v0]")
+    expect(s).toContain("[0:v][pv1]overlay=0:0:enable='between(t,1.000,6.000)':eof_action=repeat[v0]")
     expect(s).toContain('-map [v0]')
   })
 
@@ -100,6 +100,28 @@ describe('buildExportArgs', () => {
       'o'
     ).join(' ')
     expect(frozen).toContain('setpts=PTS-STARTPTS+(gte(T-STARTT\\,1.500)*2.000)/TB+1.000/TB[pv1]')
+  })
+
+  // REGRESSION: a freeze hold parked at the clip's END (atLocal === len — what
+  // "freeze the last frame" produces) shifts NO frames forward, so the layer's
+  // `-t`-limited input simply stops at len and the hold exists only as the
+  // overlay repeating its last frame. With the old `eof_action=pass` the base
+  // canvas showed through and the layer went BLACK for the whole hold.
+  it('holds the last frame past EOF so a freeze at the clip end is not blacked out', () => {
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          {
+            kind: 'video',
+            video: { ...vid, endSec: 15, freezes: [{ atLocal: 5, holdSec: 2 }, { atLocal: 5, holdSec: 7 }] }
+          }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(s).toContain('-ss 2.000 -t 5.000 -i C:/v/a.mov') // input still reads only the trim
+    expect(s).toContain("enable='between(t,1.000,15.000)':eof_action=repeat[v0]")
+    expect(s).not.toContain('eof_action=pass')
   })
 
   it('scales PTS for clip speed (slow-mo doubles the spacing) and composes with freezes', () => {
@@ -243,7 +265,7 @@ describe('buildExportArgs', () => {
     expect(s).toContain(
       "overlay=x='(if(lt(t,1.000),540.000,if(lt(t,3.000),540.000+-240.000*(t-1.000)/2.000,300.000)))-overlay_w/2'"
     )
-    expect(s).toContain("-overlay_h/2':enable='between(t,1.000,6.000)':eof_action=pass[v0]")
+    expect(s).toContain("-overlay_h/2':enable='between(t,1.000,6.000)':eof_action=repeat[v0]")
   })
 
   it('keyframed image becomes a -loop 1 frame stream with fps and per-frame scale', () => {
