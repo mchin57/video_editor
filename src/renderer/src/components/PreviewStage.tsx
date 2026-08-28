@@ -42,6 +42,7 @@ import { effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@s
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
+import { MEDIA_CROSS_ORIGIN, useMediaGain } from '@/lib/mediaGain'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { activeComp, useProject } from '@/state/projectStore'
@@ -293,10 +294,9 @@ function AudioFollower({
   const active = time >= clip.startSec - 0.001 && time < clip.startSec + (eo - clip.inSec)
   const target = clip.inSec + (time - clip.startSec)
 
-  useEffect(() => {
-    const a = ref.current
-    if (a) a.volume = Math.min(1, Math.max(0, Math.pow(10, clip.gainDb / 20)))
-  }, [clip.gainDb])
+  // Element `volume` clamps at 1.0, so a boosted clip needs the WebAudio path
+  // to match the export's `volume=` filter. @see lib/mediaGain.ts
+  useMediaGain(ref, clip.gainDb)
 
   useEffect(() => {
     const a = ref.current
@@ -310,7 +310,7 @@ function AudioFollower({
     }
   }, [playing, active, target])
 
-  return <audio ref={ref} src={src} preload="auto" />
+  return <audio ref={ref} src={src} preload="auto" crossOrigin={MEDIA_CROSS_ORIGIN} />
 }
 
 /**
@@ -391,6 +391,13 @@ function VideoLayerView({
     if (v && v.playbackRate !== speed) v.playbackRate = speed
   }, [speed])
 
+  // A ramped clip is muted on both sides (no variable-tempo export path), and a
+  // muted layout cell silences whatever fills it.
+  const silenced = content.mute || ramped || muted
+  // The layer's own gain was previously not applied to the preview at all,
+  // while the export mixed it in via `volume=`. @see lib/mediaGain.ts
+  useMediaGain(ref, content.gainDb, silenced)
+
   useEffect(() => {
     const v = ref.current
     if (!v) return
@@ -413,14 +420,15 @@ function VideoLayerView({
       <video
         ref={ref}
         src={videoProxyUrl(asset)}
-        muted={content.mute || ramped || muted}
+        crossOrigin={MEDIA_CROSS_ORIGIN}
+        muted={silenced}
         playsInline
         style={fill}
         onLoadedMetadata={() => {
           const v = ref.current
           if (v) {
             v.currentTime = target
-            v.muted = content.mute || ramped || muted
+            v.muted = silenced
           }
         }}
       />
