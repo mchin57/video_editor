@@ -32,6 +32,8 @@ import {
 } from '@shared/textAnim'
 import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect } from '@shared/audioFx'
 import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, ECHO_RANGE, fxLabel } from '@shared/audioFx'
+import type { SparkleEffect } from '@shared/sparkle'
+import { DEFAULT_SPARKLE, SPARKLE_DENSITY_RANGE } from '@shared/sparkle'
 import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { expandGroup } from '@/lib/links'
@@ -43,7 +45,7 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { Field, Row, dangerBtnCls, disabledCls, inputCls } from './ui'
+import { Field, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
 
@@ -731,6 +733,12 @@ function LayerEditor(): JSX.Element | null {
           </Field>
           <TextStyleControls style={c} onPatch={(patch) => updateContent(id, patch)} />
           <TextAnimationFields content={c} onPatch={(patch) => updateContent(id, patch)} />
+        </CollapsibleSection>
+      )}
+
+      {c.kind === 'text' && (
+        <CollapsibleSection id="texteffects" title="Text effects">
+          <TextEffectsFields content={c} onPatch={(patch) => updateContent(id, patch)} />
         </CollapsibleSection>
       )}
 
@@ -1597,5 +1605,68 @@ function SoundEffectsSection({
           : 'Adds a separate track — the original clip is left untouched.'}
       </p>
     </CollapsibleSection>
+  )
+}
+
+/**
+ * "Text effects" — decoration layered on top of the glyphs, deliberately
+ * SEPARATE from the entrance/exit animation so the two combine freely: sparkles
+ * plus a typewriter give letter-by-letter glints, sparkles plus a fade give a
+ * shimmer, and any future effect here works with every entrance for free.
+ *
+ * Unlike animations, these are not lost on the rasterised-PNG path (gradient
+ * fill / fixed wrap width) — sparkles burn as their own vector events above the
+ * image — so there is no caveat to show here. @see shared/sparkle.ts
+ */
+function TextEffectsFields({
+  content,
+  onPatch
+}: {
+  content: TextContent
+  onPatch: (patch: Partial<TextContent>) => void
+}): JSX.Element {
+  const sparkle = content.effects?.sparkle ?? null
+  const on = !!sparkle && sparkle.density > 0
+  const setSparkle = (next: SparkleEffect | null): void =>
+    onPatch({ effects: { ...content.effects, sparkle: next } })
+
+  return (
+    <>
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => setSparkle(e.target.checked ? { ...DEFAULT_SPARKLE } : null)}
+        />
+        ✧ Sparkles
+      </label>
+      {on && sparkle && (
+        <>
+          <Field label={`Amount · ${sparkle.density}`}>
+            <input
+              type="range"
+              min={SPARKLE_DENSITY_RANGE.min}
+              max={SPARKLE_DENSITY_RANGE.max}
+              step={1}
+              value={sparkle.density}
+              onChange={(e) => setSparkle({ ...sparkle, density: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label="Color">
+            <input
+              type="color"
+              value={sparkle.color.slice(0, 7)}
+              onChange={(e) => setSparkle({ ...sparkle, color: e.target.value })}
+              className={colorCls}
+            />
+          </Field>
+          <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+            Follows a typewriter entrance letter by letter; scatters across the text with any
+            other entrance.
+          </p>
+        </>
+      )}
+    </>
   )
 }

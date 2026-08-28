@@ -19,6 +19,7 @@ import type { PresetId } from './export'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
 import type { AudioFx } from './audioFx'
+import type { TextEffects } from './sparkle'
 import type { TextAnimation } from './textAnim'
 
 export interface CropRect {
@@ -270,6 +271,14 @@ export interface TextContent extends TextStyleBase {
    *  `effectiveTextAnimation` (shared/textAnim.ts), which both preview and
    *  export resolve through. */
   animation?: TextAnimation | null
+  /**
+   * Decorative effects layered ON TOP of the glyphs, independent of the
+   * entrance/exit animation — so any entrance can be combined with any effect.
+   * Absent/null = none. Unlike `animation`, these DO survive the rasterised-PNG
+   * path: sparkles burn as their own ASS events above the image.
+   * @see shared/sparkle.ts
+   */
+  effects?: TextEffects | null
 }
 
 /** A cell rectangle in the LOGICAL 1080×1920 space (top-left + size). */
@@ -902,10 +911,11 @@ export function migrateProject(raw: unknown): Project {
     }
     openCompCells(p.layers)
   }
-  // v19 adds generated audio effect tracks: the absence-tolerant `AudioClip.fx`
-  // provenance and the `'fx'` audio kind. Purely additive — an effect track is
-  // an ordinary audio clip, so older projects simply have none and nothing about
-  // their existing clips changes.
+  // v19 adds generated audio effect tracks (the absence-tolerant
+  // `AudioClip.fx` provenance and the `'fx'` audio kind) and text decoration
+  // effects (`TextContent.effects`). Both purely additive — an effect track is
+  // an ordinary audio clip and absent `effects` means none — so older projects
+  // simply have neither and nothing about their existing content changes.
   if (typeof p.version !== 'number' || p.version < 19) p.version = 19
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

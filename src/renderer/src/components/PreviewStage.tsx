@@ -38,7 +38,8 @@ import {
   type ResizeBox,
   type ResizeHandle
 } from '@shared/layers'
-import { effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
+import { clampAnimWindows, effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
+import { activeSparkle, sparkleStateAt, sparklesFor, type Sparkle } from '@shared/sparkle'
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
@@ -795,13 +796,23 @@ function StackLayer({
         // Animation state comes from the shared per-frame helper (playhead-
         // driven, so scrub/pause stay exact — never CSS animations).
         const content = layer.content
-        const anim = textAnimStateAt(
-          effectiveTextAnimation(content),
-          layer.startSec,
-          layer.endSec,
-          content.text,
-          time
-        )
+        const textAnim = effectiveTextAnimation(content)
+        const anim = textAnimStateAt(textAnim, layer.startSec, layer.endSec, content.text, time)
+        // Sparkles: same shared generator the export burns from, fed the LOGICAL
+        // font size here and the output-scaled one there. Every offset it returns
+        // is a multiple of that size, so the two layouts agree at any preset.
+        const sparkleEffect = activeSparkle(content.effects)
+        const layerDur = Math.max(0.01, layer.endSec - layer.startSec)
+        const sparkles = sparkleEffect
+          ? sparklesFor({
+              effect: sparkleEffect,
+              text: content.text,
+              fontSizePx: content.fontSizePx,
+              durSec: layerDur,
+              typewriterSec:
+                textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
+            })
+          : []
         return (
           <div
             key={layer.id}
@@ -826,8 +837,65 @@ function StackLayer({
             }`}
           >
             <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
+            {sparkleEffect && (
+              <Sparkles sparkles={sparkles} color={sparkleEffect.color} tLocal={time - layer.startSec} />
+            )}
           </div>
         )
+}
+
+/** The same four-point star the ASS burn draws (`SPARKLE_PATH`), as SVG. Both
+ *  are a radius-10 unit star, so preview and export show the same shape. */
+const SPARKLE_SVG_PATH = 'M0,-10 L2,-2 L10,0 L2,2 L0,10 L-2,2 L-10,0 L-2,-2 Z'
+
+/**
+ * The sparkle layer of a text overlay, drawn ABOVE the glyphs (matching the
+ * burn, which puts sparkles on ASS Layer 1). Positions come from the shared
+ * `sparklesFor`, and each sparkle's twinkle from `sparkleStateAt` — playhead
+ * driven like every other animation here, so scrubbing stays exact.
+ *
+ * Offsets are placed from the text block's centre in `cqw`/`cqh`, INSIDE the
+ * layer's scaled box, so the layer scale multiplies them exactly as the export
+ * does by computing sparkles at the output-scaled font size. Both dimensions
+ * use `cqw` so the star stays round (logical px are square).
+ */
+function Sparkles({
+  sparkles,
+  color,
+  tLocal
+}: {
+  sparkles: Sparkle[]
+  color: string
+  tLocal: number
+}): JSX.Element {
+  return (
+    <>
+      {sparkles.map((s, i) => {
+        const st = sparkleStateAt(s, tLocal)
+        if (st.opacity <= 0) return null
+        return (
+          <svg
+            key={i}
+            viewBox="-10 -10 20 20"
+            aria-hidden
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: cqw(s.sizePx * 2),
+              height: cqw(s.sizePx * 2),
+              transform: `translate(-50%,-50%) translate(${cqw(s.x)}, ${cqh(s.y)}) rotate(${s.rotDeg}deg) scale(${st.scale})`,
+              opacity: st.opacity,
+              pointerEvents: 'none',
+              overflow: 'visible'
+            }}
+          >
+            <path d={SPARKLE_SVG_PATH} fill={color} />
+          </svg>
+        )
+      })}
+    </>
+  )
 }
 
 /** Read-only stacks need a handler; hoisted so the identity stays stable. */
