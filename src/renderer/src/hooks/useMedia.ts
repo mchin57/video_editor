@@ -3,7 +3,7 @@ import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
 import { extractAudioDialog, importDialog, importPaths, listProjectMedia, renderAudioFx } from '@/ipc/client'
 import { useEditor } from '@/state/store'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 
 const LIBRARY_KEY = 'library'
 
@@ -107,10 +107,18 @@ export function useAddAudioFx(): ReturnType<
         fromOutSec: input.outSec
       }
       if (input.replaceClipId) {
-        // Re-render: swap the audio under the existing track, keeping where it
-        // sits and how it is mixed. A new setting means a new content hash, so
-        // this points at a different asset; the old one stays in the library.
-        store.updateAudioClip(input.replaceClipId, { mediaId: asset.id, inSec: 0, outSec: 0, fx })
+        // Re-render: swap the audio under the existing track(s), keeping where
+        // each sits, how it is mixed, and — importantly — how it is TRIMMED. A
+        // new setting means a new content hash, so this points at a different
+        // asset; the old one stays in the library.
+        //
+        // Splitting an effect track leaves SEVERAL clips over one rendered
+        // file, each carrying the same provenance. They are all re-pointed
+        // together: updating only the selected piece would leave its siblings
+        // playing the previous render.
+        const clips = activeComp(useProject.getState())?.audioClips ?? []
+        const from = clips.find((c) => c.id === input.replaceClipId)?.mediaId
+        if (from) store.replaceAudioFxRender(from, asset.id, fx)
         void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
         return
       }

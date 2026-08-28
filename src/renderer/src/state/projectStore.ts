@@ -13,6 +13,7 @@ import type {
   VideoContent
 } from '@shared/project'
 import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
+import type { AudioFx } from '@shared/audioFx'
 import {
   MAX_COMP_DEPTH,
   compDepth,
@@ -248,6 +249,13 @@ interface ProjectState {
   addAudioClip: (clip: AudioClip) => void
   updateAudioClip: (id: string, patch: Partial<AudioClip>) => void
   removeAudioClip: (id: string) => void
+  /**
+   * Point every piece of a re-rendered effect at its new asset, keeping each
+   * piece's own position and TRIM. A split effect track is several clips over
+   * ONE rendered file, so re-rendering has to move them all together — updating
+   * just the selected piece would leave its siblings playing the old render.
+   */
+  replaceAudioFxRender: (fromMediaId: string, toMediaId: string, fx: AudioFx) => void
   /** Set the project-wide noise-filter default (per-clip overrides still win). */
   setDenoiseDefault: (on: boolean) => void
   /** Set the project-wide stabilization default (per-clip overrides still win). */
@@ -775,6 +783,17 @@ export const useProject = create<ProjectState>((set, get) => {
       commitComp((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => ({ ...a, ...patch })) })),
 
     removeAudioClip: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'audio', id }])),
+
+    // Deliberately does NOT touch inSec/outSec: a piece of a split effect track
+    // is trimmed into the rendered file, and resetting the trim would expand it
+    // back to the whole effect at its own start point.
+    replaceAudioFxRender: (fromMediaId, toMediaId, fx) =>
+      commitComp((p) => ({
+        ...p,
+        audioClips: p.audioClips.map((a) =>
+          a.fx && a.mediaId === fromMediaId ? { ...a, mediaId: toMediaId, fx } : a
+        )
+      })),
 
     setDenoiseDefault: (on) => commit((p) => (p.denoiseDefault === on ? p : { ...p, denoiseDefault: on })),
 
