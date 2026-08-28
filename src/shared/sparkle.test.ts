@@ -4,6 +4,7 @@ import {
   charAnchor,
   DEFAULT_SPARKLE,
   estimateTextBox,
+  MAX_CONCURRENT_SPARKLES,
   MAX_SPARKLES,
   sparkleStateAt,
   sparklesFor,
@@ -151,5 +152,50 @@ describe('activeSparkle', () => {
 
   it('is on for a real effect', () => {
     expect(activeSparkle({ sparkle: DEFAULT_SPARKLE })).toEqual(DEFAULT_SPARKLE)
+  })
+})
+
+describe('sparklesFor — how many are actually on screen', () => {
+  /** Sparkles visible at time `t` — what the viewer counts, and what the
+   *  density control is defined in terms of. */
+  const aliveAt = (list: ReturnType<typeof sparklesFor>, t: number): number =>
+    list.filter((s) => sparkleStateAt(s, t).opacity > 0).length
+
+  it('shows roughly density x 10 at once, mid-overlay', () => {
+    for (const [density, expected] of [
+      [2, 20],
+      [5, 50],
+      [10, 100]
+    ] as const) {
+      const list = sparklesFor({
+        ...base,
+        durSec: 4,
+        effect: { ...DEFAULT_SPARKLE, density }
+      })
+      const alive = aliveAt(list, 2)
+      // Births are jittered, so allow a generous band around the target.
+      expect(alive).toBeGreaterThan(expected * 0.6)
+      expect(alive).toBeLessThan(expected * 1.4)
+    }
+  })
+
+  it('holds that on-screen count steady as the overlay gets longer', () => {
+    const short = sparklesFor({ ...base, durSec: 2, effect: { ...DEFAULT_SPARKLE, density: 8 } })
+    const long = sparklesFor({ ...base, durSec: 12, effect: { ...DEFAULT_SPARKLE, density: 8 } })
+    // Far more sparkles in total, but a similar number visible at any instant.
+    expect(long.length).toBeGreaterThan(short.length * 4)
+    expect(aliveAt(long, 6)).toBeGreaterThan(aliveAt(short, 1) * 0.6)
+    expect(aliveAt(long, 6)).toBeLessThan(aliveAt(short, 1) * 1.4)
+  })
+
+  it('never exceeds the concurrent ceiling', () => {
+    const list = sparklesFor({
+      ...base,
+      durSec: 6,
+      effect: { ...DEFAULT_SPARKLE, density: 10 }
+    })
+    for (let t = 0; t <= 6; t += 0.25) {
+      expect(aliveAt(list, t)).toBeLessThanOrEqual(MAX_CONCURRENT_SPARKLES * 1.4)
+    }
   })
 })

@@ -40,11 +40,23 @@ export interface TextEffects {
 export const DEFAULT_SPARKLE: SparkleEffect = { density: 4, color: '#ffe08a' }
 export const SPARKLE_DENSITY_RANGE = { min: 1, max: 10 } as const
 
-/** Sparkles born per second at density 1; density scales this linearly. */
-export const SPARKLES_PER_SEC = 1.6
-/** Hard cap on sparkles for one overlay — each is its own ASS Dialogue event,
- *  and a long overlay at high density would otherwise bloat the subtitle file. */
-export const MAX_SPARKLES = 140
+/**
+ * Density is expressed as **sparkles on screen at once**, not as a birth rate:
+ * density 1 shows ~10 and density 10 shows ~100. That is the number anyone
+ * actually looks at, and it stays put as the overlay gets longer (a rate would
+ * make a 10s overlay look identical to a 2s one only by accident).
+ */
+export const CONCURRENT_PER_DENSITY = 10
+/** Ceiling on how many sparkles may be alive at once, at any density. */
+export const MAX_CONCURRENT_SPARKLES = 100
+/**
+ * Absolute cap on sparkles for one overlay. This is a FILE-SIZE guard, not a
+ * visual one — each sparkle is its own ASS Dialogue event, so a very long,
+ * very dense overlay would otherwise write a huge subtitle file. It only bites
+ * past roughly 11s at maximum density; below that `MAX_CONCURRENT_SPARKLES` is
+ * what shapes the look.
+ */
+export const MAX_SPARKLES = 2000
 /** How long one sparkle takes to twinkle in and back out (seconds). */
 export const SPARKLE_LIFE_SEC = 0.55
 /** Sparkle radius as a fraction of the font size, min..max. */
@@ -170,7 +182,14 @@ export function sparklesFor(o: SparkleLayout): Sparkle[] {
     Math.min(SPARKLE_DENSITY_RANGE.max, o.effect.density)
   )
   const dur = Math.max(0.01, o.durSec)
-  const count = Math.min(MAX_SPARKLES, Math.max(1, Math.round(density * SPARKLES_PER_SEC * dur)))
+  // Work back from "how many are on screen at once" to how many to spawn: each
+  // lives ~SPARKLE_LIFE_SEC, so holding `concurrent` alive across `dur` needs
+  // that many lifetimes' worth of births.
+  const concurrent = Math.min(MAX_CONCURRENT_SPARKLES, density * CONCURRENT_PER_DENSITY)
+  const count = Math.min(
+    MAX_SPARKLES,
+    Math.max(1, Math.round((concurrent * dur) / SPARKLE_LIFE_SEC))
+  )
   const box = estimateTextBox(o.text, o.fontSizePx)
   const typeSec = o.typewriterSec ?? 0
   // Sparkles ride slightly outside the text block so they frame the glyphs
