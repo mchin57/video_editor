@@ -43,7 +43,7 @@ import { activeSparkle, sparkleStateAt, sparklesFor, type Sparkle } from '@share
 import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
-import { MEDIA_CROSS_ORIGIN, useMediaGain } from '@/lib/mediaGain'
+import { useMediaGain } from '@/lib/mediaGain'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { activeComp, useProject } from '@/state/projectStore'
@@ -311,7 +311,16 @@ function AudioFollower({
     }
   }, [playing, active, target])
 
-  return <audio ref={ref} src={src} preload="auto" crossOrigin={MEDIA_CROSS_ORIGIN} />
+  // `data-testid` distinguishes the mix follower from the library card's own
+  // preview player (`ClipCard`), which is a separate <audio> on the same source.
+  return (
+    <audio
+      ref={ref}
+      data-testid="audio-follower"
+      src={src}
+      preload="auto"
+    />
+  )
 }
 
 /**
@@ -421,7 +430,6 @@ function VideoLayerView({
       <video
         ref={ref}
         src={videoProxyUrl(asset)}
-        crossOrigin={MEDIA_CROSS_ORIGIN}
         muted={silenced}
         playsInline
         style={fill}
@@ -878,6 +886,7 @@ function Sparkles({
             key={i}
             viewBox="-10 -10 20 20"
             aria-hidden
+            data-sparkle=""
             style={{
               position: 'absolute',
               left: '50%',

@@ -5,13 +5,6 @@
  * un-buffered position (scrubbing forward appears to do nothing). Serving 206
  * partial responses makes the proxy fully seekable.
  *
- * Responses carry `Access-Control-Allow-Origin: *`. This scheme is a different
- * origin from the renderer page, and the preview's WebAudio gain path
- * (`renderer/lib/mediaGain.ts`) needs CORS-clean media: routing a TAINTED
- * element through `createMediaElementSource` yields silence rather than an
- * error. The elements set `crossOrigin="anonymous"` to match. Media never
- * leaves the app, so the wildcard grants nothing a local file read would not.
- *
  * URL shape: reelmedia://<mediaId>/<file>  e.g. reelmedia://ab12cd34ef56/proxy.mp4
  */
 
@@ -104,7 +97,6 @@ export function registerMediaProtocol(): void {
           'Content-Type': contentType,
           'Content-Range': `bytes ${start}-${end}/${size}`,
           'Accept-Ranges': 'bytes',
-          'Access-Control-Allow-Origin': '*',
           'Content-Length': String(end - start + 1)
         }
       })
@@ -115,7 +107,6 @@ export function registerMediaProtocol(): void {
       headers: {
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
-        'Access-Control-Allow-Origin': '*',
         'Content-Length': String(size)
       }
     })
