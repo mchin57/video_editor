@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { AudioClip, CaptionSegment, Composition, Layer, Project, ScriptLine, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
+import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
 import { assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
@@ -169,7 +170,8 @@ const LANE_STYLE = {
   text: { dot: 'bg-violet-400', tint: 'border-violet-400/30 bg-violet-500/10', block: 'border-violet-400/40 bg-violet-500/20', sel: 'border-violet-300 ring-1 ring-violet-300/50' },
   image: { dot: 'bg-orange-400', tint: 'border-orange-400/30 bg-orange-500/10', block: 'border-orange-400/40 bg-orange-500/20', sel: 'border-orange-300 ring-1 ring-orange-300/50' },
   caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
-  audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' }
+  audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
+  fx: { dot: 'bg-teal-300', tint: 'border-teal-300/30 bg-teal-500/10', block: 'border-teal-400/40 bg-teal-500/15', sel: 'border-teal-300 ring-1 ring-teal-300/50' }
 } as const
 
 type LaneKey = keyof typeof LANE_STYLE
@@ -333,17 +335,20 @@ export function Timeline(): JSX.Element {
     }
   }, [layers])
   const capRows = useMemo(() => packRows(captionSegs.map(spanOf)), [captionSegs])
-  const audRows = useMemo(
-    () =>
-      packRows(
-        audioClips.map((a) => ({
-          id: a.id,
-          startSec: a.startSec,
-          endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
-        }))
-      ),
-    [audioClips, assetById]
-  )
+  // A generated effect track is an ADDITION layered over source audio, so it
+  // gets its own band — sharing the Audio lane hid which clip it belongs to.
+  const dryClips = useMemo(() => audioClips.filter((a) => !a.fx), [audioClips])
+  const fxClips = useMemo(() => audioClips.filter((a) => !!a.fx), [audioClips])
+  const packAudio = (clips: AudioClip[]): Map<string, number> =>
+    packRows(
+      clips.map((a) => ({
+        id: a.id,
+        startSec: a.startSec,
+        endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
+      }))
+    )
+  const audRows = useMemo(() => packAudio(dryClips), [dryClips, assetById])
+  const fxRows = useMemo(() => packAudio(fxClips), [fxClips, assetById])
 
   // Lane layout: Clips / Text / Image always show (≥1 row as drop targets),
   // Captions only when present, Audio always.
@@ -356,7 +361,8 @@ export function Timeline(): JSX.Element {
     { key: 'text' as const, label: 'Text', rows: rowCount(grouped.tRows) },
     { key: 'image' as const, label: 'Image', rows: rowCount(grouped.iRows) },
     ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
-    { key: 'audio' as const, label: 'Audio', rows: rowCount(audRows) }
+    { key: 'audio' as const, label: 'Audio', rows: rowCount(audRows) },
+    ...(fxClips.length > 0 ? [{ key: 'fx' as const, label: 'FX', rows: rowCount(fxRows) }] : [])
   ]
   const { lanes, scaleTop, totalH } = layoutLanes(laneDefs, laneView, LANE_GEOM)
   const laneTop = (key: string): number => lanes.find((l) => l.key === key)?.top ?? RULER_H
@@ -934,6 +940,76 @@ export function Timeline(): JSX.Element {
 
   const isEmpty = layers.length === 0 && audioClips.length === 0
 
+  /**
+   * One audio tile. Shared by the Audio lane and the FX lane so a generated
+   * effect track behaves EXACTLY like the audio it sits over — same drag,
+   * trim handles, selection, waveform and badges — rather than becoming a
+   * second, quietly diverging implementation.
+   */
+  const renderAudioTile = (
+    a: AudioClip,
+    laneKey: 'audio' | 'fx',
+    rows: Map<string, number>
+  ): JSX.Element => {
+    const asset = assetById.get(a.mediaId)
+    const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
+    const eo = effectiveOut(a, maxOut)
+    const left = a.startSec * pxPerSec
+    const width = Math.max(12, (eo - a.inSec) * pxPerSec)
+    const selected = isSelected('audio', a.id)
+    const linked = isLinkedTile(a.linkGroupId)
+    const rowH = laneRowHeight(laneKey)
+    const fxName = a.fx ? fxLabel(a.fx.settings) : null
+    return (
+      <div
+        key={a.id}
+        data-testid={`tile-audio-${a.id}`}
+        onPointerDown={(e) => startTileDrag(e, { kind: 'audio', id: a.id })}
+        title={
+          [fxName ? `${fxName} track` : null, asset?.fileName ?? a.mediaId, linked ? 'linked' : null]
+            .filter(Boolean)
+            .join(' · ')
+        }
+        className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
+          selected ? LANE_STYLE[laneKey].sel : LANE_STYLE[laneKey].block
+        }`}
+        style={{ left, width, top: laneTop(laneKey) + (rows.get(a.id) ?? 0) * rowH, height: rowH - 2 }}
+      >
+        {asset && (
+          <img
+            src={waveformUrl(asset.id)}
+            alt=""
+            onError={(e) => (e.currentTarget.style.display = 'none')}
+            className="pointer-events-none absolute inset-y-0 max-w-none opacity-70"
+            style={{
+              left: `${-(a.inSec / Math.max(0.01, eo - a.inSec)) * 100}%`,
+              width: `${(maxOut / Math.max(0.01, eo - a.inSec)) * 100}%`,
+              height: '100%',
+              objectFit: 'fill'
+            }}
+          />
+        )}
+        <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
+          {linked ? '🔗' : fxName ? '✧' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;
+          {fxName ?? asset?.fileName ?? a.mediaId}
+        </span>
+        {denoiseOverridden(a) && (
+          <span
+            className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${
+              a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
+            }`}
+            title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
+          >
+            N
+          </span>
+        )}
+        <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+        <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+      </div>
+    )
+  }
+
+
   return (
     <div className="flex h-full flex-col">
       {/* Transport / edit toolbar */}
@@ -1146,59 +1222,11 @@ export function Timeline(): JSX.Element {
               )
             })}
 
-            {/* Audio lane */}
-            {!laneCollapsed('audio') && audioClips.map((a) => {
-              const asset = assetById.get(a.mediaId)
-              const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
-              const eo = effectiveOut(a, maxOut)
-              const left = a.startSec * pxPerSec
-              const width = Math.max(12, (eo - a.inSec) * pxPerSec)
-              const selected = isSelected('audio', a.id)
-              const linked = isLinkedTile(a.linkGroupId)
-              const rowH = laneRowHeight('audio')
-              return (
-                <div
-                  key={a.id}
-                  data-testid={`tile-audio-${a.id}`}
-                  onPointerDown={(e) => startTileDrag(e, { kind: 'audio', id: a.id })}
-                  title={linked ? `${asset?.fileName ?? a.mediaId} · linked` : asset?.fileName}
-                  className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
-                    selected ? LANE_STYLE.audio.sel : LANE_STYLE.audio.block
-                  }`}
-                  style={{ left, width, top: laneTop('audio') + (audRows.get(a.id) ?? 0) * rowH, height: rowH - 2 }}
-                >
-                  {asset && (
-                    <img
-                      src={waveformUrl(asset.id)}
-                      alt=""
-                      onError={(e) => (e.currentTarget.style.display = 'none')}
-                      className="pointer-events-none absolute inset-y-0 max-w-none opacity-70"
-                      style={{
-                        left: `${-(a.inSec / Math.max(0.01, eo - a.inSec)) * 100}%`,
-                        width: `${(maxOut / Math.max(0.01, eo - a.inSec)) * 100}%`,
-                        height: '100%',
-                        objectFit: 'fill'
-                      }}
-                    />
-                  )}
-                  <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
-                    {linked ? '🔗' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;{asset?.fileName ?? a.mediaId}
-                  </span>
-                  {denoiseOverridden(a) && (
-                    <span
-                      className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${
-                        a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
-                      }`}
-                      title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
-                    >
-                      N
-                    </span>
-                  )}
-                  <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
-                  <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
-                </div>
-              )
-            })}
+            {/* Audio lane — source audio only; effect tracks get their own band. */}
+            {!laneCollapsed('audio') && dryClips.map((a) => renderAudioTile(a, 'audio', audRows))}
+
+            {/* FX lane — generated echo/chorus tracks layered over the audio. */}
+            {!laneCollapsed('fx') && fxClips.map((a) => renderAudioTile(a, 'fx', fxRows))}
 
             {/* Bottom time scale */}
             <div className="pointer-events-none absolute inset-x-0 border-t border-white/10" style={{ top: scaleTop, height: SCALE_H }}>

@@ -17,6 +17,9 @@ import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
+import type { AudioFxSettings } from '@shared/audioFx'
+import { fxLabel } from '@shared/audioFx'
+import { renderAudioFx } from './audioFx'
 
 /** Content hash (first 12 hex of sha1) of a file — the media folder / id. */
 export function hashFile(path: string): Promise<string> {
@@ -245,6 +248,56 @@ export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset
     // library row flips to "ready to drag onto the music track" when done.
     if (!asset.proxyReady) {
       void ensureProxy(asset.id).catch((err) => console.error('audio proxy generation failed', err))
+    }
+    return asset
+  } catch (error) {
+    failJob(job.id, error instanceof Error ? error.message : String(error))
+    throw error
+  }
+}
+
+/**
+ * Render an audio effect's WET signal from an existing library asset and import
+ * the result as a new asset — the "add sound effect" pipeline.
+ *
+ * The output is content-addressed like every other generated asset, which gives
+ * re-rendering its cache for free: the same source window through the same
+ * settings produces identical bytes, so flipping a setting back and forth
+ * reuses the file already on disk instead of re-encoding.
+ *
+ * The caller places the returned asset on the timeline as its own `AudioClip`
+ * (`kind: 'fx'`, carrying the `AudioFx` provenance). @see shared/audioFx.ts
+ */
+export async function renderAudioFxToLibrary(
+  settings: AudioFxSettings,
+  sourceMediaId: string,
+  inSec: number,
+  outSec: number
+): Promise<MediaAsset> {
+  const source = await getAsset(sourceMediaId)
+  if (!source) throw new Error('That clip’s media is no longer in the library.')
+  if (!source.probe.audio) throw new Error('That clip has no audio to build an effect from.')
+  if (!(outSec > inSec)) throw new Error('That clip’s in/out points do not span any audio.')
+
+  const label = fxLabel(settings)
+  const { name } = parse(source.fileName)
+  const job = createJob('proxy', `${label} · ${name}`)
+  try {
+    const tmp = join(
+      getSubdir('tmp'),
+      `fx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`
+    )
+    await renderAudioFx(settings, source.originalPath, inSec, outSec, tmp)
+    const hash = await hashFile(tmp)
+    const finalPath = join(getSubdir('audiofx'), `${hash}.wav`)
+    if (existsSync(finalPath)) await fsp.rm(tmp, { force: true })
+    else await fsp.rename(tmp, finalPath)
+    const asset = await importFile(finalPath, `${name} (${label}).wav`)
+    finishJob(job.id)
+    // AAC proxy + waveform in the background, as for any imported audio — the
+    // effect track needs both to be playable and to draw on the timeline.
+    if (!asset.proxyReady) {
+      void ensureProxy(asset.id).catch((err) => console.error('audio fx proxy generation failed', err))
     }
     return asset
   } catch (error) {

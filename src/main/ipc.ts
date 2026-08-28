@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join, parse } from 'node:path'
-import { IPC, type StillRequest } from '@shared/ipc'
+import { IPC, type AudioFxRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -16,7 +16,8 @@ import {
   extractAudioToLibrary,
   getAsset,
   getProjectMedia,
-  importFile
+  importFile,
+  renderAudioFxToLibrary
 } from './services/mediaStore'
 import {
   loadProject,
@@ -193,6 +194,9 @@ export function registerIpcHandlers(): void {
   // Background removal: matte a clip into a new transparent library asset.
   ipcMain.handle(IPC.segmentAvailable, () => segmentAvailable())
   ipcMain.handle(IPC.removeBackground, (_event, mediaId: string) => removeBackgroundToLibrary(mediaId))
+  ipcMain.handle(IPC.renderAudioFx, (_event, req: AudioFxRequest) =>
+    renderAudioFxToLibrary(req.settings, req.sourceMediaId, req.inSec, req.outSec)
+  )
 
   // Stills: capture an exact frame from a clip, matching the preview's HDR
   // tonemap / crop / color, into the library or to a user-chosen file.

@@ -30,7 +30,9 @@ import {
   type TextAnimOut,
   type TextAnimation
 } from '@shared/textAnim'
-import { useLibrary } from '@/hooks/useMedia'
+import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect } from '@shared/audioFx'
+import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, ECHO_RANGE, fxLabel } from '@shared/audioFx'
+import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
@@ -590,6 +592,15 @@ function LayerEditor(): JSX.Element | null {
             📷 Stills…
           </button>
           </CollapsibleSection>
+
+          <SoundEffectsSection
+            sourceMediaId={c.mediaId}
+            inSec={c.inSec}
+            outSec={c.outSec}
+            startSec={layer.startSec}
+            linkGroupId={layer.linkGroupId}
+            disabledReason={asset?.probe.audio ? null : 'This clip has no audio track to build an effect from.'}
+          />
 
           <CollapsibleSection id="freeze" title="Freeze frames">
             <FreezeFrames layer={layer} content={c} disabled={linked} />
@@ -1345,6 +1356,18 @@ function AudioClipEditor(): JSX.Element | null {
       </button>
       {splitNote && <p className="mb-2 text-[11px] text-zinc-500">{splitNote}</p>}
 
+      {/* An effect track re-renders from the clip it was BUILT from, not from
+          its own (already wet) audio — an echo of an echo is not the intent. */}
+      <SoundEffectsSection
+        sourceMediaId={clip.fx ? clip.fx.fromMediaId : clip.mediaId}
+        inSec={clip.fx ? clip.fx.fromInSec : clip.inSec}
+        outSec={clip.fx ? clip.fx.fromOutSec : effectiveOut(clip, asset?.probe.durationSec ?? clip.outSec)}
+        startSec={clip.startSec}
+        linkGroupId={clip.linkGroupId}
+        existing={clip.fx}
+        replaceClipId={clip.fx ? clip.id : undefined}
+      />
+
       <button onClick={remove} className={`mt-2 w-full ${dangerBtnCls}`}>
         {linked ? `Delete linked group (${groupSize})` : 'Remove audio clip'}
       </button>
@@ -1391,5 +1414,188 @@ export function Inspector(): JSX.Element {
         )}
       </div>
     </div>
+  )
+}
+
+const FX_KINDS: { value: AudioFxKind; label: string; hint: string }[] = [
+  { value: 'echo', label: 'Echo', hint: 'Repeats that fall away — lands emphasis on a word.' },
+  { value: 'chorus', label: 'Chorus', hint: 'Detuned copies stacked up — thickens a voice.' }
+]
+
+/**
+ * "Sound effects" — builds an echo or chorus from the selected clip's audio and
+ * drops it on the timeline as its OWN track, mixed over the untouched original.
+ *
+ * The wet signal is rendered to a real audio asset rather than resolved at
+ * export time, so what plays in the preview is what the export mixes, the
+ * timeline draws the effect's own waveform, and the track can be moved, faded,
+ * trimmed and split like any other. @see shared/audioFx.ts
+ *
+ * With `existing` set, the section is editing a track that already IS an
+ * effect: the same controls re-render it in place instead of stacking another.
+ */
+function SoundEffectsSection({
+  sourceMediaId,
+  inSec,
+  outSec,
+  startSec,
+  linkGroupId,
+  existing,
+  replaceClipId,
+  disabledReason
+}: {
+  sourceMediaId: string
+  inSec: number
+  outSec: number
+  startSec: number
+  linkGroupId?: string
+  existing?: AudioFx | null
+  replaceClipId?: string
+  /** Non-null disables the section and says why (e.g. the clip has no audio). */
+  disabledReason?: string | null
+}): JSX.Element {
+  const addFx = useAddAudioFx()
+  const start = existing?.settings ?? null
+  const [kind, setKind] = useState<AudioFxKind>(start?.kind ?? 'echo')
+  const [echo, setEcho] = useState<EchoEffect>(
+    start?.kind === 'echo' ? start.echo : { ...DEFAULT_ECHO }
+  )
+  const [chorus, setChorus] = useState<ChorusEffect>(
+    start?.kind === 'chorus' ? start.chorus : { ...DEFAULT_CHORUS }
+  )
+  const settings: AudioFxSettings =
+    kind === 'echo' ? { kind: 'echo', echo } : { kind: 'chorus', chorus }
+  const busy = addFx.isPending
+  const disabled = !!disabledReason || busy
+
+  const run = (): void => {
+    addFx.mutate({ settings, sourceMediaId, inSec, outSec, startSec, linkGroupId, replaceClipId })
+  }
+
+  return (
+    <CollapsibleSection id="soundfx" title="Sound effects">
+      {disabledReason && <p className="mb-2 text-[10px] leading-snug text-amber-300/80">{disabledReason}</p>}
+      <div className="mb-2 flex gap-1">
+        {FX_KINDS.map((k) => (
+          <button
+            key={k.value}
+            onClick={() => setKind(k.value)}
+            disabled={disabled}
+            title={k.hint}
+            className={`flex-1 rounded px-2 py-1 text-xs disabled:opacity-50 ${
+              kind === k.value ? 'bg-sky-500/80 text-white' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
+            }`}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <p className="mb-2 text-[10px] leading-snug text-zinc-500">
+        {FX_KINDS.find((k) => k.value === kind)?.hint}
+      </p>
+
+      {kind === 'echo' ? (
+        <>
+          <Field label={`Delay · ${Math.round(echo.delayMs)} ms`}>
+            <input
+              type="range"
+              min={ECHO_RANGE.delayMs.min}
+              max={ECHO_RANGE.delayMs.max}
+              step={10}
+              value={echo.delayMs}
+              disabled={disabled}
+              onChange={(e) => setEcho({ ...echo, delayMs: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Decay · ${echo.decay.toFixed(2)}`}>
+            <input
+              type="range"
+              min={ECHO_RANGE.decay.min}
+              max={ECHO_RANGE.decay.max}
+              step={0.05}
+              value={echo.decay}
+              disabled={disabled}
+              onChange={(e) => setEcho({ ...echo, decay: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Repeats · ${echo.repeats}`}>
+            <input
+              type="range"
+              min={ECHO_RANGE.repeats.min}
+              max={ECHO_RANGE.repeats.max}
+              step={1}
+              value={echo.repeats}
+              disabled={disabled}
+              onChange={(e) => setEcho({ ...echo, repeats: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label={`Voices · ${chorus.voices}`}>
+            <input
+              type="range"
+              min={CHORUS_RANGE.voices.min}
+              max={CHORUS_RANGE.voices.max}
+              step={1}
+              value={chorus.voices}
+              disabled={disabled}
+              onChange={(e) => setChorus({ ...chorus, voices: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Spread · ${Math.round(chorus.spreadMs)} ms`}>
+            <input
+              type="range"
+              min={CHORUS_RANGE.spreadMs.min}
+              max={CHORUS_RANGE.spreadMs.max}
+              step={1}
+              value={chorus.spreadMs}
+              disabled={disabled}
+              onChange={(e) => setChorus({ ...chorus, spreadMs: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Detune · ${Math.round(chorus.detuneCents)} cents`}>
+            <input
+              type="range"
+              min={CHORUS_RANGE.detuneCents.min}
+              max={CHORUS_RANGE.detuneCents.max}
+              step={1}
+              value={chorus.detuneCents}
+              disabled={disabled}
+              onChange={(e) => setChorus({ ...chorus, detuneCents: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
+      )}
+
+      <button
+        onClick={run}
+        disabled={disabled}
+        className={`mt-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50 ${disabledCls}`}
+        title={
+          disabledReason ??
+          (existing
+            ? 'Re-render this effect track with the settings above'
+            : 'Render the effect and add it as its own track over this clip')
+        }
+      >
+        {busy
+          ? 'Rendering…'
+          : existing
+            ? `↻ Re-render ${fxLabel(settings).toLowerCase()}`
+            : `+ Add ${fxLabel(settings).toLowerCase()} track`}
+      </button>
+      <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+        {existing
+          ? 'Replaces this track’s audio in place.'
+          : 'Adds a separate track — the original clip is left untouched.'}
+      </p>
+    </CollapsibleSection>
   )
 }

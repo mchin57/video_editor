@@ -18,6 +18,7 @@
 import type { PresetId } from './export'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
+import type { AudioFx } from './audioFx'
 import type { TextAnimation } from './textAnim'
 
 export interface CropRect {
@@ -456,7 +457,7 @@ export function effectiveCaptionStyle(captions: CaptionsConfig, seg: CaptionSegm
   return seg.style ?? captions.style
 }
 
-export type AudioKind = 'music' | 'voice' | 'extracted' | 'audio'
+export type AudioKind = 'music' | 'voice' | 'extracted' | 'audio' | 'fx'
 
 /**
  * An independent audio clip on the audio track. Source is any media asset
@@ -488,6 +489,16 @@ export interface AudioClip {
   excludeFromCaptions?: boolean
   /** Link group this tile belongs to (absent = unlinked). @see `CaptionSegment.linkGroupId`. */
   linkGroupId?: string
+  /**
+   * Set only on a GENERATED EFFECT TRACK (`kind: 'fx'`) — the wet signal of an
+   * echo or chorus, rendered to its own asset and mixed over the untouched dry
+   * clip. Records the settings and the source window it was rendered from, so
+   * the Inspector can re-edit and re-render it. Absent on ordinary audio.
+   *
+   * Nothing downstream of the timeline reads this: an effect track exports as
+   * an ordinary audio clip, which is exactly the point. @see shared/audioFx.ts
+   */
+  fx?: AudioFx | null
   kind: AudioKind
 }
 
@@ -636,7 +647,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 18,
+    version: 19,
     preset: 'reel',
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -891,7 +902,11 @@ export function migrateProject(raw: unknown): Project {
     }
     openCompCells(p.layers)
   }
-  if (typeof p.version !== 'number' || p.version < 18) p.version = 18
+  // v19 adds generated audio effect tracks: the absence-tolerant `AudioClip.fx`
+  // provenance and the `'fx'` audio kind. Purely additive — an effect track is
+  // an ordinary audio clip, so older projects simply have none and nothing about
+  // their existing clips changes.
+  if (typeof p.version !== 'number' || p.version < 19) p.version = 19
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

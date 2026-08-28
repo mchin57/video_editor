@@ -28,7 +28,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(18)
+    expect(p.version).toBe(19)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -100,7 +100,7 @@ describe('migrateProject — noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
-    expect(p.version).toBe(18)
+    expect(p.version).toBe(19)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
@@ -188,7 +188,7 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
     const cells = (p.layers[0].content as { cells: { mute: boolean }[] }).cells
     expect(cells[0].mute).toBe(false) // the comp panel is audible again
     expect(cells[1].mute).toBe(true) // the clip cell is untouched
-    expect(p.version).toBe(18)
+    expect(p.version).toBe(19)
   })
 
   it('reaches comp cells nested inside a compound layer', () => {

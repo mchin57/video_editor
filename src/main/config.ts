@@ -22,7 +22,7 @@ export function getDataDir(): string {
 }
 
 export function getSubdir(
-  name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin' | 'extracted' | 'stills' | 'nobg'
+  name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin' | 'extracted' | 'stills' | 'nobg' | 'audiofx'
 ): string {
   const p = join(getDataDir(), name)
   mkdirSync(p, { recursive: true })
