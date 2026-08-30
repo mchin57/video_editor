@@ -596,6 +596,7 @@ function LayerEditor(): JSX.Element | null {
           </CollapsibleSection>
 
           <SoundEffectsSection
+            key={layer.id}
             sourceMediaId={c.mediaId}
             inSec={c.inSec}
             outSec={c.outSec}
@@ -1367,6 +1368,7 @@ function AudioClipEditor(): JSX.Element | null {
       {/* An effect track re-renders from the clip it was BUILT from, not from
           its own (already wet) audio — an echo of an echo is not the intent. */}
       <SoundEffectsSection
+        key={clip.id}
         sourceMediaId={clip.fx ? clip.fx.fromMediaId : clip.mediaId}
         inSec={clip.fx ? clip.fx.fromInSec : clip.inSec}
         outSec={clip.fx ? clip.fx.fromOutSec : effectiveOut(clip, asset?.probe.durationSec ?? clip.outSec)}
@@ -1492,8 +1494,34 @@ function SoundEffectsSection({
   const busy = addFx.isPending
   const disabled = !!disabledReason || busy
 
+  // The render is content-addressed, so re-rendering settings that are already
+  // on disk legitimately produces the SAME asset and changes nothing audible.
+  // Without saying so, that is indistinguishable from a failed render — report
+  // it. The note is tied to the settings it describes so it disappears as soon
+  // as a knob moves.
+  const [note, setNote] = useState<{ text: string; sig: string } | null>(null)
+  const sig = JSON.stringify(settings)
+
   const run = (): void => {
-    addFx.mutate({ settings, sourceMediaId, inSec, outSec, startSec, linkGroupId, replaceClipId })
+    const before = replaceClipId
+      ? activeComp(useProject.getState())?.audioClips.find((c) => c.id === replaceClipId)?.mediaId
+      : undefined
+    setNote(null)
+    addFx.mutate(
+      { settings, sourceMediaId, inSec, outSec, startSec, linkGroupId, replaceClipId },
+      {
+        onSuccess: (asset) =>
+          setNote({
+            sig,
+            text:
+              before && asset.id === before
+                ? 'Already up to date — this is exactly what is rendered.'
+                : existing
+                  ? 'Re-rendered.'
+                  : 'Track added.'
+          })
+      }
+    )
   }
 
   return (
@@ -1654,11 +1682,15 @@ function SoundEffectsSection({
             ? `↻ Re-render ${fxLabel(settings).toLowerCase()}`
             : `+ Add ${fxLabel(settings).toLowerCase()} track`}
       </button>
-      <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-        {existing
-          ? 'Replaces this track’s audio in place.'
-          : 'Adds a separate track — the original clip is left untouched.'}
-      </p>
+      {note && note.sig === sig ? (
+        <p className="mt-1 text-[10px] leading-snug text-emerald-400/90">{note.text}</p>
+      ) : (
+        <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+          {existing
+            ? 'Replaces this track’s audio in place.'
+            : 'Adds a separate track — the original clip is left untouched.'}
+        </p>
+      )}
     </CollapsibleSection>
   )
 }

@@ -308,3 +308,71 @@ test('the ensemble kind is still available under its new name', async ({ appPage
   )
   expect(fx.fx!.settings.kind).toBe('ensemble')
 })
+
+/**
+ * The Sound effects panel holds its controls in local component state seeded
+ * from the selected clip. Selecting a DIFFERENT effect track re-renders the
+ * same component instance, so without a remount the panel keeps showing the
+ * previous clip's settings — and "Re-render" then applies those, or silently
+ * no-ops when they happen to match what is already rendered.
+ */
+test('selecting a different effect track shows THAT track settings', async ({
+  appPage: page
+}) => {
+  const wav = join(mkdtempSync(join(tmpdir(), 'reel-fx-')), 'tone.wav')
+  makeWav(wav)
+  await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    const { useProject, useUi } = window.__reelStores
+    useProject.getState().addMedia([asset.id])
+    useProject.getState().addAudioClip({
+      id: 'dry-clip',
+      mediaId: asset.id,
+      startSec: 0,
+      inSec: 0,
+      outSec: 3,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'voice'
+    })
+    useUi.getState().selectAudio('dry-clip')
+  }, wav)
+
+  // An echo track…
+  await page.getByRole('button', { name: /Add echo track/i }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length), {
+      timeout: 60_000
+    })
+    .toBe(2)
+
+  // …and a chorus track, from the same dry clip.
+  await page.evaluate(() => window.__reelStores.useUi.getState().selectAudio('dry-clip'))
+  await page.getByRole('button', { name: 'Chorus', exact: true }).click()
+  await page.getByRole('button', { name: /Add chorus track/i }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length), {
+      timeout: 60_000
+    })
+    .toBe(3)
+
+  // Select the ECHO track. The panel must follow the selection, not linger on
+  // the chorus settings left over from the last thing that was edited.
+  const echoId = await page.evaluate(() => {
+    const fx = window.__reelStores.useProject
+      .getState()
+      .project!.audioClips.filter((a) => a.fx)
+    const echo = fx.find((a) => a.fx!.settings.kind === 'echo')!
+    window.__reelStores.useUi.getState().selectAudio(echo.id)
+    return echo.id
+  })
+  expect(echoId).toBeTruthy()
+
+  // Echo shows "Repeats"; chorus shows "Rate". Seeing Rate here means the panel
+  // is still describing the previously selected track.
+  await expect(page.getByText(/^Repeats · /)).toBeVisible()
+  await expect(page.getByText(/^Rate · /)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Re-render echo/i })).toBeVisible()
+})
