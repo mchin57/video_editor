@@ -24,11 +24,12 @@ import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { cellSpan, coverCrop, layoutCellRect } from '@shared/layouts'
-import { effectiveTextAnimation } from '@shared/textAnim'
+import { clampAnimWindows, effectiveTextAnimation } from '@shared/textAnim'
+import { activeSparkle, sparklesFor } from '@shared/sparkle'
 import type { PresetId } from '@shared/export'
 import { alphaInputDecoder } from '@shared/media'
 import { effectiveImageAspect, FRAME, opacityKeyframePoints, stretchedBox } from '@shared/layers'
-import type { Layer } from '@shared/project'
+import type { Layer, TextContent } from '@shared/project'
 import type { ExportKeyframe, OpacityAnim } from './exporterArgs'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
@@ -45,7 +46,7 @@ import {
   type StabilizeJob,
   type Target
 } from './exporterArgs'
-import { buildAss, type AssOverlay } from './assBuilder'
+import { buildAss, type AssOverlay, type AssSparkle } from './assBuilder'
 import { createTextRenderer, type TextRenderer } from './textImage'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
@@ -57,6 +58,27 @@ const scaledStroke = (s: StrokeStyle | null | undefined, k: number): StrokeStyle
 const scaledShadow = (s: ShadowStyle | null | undefined, k: number): ShadowStyle | null | undefined =>
   s ? { distancePx: s.distancePx * k, color: s.color, blur: s.blur * k } : s
 const scaledPill = (p: PillStyle, k: number): PillStyle => ({ ...p, padPx: p.padPx * k })
+
+/**
+ * An overlay carrying ONLY sparkles, for text whose glyphs burned as a PNG.
+ * The text fields are inert — `buildAss` emits no text events for empty text —
+ * but `AssOverlay` requires them, so they carry the layer's real values rather
+ * than placeholders.
+ */
+function sparkleOnlyOverlay(c: TextContent, l: Layer, sx: number, sy: number): AssOverlay {
+  return {
+    text: '',
+    startSec: l.startSec,
+    endSec: l.endSec,
+    x: r(l.x * sx),
+    y: r(l.y * sy),
+    anchor: 'center',
+    fontFamily: c.fontFamily,
+    fontSizePx: c.fontSizePx * l.scale * sy,
+    color: c.color,
+    pill: c.pill
+  }
+}
 
 /** A pre-rendered, output-sized PNG composited 1:1 over the frame (gradient text). */
 function fullFrameImage(path: string, startSec: number, endSec: number, t: Target): ExportImage {
@@ -553,6 +575,30 @@ async function renderComposition(
     } else if (c.kind === 'text') {
       if (c.text.trim().length === 0) continue
       const fontSizePx = c.fontSizePx * l.scale * sy
+      // Sparkles are computed from the SAME shared helper the preview uses, at
+      // the output-scaled font size — every offset it returns is a multiple of
+      // that size, so the layout matches the preview at any preset. Positions
+      // become absolute output px here; the ASS builder only formats them.
+      const sparkleEffect = activeSparkle(c.effects)
+      const textAnim = effectiveTextAnimation(c)
+      const layerDur = Math.max(0.01, l.endSec - l.startSec)
+      const sparkles: AssSparkle[] = sparkleEffect
+        ? sparklesFor({
+            effect: sparkleEffect,
+            text: c.text,
+            fontSizePx,
+            durSec: layerDur,
+            typewriterSec:
+              textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
+          }).map((s) => ({
+            startSec: l.startSec + s.tSec,
+            endSec: Math.min(l.endSec, l.startSec + s.tSec + s.lifeSec),
+            x: r(l.x * sx + s.x),
+            y: r(l.y * sy + s.y),
+            sizePx: s.sizePx,
+            rotDeg: s.rotDeg
+          }))
+        : []
       // A gradient (libass can't do it) OR an explicit wrap width (libass can't
       // wrap to an arbitrary width under \pos) burns as a full-frame PNG overlay,
       // rasterised with the same CSS the preview uses so the two match exactly.
@@ -576,6 +622,21 @@ async function renderComposition(
             l.endSec
           )
           visuals.push({ kind: 'image', image })
+          // The glyphs are an image now, but the sparkles are still vector ASS
+          // events — burn them on their own, above the picture, so a gradient
+          // or wrapped overlay is not silently stripped of its effect.
+          if (sparkles.length > 0) {
+            const sparkleAss = `text_${textN++}.ass`
+            await fsp.writeFile(
+              join(tmp, sparkleAss),
+              buildAss(
+                [{ ...sparkleOnlyOverlay(c, l, sx, sy), sparkles, sparkleColor: sparkleEffect!.color }],
+                target
+              ),
+              'utf8'
+            )
+            visuals.push({ kind: 'text', assFile: sparkleAss })
+          }
           continue
         } catch {
           // Rasterising failed — fall through to a flat-colour ASS burn so the
@@ -598,7 +659,9 @@ async function renderComposition(
         shadow: scaledShadow(c.shadow, sy),
         // Resolved (not raw): rasterised text (gradient/wrap fallback) never
         // animates, and the preview resolves through the same helper.
-        animation: effectiveTextAnimation(c)
+        animation: textAnim,
+        sparkles,
+        sparkleColor: sparkleEffect?.color
       }
       await fsp.writeFile(join(tmp, assName), buildAss([overlay], target), 'utf8')
       visuals.push({ kind: 'text', assFile: assName })

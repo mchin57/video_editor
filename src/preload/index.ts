@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
@@ -60,6 +60,8 @@ const api = {
   segmentAvailable: (): Promise<boolean> => ipcRenderer.invoke(IPC.segmentAvailable),
   removeBackground: (mediaId: string): Promise<MediaAsset> =>
     ipcRenderer.invoke(IPC.removeBackground, mediaId),
+  renderAudioFx: (req: AudioFxRequest): Promise<MediaAsset> =>
+    ipcRenderer.invoke(IPC.renderAudioFx, req),
 
   // Stills — capture a frame from a clip into the library, or save it to disk.
   captureStillToLibrary: (req: StillRequest): Promise<MediaAsset> =>

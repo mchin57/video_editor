@@ -45,6 +45,16 @@ frame dumps (`assBuilder.overlayEvents` maps `shared/textAnim.ts` onto these):
   START of its interval** (not the end). Un-highlighted words render in
   SecondaryColour — always set `\2c`/`\2a` inline (the style default is red).
   Whitespace can ride inside a syllable.
+- **Vector drawings (`\p1`) compose with `\fad`, `\t(\fscx\fscy)` and `\frz`** —
+  the sparkle mechanism. Verified by cropping a 48x48 window around one sparkle
+  and reading `signalstats` YAVG per frame: black at the event start, a linear
+  rise over the `\fad` in-window, a flat plateau while opaque, a linear fall
+  over the fade-out, and exactly black again the frame the event ends. Both the
+  straight-line star (`m 0 -10 l 2 -2 l 10 0 ...`) and the concave bezier form
+  (`m 0 -10 b 0 -3 3 0 10 0 ...`) render; coordinates are pixels under `\p1`,
+  and `\fscx`/`\fscy` scale the drawing like a glyph.
+- **A higher `Layer` field draws on top within one ASS file** — sparkles are
+  emitted at Layer 1 so they sit above the text (Layer 0) in the same burn.
 - libass logs `Error opening memory font 'LICENSES.md'` for non-font files in
   `fontsdir` — noisy but harmless.
 
@@ -64,6 +74,71 @@ frame dumps (`assBuilder.overlayEvents` maps `shared/textAnim.ts` onto these):
   proxy is folded *and* the export graph folds the same source again.
 - `astats` logs to **stderr at info level**; `-v error` suppresses it. Capture
   stderr (not stdout) and don't lower the log level when probing channel peaks.
+
+## Audio effects — echo, ensemble & chorus (verified ffmpeg 8.1.1, 2026-08)
+
+Backing for the generated FX tracks (`shared/audioFx.ts` → `services/audioFx.ts`).
+An effect track carries the **wet signal only** — it is mixed on top of the
+untouched dry clip, so every recipe below is verified in its wet-only form.
+Verified with a 5 ms 1 kHz click padded with silence, decoded to s16le and read
+sample-by-sample (peaks quoted as a fraction of full scale; the dry click is
+0.125).
+
+- **`aecho=in_gain:out_gain:delays:decays` taps the INPUT — there is no
+  feedback.** `aecho=1:1:300|600:0.5|0.25` on a burst gave peaks 0.125 at 0 ms,
+  0.062 at 300 ms, 0.031 at 600 ms, and **nothing at 900 ms**. So N repeats with
+  a decaying tail must be emitted as N explicit taps with geometric decays
+  (`echoTaps`), not as one tap with feedback.
+- **`in_gain=0` yields wet-only echo.** `aecho=0:1:300|600:0.5|0.25` left only
+  the 300 ms and 600 ms taps; the dry click was gone entirely.
+- **`aecho` extends the stream by the longest delay** — a 1.0 s trimmed clip came
+  out 1.6 s with a 600 ms tap, so the echo rings out past the clip end instead of
+  being chopped. This is why an FX clip is rendered as its own asset and gets its
+  own (longer) timeline block rather than reusing the source's.
+- **TRAP: the `chorus` filter is unusable in 8.1.1 — it ignores `delays` for
+  voice placement.** `chorus=0:1:40|60|75:...` put all of its output at 1–6 ms
+  instead of at 40/60/75 ms; raising the delays to `400|600|800` changed
+  **nothing** (still 1–6 ms), while the output tail still grew by the longest
+  delay — so the buffer is sized from `delays` but the taps are not placed from
+  it. `in_gain=0` also failed to remove the dry. Do not use this filter.
+- **ENSEMBLE (fixed detune) is built from primitives** — `asplit` into one branch per
+  voice, each `asetrate=<shifted>,aresample=<base>,atempo=<base/shifted>,
+  volume=<v>,adelay=<ms>:all=1`, recombined with `amix=inputs=N:normalize=0`.
+  Verified three voices landed at exactly 18/27/35 ms with peaks 2048/1720/1392
+  in s16 — i.e. the requested 0.50/0.42/0.34 gains, to the sample.
+- **A real (swept) chorus is built from `vibrato`, not `chorus`.** `vibrato=f=<Hz>:d=<0..1>`
+  is a delay line swept by an LFO, and it emits the modulated signal ONLY — no
+  dry mixed back in — which is exactly what a wet-only effect track wants.
+  Verified on a 1 kHz tone by measuring instantaneous frequency from
+  interpolated zero crossings: depth 0.2/0.5/1.0 swept 22/54/108 cents
+  peak-to-peak, centred on pitch (the unprocessed tone measured a flat 0), and
+  the rate knob is accurate (asked 2 Hz / 5 Hz, measured 2.08 / 5.00). Level is
+  preserved exactly.
+- `vibrato` has **no phase control**, so several voices at the same `f` move in
+  lockstep and collapse into one wobble. Give each voice a slightly different
+  rate instead (`CHORUS_RATE_SPREAD`).
+- **TRAP: `vibrato` emits a ~0.5 full-scale burst at the very start of its
+  output.** Reproducible with pure silence at that point in the stream, so it is
+  not a reaction to input — but it does NOT reproduce when `vibrato` reads a
+  file directly, only inside the effect graph, so it is some interaction with
+  the preceding `atrim`/`asetpts`/`aformat` stages. A fade-in does not fix it:
+  a 30 ms `afade=t=in` cut the burst from 9010 to 499 but introduced a fresh
+  full-scale (16384) spike further in. **The fix is to prime the graph** —
+  `adelay=<CHORUS_PRIME_MS>` before the voices and a matching
+  `atrim=start=<...>` after the mix — so the transient lands in padding that is
+  then discarded. Verified: output silent until the first real voice, voices
+  landing at exactly their designed gains, and total duration still source +
+  longest voice delay. Only the swept path is primed; echo and ensemble are
+  clean and must stay byte-identical so their rendered assets keep their
+  content hash.
+- **`asetrate`+`aresample`+`atempo` shifts pitch without moving duration.** A
+  1 kHz tone measured 998.8 Hz at ratio 1.0, 1006.3 Hz shifted up 0.6%, and
+  993.8 Hz shifted down 0.6%, with durations 0.9990/0.9980/0.9990 s. Sub-1 ms
+  drift over a second is what keeps the voices from phasing against each other.
+  Round the shifted rate to an INTEGER and derive `atempo` from the rounded value
+  (`base/shifted`), or the two stages disagree and the voice drifts. `rubberband`
+  exists in this build and would be higher quality, but it is an optional
+  link-time dependency — the `asetrate` path needs no capability gate.
 
 ## Speed (constant per-clip rate) (verified ffmpeg 8.1.1, 2026-07)
 

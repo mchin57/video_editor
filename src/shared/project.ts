@@ -18,6 +18,8 @@
 import type { PresetId } from './export'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
+import type { AudioFx } from './audioFx'
+import type { TextEffects } from './sparkle'
 import type { TextAnimation } from './textAnim'
 
 export interface CropRect {
@@ -269,6 +271,14 @@ export interface TextContent extends TextStyleBase {
    *  `effectiveTextAnimation` (shared/textAnim.ts), which both preview and
    *  export resolve through. */
   animation?: TextAnimation | null
+  /**
+   * Decorative effects layered ON TOP of the glyphs, independent of the
+   * entrance/exit animation — so any entrance can be combined with any effect.
+   * Absent/null = none. Unlike `animation`, these DO survive the rasterised-PNG
+   * path: sparkles burn as their own ASS events above the image.
+   * @see shared/sparkle.ts
+   */
+  effects?: TextEffects | null
 }
 
 /** A cell rectangle in the LOGICAL 1080×1920 space (top-left + size). */
@@ -456,7 +466,7 @@ export function effectiveCaptionStyle(captions: CaptionsConfig, seg: CaptionSegm
   return seg.style ?? captions.style
 }
 
-export type AudioKind = 'music' | 'voice' | 'extracted' | 'audio'
+export type AudioKind = 'music' | 'voice' | 'extracted' | 'audio' | 'fx'
 
 /**
  * An independent audio clip on the audio track. Source is any media asset
@@ -488,6 +498,16 @@ export interface AudioClip {
   excludeFromCaptions?: boolean
   /** Link group this tile belongs to (absent = unlinked). @see `CaptionSegment.linkGroupId`. */
   linkGroupId?: string
+  /**
+   * Set only on a GENERATED EFFECT TRACK (`kind: 'fx'`) — the wet signal of an
+   * echo or chorus, rendered to its own asset and mixed over the untouched dry
+   * clip. Records the settings and the source window it was rendered from, so
+   * the Inspector can re-edit and re-render it. Absent on ordinary audio.
+   *
+   * Nothing downstream of the timeline reads this: an effect track exports as
+   * an ordinary audio clip, which is exactly the point. @see shared/audioFx.ts
+   */
+  fx?: AudioFx | null
   kind: AudioKind
 }
 
@@ -636,7 +656,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 18,
+    version: 20,
     preset: 'reel',
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -891,7 +911,48 @@ export function migrateProject(raw: unknown): Project {
     }
     openCompCells(p.layers)
   }
-  if (typeof p.version !== 'number' || p.version < 18) p.version = 18
+  // v19 adds generated audio effect tracks (the absence-tolerant
+  // `AudioClip.fx` provenance and the `'fx'` audio kind) and text decoration
+  // effects (`TextContent.effects`). Both purely additive — an effect track is
+  // an ordinary audio clip and absent `effects` means none — so older projects
+  // simply have neither and nothing about their existing content changes.
+  // v20 RENAMES the original stacking effect from "chorus" to "ensemble" and
+  // frees the name for a real chorus (LFO-swept detune, `vibrato`). Everything
+  // saved before this shipped under `kind: 'chorus'` was the fixed-detune
+  // effect, so it moves wholesale to `'ensemble'` — carrying its settings, so
+  // existing effect tracks keep sounding exactly as they were rendered. Effect
+  // clips live on every composition, so this recurses into nested comps.
+  if ((p.version ?? 0) < 20) {
+    const renameFx = (clips: AudioClip[]): void => {
+      for (const a of clips) {
+        const st = a.fx?.settings as
+          | { kind: string; chorus?: unknown; ensemble?: unknown }
+          | undefined
+        if (st?.kind === 'chorus' && st.chorus !== undefined) {
+          st.kind = 'ensemble'
+          st.ensemble = st.chorus
+          delete st.chorus
+        }
+      }
+    }
+    const walk = (layers: Layer[]): void => {
+      for (const l of layers) {
+        if (l.content.kind === 'compound') {
+          renameFx(l.content.comp.audioClips)
+          walk(l.content.comp.layers)
+        }
+        if (l.content.kind !== 'layout') continue
+        for (const cell of l.content.cells) {
+          if (!cell.comp) continue
+          renameFx(cell.comp.audioClips)
+          walk(cell.comp.layers)
+        }
+      }
+    }
+    if (Array.isArray(p.audioClips)) renameFx(p.audioClips)
+    if (Array.isArray(p.layers)) walk(p.layers)
+  }
+  if (typeof p.version !== 'number' || p.version < 20) p.version = 20
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

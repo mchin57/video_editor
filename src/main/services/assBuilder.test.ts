@@ -222,3 +222,80 @@ describe('buildAss', () => {
     expect(s).toContain('\\bord20')
   })
 })
+
+// Sparkles were verified by rendering the ACTUAL generated ASS over a black
+// base and reading `signalstats` YAVG in a crop around one sparkle: it rose
+// from the frame the event started, peaked at mid-life, and returned to
+// baseline exactly as the event ended. See docs/FFMPEG-NOTES.md.
+describe('sparkles', () => {
+  const sparkle = {
+    startSec: 1,
+    endSec: 1.5,
+    x: 300,
+    y: 400,
+    sizePx: 8,
+    rotDeg: 45
+  }
+
+  it('declares the Sparkle style', () => {
+    expect(buildAss([overlay()], target)).toContain('Style: Sparkle,')
+  })
+
+  it('draws sparkles on Layer 1 so they sit above the glyphs', () => {
+    const ass = buildAss([overlay({ sparkles: [sparkle] })], target)
+    const events = ass.split('\n').filter((l) => l.startsWith('Dialogue:'))
+    expect(events.some((l) => l.startsWith('Dialogue: 1,') && l.includes('Sparkle'))).toBe(true)
+    // The text itself stays on Layer 0.
+    expect(events.some((l) => l.startsWith('Dialogue: 0,'))).toBe(true)
+  })
+
+  it('emits one event per sparkle', () => {
+    const ass = buildAss([overlay({ sparkles: [sparkle, { ...sparkle, x: 500 }] })], target)
+    expect(ass.split('\n').filter((l) => l.includes(',Sparkle,'))).toHaveLength(2)
+  })
+
+  it('pulses the drawing up at mid-life and back down', () => {
+    const ass = buildAss([overlay({ sparkles: [sparkle] })], target)
+    const line = ass.split('\n').find((l) => l.includes(',Sparkle,'))!
+    // radius 8 on a radius-10 unit star => 80% at full, 40% of that at rest.
+    expect(line).toContain('\\fscx32\\fscy32')
+    expect(line).toContain('\\t(0,250,\\fscx80\\fscy80)')
+    expect(line).toContain('\\t(250,500,\\fscx32\\fscy32)')
+  })
+
+  it('twinkles in and out over the sparkle life', () => {
+    const line = buildAss([overlay({ sparkles: [sparkle] })], target)
+      .split('\n')
+      .find((l) => l.includes(',Sparkle,'))!
+    expect(line).toContain('\\fad(250,250)')
+  })
+
+  it('carries the sparkle colour, defaulting to white', () => {
+    const tinted = buildAss([overlay({ sparkles: [sparkle], sparkleColor: '#ffe08a' })], target)
+    expect(tinted).toContain(`\\1c${assColor('#ffe08a')}&`)
+    const plain = buildAss([overlay({ sparkles: [sparkle] })], target)
+    expect(plain).toContain(`\\1c${assColor('#ffffff')}&`)
+  })
+
+  it('draws with no outline or shadow — a drawing is not a glyph', () => {
+    const line = buildAss([overlay({ sparkles: [sparkle] })], target)
+      .split('\n')
+      .find((l) => l.includes(',Sparkle,'))!
+    expect(line).toContain('\\bord0')
+    expect(line).toContain('\\shad0')
+    expect(line).toContain('\\p1')
+    expect(line.endsWith('{\\p0}')).toBe(true)
+  })
+
+  it('still burns sparkles for a SPARKLE-ONLY overlay (text burned as a PNG)', () => {
+    const ass = buildAss([overlay({ text: '', sparkles: [sparkle] })], target)
+    const events = ass.split('\n').filter((l) => l.startsWith('Dialogue:'))
+    expect(events).toHaveLength(1)
+    expect(events[0]).toContain(',Sparkle,')
+  })
+
+  it('still drops an overlay that has neither text nor sparkles', () => {
+    const ass = buildAss([overlay({ text: '   ' })], target)
+    expect(ass.split('\n').filter((l) => l.startsWith('Dialogue:'))).toHaveLength(0)
+  })
+})

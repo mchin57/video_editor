@@ -30,7 +30,11 @@ import {
   type TextAnimOut,
   type TextAnimation
 } from '@shared/textAnim'
-import { useLibrary } from '@/hooks/useMedia'
+import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect, EnsembleEffect } from '@shared/audioFx'
+import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, DEFAULT_ENSEMBLE, ECHO_RANGE, ENSEMBLE_RANGE, fxLabel } from '@shared/audioFx'
+import type { SparkleEffect } from '@shared/sparkle'
+import { DEFAULT_SPARKLE, SPARKLE_DENSITY_RANGE } from '@shared/sparkle'
+import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
@@ -41,7 +45,7 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { Field, Row, dangerBtnCls, disabledCls, inputCls } from './ui'
+import { Field, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
 
@@ -591,6 +595,16 @@ function LayerEditor(): JSX.Element | null {
           </button>
           </CollapsibleSection>
 
+          <SoundEffectsSection
+            key={layer.id}
+            sourceMediaId={c.mediaId}
+            inSec={c.inSec}
+            outSec={c.outSec}
+            startSec={layer.startSec}
+            linkGroupId={layer.linkGroupId}
+            disabledReason={asset?.probe.audio ? null : 'This clip has no audio track to build an effect from.'}
+          />
+
           <CollapsibleSection id="freeze" title="Freeze frames">
             <FreezeFrames layer={layer} content={c} disabled={linked} />
           </CollapsibleSection>
@@ -720,6 +734,12 @@ function LayerEditor(): JSX.Element | null {
           </Field>
           <TextStyleControls style={c} onPatch={(patch) => updateContent(id, patch)} />
           <TextAnimationFields content={c} onPatch={(patch) => updateContent(id, patch)} />
+        </CollapsibleSection>
+      )}
+
+      {c.kind === 'text' && (
+        <CollapsibleSection id="texteffects" title="Text effects">
+          <TextEffectsFields content={c} onPatch={(patch) => updateContent(id, patch)} />
         </CollapsibleSection>
       )}
 
@@ -1345,6 +1365,19 @@ function AudioClipEditor(): JSX.Element | null {
       </button>
       {splitNote && <p className="mb-2 text-[11px] text-zinc-500">{splitNote}</p>}
 
+      {/* An effect track re-renders from the clip it was BUILT from, not from
+          its own (already wet) audio — an echo of an echo is not the intent. */}
+      <SoundEffectsSection
+        key={clip.id}
+        sourceMediaId={clip.fx ? clip.fx.fromMediaId : clip.mediaId}
+        inSec={clip.fx ? clip.fx.fromInSec : clip.inSec}
+        outSec={clip.fx ? clip.fx.fromOutSec : effectiveOut(clip, asset?.probe.durationSec ?? clip.outSec)}
+        startSec={clip.startSec}
+        linkGroupId={clip.linkGroupId}
+        existing={clip.fx}
+        replaceClipId={clip.fx ? clip.id : undefined}
+      />
+
       <button onClick={remove} className={`mt-2 w-full ${dangerBtnCls}`}>
         {linked ? `Delete linked group (${groupSize})` : 'Remove audio clip'}
       </button>
@@ -1391,5 +1424,336 @@ export function Inspector(): JSX.Element {
         )}
       </div>
     </div>
+  )
+}
+
+const FX_KINDS: { value: AudioFxKind; label: string; hint: string }[] = [
+  { value: 'echo', label: 'Echo', hint: 'Repeats that fall away — lands emphasis on a word.' },
+  {
+    value: 'ensemble',
+    label: 'Ensemble',
+    hint: 'Copies at a fixed detune, stacked — thickens a voice without movement.'
+  },
+  {
+    value: 'chorus',
+    label: 'Chorus',
+    hint: 'Copies whose pitch drifts back and forth — the classic shimmer.'
+  }
+]
+
+/**
+ * "Sound effects" — builds an echo or chorus from the selected clip's audio and
+ * drops it on the timeline as its OWN track, mixed over the untouched original.
+ *
+ * The wet signal is rendered to a real audio asset rather than resolved at
+ * export time, so what plays in the preview is what the export mixes, the
+ * timeline draws the effect's own waveform, and the track can be moved, faded,
+ * trimmed and split like any other. @see shared/audioFx.ts
+ *
+ * With `existing` set, the section is editing a track that already IS an
+ * effect: the same controls re-render it in place instead of stacking another.
+ */
+function SoundEffectsSection({
+  sourceMediaId,
+  inSec,
+  outSec,
+  startSec,
+  linkGroupId,
+  existing,
+  replaceClipId,
+  disabledReason
+}: {
+  sourceMediaId: string
+  inSec: number
+  outSec: number
+  startSec: number
+  linkGroupId?: string
+  existing?: AudioFx | null
+  replaceClipId?: string
+  /** Non-null disables the section and says why (e.g. the clip has no audio). */
+  disabledReason?: string | null
+}): JSX.Element {
+  const addFx = useAddAudioFx()
+  const start = existing?.settings ?? null
+  const [kind, setKind] = useState<AudioFxKind>(start?.kind ?? 'echo')
+  const [echo, setEcho] = useState<EchoEffect>(
+    start?.kind === 'echo' ? start.echo : { ...DEFAULT_ECHO }
+  )
+  const [ensemble, setEnsemble] = useState<EnsembleEffect>(
+    start?.kind === 'ensemble' ? start.ensemble : { ...DEFAULT_ENSEMBLE }
+  )
+  const [chorus, setChorus] = useState<ChorusEffect>(
+    start?.kind === 'chorus' ? start.chorus : { ...DEFAULT_CHORUS }
+  )
+  const settings: AudioFxSettings =
+    kind === 'echo'
+      ? { kind: 'echo', echo }
+      : kind === 'ensemble'
+        ? { kind: 'ensemble', ensemble }
+        : { kind: 'chorus', chorus }
+  const busy = addFx.isPending
+  const disabled = !!disabledReason || busy
+
+  // The render is content-addressed, so re-rendering settings that are already
+  // on disk legitimately produces the SAME asset and changes nothing audible.
+  // Without saying so, that is indistinguishable from a failed render — report
+  // it. The note is tied to the settings it describes so it disappears as soon
+  // as a knob moves.
+  const [note, setNote] = useState<{ text: string; sig: string } | null>(null)
+  const sig = JSON.stringify(settings)
+
+  const run = (): void => {
+    const before = replaceClipId
+      ? activeComp(useProject.getState())?.audioClips.find((c) => c.id === replaceClipId)?.mediaId
+      : undefined
+    setNote(null)
+    addFx.mutate(
+      { settings, sourceMediaId, inSec, outSec, startSec, linkGroupId, replaceClipId },
+      {
+        onSuccess: (asset) =>
+          setNote({
+            sig,
+            text:
+              before && asset.id === before
+                ? 'Already up to date — this is exactly what is rendered.'
+                : existing
+                  ? 'Re-rendered.'
+                  : 'Track added.'
+          })
+      }
+    )
+  }
+
+  return (
+    <CollapsibleSection id="soundfx" title="Sound effects">
+      {disabledReason && <p className="mb-2 text-[10px] leading-snug text-amber-300/80">{disabledReason}</p>}
+      <div className="mb-2 flex gap-1">
+        {FX_KINDS.map((k) => (
+          <button
+            key={k.value}
+            onClick={() => setKind(k.value)}
+            disabled={disabled}
+            title={k.hint}
+            className={`flex-1 rounded px-2 py-1 text-xs disabled:opacity-50 ${
+              kind === k.value ? 'bg-sky-500/80 text-white' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
+            }`}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <p className="mb-2 text-[10px] leading-snug text-zinc-500">
+        {FX_KINDS.find((k) => k.value === kind)?.hint}
+      </p>
+
+      {kind === 'echo' ? (
+        <>
+          <Field label={`Delay · ${Math.round(echo.delayMs)} ms`}>
+            <input
+              type="range"
+              min={ECHO_RANGE.delayMs.min}
+              max={ECHO_RANGE.delayMs.max}
+              step={10}
+              value={echo.delayMs}
+              disabled={disabled}
+              onChange={(e) => setEcho({ ...echo, delayMs: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Decay · ${echo.decay.toFixed(2)}`}>
+            <input
+              type="range"
+              min={ECHO_RANGE.decay.min}
+              max={ECHO_RANGE.decay.max}
+              step={0.05}
+              value={echo.decay}
+              disabled={disabled}
+              onChange={(e) => setEcho({ ...echo, decay: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Repeats · ${echo.repeats}`}>
+            <input
+              type="range"
+              min={ECHO_RANGE.repeats.min}
+              max={ECHO_RANGE.repeats.max}
+              step={1}
+              value={echo.repeats}
+              disabled={disabled}
+              onChange={(e) => setEcho({ ...echo, repeats: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
+      ) : kind === 'ensemble' ? (
+        <>
+          <Field label={`Voices · ${ensemble.voices}`}>
+            <input
+              type="range"
+              min={ENSEMBLE_RANGE.voices.min}
+              max={ENSEMBLE_RANGE.voices.max}
+              step={1}
+              value={ensemble.voices}
+              disabled={disabled}
+              onChange={(e) => setEnsemble({ ...ensemble, voices: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Spread · ${Math.round(ensemble.spreadMs)} ms`}>
+            <input
+              type="range"
+              min={ENSEMBLE_RANGE.spreadMs.min}
+              max={ENSEMBLE_RANGE.spreadMs.max}
+              step={1}
+              value={ensemble.spreadMs}
+              disabled={disabled}
+              onChange={(e) => setEnsemble({ ...ensemble, spreadMs: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Detune · ${Math.round(ensemble.detuneCents)} cents`}>
+            <input
+              type="range"
+              min={ENSEMBLE_RANGE.detuneCents.min}
+              max={ENSEMBLE_RANGE.detuneCents.max}
+              step={1}
+              value={ensemble.detuneCents}
+              disabled={disabled}
+              onChange={(e) => setEnsemble({ ...ensemble, detuneCents: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label={`Voices · ${chorus.voices}`}>
+            <input
+              type="range"
+              min={CHORUS_RANGE.voices.min}
+              max={CHORUS_RANGE.voices.max}
+              step={1}
+              value={chorus.voices}
+              disabled={disabled}
+              onChange={(e) => setChorus({ ...chorus, voices: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Rate · ${chorus.rateHz.toFixed(1)} Hz`}>
+            <input
+              type="range"
+              min={CHORUS_RANGE.rateHz.min}
+              max={CHORUS_RANGE.rateHz.max}
+              step={0.1}
+              value={chorus.rateHz}
+              disabled={disabled}
+              onChange={(e) => setChorus({ ...chorus, rateHz: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Depth · ${chorus.depth.toFixed(2)}`}>
+            <input
+              type="range"
+              min={CHORUS_RANGE.depth.min}
+              max={CHORUS_RANGE.depth.max}
+              step={0.05}
+              value={chorus.depth}
+              disabled={disabled}
+              onChange={(e) => setChorus({ ...chorus, depth: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
+      )}
+
+      <button
+        onClick={run}
+        disabled={disabled}
+        className={`mt-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50 ${disabledCls}`}
+        title={
+          disabledReason ??
+          (existing
+            ? 'Re-render this effect track with the settings above'
+            : 'Render the effect and add it as its own track over this clip')
+        }
+      >
+        {busy
+          ? 'Rendering…'
+          : existing
+            ? `↻ Re-render ${fxLabel(settings).toLowerCase()}`
+            : `+ Add ${fxLabel(settings).toLowerCase()} track`}
+      </button>
+      {note && note.sig === sig ? (
+        <p className="mt-1 text-[10px] leading-snug text-emerald-400/90">{note.text}</p>
+      ) : (
+        <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+          {existing
+            ? 'Replaces this track’s audio in place.'
+            : 'Adds a separate track — the original clip is left untouched.'}
+        </p>
+      )}
+    </CollapsibleSection>
+  )
+}
+
+/**
+ * "Text effects" — decoration layered on top of the glyphs, deliberately
+ * SEPARATE from the entrance/exit animation so the two combine freely: sparkles
+ * plus a typewriter give letter-by-letter glints, sparkles plus a fade give a
+ * shimmer, and any future effect here works with every entrance for free.
+ *
+ * Unlike animations, these are not lost on the rasterised-PNG path (gradient
+ * fill / fixed wrap width) — sparkles burn as their own vector events above the
+ * image — so there is no caveat to show here. @see shared/sparkle.ts
+ */
+function TextEffectsFields({
+  content,
+  onPatch
+}: {
+  content: TextContent
+  onPatch: (patch: Partial<TextContent>) => void
+}): JSX.Element {
+  const sparkle = content.effects?.sparkle ?? null
+  const on = !!sparkle && sparkle.density > 0
+  const setSparkle = (next: SparkleEffect | null): void =>
+    onPatch({ effects: { ...content.effects, sparkle: next } })
+
+  return (
+    <>
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => setSparkle(e.target.checked ? { ...DEFAULT_SPARKLE } : null)}
+        />
+        ✧ Sparkles
+      </label>
+      {on && sparkle && (
+        <>
+          <Field label={`Amount · ${sparkle.density}`}>
+            <input
+              type="range"
+              min={SPARKLE_DENSITY_RANGE.min}
+              max={SPARKLE_DENSITY_RANGE.max}
+              step={1}
+              value={sparkle.density}
+              onChange={(e) => setSparkle({ ...sparkle, density: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label="Color">
+            <input
+              type="color"
+              value={sparkle.color.slice(0, 7)}
+              onChange={(e) => setSparkle({ ...sparkle, color: e.target.value })}
+              className={colorCls}
+            />
+          </Field>
+          <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+            Follows a typewriter entrance letter by letter; scatters across the text with any
+            other entrance.
+          </p>
+        </>
+      )}
+    </>
   )
 }

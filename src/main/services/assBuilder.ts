@@ -50,6 +50,25 @@ export interface AssOverlay {
    *  \fad/\move/\t/\k and, for typewriter, per-step reveal events; every tag
    *  verified against ffmpeg 8.1.1 (docs/FFMPEG-NOTES.md "ASS animation tags"). */
   animation?: TextAnimation | null
+  /** Decorative sparkles burned ABOVE the glyphs. Unlike `animation`, these are
+   *  independent of how the text itself renders, so a gradient/wrapped overlay
+   *  (which burns as a PNG) still gets them — the exporter emits a
+   *  sparkle-only overlay in that case, with `text` empty. @see shared/sparkle.ts */
+  sparkles?: AssSparkle[]
+  /** Sparkle fill colour; defaults to white. */
+  sparkleColor?: string
+}
+
+/** One sparkle to burn, already resolved to absolute time and OUTPUT px. */
+export interface AssSparkle {
+  startSec: number
+  endSec: number
+  /** Centre in output px. */
+  x: number
+  y: number
+  /** Radius in output px at full size. */
+  sizePx: number
+  rotDeg: number
 }
 
 function assTime(sec: number): string {
@@ -130,6 +149,9 @@ export function buildAss(
     'Style: Plain,Arial,76,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,4,1,5,0,0,0,1',
     'Style: Pill,Arial,76,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,3,18,0,5,0,0,0,1',
     'Style: Caption,Arial,64,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,5,1,5,0,0,0,1',
+    // Sparkles are \p1 vector drawings, not glyphs: no outline, no shadow, and
+    // centre-anchored so \pos places the sparkle's middle.
+    'Style: Sparkle,Arial,60,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1',
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
@@ -165,11 +187,57 @@ export function buildAss(
   }
 
   for (const o of overlays) {
-    if (o.text.trim().length === 0) continue
+    // A sparkle-only overlay (empty text) is legitimate: it carries the
+    // decoration for text that burned as a PNG on the image track.
+    if (o.text.trim().length === 0 && !o.sparkles?.length) continue
     lines.push(...overlayEvents(o, target))
   }
 
   return lines.join('\n') + '\n'
+}
+
+/** The unit sparkle: a four-point star of radius 10 in `\p1` drawing units,
+ *  scaled to size with `\fscx`/`\fscy` like a glyph (verified — FFMPEG-NOTES). */
+const SPARKLE_PATH = 'm 0 -10 l 2 -2 l 10 0 l 2 2 l 0 10 l -2 2 l -10 0 l -2 -2'
+const SPARKLE_RADIUS = 10
+
+/**
+ * One Dialogue event per sparkle, on ASS **Layer 1** so they draw above the
+ * glyphs (Layer 0) in the same burn. Each twinkles in and back out via
+ * `\fad(half,half)` and pulses `\fscx/\fscy` up at mid-life and back down —
+ * the same shape `sparkleStateAt` gives the preview, so the two match.
+ */
+function sparkleEvents(o: AssOverlay): string[] {
+  if (!o.sparkles?.length) return []
+  const color = assColor(o.sparkleColor ?? '#ffffff')
+  return o.sparkles.map((s) => {
+    const lifeMs = Math.max(1, Math.round((s.endSec - s.startSec) * 1000))
+    const halfMs = Math.round(lifeMs / 2)
+    // \fscx is a percentage of the drawing's natural size, so a radius-10 star
+    // needs sizePx/10 * 100 percent to reach `sizePx`.
+    const full = Math.max(1, Math.round((s.sizePx / SPARKLE_RADIUS) * 100))
+    const small = Math.max(1, Math.round(full * 0.4))
+    const tags = [
+      '\\an5',
+      `\\pos(${Math.round(s.x)},${Math.round(s.y)})`,
+      `\\1c${color}&`,
+      '\\bord0',
+      '\\shad0',
+      `\\frz${Math.round(s.rotDeg)}`,
+      `\\fad(${halfMs},${lifeMs - halfMs})`,
+      `\\fscx${small}\\fscy${small}`,
+      `\\t(0,${halfMs},\\fscx${full}\\fscy${full})`,
+      `\\t(${halfMs},${lifeMs},\\fscx${small}\\fscy${small})`,
+      '\\p1'
+    ]
+    return `Dialogue: 1,${assTime(s.startSec)},${assTime(s.endSec)},Sparkle,,0,0,0,,{${tags.join('')}}${SPARKLE_PATH}{\\p0}`
+  })
+}
+
+/** Text events (when there is text) plus its sparkles (when there are any). */
+function overlayEvents(o: AssOverlay, target: Target): string[] {
+  const text = o.text.trim().length > 0 ? textEvents(o, target) : []
+  return [...text, ...sparkleEvents(o)]
 }
 
 /**
@@ -185,7 +253,7 @@ export function buildAss(
  * \1a\4a are hidden so the full-size box shows from the start (both verified —
  * docs/FFMPEG-NOTES.md).
  */
-function overlayEvents(o: AssOverlay, target: Target): string[] {
+function textEvents(o: AssOverlay, target: Target): string[] {
   const style = o.pill.enabled ? 'Pill' : 'Plain'
   const an = o.anchor === 'center' ? 5 : 7
   const x = Math.round(o.x)

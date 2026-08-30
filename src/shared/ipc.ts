@@ -1,5 +1,7 @@
 /** IPC channel names shared between main (handlers) and preload (invokers). */
 
+import type { AudioFxSettings } from './audioFx'
+
 export const IPC = {
   getCapabilities: 'system:getCapabilities',
   getDataDir: 'system:getDataDir',
@@ -30,6 +32,7 @@ export const IPC = {
   getTranscript: 'whisper:getTranscript',
   // Audio editing
   detectSilence: 'audio:detectSilence',
+  renderAudioFx: 'audio:renderFx',
   // Background removal (subject-aware crop)
   segmentAvailable: 'segment:available',
   removeBackground: 'segment:removeBackground',
@@ -47,6 +50,16 @@ export interface StillRequest {
   crop: { x: number; y: number; w: number; h: number } | null
   /** Color correction to apply (null = none). */
   color: { brightness: number; contrast: number; saturation: number } | null
+}
+
+/** Ask main to render an effect's wet signal into a new library asset. */
+export interface AudioFxRequest {
+  settings: AudioFxSettings
+  /** Library asset the dry signal comes from. */
+  sourceMediaId: string
+  /** Source window to render, in the source's own time. */
+  inSec: number
+  outSec: number
 }
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
