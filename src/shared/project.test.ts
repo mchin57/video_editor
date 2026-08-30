@@ -7,7 +7,7 @@ import {
   pillRadiusPx,
   stabilizeOverridden
 } from './project'
-import type { CaptionSegment, CaptionsConfig } from './project'
+import type { CaptionSegment, CaptionsConfig, AudioClip } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 
 describe('pillRadiusPx', () => {
@@ -28,7 +28,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(19)
+    expect(p.version).toBe(20)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -100,7 +100,7 @@ describe('migrateProject — noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
-    expect(p.version).toBe(19)
+    expect(p.version).toBe(20)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
@@ -188,7 +188,7 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
     const cells = (p.layers[0].content as { cells: { mute: boolean }[] }).cells
     expect(cells[0].mute).toBe(false) // the comp panel is audible again
     expect(cells[1].mute).toBe(true) // the clip cell is untouched
-    expect(p.version).toBe(19)
+    expect(p.version).toBe(20)
   })
 
   it('reaches comp cells nested inside a compound layer', () => {
@@ -218,5 +218,76 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
     const inner = (p.layers[0].content as { comp: { layers: { content: { cells: { mute: boolean }[] } }[] } })
       .comp.layers[0].content.cells
     expect(inner[0].mute).toBe(false)
+  })
+})
+
+describe('migrateProject — chorus renamed to ensemble (v20)', () => {
+  const legacyFxClip = (id: string): Record<string, unknown> => ({
+    id,
+    mediaId: 'rendered-wet',
+    startSec: 1,
+    inSec: 0,
+    outSec: 0,
+    gainDb: 0,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    duck: false,
+    kind: 'fx',
+    fx: {
+      settings: { kind: 'chorus', chorus: { voices: 3, spreadMs: 32, detuneCents: 14 } },
+      fromMediaId: 'src',
+      fromInSec: 0,
+      fromOutSec: 3
+    }
+  })
+
+  it('moves a legacy chorus track to ensemble, keeping its settings', () => {
+    const p = migrateProject({ version: 19, audioClips: [legacyFxClip('a1')], layers: [] })
+    const fx = p.audioClips[0].fx!
+    expect(fx.settings.kind).toBe('ensemble')
+    // The rendered audio is unchanged, so the numbers that produced it must be.
+    expect(fx.settings).toEqual({
+      kind: 'ensemble',
+      ensemble: { voices: 3, spreadMs: 32, detuneCents: 14 }
+    })
+    expect('chorus' in fx.settings).toBe(false)
+    expect(p.version).toBe(20)
+  })
+
+  it('reaches effect tracks inside a nested composition', () => {
+    const p = migrateProject({
+      version: 19,
+      audioClips: [],
+      layers: [
+        {
+          id: 'L1',
+          hidden: false,
+          startSec: 0,
+          endSec: 3,
+          x: 540,
+          y: 960,
+          scale: 1,
+          content: {
+            kind: 'compound',
+            comp: { layers: [], captions: { segments: [] }, audioClips: [legacyFxClip('nested')] }
+          }
+        }
+      ]
+    })
+    const nested = (p.layers[0].content as { comp: { audioClips: AudioClip[] } }).comp.audioClips[0]
+    expect(nested.fx!.settings.kind).toBe('ensemble')
+  })
+
+  it('leaves a NEW-style chorus track alone', () => {
+    const modern = legacyFxClip('a2')
+    ;(modern.fx as { settings: unknown }).settings = {
+      kind: 'chorus',
+      chorus: { voices: 3, rateHz: 1.2, depth: 0.35 }
+    }
+    const p = migrateProject({ version: 20, audioClips: [modern], layers: [] })
+    expect(p.audioClips[0].fx!.settings).toEqual({
+      kind: 'chorus',
+      chorus: { voices: 3, rateHz: 1.2, depth: 0.35 }
+    })
   })
 })

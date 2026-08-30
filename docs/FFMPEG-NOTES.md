@@ -75,7 +75,7 @@ frame dumps (`assBuilder.overlayEvents` maps `shared/textAnim.ts` onto these):
 - `astats` logs to **stderr at info level**; `-v error` suppresses it. Capture
   stderr (not stdout) and don't lower the log level when probing channel peaks.
 
-## Audio effects — echo & chorus (verified ffmpeg 8.1.1, 2026-08)
+## Audio effects — echo, ensemble & chorus (verified ffmpeg 8.1.1, 2026-08)
 
 Backing for the generated FX tracks (`shared/audioFx.ts` → `services/audioFx.ts`).
 An effect track carries the **wet signal only** — it is mixed on top of the
@@ -101,11 +101,36 @@ sample-by-sample (peaks quoted as a fraction of full scale; the dry click is
   **nothing** (still 1–6 ms), while the output tail still grew by the longest
   delay — so the buffer is sized from `delays` but the taps are not placed from
   it. `in_gain=0` also failed to remove the dry. Do not use this filter.
-- **Chorus is built from primitives instead** — `asplit` into one branch per
+- **ENSEMBLE (fixed detune) is built from primitives** — `asplit` into one branch per
   voice, each `asetrate=<shifted>,aresample=<base>,atempo=<base/shifted>,
   volume=<v>,adelay=<ms>:all=1`, recombined with `amix=inputs=N:normalize=0`.
   Verified three voices landed at exactly 18/27/35 ms with peaks 2048/1720/1392
   in s16 — i.e. the requested 0.50/0.42/0.34 gains, to the sample.
+- **A real (swept) chorus is built from `vibrato`, not `chorus`.** `vibrato=f=<Hz>:d=<0..1>`
+  is a delay line swept by an LFO, and it emits the modulated signal ONLY — no
+  dry mixed back in — which is exactly what a wet-only effect track wants.
+  Verified on a 1 kHz tone by measuring instantaneous frequency from
+  interpolated zero crossings: depth 0.2/0.5/1.0 swept 22/54/108 cents
+  peak-to-peak, centred on pitch (the unprocessed tone measured a flat 0), and
+  the rate knob is accurate (asked 2 Hz / 5 Hz, measured 2.08 / 5.00). Level is
+  preserved exactly.
+- `vibrato` has **no phase control**, so several voices at the same `f` move in
+  lockstep and collapse into one wobble. Give each voice a slightly different
+  rate instead (`CHORUS_RATE_SPREAD`).
+- **TRAP: `vibrato` emits a ~0.5 full-scale burst at the very start of its
+  output.** Reproducible with pure silence at that point in the stream, so it is
+  not a reaction to input — but it does NOT reproduce when `vibrato` reads a
+  file directly, only inside the effect graph, so it is some interaction with
+  the preceding `atrim`/`asetpts`/`aformat` stages. A fade-in does not fix it:
+  a 30 ms `afade=t=in` cut the burst from 9010 to 499 but introduced a fresh
+  full-scale (16384) spike further in. **The fix is to prime the graph** —
+  `adelay=<CHORUS_PRIME_MS>` before the voices and a matching
+  `atrim=start=<...>` after the mix — so the transient lands in padding that is
+  then discarded. Verified: output silent until the first real voice, voices
+  landing at exactly their designed gains, and total duration still source +
+  longest voice delay. Only the swept path is primed; echo and ensemble are
+  clean and must stay byte-identical so their rendered assets keep their
+  content hash.
 - **`asetrate`+`aresample`+`atempo` shifts pitch without moving duration.** A
   1 kHz tone measured 998.8 Hz at ratio 1.0, 1006.3 Hz shifted up 0.6%, and
   993.8 Hz shifted down 0.6%, with durations 0.9990/0.9980/0.9990 s. Sub-1 ms

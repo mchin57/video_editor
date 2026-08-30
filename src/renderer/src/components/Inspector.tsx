@@ -30,8 +30,8 @@ import {
   type TextAnimOut,
   type TextAnimation
 } from '@shared/textAnim'
-import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect } from '@shared/audioFx'
-import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, ECHO_RANGE, fxLabel } from '@shared/audioFx'
+import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect, EnsembleEffect } from '@shared/audioFx'
+import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, DEFAULT_ENSEMBLE, ECHO_RANGE, ENSEMBLE_RANGE, fxLabel } from '@shared/audioFx'
 import type { SparkleEffect } from '@shared/sparkle'
 import { DEFAULT_SPARKLE, SPARKLE_DENSITY_RANGE } from '@shared/sparkle'
 import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
@@ -1427,7 +1427,16 @@ export function Inspector(): JSX.Element {
 
 const FX_KINDS: { value: AudioFxKind; label: string; hint: string }[] = [
   { value: 'echo', label: 'Echo', hint: 'Repeats that fall away — lands emphasis on a word.' },
-  { value: 'chorus', label: 'Chorus', hint: 'Detuned copies stacked up — thickens a voice.' }
+  {
+    value: 'ensemble',
+    label: 'Ensemble',
+    hint: 'Copies at a fixed detune, stacked — thickens a voice without movement.'
+  },
+  {
+    value: 'chorus',
+    label: 'Chorus',
+    hint: 'Copies whose pitch drifts back and forth — the classic shimmer.'
+  }
 ]
 
 /**
@@ -1468,11 +1477,18 @@ function SoundEffectsSection({
   const [echo, setEcho] = useState<EchoEffect>(
     start?.kind === 'echo' ? start.echo : { ...DEFAULT_ECHO }
   )
+  const [ensemble, setEnsemble] = useState<EnsembleEffect>(
+    start?.kind === 'ensemble' ? start.ensemble : { ...DEFAULT_ENSEMBLE }
+  )
   const [chorus, setChorus] = useState<ChorusEffect>(
     start?.kind === 'chorus' ? start.chorus : { ...DEFAULT_CHORUS }
   )
   const settings: AudioFxSettings =
-    kind === 'echo' ? { kind: 'echo', echo } : { kind: 'chorus', chorus }
+    kind === 'echo'
+      ? { kind: 'echo', echo }
+      : kind === 'ensemble'
+        ? { kind: 'ensemble', ensemble }
+        : { kind: 'chorus', chorus }
   const busy = addFx.isPending
   const disabled = !!disabledReason || busy
 
@@ -1541,6 +1557,45 @@ function SoundEffectsSection({
             />
           </Field>
         </>
+      ) : kind === 'ensemble' ? (
+        <>
+          <Field label={`Voices · ${ensemble.voices}`}>
+            <input
+              type="range"
+              min={ENSEMBLE_RANGE.voices.min}
+              max={ENSEMBLE_RANGE.voices.max}
+              step={1}
+              value={ensemble.voices}
+              disabled={disabled}
+              onChange={(e) => setEnsemble({ ...ensemble, voices: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Spread · ${Math.round(ensemble.spreadMs)} ms`}>
+            <input
+              type="range"
+              min={ENSEMBLE_RANGE.spreadMs.min}
+              max={ENSEMBLE_RANGE.spreadMs.max}
+              step={1}
+              value={ensemble.spreadMs}
+              disabled={disabled}
+              onChange={(e) => setEnsemble({ ...ensemble, spreadMs: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+          <Field label={`Detune · ${Math.round(ensemble.detuneCents)} cents`}>
+            <input
+              type="range"
+              min={ENSEMBLE_RANGE.detuneCents.min}
+              max={ENSEMBLE_RANGE.detuneCents.max}
+              step={1}
+              value={ensemble.detuneCents}
+              disabled={disabled}
+              onChange={(e) => setEnsemble({ ...ensemble, detuneCents: Number(e.target.value) })}
+              className="w-full accent-sky-400"
+            />
+          </Field>
+        </>
       ) : (
         <>
           <Field label={`Voices · ${chorus.voices}`}>
@@ -1555,27 +1610,27 @@ function SoundEffectsSection({
               className="w-full accent-sky-400"
             />
           </Field>
-          <Field label={`Spread · ${Math.round(chorus.spreadMs)} ms`}>
+          <Field label={`Rate · ${chorus.rateHz.toFixed(1)} Hz`}>
             <input
               type="range"
-              min={CHORUS_RANGE.spreadMs.min}
-              max={CHORUS_RANGE.spreadMs.max}
-              step={1}
-              value={chorus.spreadMs}
+              min={CHORUS_RANGE.rateHz.min}
+              max={CHORUS_RANGE.rateHz.max}
+              step={0.1}
+              value={chorus.rateHz}
               disabled={disabled}
-              onChange={(e) => setChorus({ ...chorus, spreadMs: Number(e.target.value) })}
+              onChange={(e) => setChorus({ ...chorus, rateHz: Number(e.target.value) })}
               className="w-full accent-sky-400"
             />
           </Field>
-          <Field label={`Detune · ${Math.round(chorus.detuneCents)} cents`}>
+          <Field label={`Depth · ${chorus.depth.toFixed(2)}`}>
             <input
               type="range"
-              min={CHORUS_RANGE.detuneCents.min}
-              max={CHORUS_RANGE.detuneCents.max}
-              step={1}
-              value={chorus.detuneCents}
+              min={CHORUS_RANGE.depth.min}
+              max={CHORUS_RANGE.depth.max}
+              step={0.05}
+              value={chorus.depth}
               disabled={disabled}
-              onChange={(e) => setChorus({ ...chorus, detuneCents: Number(e.target.value) })}
+              onChange={(e) => setChorus({ ...chorus, depth: Number(e.target.value) })}
               className="w-full accent-sky-400"
             />
           </Field>

@@ -656,7 +656,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 19,
+    version: 20,
     preset: 'reel',
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -916,7 +916,43 @@ export function migrateProject(raw: unknown): Project {
   // effects (`TextContent.effects`). Both purely additive — an effect track is
   // an ordinary audio clip and absent `effects` means none — so older projects
   // simply have neither and nothing about their existing content changes.
-  if (typeof p.version !== 'number' || p.version < 19) p.version = 19
+  // v20 RENAMES the original stacking effect from "chorus" to "ensemble" and
+  // frees the name for a real chorus (LFO-swept detune, `vibrato`). Everything
+  // saved before this shipped under `kind: 'chorus'` was the fixed-detune
+  // effect, so it moves wholesale to `'ensemble'` — carrying its settings, so
+  // existing effect tracks keep sounding exactly as they were rendered. Effect
+  // clips live on every composition, so this recurses into nested comps.
+  if ((p.version ?? 0) < 20) {
+    const renameFx = (clips: AudioClip[]): void => {
+      for (const a of clips) {
+        const st = a.fx?.settings as
+          | { kind: string; chorus?: unknown; ensemble?: unknown }
+          | undefined
+        if (st?.kind === 'chorus' && st.chorus !== undefined) {
+          st.kind = 'ensemble'
+          st.ensemble = st.chorus
+          delete st.chorus
+        }
+      }
+    }
+    const walk = (layers: Layer[]): void => {
+      for (const l of layers) {
+        if (l.content.kind === 'compound') {
+          renameFx(l.content.comp.audioClips)
+          walk(l.content.comp.layers)
+        }
+        if (l.content.kind !== 'layout') continue
+        for (const cell of l.content.cells) {
+          if (!cell.comp) continue
+          renameFx(cell.comp.audioClips)
+          walk(cell.comp.layers)
+        }
+      }
+    }
+    if (Array.isArray(p.audioClips)) renameFx(p.audioClips)
+    if (Array.isArray(p.layers)) walk(p.layers)
+  }
+  if (typeof p.version !== 'number' || p.version < 20) p.version = 20
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

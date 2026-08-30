@@ -3,6 +3,9 @@ import {
   chorusVoices,
   DEFAULT_CHORUS,
   DEFAULT_ECHO,
+  DEFAULT_ENSEMBLE,
+  ensembleVoices,
+  normalizeEnsemble,
   ECHO_MIN_TAP_GAIN,
   echoTaps,
   fxTailSec,
@@ -40,8 +43,8 @@ describe('echoTaps', () => {
   })
 })
 
-describe('chorusVoices', () => {
-  const voices = chorusVoices({ voices: 3, spreadMs: 30, detuneCents: 12 })
+describe('ensembleVoices', () => {
+  const voices = ensembleVoices({ voices: 3, spreadMs: 30, detuneCents: 12 })
 
   it('fans the voices out evenly across the spread', () => {
     expect(voices.map((v) => v.delayMs)).toEqual([10, 20, 30])
@@ -58,10 +61,49 @@ describe('chorusVoices', () => {
   })
 
   it('clamps out-of-range settings', () => {
-    expect(normalizeChorus({ voices: 99, spreadMs: 0, detuneCents: 999 })).toEqual({
+    expect(normalizeEnsemble({ voices: 99, spreadMs: 0, detuneCents: 999 })).toEqual({
       voices: 5,
       spreadMs: 8,
       detuneCents: 50
+    })
+  })
+})
+
+describe('chorusVoices', () => {
+  const voices = chorusVoices({ voices: 3, rateHz: 1, depth: 0.4 })
+
+  // vibrato has no phase control, so identical rates would move in lockstep.
+  it('gives each voice its own sweep rate', () => {
+    const rates = voices.map((v) => v.rateHz)
+    expect(new Set(rates).size).toBe(rates.length)
+    expect(rates[0]).toBeLessThan(rates[1])
+    expect(rates[1]).toBeLessThan(rates[2])
+  })
+
+  it('sits each voice a little further back', () => {
+    const delays = voices.map((v) => v.delayMs)
+    expect(delays[0]).toBeGreaterThan(0)
+    expect(delays[1]).toBeGreaterThan(delays[0])
+    expect(delays[2]).toBeGreaterThan(delays[1])
+  })
+
+  it('steps the level down like an ensemble does', () => {
+    const gains = voices.map((v) => v.gain)
+    expect(gains[0]).toBeGreaterThan(gains[1])
+    expect(gains[1]).toBeGreaterThan(gains[2])
+  })
+
+  it('scales every voice rate with the knob', () => {
+    const slow = chorusVoices({ voices: 3, rateHz: 1, depth: 0.4 })
+    const fast = chorusVoices({ voices: 3, rateHz: 3, depth: 0.4 })
+    fast.forEach((v, i) => expect(v.rateHz).toBeCloseTo(slow[i].rateHz * 3, 6))
+  })
+
+  it('clamps out-of-range settings', () => {
+    expect(normalizeChorus({ voices: 99, rateHz: 999, depth: 5 })).toEqual({
+      voices: 4,
+      rateHz: 6,
+      depth: 1
     })
   })
 })
@@ -71,12 +113,19 @@ describe('fxTailSec', () => {
     expect(fxTailSec({ kind: 'echo', echo: { delayMs: 200, decay: 0.5, repeats: 3 } })).toBeCloseTo(0.6)
   })
 
+  it('is the last ensemble voice offset', () => {
+    expect(fxTailSec({ kind: 'ensemble', ensemble: { voices: 2, spreadMs: 40, detuneCents: 10 } })).toBeCloseTo(0.04)
+  })
+
   it('is the last chorus voice offset', () => {
-    expect(fxTailSec({ kind: 'chorus', chorus: { voices: 2, spreadMs: 40, detuneCents: 10 } })).toBeCloseTo(0.04)
+    const tail = fxTailSec({ kind: 'chorus', chorus: { voices: 3, rateHz: 1, depth: 0.4 } })
+    expect(tail).toBeGreaterThan(0)
+    expect(tail).toBeLessThan(0.1)
   })
 
   it('is positive for the shipped defaults', () => {
     expect(fxTailSec({ kind: 'echo', echo: DEFAULT_ECHO })).toBeGreaterThan(0)
+    expect(fxTailSec({ kind: 'ensemble', ensemble: DEFAULT_ENSEMBLE })).toBeGreaterThan(0)
     expect(fxTailSec({ kind: 'chorus', chorus: DEFAULT_CHORUS })).toBeGreaterThan(0)
   })
 })

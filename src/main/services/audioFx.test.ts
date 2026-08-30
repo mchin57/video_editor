@@ -29,8 +29,8 @@ describe('buildAudioFxFilter — echo', () => {
   })
 })
 
-describe('buildAudioFxFilter — chorus', () => {
-  const filter = buildAudioFxFilter(defaultFxSettings('chorus'), 1, 3)
+describe('buildAudioFxFilter — ensemble', () => {
+  const filter = buildAudioFxFilter(defaultFxSettings('ensemble'), 1, 3)
 
   it('matches the verified filter string', () => {
     expect(filter).toBe(
@@ -56,6 +56,46 @@ describe('buildAudioFxFilter — chorus', () => {
 
   it('never reaches ffmpeg\u2019s own chorus filter, which ignores its delays', () => {
     expect(filter).not.toMatch(/(^|[,;[])chorus=/)
+  })
+
+  // Only the swept path needs priming, and changing this string would
+  // invalidate the content hash of every already-rendered ensemble asset.
+  it('is NOT primed, keeping existing renders valid', () => {
+    expect(filter).not.toContain('adelay=200')
+  })
+})
+
+describe('buildAudioFxFilter \u2014 chorus (LFO-swept)', () => {
+  const filter = buildAudioFxFilter(defaultFxSettings('chorus'), 1, 3)
+
+  it('matches the verified filter string', () => {
+    expect(filter).toBe(
+      '[0:a]atrim=1.000:3.000,asetpts=N/SR/TB,' +
+        'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,' +
+        'adelay=200:all=1,asetpts=N/SR/TB[src];' +
+        '[src]asplit=3[v0][v1][v2];' +
+        '[v0]vibrato=f=1.200:d=0.350,volume=0.5500,adelay=18:all=1,asetpts=N/SR/TB[o0];' +
+        '[v1]vibrato=f=1.416:d=0.350,volume=0.4840,adelay=25:all=1,asetpts=N/SR/TB[o1];' +
+        '[v2]vibrato=f=1.632:d=0.350,volume=0.4180,adelay=32:all=1,asetpts=N/SR/TB[o2];' +
+        '[o0][o1][o2]amix=inputs=3:normalize=0[mix];' +
+        '[mix]atrim=start=0.200,asetpts=N/SR/TB[fx]'
+    )
+  })
+
+  it('sweeps each voice at its own rate, so they do not move in lockstep', () => {
+    const rates = [...filter.matchAll(/vibrato=f=([\d.]+)/g)].map((m) => Number(m[1]))
+    expect(rates).toHaveLength(3)
+    expect(new Set(rates).size).toBe(3)
+  })
+
+  it('primes with silence and discards it \u2014 vibrato bursts at its output start', () => {
+    expect(filter).toContain('adelay=200:all=1')
+    expect(filter).toContain('atrim=start=0.200')
+  })
+
+  it('shifts pitch by sweeping, never by a fixed rate change', () => {
+    expect(filter).toContain('vibrato=')
+    expect(filter).not.toContain('asetrate=')
   })
 })
 

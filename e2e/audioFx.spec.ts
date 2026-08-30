@@ -211,3 +211,100 @@ test('re-rendering a SPLIT effect track keeps every piece trimmed and in sync', 
   const first = after.find((a) => a.id === before.pieces[0].id)!
   expect(first.outSec).toBeGreaterThan(0)
 })
+
+/** The swept chorus runs a different ffmpeg chain (vibrato, plus a primed
+ *  lead-in that gets trimmed off). Only running it in the app proves the chain
+ *  assembles and renders. */
+test('the chorus kind renders through its own swept chain', async ({ appPage: page }) => {
+  const wav = join(mkdtempSync(join(tmpdir(), 'reel-fx-')), 'tone.wav')
+  makeWav(wav)
+
+  await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    const { useProject, useUi } = window.__reelStores
+    useProject.getState().addMedia([asset.id])
+    useProject.getState().addAudioClip({
+      id: 'dry-clip',
+      mediaId: asset.id,
+      startSec: 0,
+      inSec: 0,
+      outSec: 3,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'voice'
+    })
+    useUi.getState().selectAudio('dry-clip')
+  }, wav)
+
+  await page.getByRole('button', { name: 'Chorus', exact: true }).click()
+  await page.getByRole('button', { name: /Add chorus track/i }).click()
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.__reelStores.useProject.getState().project!.audioClips.length
+        ),
+      { timeout: 60_000 }
+    )
+    .toBe(2)
+
+  const fx = await page.evaluate(
+    () => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!
+  )
+  expect(fx.fx!.settings.kind).toBe('chorus')
+  expect(fx.kind).toBe('fx')
+
+  // The primed lead-in must be trimmed off, so the effect is not shifted late:
+  // its rendered length should track the source window, not exceed it by 200ms.
+  const dur = await page.evaluate(async (id) => {
+    const p = window.__reelStores.useProject.getState().project!
+    const assets = await window.api.listProjectMedia(p.mediaIds)
+    return assets.find((a) => a.id === id)!.probe.durationSec
+  }, fx.mediaId)
+  expect(dur).toBeGreaterThan(2.9)
+  expect(dur).toBeLessThan(3.2) // 3s source + the longest voice delay, NOT +200ms
+})
+
+test('the ensemble kind is still available under its new name', async ({ appPage: page }) => {
+  const wav = join(mkdtempSync(join(tmpdir(), 'reel-fx-')), 'tone.wav')
+  makeWav(wav)
+  await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    const { useProject, useUi } = window.__reelStores
+    useProject.getState().addMedia([asset.id])
+    useProject.getState().addAudioClip({
+      id: 'dry-clip',
+      mediaId: asset.id,
+      startSec: 0,
+      inSec: 0,
+      outSec: 3,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'voice'
+    })
+    useUi.getState().selectAudio('dry-clip')
+  }, wav)
+
+  await page.getByRole('button', { name: 'Ensemble', exact: true }).click()
+  await page.getByRole('button', { name: /Add ensemble track/i }).click()
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.__reelStores.useProject.getState().project!.audioClips.length
+        ),
+      { timeout: 60_000 }
+    )
+    .toBe(2)
+
+  const fx = await page.evaluate(
+    () => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!
+  )
+  expect(fx.fx!.settings.kind).toBe('ensemble')
+})

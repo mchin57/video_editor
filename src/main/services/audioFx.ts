@@ -1,5 +1,5 @@
 /**
- * Renders an audio effect (echo / chorus) to a standalone WET-ONLY asset — the
+ * Renders an audio effect (echo / ensemble / chorus) to a standalone WET-ONLY asset — the
  * "add sound effect" pipeline. The result is imported as an ordinary library
  * asset and dropped on the timeline as its own `AudioClip`, mixed on top of the
  * untouched dry clip. Nothing about the source is modified.
@@ -11,16 +11,17 @@
  * / trim / split all work on it with no new code.
  *
  * The recipes are verified against the real binary — see docs/FFMPEG-NOTES.md
- * "Audio effects — echo & chorus". Two findings shape this file: `aecho` has no
- * feedback (so repeats are explicit taps), and ffmpeg's own `chorus` filter
- * IGNORES its `delays`, so chorus is assembled from asplit / asetrate /
- * aresample / atempo / volume / adelay / amix instead.
+ * "Audio effects". Two findings shape this file: `aecho` has no feedback (so
+ * repeats are explicit taps), and ffmpeg's own `chorus` filter IGNORES its
+ * `delays` and is unusable — so the stacking effects are assembled from
+ * primitives instead (`asetrate`/`atempo` for a fixed detune, `vibrato` for a
+ * swept one).
  *
  * Arg builders here are pure and unit-tested; `renderAudioFx` runs them.
  */
 
 import type { AudioFxSettings } from '@shared/audioFx'
-import { chorusVoices, echoTaps } from '@shared/audioFx'
+import { chorusVoices, echoTaps, ensembleVoices, normalizeChorus } from '@shared/audioFx'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 
@@ -29,10 +30,14 @@ import { runFfmpeg } from './ffmpegRun'
  *  `aformat` before any voice splitting. */
 export const FX_SAMPLE_RATE = 48000
 
+/** Silence prepended before the swept (chorus) voices and discarded after them,
+ *  so `vibrato`'s startup transient never reaches the rendered file. */
+export const CHORUS_PRIME_MS = 200
+
 const f3 = (n: number): string => n.toFixed(3)
 
 /**
- * Pitch-shift stages for one chorus voice: reinterpret the samples at a shifted
+ * Pitch-shift stages for one ENSEMBLE voice: reinterpret the samples at a shifted
  * rate (raising pitch and shortening the voice), resample back to the working
  * rate, then undo the duration change with `atempo` — leaving pitch moved and
  * length intact. The shifted rate is ROUNDED TO AN INTEGER and `atempo` derived
@@ -58,9 +63,10 @@ function sourceChain(inSec: number, outSec: number): string {
  * The wet-only `filter_complex` for one effect, ending at `[fx]`.
  *
  * Echo is a single `aecho` with `in_gain=0` (which drops the dry signal
- * entirely) and one explicit tap per repeat. Chorus splits the source into one
- * branch per voice — each detuned, levelled and delayed — and mixes them with
- * `normalize=0` so the per-voice gains are the gains that actually land.
+ * entirely) and one explicit tap per repeat. Ensemble and chorus both split the
+ * source into one branch per voice and mix with `normalize=0` so the per-voice
+ * gains are the gains that actually land; an ensemble voice is pitch-shifted by
+ * a FIXED amount, a chorus voice is swept by an LFO (`vibrato`).
  *
  * Every `adelay` is followed by `asetpts=N/SR/TB`: an `atrim`'d stream fed into
  * a non-zero `adelay` emits a poisoned near-INT64_MAX PTS that kills the mux
@@ -81,21 +87,50 @@ export function buildAudioFxFilter(
     return `[0:a]${src},aecho=0:1:${delays}:${decays}[fx]`
   }
 
-  const voices = chorusVoices(settings.chorus)
-  const chains: string[] = [`[0:a]${src}[src]`]
-  chains.push(`[src]asplit=${voices.length}${voices.map((_, i) => `[v${i}]`).join('')}`)
-  voices.forEach((v, i) => {
-    const parts = [
-      ...pitchStages(v.cents),
-      `volume=${v.gain.toFixed(4)}`,
-      `adelay=${Math.round(v.delayMs)}:all=1`,
-      'asetpts=N/SR/TB'
-    ]
-    chains.push(`[v${i}]${parts.join(',')}[o${i}]`)
-  })
+  // Both stacking effects share the same skeleton — split into one branch per
+  // voice, shape each, mix without normalising so the per-voice gains land —
+  // and differ only in what shapes a voice: a FIXED pitch shift (ensemble) or a
+  // swept one (chorus).
+  const voiceParts: string[][] =
+    settings.kind === 'ensemble'
+      ? ensembleVoices(settings.ensemble).map((v) => [
+          ...pitchStages(v.cents),
+          `volume=${v.gain.toFixed(4)}`,
+          `adelay=${Math.round(v.delayMs)}:all=1`,
+          'asetpts=N/SR/TB'
+        ])
+      : chorusVoices(settings.chorus).map((v) => [
+          // `vibrato` IS the chorus: a delay line swept by an LFO, so the pitch
+          // drifts sharp and flat instead of sitting at an offset. It emits the
+          // modulated signal only — no dry mixed back in — which is exactly
+          // what an effect track wants. Verified: depth 1.0 sweeps ~108 cents
+          // peak-to-peak centred on pitch, and the rate knob is accurate.
+          `vibrato=f=${v.rateHz.toFixed(3)}:d=${normalizeChorus(settings.chorus).depth.toFixed(3)}`,
+          `volume=${v.gain.toFixed(4)}`,
+          `adelay=${Math.round(v.delayMs)}:all=1`,
+          'asetpts=N/SR/TB'
+        ])
+
+  // `vibrato` emits a ~0.5 full-scale burst at the very start of its output —
+  // reproducible even when the audio there is pure silence, and NOT fixable by
+  // fading it out (a fade only relocated it and added a worse full-scale spike).
+  // Priming the graph with silence puts that transient inside a region the last
+  // `atrim` throws away. Only the swept path needs this: the echo and ensemble
+  // chains are verified clean, and leaving them untouched keeps their filter
+  // strings — and so their content hashes and already-rendered assets — stable.
+  const primed = settings.kind === 'chorus'
+  const prime = primed ? `,adelay=${CHORUS_PRIME_MS}:all=1,asetpts=N/SR/TB` : ''
+
+  const chains: string[] = [`[0:a]${src}${prime}[src]`]
+  chains.push(`[src]asplit=${voiceParts.length}${voiceParts.map((_, i) => `[v${i}]`).join('')}`)
+  voiceParts.forEach((parts, i) => chains.push(`[v${i}]${parts.join(',')}[o${i}]`))
+  const mixOut = primed ? 'mix' : 'fx'
   chains.push(
-    `${voices.map((_, i) => `[o${i}]`).join('')}amix=inputs=${voices.length}:normalize=0[fx]`
+    `${voiceParts.map((_, i) => `[o${i}]`).join('')}amix=inputs=${voiceParts.length}:normalize=0[${mixOut}]`
   )
+  if (primed) {
+    chains.push(`[mix]atrim=start=${f3(CHORUS_PRIME_MS / 1000)},asetpts=N/SR/TB[fx]`)
+  }
   return chains.join(';')
 }
 
