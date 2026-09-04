@@ -348,6 +348,41 @@ black + `signalstats` YAVG readbacks (drives `buildOpacityCmdLines` /
   (`tin`/`pin`/`min`) or it errors with "no path between colorspaces"
   (`hdrToSdrChain`).
 
+## Text rasterisation — the capture window is CLAMPED (verified Electron 38 / Windows 11, 2026-09)
+
+Not an ffmpeg trap, but it lives here because it silently corrupts export output
+and the recipe for catching it is the same: render, then look at the pixels.
+
+Gradient text, side-resized text (`widthPx`) and gradient captions can't burn
+through libass, so they rasterise to a transparent PNG via a hidden
+`BrowserWindow` + `capturePage()` (`services/textImage.ts`).
+
+- **`new BrowserWindow({ width, height })` CLAMPS to the display work area.** A
+  1080x1920 reel window on an ordinary 1920x1080 monitor is born **1080x1032**
+  (measured: work area 1920x1032). `capturePage()` then returns a 1080x1032
+  picture — correct width, cropped height.
+- **The result is a silent, partial export.** Every overlay below the cut simply
+  is not in the output. Nothing throws: the window loads, the fonts load, the
+  capture succeeds, the PNG is written, ffmpeg composites it. The bug shipped
+  because the size guard compared **width only** (`getSize().width === width`),
+  which a height-clamped capture passes. A text layer at y≈1110 vanished from
+  every export while showing perfectly in the preview.
+- **Fix: `win.setContentSize(width, height)` after construction.** It is *not*
+  clamped, and the size survives `showInactive()`. Verified across a reused
+  window (the renderer keeps one for the whole export): three consecutive
+  renders all captured a full 1080x1920 with alpha intact (a 50%-alpha probe
+  block read back as `[0,128,0,128]`, empty areas `[0,0,0,0]`).
+- `webPreferences.offscreen: true` does **not** help on its own — the window is
+  still constructed at the clamped size (measured 1080x1032). It is the
+  constructor, not the presentation mode.
+- **Never `resize()` a mismatched capture.** A crop is not a scale; resizing
+  stretches a partial frame. `normaliseCapture` passes an exact match, scales
+  only a *uniform* multiple (real HiDPI), and otherwise THROWS — which drops the
+  caller into its flat-colour ASS fallback, so the text is degraded but present.
+  Verified end-to-end: with the fix disabled, "Sick" still burned (via ASS)
+  instead of disappearing.
+
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

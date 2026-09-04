@@ -13,7 +13,7 @@
  * gradient never breaks an export.
  */
 
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, type NativeImage } from 'electron'
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -121,6 +121,27 @@ ${fontFaceCss(fontsDir)}
 
 const delay = (ms: number): Promise<void> => new Promise((res) => setTimeout(res, ms))
 
+/**
+ * The capture has to be exactly output-sized. A HiDPI display hands back a
+ * uniform multiple of it, which is safe to scale down — but any OTHER size means
+ * the window wasn't the size we asked for and the picture is CROPPED, not
+ * scaled. Resizing that would stretch a partial frame; the old code checked only
+ * the WIDTH, so a window clamped to the display height sailed through and the
+ * export lost every overlay below the cut with nothing raised anywhere.
+ *
+ * Throwing instead hands control to the caller's fallback, which burns the text
+ * flat through libass — a lost gradient or wrap width, but text that is THERE.
+ */
+export function normaliseCapture(img: NativeImage, width: number, height: number): NativeImage {
+  const { width: w, height: h } = img.getSize()
+  if (w === width && h === height) return img
+  // Cross-multiplied aspect compare, with a pixel of rounding tolerance.
+  if (w > 0 && h > 0 && Math.abs(w * height - h * width) <= Math.max(w, h)) {
+    return img.resize({ width, height })
+  }
+  throw new Error(`text capture was ${w}x${h}, expected ${width}x${height} (cropped, not scaled)`)
+}
+
 /** A reusable off-screen text rasteriser for one export run. */
 export interface TextRenderer {
   /** Render `spec` to `outPath` (a .png). Throws on failure. */
@@ -152,6 +173,13 @@ export function createTextRenderer(
       webPreferences: { offscreen: false, backgroundThrottling: false }
     })
     win.setIgnoreMouseEvents(true)
+    // MUST re-assert the size: the BrowserWindow constructor CLAMPS width/height
+    // to the display work area, so on any ordinary landscape monitor a 1080x1920
+    // reel window is born short (measured: 1080x1032 on a 1920x1080 screen) and
+    // capturePage then returns a picture cropped at that height — silently
+    // deleting every overlay below it from the export. `setContentSize` is not
+    // clamped, and the size survives `showInactive()`.
+    win.setContentSize(width, height)
     return win
   }
 
@@ -169,9 +197,7 @@ export function createTextRenderer(
       w.showInactive()
       await delay(70) // let a frame paint after show
       const img = await w.webContents.capturePage()
-      // Normalise away any HiDPI scaling so the PNG is exactly output-sized.
-      const sized = img.getSize().width === width ? img : img.resize({ width, height })
-      await fsp.writeFile(outPath, sized.toPNG())
+      await fsp.writeFile(outPath, normaliseCapture(img, width, height).toPNG())
     },
     dispose() {
       if (win && !win.isDestroyed()) win.destroy()
