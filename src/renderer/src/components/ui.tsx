@@ -6,6 +6,7 @@
  * @see docs/SHARED.md
  */
 
+import { useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 
 /** Stock text/number input. */
@@ -67,5 +68,90 @@ export function Check({
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {children}
     </label>
+  )
+}
+
+/**
+ * Stock numeric input that does NOT fight the user mid-typing.
+ *
+ * A plain `<input type="number">` bound to `value` with a clamp in `onChange`
+ * re-renders the clamped number back into the field on every keystroke, so the
+ * field can never be empty and can never hold an intermediate value below the
+ * minimum ("" and "1" on the way to "12" both snap to 12). Instead this keeps a
+ * DRAFT string while the user is typing: an in-range value commits live (so the
+ * preview still follows every keystroke), while an empty/partial/out-of-range
+ * one is held in the draft and only clamped + committed on blur or Enter.
+ * Escape abandons the draft. `format` controls the resting display only — it is
+ * never applied to what the user is currently typing.
+ */
+export function NumberInput({
+  value,
+  onCommit,
+  min,
+  max,
+  step,
+  format,
+  disabled,
+  className = inputCls,
+  title
+}: {
+  value: number
+  onCommit: (v: number) => void
+  min?: number
+  max?: number
+  step?: number | string
+  format?: (v: number) => string
+  disabled?: boolean
+  className?: string
+  title?: string
+}): JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  // The draft is mirrored in a ref because `commit` runs from `onBlur`, which
+  // Escape triggers in the same tick it abandons the draft — reading the state
+  // there would still see the abandoned text and commit it.
+  const draftRef = useRef<string | null>(null)
+  const putDraft = (v: string | null): void => {
+    draftRef.current = v
+    setDraft(v)
+  }
+  const clamp = (v: number): number =>
+    Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, v))
+
+  const commit = (): void => {
+    const d = draftRef.current
+    if (d === null) return
+    const n = Number(d)
+    // An unparseable/empty draft reverts to the last good value rather than
+    // committing NaN; clearing a field is a typing state, not an edit.
+    if (d.trim() !== '' && Number.isFinite(n)) onCommit(clamp(n))
+    putDraft(null)
+  }
+
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      max={max}
+      disabled={disabled}
+      title={title}
+      className={className}
+      value={draft ?? (format ? format(value) : String(value))}
+      onChange={(e) => {
+        const raw = e.target.value
+        putDraft(raw)
+        const n = Number(raw)
+        // Live-commit only what needs no clamping — anything else waits for blur.
+        if (raw.trim() !== '' && Number.isFinite(n) && clamp(n) === n) onCommit(n)
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        else if (e.key === 'Escape') {
+          putDraft(null)
+          e.currentTarget.blur()
+        }
+      }}
+    />
   )
 }

@@ -8,6 +8,7 @@ export const IPC = {
   // Media library (M1)
   importDialog: 'media:importDialog',
   importPaths: 'media:importPaths',
+  importFolderDialog: 'media:importFolderDialog',
   extractAudioDialog: 'media:extractAudioDialog',
   listProjectMedia: 'media:listForProject',
   ensureProxy: 'media:ensureProxy',

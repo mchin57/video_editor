@@ -1,4 +1,5 @@
-import { useRef, useState, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useState, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { startPointerDrag } from '@/lib/pointerDrag'
 
 /**
  * A lightweight floating, draggable panel (not a full-screen modal) — for tools
@@ -19,24 +20,20 @@ export function Popout({
   children: ReactNode
 }): JSX.Element {
   const [pos, setPos] = useState(() => initial ?? { x: window.innerWidth - width - 48, y: 96 })
-  const dragging = useRef<{ dx: number; dy: number } | null>(null)
 
+  // The grab offset lives in the drag's own closure — `startPointerDrag` tears
+  // the listeners down itself (pointercancel included), so there is no
+  // is-a-drag-live flag left for a stale move to consult.
   const onDown = (e: ReactPointerEvent): void => {
     e.preventDefault()
-    dragging.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y }
-    const onMove = (ev: PointerEvent): void => {
-      if (!dragging.current) return
-      const x = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - dragging.current.dx))
-      const y = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - dragging.current.dy))
-      setPos({ x, y })
-    }
-    const onUp = (): void => {
-      dragging.current = null
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    const dx = e.clientX - pos.x
+    const dy = e.clientY - pos.y
+    startPointerDrag((ev) => {
+      setPos({
+        x: Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - dx)),
+        y: Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - dy))
+      })
+    })
   }
 
   return (

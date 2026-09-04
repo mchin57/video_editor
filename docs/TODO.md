@@ -4,10 +4,15 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ## Codebase health
 
-- [ ] **Finish the drag-helper sweep.** `Popout.tsx` and `LayersPanel.tsx`
-  still hand-roll the pointermove/pointerup dance (small, no edge-scroll) — convert to
-  `startPointerDrag` when next touched. (`Splitter.tsx` was deleted with the dockable-panel
-  refactor — the dock's sashes replaced it.)
+- [x] **Finish the drag-helper sweep.** `Popout.tsx` and `LayersPanel.tsx` were the last two hand-rolled
+  pointermove/pointerup pairs and now use `startPointerDrag`; `grep` confirms no
+  `addEventListener('pointermove')` survives outside `lib/pointerDrag.ts`. `edgeAutoScroll` moved there
+  from `Timeline.tsx` in the same pass, so all the drag plumbing lives in one module. Popout also lost a
+  now-write-only `dragging` ref (the grab offset rides in the drag's own closure).
+  (`Splitter.tsx` was deleted with the dockable-panel refactor — the dock's sashes replaced it.)
+  _Smoke-tested by the owner in `npm run dev` (2026-09-04): both converted drags work — the Popout
+  header (Stills / image editor) and the Layers-panel ⠿ restack. Layers reordering is now covered by
+  `e2e/layersReorder.spec.ts`; the Popout header drag remains manual-only._
 - [ ] **IPC hardening pass (pre-distribution).** The renderer-facing IPC surface is
   unvalidated: `writeProjectFile(project, path)` is an arbitrary-path write primitive,
   `importPaths` an arbitrary read, and the window runs `sandbox: false`. Fine for a
@@ -16,8 +21,63 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   CSP. Tracked from the 2026-07 code review.
 ## Bugs
 
-- [ ] **Font size input clamps on every keystroke** — the font size field in the Inspector prevents the user from clearing the value while typing (snaps back to the minimum on each change). Should allow any intermediate value including empty string while focused; clamp to the minimum only on `blur`. Fix: local draft string in component state on `onChange`, commit + clamp on `onBlur`.
-- [ ] **Edge-scroll speed accelerates instead of staying constant** — `edgeAutoScroll` in `Timeline.tsx` scales scroll speed with proximity to the edge. It should use a flat constant speed; proximity should only gate whether scrolling is active (within the ~40px zone) or not.
+- [x] **The bottom-most layer was pinned as "Background" and could never be restacked.** Found by the
+  owner (2026-09-04) while smoke-testing the drag-helper sweep: dragging in the Layers panel "did
+  nothing". The drag was fine — the row simply WAS the pinned Background, which showed a `▦` instead of a
+  `⠿` handle. The pin turned out to be UI-only: `backgroundId = stack[0].id` lived entirely in
+  `LayersPanel.tsx`, and nothing in the preview, the exporter, `shared/layers.ts` or the schema treats
+  `layers[0]` specially; git history shows it arrived with the panel's first commit and no doc recorded a
+  reason. It cost the common case dearly: a single-clip Reel has exactly one layer, which was therefore
+  "the Background" — unmovable, with nothing placeable beneath it — and a two-layer project offered one
+  draggable row and so nothing to reorder.
+  **Dropped it** (owner picked option (a)): every visible layer now has a handle and restacks, the
+  bottom-most included. The store side needed no change — `reorderLayers` already takes the visible set
+  front→back and `applyVisibleOrder` permutes those layers within their own slots, so handing it the full
+  set is exactly what it was built for. The `▦`/"bg" row treatment is gone with the pin.
+  _Verified: `e2e/layersReorder.spec.ts` (7 cases) covers the restack, raising the bottom-most layer, and
+  the two-layer case the owner actually hit; restoring the pin fails exactly the four pin-dependent tests._
+  _Not addressed: the ⠿ handle is a 14px target on a 30px row and the rest of the row only selects, which
+  is the other half of the "it does nothing" impression. Widening the drag affordance to the whole row
+  (checkbox and label staying clickable) is a separate, still-open UI question._
+- [x] **Font size input clamps on every keystroke** — was a whole CLASS of field, not one: 13 numeric
+  Inspector inputs clamped inside `onChange`, so the clamped number was re-rendered into the field on
+  every keystroke (the field could never be emptied, and "1"/"12" on the way to "120" snapped to the
+  minimum as you typed). Fixed once, by a shared `NumberInput` in `components/ui.tsx` that holds a DRAFT
+  string while focused: an in-range value still commits live so the preview follows each keystroke, while
+  an empty/partial/out-of-range one waits for blur or Enter, and Escape abandons it. Every clamping site
+  now routes through it (`Inspector.tsx` x11, `TextStyleControls.tsx` x2) — which also picked up a
+  two-sided clamp (trim-in) that the original grep had missed because its `onChange` spanned lines.
+  _Verified: `e2e/numberInput.spec.ts` covers clear-while-typing, the below-minimum intermediate, live
+  commit, blur-clamps, blur-on-empty reverting, Escape and Enter; the first test fails without the fix.
+  Escape initially still committed — blur fires `commit` before React applies `setDraft(null)` — which is
+  why the draft is mirrored in a ref._
+- [x] **Edge-scroll speed accelerates instead of staying constant** — `edgeAutoScroll` scaled speed by
+  edge proximity, so the same hand movement scrolled a different distance depending on where in the 40px
+  band it landed and overshooting was hard to correct. The band is now a pure GATE: `edgeScrollDir`
+  returns a DIRECTION (-1/0/+1) and the rate is a flat 12 px/frame anywhere inside it (or past the edge).
+  Moved out of `Timeline.tsx` into `lib/pointerDrag.ts` alongside the rest of the drag plumbing, so the
+  invariant is unit-testable — `pointerDrag.test.ts` pins that the velocity is identical across the whole
+  band, which is what fails if a ramp is ever reintroduced.
+  **A second, independent cause of the same symptom surfaced in testing:** the owner reported that after
+  the flat-rate fix, dragging RIGHT felt right but dragging LEFT still accelerated. That was not the
+  scroll rate at all — the track's width is derived from the total duration, so moving the rightmost tile
+  left shrinks the scrollable area mid-drag; the browser clamps `scrollLeft` to the new maximum, that
+  clamp feeds into the drag's `dx` (which adds the live `scrollLeft`), the tile jumps further left, and
+  the width shrinks again. A genuine runaway that a constant velocity cannot fix. The vertical axis had
+  been guarded against exactly this since the lane-resize work (`resizeFloorH`); `dragFloorW` is the
+  horizontal twin, pinning the width for the drag and releasing it on pointer-up. All five horizontal
+  drags go through one `startEdgeScrollX` wrapper so none can re-open it. The floor must RATCHET with the
+  drag rather than be snapshotted at grab time — the owner caught a first attempt that pinned once: drag
+  right and the natural width grows past the stale floor, so dragging back left without releasing is free
+  to shrink through that band and the runaway returns. (The vertical twin always ratcheted; porting it
+  dropped that property.) _Verified: owner-reported and
+  reproduced; `e2e/edgeScrollShrink.spec.ts` asserts the width never shrinks mid-drag, that the pin is
+  released after, a mid-drag REVERSAL (right then left, still held) never shrinks, and a leftward drag moves
+  the tile by exactly the pointer distance. Both failure modes were reproduced by reverting the fix: with no
+  pin two tests fail; with a frozen (non-ratcheting) pin exactly the reversal test fails._
+  _Smoke-tested by the owner in `npm run dev` (2026-09-04): both directions and a mid-drag reversal are
+  free of acceleration, and 12 px/frame was confirmed as the right feel — leave `EDGE_SCROLL_SPEED` alone
+  without a reason to change it._
 - [ ] **Deleted files break the library until restart** — if a media file is deleted from disk via File Explorer while the app is running, the library doesn't detect the missing file. Unclear whether it crashes the entire library or just that one card. Two parts to fix: (1) **graceful missing-file handling** — when a media asset's original or proxy is not found on disk, show a "missing" badge on the library card and a placeholder on the timeline block instead of erroring; the rest of the library should continue working normally. (2) **optional file-watch** — use `fs.watch` or a periodic existence-check on import/project-load to detect deletions proactively and mark assets missing without requiring a restart. Missing assets should block export with a clear error listing which files need to be re-imported.
 - [ ] **Captions consistently miss words near the start and end of a cut audio clip** — when captioning a clip that's been trimmed/split, words near both the beginning AND the end are dropped, not just the start. This symmetry is a strong hint that the clip is being extracted to its own audio file (`inSec`→`outSec` slice) *before* being handed to whisper, rather than whisper transcribing the full original source and the app filtering/re-timing the words afterward. If so, likely causes: (1) the extraction itself trims a few ms short on each edge (off-by-one in the ffmpeg trim args), so the edge words are physically cut out of the audio before whisper ever sees them; (2) whisper's own behavior of dropping/mis-timing words very close to the start/end of a short audio buffer (no surrounding context to disambiguate) — a known whisper.cpp quirk on tightly-cropped clips. Investigate: check whether the caption pipeline extracts a per-clip audio slice or transcribes the whole source — if it slices, try padding the extraction by ~0.5s on each edge (silence or a bit of surrounding audio) before running whisper, then clip the resulting word timestamps back to the true `inSec`/`outSec` window when building caption segments. Look in the caption-audio pipeline (`CaptionAudioButton` → whichever service extracts audio and calls whisper) and `docs/FFMPEG-NOTES.md` for any existing notes on whisper edge behavior.
 - [~] **Preview plays positive gain through a WebAudio GainNode** — `HTMLMediaElement.volume` clamps at 1.0, so `gainDb > 0` used to play at unity in the preview while the export applied the full boost via `volume=`. This was previously recorded here as BLOCKED on the renderer origin, with an `app://` migration as the prerequisite. **That diagnosis was wrong.** The real blocker was that `reelmedia://` was registered without the `corsEnabled` privilege, so the scheme could not do CORS *at all* — which is why `crossOrigin="anonymous"` failed to load whatever `Access-Control-Allow-Origin` the handler sent, and why the plain element was tainted into measured silence. Adding `corsEnabled` (done while fixing bundled-font loading, which was broken by the same omission) unblocked it with no origin change. Re-measured from the production `file://` page afterwards, on all three proxy kinds (`audio.m4a`, `proxy.mp4`, alpha `proxy.webm`): each reaches `canplay` with `crossOrigin`, and a GainNode on it measures +6 dB as exactly 2x the unity peak, gain 0 as true silence. Routing is LAZY and one-way — an element stays on plain `element.volume` until it needs more than unity, because `createMediaElementSource` can only be called once per element and cannot be undone, so the common attenuation path is left exactly as it was; a routing failure falls back to the clamped `volume` rather than going silent. `e2e/previewGain.spec.ts` pins both routes via the `appliedGain`/`isRouted`/`previewAudioState` seams. _Unverified: not yet confirmed BY EAR in `npm run dev` that a +6 dB clip is audibly louder than the same clip at 0 dB. The graph is measured correct; a human still has to listen._
@@ -273,12 +333,38 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   smoke-tested through `npm run dev` (fade feel + real export A/B)._
   _Original notes:_ `Layer.keyframes` (`LayerKeyframe[]` — `tSec` relative to `startSec`, so moving the block keeps the motion; migration v12). Interpolation is LINEAR with hold outside the range, resolved through the shared `layerTransformAt` (+`upsertKeyframe`) in `shared/layers.ts`. Preview evaluates it per playhead tick; canvas drags / corner-resizes on a keyframed layer write a keyframe at the playhead. Export bakes the same ramps into per-frame `t` expressions: `scale=…:eval=frame` AFTER the setpts shift (so absolute timeline time, composing with speed/freezes) + `overlay` x/y with `overlay_w/2` centering; keyframed still images become `-loop 1` + `fps=30` frame streams — every mechanism verified against ffmpeg 8.1.1 frame dumps (FFMPEG-NOTES "Keyframed layer motion"). UI: Inspector ▸ Keyframes (add-at-playhead, list with seek/remove, clear); base X/Y/Zoom disable while keyframed. _Limitations: no opacity keyframes (no clean per-frame alpha path in one ffmpeg pass — needs sendcmd or a slow geq); text layers excluded (they animate via `TextContent.animation`); easing is linear-only._ _Unverified: not yet smoke-tested through `npm run dev` with real media (drag-writes-keyframe feel, export A/B against preview motion)._
 
-- [ ] **Import folder into library** — allow the user to select an entire folder (via File → "Import folder…" or drag-dropping a folder onto the library) and have all supported media files inside it imported at once. Each file goes through the normal import pipeline (hash, probe, proxy job). Subdirectories should be traversed recursively with an option to skip or include them.
-
+- [x] **Import folder into library** — a directory anywhere in an import path list is now walked and its
+  media imported. Expansion happens in ONE place (`expandImportPaths`, `services/importScan.ts`, called by
+  `importMany`), so the File menu, the OS drag-drop onto the window and the `importPaths` IPC all handle a
+  folder identically — dropping a folder needed no new code at all. Recursive by default (depth-capped, and
+  a 500-file limit so a mis-dropped tree cannot queue thousands of probes), skipping `node_modules`/`.git`/
+  recycle bins and the junk real media folders carry (macOS `._` resource forks share their file's
+  extension, so the extension filter alone would import them). Order is stable and duplicates collapse.
+  The extension filter applies only INSIDE a walked directory: an explicitly picked file is always
+  attempted, since the dialog offers an "All files" filter. UI: File ▸ Import folder… (`importFolderDialog`,
+  an `openDirectory` picker). _Verified: `importScan.test.ts` (10 cases) runs against a real temp tree._
+  _Smoke-tested by the owner in `npm run dev` (2026-09-04): importing a real folder works._
 - [ ] **Merge clips** — select two or more video clips on the timeline and merge them into a single new media asset in the library, which then replaces the original clips as one contiguous block. Useful for locking a multi-clip sequence before applying effects or to simplify a crowded timeline. Implementation: a "Merge selected clips" toolbar button / right-click action triggers a mini-export job — runs the same per-clip normalize + concat pipeline as the main export but outputs a single proxy-quality H.264 `.mp4` (no ASS burn, no music mix), imports the result into the library as a new asset, removes the source clips from the timeline, and places the merged asset at the first clip's `startSec`. The original source files remain in the library untouched. Edge cases: clips must be on the same lane and contiguous (or the gaps become black frames in the merge — warn the user); freeze holds and speed changes should be baked into the merged output.
 
-- [ ] **Snap selected clip to end of previous clip** — a keybind or toolbar button that moves the selected layer's `startSec` to exactly the `endSec` of the nearest clip that ends before it (on the same lane), eliminating any gap between them. Useful for butting clips together without manual dragging. If no prior clip exists in the lane, snap to 0. Logic belongs in a pure helper in `lib/timeline.ts`; dispatches via `liveUpdate` + `commitLive` so it's undoable.
-
+- [x] **Snap selected clip to end of previous clip** — ⇤ Snap on the timeline bar and the **N** keybind.
+  The pure part is `snapToPreviousDelta` (`lib/links.ts`, not `lib/timeline.ts` as first sketched: it is a
+  whole-SET operation over the flattened tile model and belongs next to the `moveItemsBy` it feeds, and
+  timeline.ts is imported BY links.ts so the dependency only runs one way). It returns a delta, or `null`
+  when already flush — which is also what disables the button and skips the undo step.
+  - Works on a link group / multi-selection: the EARLIEST member is the anchor and its LANE is the one
+    searched, so the set moves as one and every relative offset survives.
+  - The delta is signed: a gap closes leftwards, but an OVERLAP closes rightwards, because a tile that
+    starts before the anchor and ends after it is still "the previous clip". Considering only tiles that
+    END before the anchor would skip an overlapping neighbour and snap to some earlier one instead.
+  - With nothing before it in the lane, it snaps to 0.
+  Needed a `lane` on `Tile` (`TileLane`). Rather than leave that as a second copy of the grouping
+  `Timeline.tsx` already derived inline, both now go through `layerLane`/`audioLane` in `lib/links.ts`,
+  and `LANE_STYLE` is `satisfies Record<TileLane, …>` so a new band without colours is a compile error.
+  _Verified: 10 unit cases in `links.test.ts` + `e2e/snapToPrevious.spec.ts`
+  (button, keybind, N ignored while a field has focus, disabled-when-flush, snap-to-0, single undo step,
+  linked pair keeping its offset) — driven against the BUILT app with real pointer/keyboard events._
+  _Touches neither preview nor export, so the ffmpeg smoke-test gate does not apply; what a human may still
+  want to judge is whether the LANE is the right notion of "previous clip" for their editing habits._
 - [ ] **Canvas waveform (crisp at any zoom / sample-level).** Audio waveforms are pre-rendered PNGs (`showwavespic`), now scaled to clip length so they're crisp at realistic zoom — but a raster image still softens at extreme zoom. The DAW-style fix: decode the audio to a multi-resolution **peak cache**, then render the waveform on a `<canvas>` that redraws per zoom/scroll, switching from min/max peak envelopes to individual samples at extreme zoom. Bigger feature; overkill for Reels but the "infinite zoom" answer. Start: a peaks extractor (ffmpeg → raw PCM → min/max buckets) + a `<WaveformCanvas>` lane renderer.
 
 - [ ] **Per-lane mute / solo** — the gutter header bubbles exist but have no mute or solo buttons yet. Would require adding a `mutedLanes` set to the project or view state, then skipping those layers during preview playback and export. Data-model change needed before the UI can wire up.

@@ -36,6 +36,10 @@ import {
   expandGroup,
   expandSelection,
   moveItemsBy,
+  snapToPreviousDelta,
+  layerLane,
+  audioLane,
+  type TileLane,
   refKey,
   refKeys,
   tileOf,
@@ -43,7 +47,7 @@ import {
   trimItemsBy,
   type SourceDuration
 } from '@/lib/links'
-import { startPointerDrag } from '@/lib/pointerDrag'
+import { edgeAutoScroll, startPointerDrag } from '@/lib/pointerDrag'
 import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
@@ -71,61 +75,6 @@ const EMPTY_AUDIO: AudioClip[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
-/**
- * Auto-scrolls a container while a drag hovers near an edge. Feed the pointer's
- * X and/or Y on every move (`setX`/`setY`; an axis stays off until first fed); a
- * rAF loop nudges `scrollLeft`/`scrollTop` proportional to edge proximity and
- * calls `onScroll` after each real nudge, so the drag handler can re-apply its
- * position (which reads the live scroll offset). Horizontal callers (block
- * drags) use only `setX`; the vertical lane-resize uses only `setY`. Returns
- * `setX`/`setY`/`stop`; the loop starts immediately.
- */
-function edgeAutoScroll(
-  el: HTMLElement,
-  onScroll: () => void
-): { setX: (x: number) => void; setY: (y: number) => void; stop: () => void } {
-  const EDGE = 40 // px from an edge where auto-scroll kicks in
-  const MAX = 20 // px/frame at the very edge
-  let x = -1
-  let y = -1
-  let raf = 0
-  const tick = (): void => {
-    raf = requestAnimationFrame(tick)
-    const rect = el.getBoundingClientRect()
-    let scrolled = false
-    if (x >= 0) {
-      let v = 0
-      if (x < rect.left + EDGE) v = -Math.min(1, (rect.left + EDGE - x) / EDGE) * MAX
-      else if (x > rect.right - EDGE) v = Math.min(1, (x - (rect.right - EDGE)) / EDGE) * MAX
-      if (v !== 0) {
-        const before = el.scrollLeft
-        el.scrollLeft = Math.max(0, before + v)
-        if (el.scrollLeft !== before) scrolled = true
-      }
-    }
-    if (y >= 0) {
-      let v = 0
-      if (y < rect.top + EDGE) v = -Math.min(1, (rect.top + EDGE - y) / EDGE) * MAX
-      else if (y > rect.bottom - EDGE) v = Math.min(1, (y - (rect.bottom - EDGE)) / EDGE) * MAX
-      if (v !== 0) {
-        const before = el.scrollTop
-        el.scrollTop = Math.max(0, before + v)
-        if (el.scrollTop !== before) scrolled = true
-      }
-    }
-    if (scrolled) onScroll()
-  }
-  raf = requestAnimationFrame(tick)
-  return {
-    setX: (nx: number) => {
-      x = nx
-    },
-    setY: (ny: number) => {
-      y = ny
-    },
-    stop: () => cancelAnimationFrame(raf)
-  }
-}
 const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
   id: l.id,
   startSec: l.startSec,
@@ -163,7 +112,9 @@ function ToolbarButton({
 }
 
 // Lane visual identity (the labeled bands the user likes — now purely a visual
-// grouping over the unified layer stack).
+// grouping over the unified layer stack). Keyed by `TileLane`, and the
+// `satisfies` makes that exhaustive: adding a band to the tile model without
+// giving it colours here is a compile error, so the two can't drift apart.
 const LANE_STYLE = {
   clips: { dot: 'bg-sky-400', tint: 'border-sky-400/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/20', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
   layout: { dot: 'bg-fuchsia-400', tint: 'border-fuchsia-400/30 bg-fuchsia-500/10', block: 'border-fuchsia-400/40 bg-fuchsia-500/20', sel: 'border-fuchsia-300 ring-1 ring-fuchsia-300/50' },
@@ -172,9 +123,9 @@ const LANE_STYLE = {
   caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
   audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
   fx: { dot: 'bg-teal-300', tint: 'border-teal-300/30 bg-teal-500/10', block: 'border-teal-400/40 bg-teal-500/15', sel: 'border-teal-300 ring-1 ring-teal-300/50' }
-} as const
+} as const satisfies Record<TileLane, { dot: string; tint: string; block: string; sel: string }>
 
-type LaneKey = keyof typeof LANE_STYLE
+type LaneKey = TileLane
 
 // Vertical geometry passed to the pure lane-layout math in `lib/lanes.ts`.
 const LANE_GEOM: LaneGeometry = {
@@ -245,6 +196,7 @@ export function Timeline(): JSX.Element {
   const addAudioClip = useProject((s) => s.addAudioClip)
   const removeItems = useProject((s) => s.removeItems)
   const splitItemsAt = useProject((s) => s.splitItemsAt)
+  const snapItemsToPrevious = useProject((s) => s.snapItemsToPrevious)
   const linkItems = useProject((s) => s.linkItems)
   const unlinkItems = useProject((s) => s.unlinkItems)
   const canUndo = useProject((s) => s.past.length > 0)
@@ -298,6 +250,21 @@ export function Timeline(): JSX.Element {
   // the tallest it reached this drag so the browser can't clamp scrollTop out
   // from under us (which would feed back into the height and run away). 0 = idle.
   const [resizeFloorH, setResizeFloorH] = useState(0)
+  // The horizontal twin of `resizeFloorH`, and it exists for the same reason.
+  // The track's width is derived from `total`, so dragging the RIGHTMOST tile
+  // leftwards shrinks the scrollable area under the drag: the browser then
+  // clamps `scrollLeft` down to the new maximum, that clamp feeds straight into
+  // the drag's `dx` (which adds the live `scrollLeft`), the tile jumps further
+  // left, and the width shrinks again — a runaway that reads as the edge-scroll
+  // accelerating even though its rate is flat. Pinning the width breaks the loop.
+  //
+  // It must be a HIGH-WATER MARK maintained for the whole drag, not a snapshot
+  // taken at grab time: drag right and the natural width grows past a stale
+  // floor, so dragging back left without releasing is free to shrink again
+  // through that band and the runaway returns. `draggingX` gates the ratchet
+  // (below) and is cleared on release, when the track settles to its content.
+  const [dragFloorW, setDragFloorW] = useState(0)
+  const [draggingX, setDraggingX] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
@@ -316,13 +283,25 @@ export function Timeline(): JSX.Element {
   )
   const total = Math.max(visualDuration(layers), audioEnd)
 
+  // The track's width from content alone. Deliberately does NOT include
+  // `dragFloorW` — the floor ratchets off this, so folding the floor back in
+  // would make it feed itself and the track could only ever grow.
+  const naturalW = Math.max(total * pxPerSec + 24, 200)
+  // Ratchet the floor up while a horizontal drag is live, so the pin tracks the
+  // widest the track has been THIS drag (drag right, then left without
+  // releasing). Settles immediately: the floor only changes when `naturalW`
+  // does, and re-running with an unchanged `naturalW` is a no-op.
+  useEffect(() => {
+    if (draggingX) setDragFloorW((f) => Math.max(f, naturalW))
+  }, [draggingX, naturalW])
+
   // Group the unified stack into typed lanes (a visual grouping only).
   // Compound clips are clip-like, so they ride in the Clips lane.
   const grouped = useMemo(() => {
-    const video = layers.filter((l) => l.content.kind === 'video' || l.content.kind === 'compound')
-    const layout = layers.filter((l) => l.content.kind === 'layout')
-    const text = layers.filter((l) => l.content.kind === 'text')
-    const image = layers.filter((l) => l.content.kind === 'image')
+    const video = layers.filter((l) => layerLane(l) === 'clips')
+    const layout = layers.filter((l) => layerLane(l) === 'layout')
+    const text = layers.filter((l) => layerLane(l) === 'text')
+    const image = layers.filter((l) => layerLane(l) === 'image')
     return {
       video,
       layout,
@@ -337,8 +316,8 @@ export function Timeline(): JSX.Element {
   const capRows = useMemo(() => packRows(captionSegs.map(spanOf)), [captionSegs])
   // A generated effect track is an ADDITION layered over source audio, so it
   // gets its own band — sharing the Audio lane hid which clip it belongs to.
-  const dryClips = useMemo(() => audioClips.filter((a) => !a.fx), [audioClips])
-  const fxClips = useMemo(() => audioClips.filter((a) => !!a.fx), [audioClips])
+  const dryClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'audio'), [audioClips])
+  const fxClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'fx'), [audioClips])
   const packAudio = (clips: AudioClip[]): Map<string, number> =>
     packRows(
       clips.map((a) => ({
@@ -403,6 +382,32 @@ export function Timeline(): JSX.Element {
       scroller?.stop()
       setResizeFloorH(0) // release the pin; the track settles to its true height
     })
+  }
+
+  /**
+   * Start the edge auto-scroller for a HORIZONTAL drag, pinning the track's
+   * scrollable width for the drag's lifetime (see `dragFloorW`). Every
+   * horizontal drag goes through this rather than `edgeAutoScroll` directly, so
+   * none of them can re-open the shrink runaway; the vertical lane resize keeps
+   * calling `edgeAutoScroll` itself and pins the HEIGHT instead. Releasing the
+   * pin rides on the `stop()` every caller already runs in its `onUp`.
+   */
+  const startEdgeScrollX = (
+    sc: HTMLElement,
+    onScroll: () => void
+  ): { setX: (x: number) => void; stop: () => void } => {
+    // Arm the ratchet; the effect above seeds and then maintains the floor from
+    // the live content width, so it keeps up with a drag that reverses.
+    setDraggingX(true)
+    const s = edgeAutoScroll(sc, onScroll)
+    return {
+      setX: s.setX,
+      stop: () => {
+        s.stop()
+        setDraggingX(false)
+        setDragFloorW(0) // release; the track settles to its true width
+      }
+    }
   }
 
   // Snap targets: layer + audio boundaries, playhead, 0, end. `skip` (ref keys)
@@ -626,7 +631,7 @@ export function Timeline(): JSX.Element {
       // accumulate (and the transform yields a comp, spliced back at editPath).
       useProject.getState().liveUpdate(() => moveItemsBy(comp0, refs, snapped - startSec))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       if (!dragged) {
@@ -679,7 +684,7 @@ export function Timeline(): JSX.Element {
       const snapped = snap(edge0 + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
       useProject.getState().liveUpdate(() => trimItemsBy(comp0, refs, mode, snapped - edge0, srcDur))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       if (dragged) useProject.getState().commitLive(before)
@@ -742,7 +747,7 @@ export function Timeline(): JSX.Element {
         })
       }))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       useProject.getState().commitLive(before)
@@ -786,7 +791,7 @@ export function Timeline(): JSX.Element {
         }
       }))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       useProject.getState().commitLive(before)
@@ -834,7 +839,7 @@ export function Timeline(): JSX.Element {
         })
       }))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       useProject.getState().commitLive(before)
@@ -848,6 +853,11 @@ export function Timeline(): JSX.Element {
 
   const canDelete = selection.length > 0
   const deleteSelected = (): void => removeItems(selection)
+
+  // Butting the selection against its lane's previous tile. Disabled when it is
+  // already flush, so the button reflects whether pressing it would do anything.
+  const canSnapPrev = !!comp && snapToPreviousDelta(comp, selection, srcDur) !== null
+  const snapSelectedToPrevious = (): void => snapItemsToPrevious(selection, srcDur)
 
   const canLink = !!comp && canLinkItems(comp, selection)
   const canUnlink = !!comp && canUnlinkItems(comp, selection)
@@ -1069,6 +1079,13 @@ export function Timeline(): JSX.Element {
         >
           ✂ Split
         </ToolbarButton>
+        <ToolbarButton
+          title="Butt the selection against the previous clip in its lane, closing the gap (N). With nothing before it, snaps to the start."
+          onClick={snapSelectedToPrevious}
+          disabled={!canSnapPrev}
+        >
+          ⇤ Snap
+        </ToolbarButton>
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
         </ToolbarButton>
@@ -1178,7 +1195,7 @@ export function Timeline(): JSX.Element {
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
             className="relative h-full cursor-pointer"
-            style={{ width: Math.max(total * pxPerSec + 24, 200), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
+            style={{ width: Math.max(naturalW, dragFloorW), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
           >
             {/* Ruler */}
             <div className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30" style={{ height: RULER_H }} />

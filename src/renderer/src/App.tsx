@@ -57,7 +57,8 @@ export default function App(): JSX.Element {
     })
   }, [queryClient])
 
-  // Keyboard shortcuts: space play/pause, Ctrl+Z/Y undo/redo, Del delete, S split.
+  // Keyboard shortcuts: space play/pause, Ctrl+Z/Y undo/redo, Del delete, S split,
+  // N snap-to-previous, T text layer.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey
@@ -106,6 +107,14 @@ export default function App(): JSX.Element {
         const { selection } = useUi.getState()
         if (selection.length) {
           project.splitItemsAt(selection, usePlayback.getState().time, (mediaId) =>
+            assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
+          )
+        }
+      } else if (!mod && e.key.toLowerCase() === 'n') {
+        // Butt the selection against the previous clip in its lane (no gap).
+        const { selection } = useUi.getState()
+        if (selection.length) {
+          project.snapItemsToPrevious(selection, (mediaId) =>
             assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
           )
         }

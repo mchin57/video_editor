@@ -15,6 +15,7 @@ export const {
   getDataDir,
   importDialog,
   importPaths,
+  importFolderDialog,
   extractAudioDialog,
   listProjectMedia,
   ensureProxy,

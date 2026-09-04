@@ -15,6 +15,7 @@ import {
   moveItemsBy,
   pruneLinkGroups,
   removeItems,
+  snapToPreviousDelta,
   splitItemsAt,
   splittableAt,
   timelineTiles,
@@ -28,6 +29,7 @@ import type {
   AudioClip,
   CaptionSegment,
   Layer,
+  Composition,
   Project,
   TimelineItemRef,
   VideoContent
@@ -105,7 +107,7 @@ const pair = (): Project =>
     audioClips: [audio('A1', 2, 6, 'g1')]
   })
 
-const startOf = (p: Project, ref: TimelineItemRef): number =>
+const startOf = (p: Composition, ref: TimelineItemRef): number =>
   timelineTiles(p).find((t) => t.ref.kind === ref.kind && t.ref.id === ref.id)!.startSec
 
 describe('link / unlink', () => {
@@ -430,5 +432,82 @@ describe('timelineTiles', () => {
     const p = pair()
     expect(startOf(p, L('L1'))).toBe(0)
     expect(startOf(p, A('A1'))).toBe(2)
+  })
+})
+
+describe('snapToPreviousDelta', () => {
+  it('closes the gap to the previous clip in the same lane', () => {
+    const p = project({ layers: [layer('L1', 0, 4), layer('L2', 10, 3)] })
+    expect(snapToPreviousDelta(p, [L('L2')])).toBeCloseTo(-6)
+    const after = moveItemsBy(p, [L('L2')], snapToPreviousDelta(p, [L('L2')])!)
+    expect(startOf(after, L('L2'))).toBeCloseTo(4)
+  })
+
+  it('picks the NEAREST preceding tile, not the first', () => {
+    const p = project({ layers: [layer('L1', 0, 2), layer('L2', 5, 2), layer('L3', 20, 2)] })
+    expect(snapToPreviousDelta(p, [L('L3')])).toBeCloseTo(-13) // to L2's end at 7
+  })
+
+  it('snaps to 0 when nothing precedes it in the lane', () => {
+    const p = project({ layers: [layer('L1', 8, 2)] })
+    expect(snapToPreviousDelta(p, [L('L1')])).toBeCloseTo(-8)
+  })
+
+  it('ignores tiles in other lanes', () => {
+    // A text tile ending at 9 must not pull a CLIPS tile — different bands.
+    const p = project({ layers: [layer('L1', 12, 2), textLayer('T1', 3, 6)] })
+    expect(snapToPreviousDelta(p, [L('L1')])).toBeCloseTo(-12)
+    expect(snapToPreviousDelta(p, [L('T1')])).toBeCloseTo(-3)
+  })
+
+  it('separates the audio and fx bands', () => {
+    const fx = { ...audio('F1', 0, 5), fx: {} as AudioClip['fx'] }
+    const p = project({ audioClips: [fx, audio('A1', 9, 2)] })
+    // A1 is in the audio lane; the fx tile ending at 5 is a different band.
+    expect(snapToPreviousDelta(p, [A('A1')])).toBeCloseTo(-9)
+  })
+
+  it('pushes RIGHT to close an overlap with the previous clip', () => {
+    const p = project({ layers: [layer('L1', 0, 10), layer('L2', 4, 3)] })
+    expect(snapToPreviousDelta(p, [L('L2')])).toBeCloseTo(6) // out to L1's end at 10
+  })
+
+  it('returns null when already flush', () => {
+    const p = project({ layers: [layer('L1', 0, 4), layer('L2', 4, 3)] })
+    expect(snapToPreviousDelta(p, [L('L2')])).toBeNull()
+  })
+
+  it('returns null for refs that do not resolve', () => {
+    expect(snapToPreviousDelta(project({ layers: [layer('L1', 0, 4)] }), [L('nope')])).toBeNull()
+  })
+
+  it('moves a link group as one, off its EARLIEST member', () => {
+    // Group = L1 [10,20] + its audio A1 [12,18]; a clip ends at 4.
+    const p = project({
+      layers: [layer('P0', 0, 4), layer('L1', 10, 10, 'g1')],
+      audioClips: [audio('A1', 12, 6, 'g1')]
+    })
+    const refs = [L('L1'), A('A1')]
+    const d = snapToPreviousDelta(p, refs)!
+    expect(d).toBeCloseTo(-6) // anchor L1 10 → 4
+    const after = moveItemsBy(p, refs, d)
+    expect(startOf(after, L('L1'))).toBeCloseTo(4)
+    expect(startOf(after, A('A1'))).toBeCloseTo(6) // offset preserved
+  })
+
+  it('never snaps a tile onto a member of its own selection', () => {
+    const p = project({ layers: [layer('L1', 0, 4), layer('L2', 10, 3)] })
+    // Both selected: L1 is the anchor and L2 is excluded as a candidate, so the
+    // set slides to the start rather than L2 collapsing onto L1.
+    expect(snapToPreviousDelta(p, [L('L1'), L('L2')])).toBeNull()
+  })
+
+  it('skips an open-ended audio tile as a snap target', () => {
+    // outSec 0 + unknown source duration = an unknown end; can't snap to it.
+    const open = { ...audio('A0', 0, 0), outSec: 0 }
+    const p = project({ audioClips: [open, audio('A1', 9, 2)] })
+    expect(snapToPreviousDelta(p, [A('A1')])).toBeCloseTo(-9)
+    // With the duration known, it becomes a real target.
+    expect(snapToPreviousDelta(p, [A('A1')], () => 5)).toBeCloseTo(-4)
   })
 })
