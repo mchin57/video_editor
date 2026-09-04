@@ -43,10 +43,37 @@ export function registerMediaSchemePrivileges(): void {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: MEDIA_SCHEME,
-      privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, bypassCSP: true }
+      // `corsEnabled` is what lets the renderer's `@font-face` rules read
+      // reelmedia:// at all. CSS font fetches are ALWAYS CORS-mode, and without
+      // this privilege Chromium rejects the scheme outright ("Cross origin
+      // requests are only supported for protocol schemes: chrome, …, https"),
+      // so every bundled font silently fell back to a system face and the
+      // preview stopped matching what libass burns into the export. It also
+      // obliges the handler to send `Access-Control-Allow-Origin` (see CORS).
+      privileges: {
+        standard: true,
+        secure: true,
+        stream: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        bypassCSP: true
+      }
     }
   ])
 }
+
+/**
+ * Now that the scheme is `corsEnabled`, every response has to opt in explicitly
+ * or the fetch is blocked. The renderer is the only consumer (and the handler
+ * already refuses to escape the asset dir), so `*` is the whole policy.
+ * `Range` must be allow-listed too, or the <video> seek preflight fails.
+ */
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+  'Access-Control-Allow-Headers': 'Range',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges'
+} as const
 
 function webStream(nodeStream: NodeJS.ReadableStream): ReadableStream {
   // Readable.toWeb returns a web ReadableStream the Response constructor accepts.
@@ -68,14 +95,14 @@ export function registerMediaProtocol(): void {
 
     // Path-traversal guard: target must stay within this asset's folder.
     if (target !== assetRoot && !target.startsWith(assetRoot + sep)) {
-      return new Response('Forbidden', { status: 403 })
+      return new Response('Forbidden', { status: 403, headers: { ...CORS_HEADERS } })
     }
 
     let size: number
     try {
       size = (await fsp.stat(target)).size
     } catch {
-      return new Response('Not found', { status: 404 })
+      return new Response('Not found', { status: 404, headers: { ...CORS_HEADERS } })
     }
 
     const contentType = MIME[extname(target).toLowerCase()] ?? 'application/octet-stream'
@@ -88,12 +115,13 @@ export function registerMediaProtocol(): void {
       if (start >= size || start > end) {
         return new Response('Range Not Satisfiable', {
           status: 416,
-          headers: { 'Content-Range': `bytes */${size}` }
+          headers: { ...CORS_HEADERS, 'Content-Range': `bytes */${size}` }
         })
       }
       return new Response(webStream(createReadStream(target, { start, end })), {
         status: 206,
         headers: {
+          ...CORS_HEADERS,
           'Content-Type': contentType,
           'Content-Range': `bytes ${start}-${end}/${size}`,
           'Accept-Ranges': 'bytes',
@@ -105,6 +133,7 @@ export function registerMediaProtocol(): void {
     return new Response(webStream(createReadStream(target)), {
       status: 200,
       headers: {
+        ...CORS_HEADERS,
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
         'Content-Length': String(size)

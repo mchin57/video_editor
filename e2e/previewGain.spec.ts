@@ -2,15 +2,14 @@
  * Preview gain. A clip's `gainDb` must reach its preview element so the mix you
  * hear matches the one the export builds with `volume=`.
  *
- * These specs also PIN THE KNOWN CEILING: `HTMLMediaElement.volume` is clamped
- * to [0, 1], so a boost above 0 dB cannot be reproduced in the preview. The
- * WebAudio route that would lift it is blocked in this app — the renderer runs
- * from `file://`, so a `reelmedia://` element either fails to load (with
- * `crossOrigin`) or is tainted and emits silence (without it). Both were
- * measured against the real app; see `lib/mediaGain.ts` for the details and the
- * prerequisite. The clamp is asserted here deliberately, so that if someone
- * later gives the renderer a real origin and wires up a GainNode, this test
- * fails and tells them to finish the job.
+ * These specs also PIN THE CURRENT CEILING: `HTMLMediaElement.volume` is clamped
+ * to [0, 1], so a boost above 0 dB is not reproduced in the preview. The
+ * WebAudio route that would lift it used to be impossible (a `reelmedia://`
+ * element either failed to load with `crossOrigin` or was tainted and emitted
+ * silence without it) — but making the scheme `corsEnabled` to fix font loading
+ * also unblocked it, and it is now measured to work. See `lib/mediaGain.ts`.
+ * The clamp is asserted here deliberately, so that whoever wires up the GainNode
+ * gets a failing test telling them to finish the job.
  */
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -100,8 +99,9 @@ test('the media element keeps loading — no CORS opt-in that would break it', a
 }) => {
   await placeClip(page, 0)
   await expect.poll(() => follower(page).count(), { timeout: 30_000 }).toBeGreaterThan(0)
-  // crossOrigin="anonymous" makes a reelmedia:// element fail with
-  // MEDIA_ELEMENT_ERROR from a file:// page. It must stay off.
+  // The app does not set crossOrigin, and this pins that. (It is now SAFE to
+  // set — the scheme is corsEnabled — but turning it on is only worth doing as
+  // part of wiring the GainNode, so until then the plain element stays.)
   expect(await follower(page).first().getAttribute('crossorigin')).toBeNull()
   await expect
     .poll(

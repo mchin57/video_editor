@@ -5,29 +5,29 @@
  * export's `volume=` filter. `dbToGain` is the same conversion the export uses
  * (`main/services/audio.ts`) — keep the two in step.
  *
- * **Above 0 dB the preview cannot match the export, and this is a dead end, not
- * an oversight.** `HTMLMediaElement.volume` is spec-clamped to [0, 1], so a
- * boost needs WebAudio — and WebAudio cannot be reached from here. Both routes
- * were tried against the real app and both fail (see `e2e/previewGain.spec.ts`,
- * which pins the working half):
+ * **Above 0 dB the preview does not match the export — currently by choice, no
+ * longer by necessity.** `HTMLMediaElement.volume` is spec-clamped to [0, 1],
+ * so a boost needs WebAudio, and WebAudio needs a CORS-clean element.
  *
- * - Media is served from `reelmedia://`, a different origin from the renderer
- *   page, so `createMediaElementSource` needs a CORS-clean element. Adding
- *   `crossOrigin="anonymous"` makes the media **fail to load outright**
- *   (`MEDIA_ELEMENT_ERROR: Format error`): the production page is `file://`,
- *   whose origin serialises to `null`, and Chromium refuses the CORS request
- *   whatever `Access-Control-Allow-Origin` the protocol handler returns.
- * - Without `crossOrigin` the media loads and plays, and
- *   `createMediaElementSource` does NOT throw — but the element is tainted, so
- *   the graph emits SILENCE. Measured: an AnalyserNode on a playing element
- *   (`readyState` 4, `currentTime` advancing, context running) read a peak
- *   amplitude of exactly 0.
+ * That used to be impossible. `reelmedia://` was registered WITHOUT the
+ * `corsEnabled` privilege, so `crossOrigin="anonymous"` made media fail to load
+ * outright (`MEDIA_ELEMENT_ERROR: Format error`) no matter what
+ * `Access-Control-Allow-Origin` the handler returned, and dropping
+ * `crossOrigin` left the element tainted — `createMediaElementSource` did not
+ * throw, but an AnalyserNode on it measured a peak amplitude of exactly 0.
  *
- * So routing through WebAudio would either break preview audio entirely or mute
- * it. The real prerequisite is giving the renderer a true origin (serving it
- * from a custom standard scheme instead of `file://`), at which point the first
- * route starts working and this module can grow a GainNode. Until then a boost
- * is capped at unity in the preview and correct in the export.
+ * Fixing the font-loading bug removed that wall: the scheme is now `corsEnabled`
+ * and answers with `Access-Control-Allow-Origin` (`main/mediaProtocol.ts`).
+ * Re-measured against the real app afterwards, from the production `file://`
+ * page: a `crossOrigin="anonymous"` element reaches `canplay`, and an
+ * AnalyserNode on the resulting graph reads a peak of ~0.26 — real signal, not
+ * silence. So a GainNode here WOULD work now.
+ *
+ * It is deliberately not wired up yet: routing every preview element through an
+ * AudioContext is a behaviour change to all preview audio, not a free win, and
+ * a boost above unity is the rarer half of the feature. Until someone takes
+ * that on, a boost stays capped at unity in the preview and correct in the
+ * export (`e2e/previewGain.spec.ts` pins both halves).
  *
  * Below 0 dB — the common case, and the only one that affects a mix decision
  * you can act on — `element.volume` IS exact: it is a plain linear gain, the
