@@ -80,6 +80,10 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls. _The natural unit to save/apply is `TextStyleBase` (`shared/project.ts`) — the shape `TextContent` and `CaptionStyle` already share via `TextStyleControls`._
 - [ ] **Text-behind-subject effect** — composite a text layer between the subject and background using the auto background removal mask (see subject-aware crop item). Requires the segmentation feature to be built first.
 
+### Text updates (continued)
+
+- [ ] **Free rotation for text overlays** — `CaptionStyle` already has a rotation field, but text overlay layers (`TextContent`) have no rotation control, unlike image layers (which support 90° `rotateQuarters` steps). Add a free-angle rotation field to `TextContent`, matching what captions already have — not just 90° steps. Preview via CSS `transform: rotate()`; export via ASS `\frz` (already used for caption rotation in `assBuilder`, so the export path is proven — just needs wiring to text overlays too). UI: a rotation handle on the preview canvas (drag to rotate) plus a numeric angle field in the Inspector, consistent with how captions already expose rotation.
+
 ### Insert menu & shapes
 
 - [ ] **"Insert" menu + basic shapes** — add an "Insert" dropdown to the menu bar (alongside File / Edit) with options to place primitive shapes onto the timeline as visual layers. Each shape is a new `ShapeContent` layer kind in `shared/project.ts`. The layer sits in the Image lane and supports the same move/resize/restack/keyframe controls as image layers. Preview renders via inline SVG in `PreviewStage`; export rasterises the SVG to a transparent PNG overlay burned before the ASS pass (most reliable cross-shape ffmpeg path).
