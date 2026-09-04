@@ -18,6 +18,24 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   CSP. Tracked from the 2026-07 code review.
 ## Bugs
 
+- [ ] **The bottom-most layer is pinned as "Background" and can never be restacked.** Found by the owner
+  (2026-09-04) while smoke-testing the drag-helper sweep: dragging in the Layers panel "did nothing".
+  The drag is fine (`e2e/layersReorder.spec.ts` covers it, and passes identically against the pre-sweep
+  implementation) — the row simply was the pinned Background, which shows a `▦` instead of a `⠿` handle.
+  **The pin is UI-only.** `backgroundId = stack[0].id` lives entirely in `LayersPanel.tsx`; nothing in the
+  preview, the exporter, `shared/layers.ts` or the schema treats `layers[0]` specially. So the restriction
+  buys nothing and costs a lot in the common case: a single-clip Reel has exactly ONE layer, which is
+  therefore "the Background" — unmovable, with no way to put an image or colour beneath it. A two-layer
+  project offers one draggable row and so nothing to reorder either.
+  Options, roughly in order of effort: (a) drop the pin entirely and let every layer restack — the
+  bottom-most is just whatever sits lowest; (b) keep a Background CONCEPT but make it an explicit,
+  user-assigned flag on a layer rather than "whichever happens to be at index 0"; (c) keep the pin only
+  when a layer is genuinely backdrop-like (full-frame, untransformed), which is fuzzy and probably not
+  worth it. (a) is the honest fix unless the pin was protecting something that is no longer true — worth
+  checking `docs/HANDOFF.md` for why it exists before deleting it.
+  Whichever way it goes, the ⠿ handle is also a 14px target on a 30px row and the rest of the row only
+  selects; widening the drag affordance to the whole row (with the checkbox/label still clickable) would
+  remove the other half of the "it does nothing" impression.
 - [x] **Font size input clamps on every keystroke** — was a whole CLASS of field, not one: 13 numeric
   Inspector inputs clamped inside `onChange`, so the clamped number was re-rendered into the field on
   every keystroke (the field could never be emptied, and "1"/"12" on the way to "120" snapped to the
