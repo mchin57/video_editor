@@ -74,6 +74,32 @@ export type SourceDuration = (mediaId: string) => number
 export type TileLane = 'clips' | 'layout' | 'text' | 'image' | 'caption' | 'audio' | 'fx'
 
 /**
+ * Which band a layer is drawn in. The ONE definition — `timelineTiles` fills
+ * `Tile.lane` from it and `Timeline.tsx` groups its lane rows with it, so a new
+ * content kind lands in the same band for rendering and for every tile
+ * operation (`snapToPreviousDelta`'s notion of "the previous clip" included).
+ * A compound clip is clip-like, so it rides with video.
+ */
+export function layerLane(l: Layer): TileLane {
+  switch (l.content.kind) {
+    case 'layout':
+      return 'layout'
+    case 'text':
+      return 'text'
+    case 'image':
+      return 'image'
+    default:
+      return 'clips'
+  }
+}
+
+/** Which band an audio clip is drawn in: a generated effect track is an ADDITION
+ *  over source audio, so it gets its own band rather than hiding in Audio. */
+export function audioLane(a: AudioClip): TileLane {
+  return a.fx ? 'fx' : 'audio'
+}
+
+/**
  * One timeline tile, flattened out of whichever array it lives in — the common
  * shape every group operation works against, so the three-array walk exists in
  * exactly one place.
@@ -120,8 +146,7 @@ export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0):
       ref: { kind: 'layer', id: l.id },
       startSec: l.startSec,
       endSec: l.endSec,
-      // A compound clip is clip-like, so it rides in the Clips lane.
-      lane: k === 'layout' ? 'layout' : k === 'text' ? 'text' : k === 'image' ? 'image' : 'clips',
+      lane: layerLane(l),
       linkGroupId: l.linkGroupId,
       linkable: k !== 'layout',
       splittable: k !== 'layout'
@@ -143,7 +168,7 @@ export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0):
       ref: { kind: 'audio', id: a.id },
       startSec: a.startSec,
       endSec: audioTileEnd(a, srcDur(a.mediaId)),
-      lane: a.fx ? 'fx' : 'audio',
+      lane: audioLane(a),
       linkGroupId: a.linkGroupId,
       linkable: true,
       splittable: true

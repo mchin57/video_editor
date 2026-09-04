@@ -319,8 +319,10 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     starts before the anchor and ends after it is still "the previous clip". Considering only tiles that
     END before the anchor would skip an overlapping neighbour and snap to some earlier one instead.
   - With nothing before it in the lane, it snaps to 0.
-  Needed a `lane` on `Tile` (`TileLane`), which `timelineTiles` now fills — it must stay in step with
-  `Timeline.tsx`'s `LANE_STYLE` keys. _Verified: 10 unit cases in `links.test.ts` + `e2e/snapToPrevious.spec.ts`
+  Needed a `lane` on `Tile` (`TileLane`). Rather than leave that as a second copy of the grouping
+  `Timeline.tsx` already derived inline, both now go through `layerLane`/`audioLane` in `lib/links.ts`,
+  and `LANE_STYLE` is `satisfies Record<TileLane, …>` so a new band without colours is a compile error.
+  _Verified: 10 unit cases in `links.test.ts` + `e2e/snapToPrevious.spec.ts`
   (button, keybind, N ignored while a field has focus, disabled-when-flush, snap-to-0, single undo step,
   linked pair keeping its offset) — driven against the BUILT app with real pointer/keyboard events._
   _Touches neither preview nor export, so the ffmpeg smoke-test gate does not apply; what a human may still

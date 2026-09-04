@@ -37,6 +37,9 @@ import {
   expandSelection,
   moveItemsBy,
   snapToPreviousDelta,
+  layerLane,
+  audioLane,
+  type TileLane,
   refKey,
   refKeys,
   tileOf,
@@ -109,7 +112,9 @@ function ToolbarButton({
 }
 
 // Lane visual identity (the labeled bands the user likes — now purely a visual
-// grouping over the unified layer stack).
+// grouping over the unified layer stack). Keyed by `TileLane`, and the
+// `satisfies` makes that exhaustive: adding a band to the tile model without
+// giving it colours here is a compile error, so the two can't drift apart.
 const LANE_STYLE = {
   clips: { dot: 'bg-sky-400', tint: 'border-sky-400/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/20', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
   layout: { dot: 'bg-fuchsia-400', tint: 'border-fuchsia-400/30 bg-fuchsia-500/10', block: 'border-fuchsia-400/40 bg-fuchsia-500/20', sel: 'border-fuchsia-300 ring-1 ring-fuchsia-300/50' },
@@ -118,9 +123,9 @@ const LANE_STYLE = {
   caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
   audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
   fx: { dot: 'bg-teal-300', tint: 'border-teal-300/30 bg-teal-500/10', block: 'border-teal-400/40 bg-teal-500/15', sel: 'border-teal-300 ring-1 ring-teal-300/50' }
-} as const
+} as const satisfies Record<TileLane, { dot: string; tint: string; block: string; sel: string }>
 
-type LaneKey = keyof typeof LANE_STYLE
+type LaneKey = TileLane
 
 // Vertical geometry passed to the pure lane-layout math in `lib/lanes.ts`.
 const LANE_GEOM: LaneGeometry = {
@@ -266,10 +271,10 @@ export function Timeline(): JSX.Element {
   // Group the unified stack into typed lanes (a visual grouping only).
   // Compound clips are clip-like, so they ride in the Clips lane.
   const grouped = useMemo(() => {
-    const video = layers.filter((l) => l.content.kind === 'video' || l.content.kind === 'compound')
-    const layout = layers.filter((l) => l.content.kind === 'layout')
-    const text = layers.filter((l) => l.content.kind === 'text')
-    const image = layers.filter((l) => l.content.kind === 'image')
+    const video = layers.filter((l) => layerLane(l) === 'clips')
+    const layout = layers.filter((l) => layerLane(l) === 'layout')
+    const text = layers.filter((l) => layerLane(l) === 'text')
+    const image = layers.filter((l) => layerLane(l) === 'image')
     return {
       video,
       layout,
@@ -284,8 +289,8 @@ export function Timeline(): JSX.Element {
   const capRows = useMemo(() => packRows(captionSegs.map(spanOf)), [captionSegs])
   // A generated effect track is an ADDITION layered over source audio, so it
   // gets its own band — sharing the Audio lane hid which clip it belongs to.
-  const dryClips = useMemo(() => audioClips.filter((a) => !a.fx), [audioClips])
-  const fxClips = useMemo(() => audioClips.filter((a) => !!a.fx), [audioClips])
+  const dryClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'audio'), [audioClips])
+  const fxClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'fx'), [audioClips])
   const packAudio = (clips: AudioClip[]): Map<string, number> =>
     packRows(
       clips.map((a) => ({
