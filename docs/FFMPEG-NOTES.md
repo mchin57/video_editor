@@ -383,6 +383,36 @@ through libass, so they rasterise to a transparent PNG via a hidden
   instead of disappearing.
 
 
+### Pill geometry — inline backgrounds and the layer scale (verified 2026-09)
+
+Two separate parity breaks in the same overlay, both invisible until the crop
+bug above was fixed and rasterised text actually reached the output.
+
+- **An inline box's background is sized from ITS OWN font metrics.** The pill is
+  a `<span>` *between* the positioning box and the text span. `buildHtml`
+  declared `font-family`/`font-size` on the innermost text span only, so the
+  pill inherited the document default **16px** and painted a box 16px + 2x18px
+  padding = **52px** tall behind 108.89px glyphs — measured exactly 52px in the
+  export. The text sat outside its own background. The preview never had this
+  because it declares the font on the wrapper div, which the pill inherits.
+  Fix: declare the font on `.box`, never on `.txt`. Pinned in
+  `textImage.test.ts`.
+- **Decorations must scale by `layer.scale` too, not just the output scale.**
+  The preview scales a resized overlay with `transform: scale(layer.scale)`, so
+  padding/stroke/shadow grow with the glyphs; the export computes absolute
+  output px and was multiplying only by `sy`. A 1.43x overlay burned with a pill
+  sized for the unscaled text. `decorationScale(layerScale, outputScale)`
+  (`services/textScale.ts`) is now the one factor, and its test pins the real
+  invariant: the pill-to-font ratio survives the trip unchanged.
+- **`line-height` has to match the preview's.** It sets the line box the pill
+  background is drawn around. The preview uses Tailwind `leading-tight`; read
+  out of the built stylesheet as `--leading-tight: 1.25` (the export had 1.1).
+- Measuring it: export a frame, scan for the pill's bounding box, compare its
+  **aspect** with the preview's (aspect is scale-independent, so it compares
+  across the CSS-scaled stage and the 1080x1920 output). Before: 5.346. After:
+  1.598, against a preview of 1.596.
+
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

@@ -44,6 +44,15 @@ export interface TextImageSpec {
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+/**
+ * Line height for the overlay box. Must equal what the preview puts on its text
+ * layer, which is Tailwind's `leading-tight` — read out of the built stylesheet
+ * as `--leading-tight: 1.25`, not assumed. It sets the line box the pill's
+ * background is drawn around, so a mismatch shows up as a pill of the wrong
+ * height and as different wrap spacing on multi-line text.
+ */
+const LINE_HEIGHT = 1.25
+
 /** `@font-face` rules for every bundled font, loaded from disk (file://). */
 function fontFaceCss(fontsDir: string | null): string {
   if (!fontsDir) return ''
@@ -56,15 +65,17 @@ function fontFaceCss(fontsDir: string | null): string {
 
 /** Build the standalone HTML page that draws one text element on a transparent
  *  W×H canvas, positioned by its center. */
-function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string | null): string {
+export function buildHtml(
+  spec: TextImageSpec,
+  W: number,
+  H: number,
+  fontsDir: string | null
+): string {
   const def = resolveFont(spec.fontFamily)
   const pillOn = spec.pill.enabled
-  const span: string[] = [
-    `font-family:"${def.label}",system-ui,sans-serif`,
-    'font-weight:normal',
-    `font-size:${spec.fontSizePx}px`,
-    'line-height:1.1'
-  ]
+  // NOTE: the font goes on the BOX, not here — see the `box` array below. This
+  // span only carries the paint (fill/stroke/shadow).
+  const span: string[] = []
   // Gradient fill via background-clip:text, else a flat colour.
   if (spec.gradient) {
     span.push(
@@ -106,7 +117,18 @@ function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string |
     `transform:translate(-50%,-50%)${rot}`,
     spec.widthPx != null ? `width:${spec.widthPx}px` : 'max-width:88%',
     'text-align:center',
-    'white-space:pre-wrap'
+    'white-space:pre-wrap',
+    // The font MUST be declared here, on the wrapper, exactly as the preview
+    // declares it on its overlay div. The pill is an inline span BETWEEN this
+    // box and the text, and an inline box's background is sized from ITS OWN
+    // font metrics — so with the font set only on the inner text span the pill
+    // inherited the default 16px, drew a box sized for 16px type, and the real
+    // glyphs spilled straight out of it. (Measured: pill computed font-size
+    // 16px here vs 76px in the preview.)
+    `font-family:"${def.label}",system-ui,sans-serif`,
+    'font-weight:normal',
+    `font-size:${spec.fontSizePx}px`,
+    `line-height:${LINE_HEIGHT}`
   ]
   const inner = `<span class="txt">${esc(spec.text)}</span>`
   const content = pillOn ? `<span class="pill">${inner}</span>` : inner

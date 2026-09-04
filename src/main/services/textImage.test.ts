@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { NativeImage } from 'electron'
-import { normaliseCapture } from './textImage'
+import { buildHtml, normaliseCapture } from './textImage'
 
 /** Minimal NativeImage stand-in: this helper only ever asks for the size and
  *  (maybe) resizes, so nothing else needs to exist. */
@@ -54,5 +54,49 @@ describe('normaliseCapture', () => {
       width: 1080,
       height: 1920
     })
+  })
+})
+
+describe('buildHtml — the pill inherits the text metrics', () => {
+  const spec = {
+    text: 'Sick',
+    xCenter: 464,
+    yCenter: 1109,
+    fontFamily: 'montserrat-extrabold',
+    fontSizePx: 108.89,
+    color: '#ffffff',
+    pill: { enabled: true, color: '#000000ff', padPx: 25.79 }
+  }
+  /** The declaration block of one CSS rule in the generated page. */
+  const css = (html: string, cls: string): string =>
+    html.match(new RegExp(`\\.${cls}\\{([^}]*)\\}`))?.[1] ?? ''
+
+  it('declares the font on the BOX, not only on the text span', () => {
+    // THE regression. The pill is an inline span between .box and .txt, and an
+    // inline box's background is sized from ITS OWN font metrics. With the font
+    // declared only on .txt, the pill inherited the default 16px and drew a box
+    // 52px tall (16 + 2x18 padding, measured) while the glyphs were 108.89px —
+    // so the text spilled straight out of its own background.
+    const box = css(buildHtml(spec, 1080, 1920, null), 'box')
+    expect(box).toContain('font-size:108.89px')
+    expect(box).toContain('Montserrat ExtraBold')
+    expect(box).toContain('font-weight:normal')
+  })
+
+  it('does NOT re-declare font-size on the text span, which would re-break it', () => {
+    // A font-size on .txt shadows the inherited one for the glyphs only, putting
+    // the pill back on a different size from the text it wraps.
+    expect(css(buildHtml(spec, 1080, 1920, null), 'txt')).not.toContain('font-size')
+  })
+
+  it('uses the same line-height as the preview (Tailwind leading-tight)', () => {
+    // Read from the built stylesheet as --leading-tight: 1.25. It sets the line
+    // box the pill background is drawn around, so a mismatch is a wrong-height
+    // pill and different multi-line spacing.
+    expect(css(buildHtml(spec, 1080, 1920, null), 'box')).toContain('line-height:1.25')
+  })
+
+  it('still carries the fill on the text span', () => {
+    expect(css(buildHtml(spec, 1080, 1920, null), 'txt')).toContain('color:#ffffff')
   })
 })

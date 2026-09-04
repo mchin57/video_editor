@@ -10,15 +10,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type {
-  CaptionStyle,
-  Composition,
-  PillStyle,
-  Project,
-  ShadowStyle,
-  StrokeStyle,
-  Stabilize
-} from '@shared/project'
+import type { CaptionStyle, Composition, Project, Stabilize } from '@shared/project'
 import {
   audioClipAudible,
   effectiveDenoise,
@@ -55,16 +47,10 @@ import {
 } from './exporterArgs'
 import { buildAss, type AssOverlay, type AssSparkle } from './assBuilder'
 import { createTextRenderer, type TextRenderer } from './textImage'
+import { decorationScale, scaledPill, scaledShadow, scaledStroke } from './textScale'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
 import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
-
-/** Scale optional decorations from logical to output px (matching font scaling). */
-const scaledStroke = (s: StrokeStyle | null | undefined, k: number): StrokeStyle | null | undefined =>
-  s ? { widthPx: s.widthPx * k, color: s.color } : s
-const scaledShadow = (s: ShadowStyle | null | undefined, k: number): ShadowStyle | null | undefined =>
-  s ? { distancePx: s.distancePx * k, color: s.color, blur: s.blur * k } : s
-const scaledPill = (p: PillStyle, k: number): PillStyle => ({ ...p, padPx: p.padPx * k })
 
 /**
  * An overlay carrying ONLY sparkles, for text whose glyphs burned as a PNG.
@@ -582,6 +568,13 @@ async function renderComposition(
     } else if (c.kind === 'text') {
       if (c.text.trim().length === 0) continue
       const fontSizePx = c.fontSizePx * l.scale * sy
+      // Decoration scale. The preview scales the WHOLE overlay
+      // (`transform: scale(layer.scale)`), so a resized text layer grows its
+      // pill padding, stroke and shadow along with the glyphs. Scaling those by
+      // `sy` alone — as this did — left a 1.43x-resized overlay wearing a pill
+      // sized for the unscaled text. `l.scale` belongs in here exactly as it
+      // already does in `fontSizePx` above.
+      const decoScale = decorationScale(l.scale, sy)
       // Sparkles are computed from the SAME shared helper the preview uses, at
       // the output-scaled font size — every offset it returns is a multiple of
       // that size, so the layout matches the preview at any preset. Positions
@@ -621,9 +614,9 @@ async function renderComposition(
               color: c.color,
               gradient: c.gradient ?? undefined,
               widthPx: c.widthPx != null ? c.widthPx * l.scale * sx : undefined,
-              pill: scaledPill(c.pill, sy),
-              stroke: scaledStroke(c.stroke, sy) ?? null,
-              shadow: scaledShadow(c.shadow, sy) ?? null
+              pill: scaledPill(c.pill, decoScale),
+              stroke: scaledStroke(c.stroke, decoScale) ?? null,
+              shadow: scaledShadow(c.shadow, decoScale) ?? null
             },
             l.startSec,
             l.endSec
@@ -661,9 +654,13 @@ async function renderComposition(
         fontFamily: c.fontFamily,
         fontSizePx,
         color: c.gradient ? c.gradient.from : c.color,
-        pill: c.pill,
-        stroke: scaledStroke(c.stroke, sy),
-        shadow: scaledShadow(c.shadow, sy),
+        // Same decoration scale as the raster path above: a resized layer's
+        // pill/stroke/shadow grow with its glyphs, because that is what the
+        // preview's `scale(layer.scale)` does to the whole overlay. The pill
+        // was passed through completely unscaled here.
+        pill: scaledPill(c.pill, decoScale),
+        stroke: scaledStroke(c.stroke, decoScale),
+        shadow: scaledShadow(c.shadow, decoScale),
         // Resolved (not raw): rasterised text (gradient/wrap fallback) never
         // animates, and the preview resolves through the same helper.
         animation: textAnim,
