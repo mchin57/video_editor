@@ -19,7 +19,14 @@ import type {
   StrokeStyle,
   Stabilize
 } from '@shared/project'
-import { effectiveDenoise, effectiveOut, effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
+import {
+  audioClipAudible,
+  effectiveDenoise,
+  effectiveOut,
+  effectiveStabilize,
+  isNeutralColor,
+  videoSpeed
+} from '@shared/project'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { hasSpeedRamp, speedSegments } from '@shared/speed'
@@ -674,6 +681,9 @@ async function renderComposition(
 
   // Audio clips (music / voiceover / extracted), trimmed + placed by the graph.
   for (const a of comp.audioClips) {
+    // A muted clip is dropped before it ever becomes an input: `volume=0` would
+    // work, but it would still decode the whole source to add silence to amix.
+    if (!audioClipAudible(a)) continue
     const asset = await getAsset(a.mediaId)
     if (!asset) continue
     const proxy = join(getSubdir('media'), a.mediaId, 'audio.m4a')

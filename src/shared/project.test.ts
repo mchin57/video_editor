@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_CAPTION_STYLE,
+  audioClipAudible,
   effectiveCaptionStyle,
   effectiveStabilize,
   migrateProject,
@@ -28,7 +29,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(20)
+    expect(p.version).toBe(21)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -100,7 +101,7 @@ describe('migrateProject — noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
-    expect(p.version).toBe(20)
+    expect(p.version).toBe(21)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
@@ -188,7 +189,7 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
     const cells = (p.layers[0].content as { cells: { mute: boolean }[] }).cells
     expect(cells[0].mute).toBe(false) // the comp panel is audible again
     expect(cells[1].mute).toBe(true) // the clip cell is untouched
-    expect(p.version).toBe(20)
+    expect(p.version).toBe(21)
   })
 
   it('reaches comp cells nested inside a compound layer', () => {
@@ -251,7 +252,7 @@ describe('migrateProject — chorus renamed to ensemble (v20)', () => {
       ensemble: { voices: 3, spreadMs: 32, detuneCents: 14 }
     })
     expect('chorus' in fx.settings).toBe(false)
-    expect(p.version).toBe(20)
+    expect(p.version).toBe(21)
   })
 
   it('reaches effect tracks inside a nested composition', () => {
@@ -289,5 +290,70 @@ describe('migrateProject — chorus renamed to ensemble (v20)', () => {
       kind: 'chorus',
       chorus: { voices: 3, rateHz: 1.2, depth: 0.35 }
     })
+  })
+})
+
+describe('audioClipAudible', () => {
+  it('treats an absent mute flag as audible (every pre-v21 clip)', () => {
+    expect(audioClipAudible({})).toBe(true)
+    expect(audioClipAudible({ mute: undefined })).toBe(true)
+  })
+
+  it('is the single decision the preview and the export both act on', () => {
+    // They reach silence differently — preview holds gain 0, export drops the
+    // clip from the mix — so the DECISION has to come from one place.
+    expect(audioClipAudible({ mute: true })).toBe(false)
+    expect(audioClipAudible({ mute: false })).toBe(true)
+  })
+})
+
+describe('migrateProject — per-clip audio mute (v21)', () => {
+  it('stamps v21 and leaves older clips audible', () => {
+    const p = migrateProject({
+      version: 20,
+      layers: [],
+      audioClips: [
+        {
+          id: 'a1',
+          mediaId: 'm1',
+          startSec: 0,
+          inSec: 0,
+          outSec: 5,
+          gainDb: 0,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false,
+          kind: 'music'
+        }
+      ]
+    })
+    expect(p.version).toBe(21)
+    expect(p.audioClips[0].mute).toBeUndefined()
+    expect(audioClipAudible(p.audioClips[0])).toBe(true)
+  })
+
+  it('preserves an explicit mute across a migration', () => {
+    const p = migrateProject({
+      version: 21,
+      layers: [],
+      audioClips: [
+        {
+          id: 'a1',
+          mediaId: 'm1',
+          startSec: 0,
+          inSec: 0,
+          outSec: 5,
+          gainDb: -6,
+          mute: true,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false,
+          kind: 'music'
+        }
+      ]
+    })
+    // The level survives muting — that is the point of a separate flag.
+    expect(p.audioClips[0].mute).toBe(true)
+    expect(p.audioClips[0].gainDb).toBe(-6)
   })
 })

@@ -45,7 +45,7 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { Field, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
+import { Check, Field, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
 
@@ -1278,15 +1278,21 @@ function AudioClipEditor(): JSX.Element | null {
         {asset?.fileName ?? clip.mediaId} · {clip.kind}
       </div>
       {linked && <LinkedNote size={groupSize} />}
-      <Field label={`Volume · ${clip.gainDb} dB`}>
+      <Check checked={!!clip.mute} onChange={(v) => update(clip.id, { mute: v })}>
+        🔇 Mute this clip
+      </Check>
+      {/* The level is kept, not zeroed, so unmuting restores it — but the
+          slider is disabled while muted so it can't look like it does anything. */}
+      <Field label={clip.mute ? `Volume · muted (${clip.gainDb} dB)` : `Volume · ${clip.gainDb} dB`}>
         <input
           type="range"
           min={-40}
           max={6}
           step={1}
           value={clip.gainDb}
+          disabled={!!clip.mute}
           onChange={(e) => update(clip.id, { gainDb: Number(e.target.value) })}
-          className="w-full accent-sky-400"
+          className={`w-full accent-sky-400 ${disabledCls}`}
         />
       </Field>
       {/* An audio clip's Start is a MOVE (its trim doesn't change), so unlike a

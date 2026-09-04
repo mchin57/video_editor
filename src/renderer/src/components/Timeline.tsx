@@ -980,7 +980,9 @@ export function Timeline(): JSX.Element {
             src={waveformUrl(asset.id)}
             alt=""
             onError={(e) => (e.currentTarget.style.display = 'none')}
-            className="pointer-events-none absolute inset-y-0 max-w-none opacity-70"
+            className={`pointer-events-none absolute inset-y-0 max-w-none ${
+              a.mute ? 'opacity-20' : 'opacity-70'
+            }`}
             style={{
               left: `${-(a.inSec / Math.max(0.01, eo - a.inSec)) * 100}%`,
               width: `${(maxOut / Math.max(0.01, eo - a.inSec)) * 100}%`,
@@ -989,18 +991,36 @@ export function Timeline(): JSX.Element {
             }}
           />
         )}
-        <span className="pointer-events-none absolute left-1.5 truncate text-[9px] font-medium text-sky-50">
+        <span
+          className={`pointer-events-none absolute left-1.5 truncate text-[9px] font-medium ${
+            a.mute ? 'text-zinc-400 line-through' : 'text-sky-50'
+          }`}
+        >
           {linked ? '🔗' : fxName ? '✧' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;
           {fxName ?? asset?.fileName ?? a.mediaId}
         </span>
-        {denoiseOverridden(a) && (
-          <span
-            className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${
-              a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
-            }`}
-            title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
-          >
-            N
+        {/* Badges share one right-aligned row so a clip carrying both doesn't
+            stack them on top of each other. */}
+        {(a.mute || denoiseOverridden(a)) && (
+          <span className="pointer-events-none absolute right-1.5 top-0.5 flex items-center gap-1">
+            {a.mute && (
+              <span
+                className="rounded bg-zinc-900/80 px-1 text-[8px] font-bold leading-tight text-zinc-100"
+                title="Muted — silent in the preview and left out of the export"
+              >
+                🔇
+              </span>
+            )}
+            {denoiseOverridden(a) && (
+              <span
+                className={`rounded px-1 text-[8px] font-bold leading-tight ${
+                  a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
+                }`}
+                title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
+              >
+                N
+              </span>
+            )}
           </span>
         )}
         <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />

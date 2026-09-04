@@ -482,6 +482,18 @@ export interface AudioClip {
   inSec: number
   outSec: number
   gainDb: number
+  /**
+   * Silence this clip without losing its level. Absent/false = audible.
+   * Deliberately separate from `gainDb` so muting is reversible: dropping the
+   * slider to -40 dB and back loses whatever you had set, and -40 dB is not
+   * actually silent anyway.
+   *
+   * The two sides reach silence differently and that is fine — the preview
+   * holds the clip at gain 0 (it still tracks the playhead, so unmuting mid-
+   * playback is instant), while the export omits the clip from the mix
+   * entirely rather than paying to decode a source that contributes nothing.
+   */
+  mute?: boolean
   fadeInSec: number
   fadeOutSec: number
   /** Duck under dialogue/other audio on export (typical for a music bed). */
@@ -616,6 +628,17 @@ export function denoiseOverridden(c: Pick<AudioClip, 'denoise'>): boolean {
   return isOverridden(c.denoise)
 }
 
+/**
+ * Whether this clip should be heard at all. The preview and the export both ask
+ * this, then act on it differently — the preview holds an inaudible clip at gain
+ * 0 (so it keeps following the playhead), the export leaves it out of the mix
+ * (so it never decodes a source contributing nothing). Same decision, one place,
+ * per the preview/export parity rule.
+ */
+export function audioClipAudible(c: Pick<AudioClip, 'mute'>): boolean {
+  return !c.mute
+}
+
 /** The stabilization actually applied to a video clip on export (clip override
  *  wins, else the project-wide default). `null` = no stabilization. */
 export function effectiveStabilize(
@@ -656,7 +679,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 20,
+    version: 21,
     preset: 'reel',
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -952,7 +975,10 @@ export function migrateProject(raw: unknown): Project {
     if (Array.isArray(p.audioClips)) renameFx(p.audioClips)
     if (Array.isArray(p.layers)) walk(p.layers)
   }
-  if (typeof p.version !== 'number' || p.version < 20) p.version = 20
+  // v21 adds per-clip audio mute (`AudioClip.mute`). Purely additive — absent
+  // means audible, which is what every older project means — so nothing about
+  // existing content changes and no rewrite step is needed.
+  if (typeof p.version !== 'number' || p.version < 21) p.version = 21
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

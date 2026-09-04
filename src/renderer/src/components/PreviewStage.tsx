@@ -18,7 +18,14 @@ import type {
   TextStyleBase,
   VideoContent
 } from '@shared/project'
-import { audioClipEnd, effectiveCaptionStyle, effectiveOut, pillRadiusPx, videoSpeed } from '@shared/project'
+import {
+  audioClipAudible,
+  audioClipEnd,
+  effectiveCaptionStyle,
+  effectiveOut,
+  pillRadiusPx,
+  videoSpeed
+} from '@shared/project'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { cellSpan, layoutCellRect } from '@shared/layouts'
@@ -297,7 +304,10 @@ function AudioFollower({
 
   // Element `volume` clamps at 1.0, so a boosted clip is routed through a
   // GainNode to match the export's `volume=` filter. @see lib/mediaGain.ts
-  useMediaGain(ref, clip.gainDb)
+  // A muted clip is held at gain 0 rather than skipped, so it keeps following
+  // the playhead and unmuting mid-playback is instant. The export reaches the
+  // same silence by dropping the clip — `audioClipAudible` is the shared call.
+  useMediaGain(ref, clip.gainDb, !audioClipAudible(clip))
 
   useEffect(() => {
     const a = ref.current
