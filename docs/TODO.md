@@ -10,6 +10,9 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   from `Timeline.tsx` in the same pass, so all the drag plumbing lives in one module. Popout also lost a
   now-write-only `dragging` ref (the grab offset rides in the drag's own closure).
   (`Splitter.tsx` was deleted with the dockable-panel refactor — the dock's sashes replaced it.)
+  _Smoke-tested by the owner in `npm run dev` (2026-09-04): both converted drags work — the Popout
+  header (Stills / image editor) and the Layers-panel ⠿ restack. Layers reordering is now covered by
+  `e2e/layersReorder.spec.ts`; the Popout header drag remains manual-only._
 - [ ] **IPC hardening pass (pre-distribution).** The renderer-facing IPC surface is
   unvalidated: `writeProjectFile(project, path)` is an arbitrary-path write primitive,
   `importPaths` an arbitrary read, and the window runs `sandbox: false`. Fine for a
