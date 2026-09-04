@@ -67,6 +67,8 @@ it can be deleted silently). Push it back into `lib/`.
   constant until release (no accelerating auto-scroll). The horizontal twin —
   dragging the rightmost tile LEFT, which shrinks the width — is now guarded
   the same way (`dragFloorW`) and covered by `e2e/edgeScrollShrink.spec.ts`.
+  The floor RATCHETS, so a drag that reverses (right, then left, still held) is
+  guarded too — a pin snapshotted at grab time silently misses that case.
 - **Collapse/expand:** the ▾/▸ chevron and double-clicking the bubble both
   toggle; collapsed lanes become a thin strip with blocks + resize handle hidden.
 - **Caption gutter bubble:** clicking it selects the lane-wide caption style.
