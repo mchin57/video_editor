@@ -250,6 +250,15 @@ export function Timeline(): JSX.Element {
   // the tallest it reached this drag so the browser can't clamp scrollTop out
   // from under us (which would feed back into the height and run away). 0 = idle.
   const [resizeFloorH, setResizeFloorH] = useState(0)
+  // The horizontal twin of `resizeFloorH`, and it exists for the same reason.
+  // The track's width is derived from `total`, so dragging the RIGHTMOST tile
+  // leftwards shrinks the scrollable area under the drag: the browser then
+  // clamps `scrollLeft` down to the new maximum, that clamp feeds straight into
+  // the drag's `dx` (which adds the live `scrollLeft`), the tile jumps further
+  // left, and the width shrinks again — a runaway that reads as the edge-scroll
+  // accelerating even though its rate is flat. Pinning the width to its
+  // high-water mark for the duration of the drag breaks the loop. 0 = idle.
+  const [dragFloorW, setDragFloorW] = useState(0)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
@@ -355,6 +364,29 @@ export function Timeline(): JSX.Element {
       scroller?.stop()
       setResizeFloorH(0) // release the pin; the track settles to its true height
     })
+  }
+
+  /**
+   * Start the edge auto-scroller for a HORIZONTAL drag, pinning the track's
+   * scrollable width for the drag's lifetime (see `dragFloorW`). Every
+   * horizontal drag goes through this rather than `edgeAutoScroll` directly, so
+   * none of them can re-open the shrink runaway; the vertical lane resize keeps
+   * calling `edgeAutoScroll` itself and pins the HEIGHT instead. Releasing the
+   * pin rides on the `stop()` every caller already runs in its `onUp`.
+   */
+  const startEdgeScrollX = (
+    sc: HTMLElement,
+    onScroll: () => void
+  ): { setX: (x: number) => void; stop: () => void } => {
+    setDragFloorW(trackInnerRef.current?.scrollWidth ?? 0)
+    const s = edgeAutoScroll(sc, onScroll)
+    return {
+      setX: s.setX,
+      stop: () => {
+        s.stop()
+        setDragFloorW(0) // release; the track settles to its true width
+      }
+    }
   }
 
   // Snap targets: layer + audio boundaries, playhead, 0, end. `skip` (ref keys)
@@ -578,7 +610,7 @@ export function Timeline(): JSX.Element {
       // accumulate (and the transform yields a comp, spliced back at editPath).
       useProject.getState().liveUpdate(() => moveItemsBy(comp0, refs, snapped - startSec))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       if (!dragged) {
@@ -631,7 +663,7 @@ export function Timeline(): JSX.Element {
       const snapped = snap(edge0 + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
       useProject.getState().liveUpdate(() => trimItemsBy(comp0, refs, mode, snapped - edge0, srcDur))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       if (dragged) useProject.getState().commitLive(before)
@@ -694,7 +726,7 @@ export function Timeline(): JSX.Element {
         })
       }))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       useProject.getState().commitLive(before)
@@ -738,7 +770,7 @@ export function Timeline(): JSX.Element {
         }
       }))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       useProject.getState().commitLive(before)
@@ -786,7 +818,7 @@ export function Timeline(): JSX.Element {
         })
       }))
     }
-    scroller = sc ? edgeAutoScroll(sc, () => last && onMove(last)) : null
+    scroller = sc ? startEdgeScrollX(sc, () => last && onMove(last)) : null
     startPointerDrag(onMove, () => {
       scroller?.stop()
       useProject.getState().commitLive(before)
@@ -1142,7 +1174,7 @@ export function Timeline(): JSX.Element {
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
             className="relative h-full cursor-pointer"
-            style={{ width: Math.max(total * pxPerSec + 24, 200), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
+            style={{ width: Math.max(total * pxPerSec + 24, 200, dragFloorW), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
           >
             {/* Ruler */}
             <div className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30" style={{ height: RULER_H }} />

@@ -37,6 +37,7 @@ item, move it into the guarded table below.
 | Snap-to-previous — the delta closes a gap (left) or an overlap (right), picks the NEAREST preceding tile in the SAME lane, ignores other lanes and the audio/fx split, snaps to 0 with nothing before it, moves a link group off its earliest member, and skips a tile whose end is unknown | `lib/links.test.ts` |
 | ⇤ Snap / **N** on the real timeline — button + keybind agree, N is ignored while a field has focus, the button disables when already flush, one undo step, a linked pair keeps its offset | `e2e/snapToPrevious.spec.ts` |
 | Edge auto-scroll speed is CONSTANT across the 40px band (no proximity ramp) | `lib/pointerDrag.test.ts` |
+| No horizontal shrink runaway — dragging the rightmost tile leftwards never shrinks the scrollable width mid-drag (the clamp used to feed back into the drag and accelerate it); the pin is released afterwards | `e2e/edgeScrollShrink.spec.ts` |
 | Numeric Inspector fields keep a draft while typing — clearable, below-minimum intermediates survive, in-range commits live, blur/Enter clamp, Escape abandons | `e2e/numberInput.spec.ts` |
 | OS-file import overlay can't get stuck (depth counter; the Timeline drop-ring shares the hook) | `e2e/dropOverlay.spec.ts` |
 
@@ -63,7 +64,9 @@ it can be deleted silently). Push it back into `lib/`.
 - **Vertical edge auto-scroll:** resize a lane past the top/bottom edge → the
   track scrolls with you and keeps growing the lane.
 - **No shrink runaway:** while shrinking a lane, the scrollable height holds
-  constant until release (no accelerating auto-scroll).
+  constant until release (no accelerating auto-scroll). The horizontal twin —
+  dragging the rightmost tile LEFT, which shrinks the width — is now guarded
+  the same way (`dragFloorW`) and covered by `e2e/edgeScrollShrink.spec.ts`.
 - **Collapse/expand:** the ▾/▸ chevron and double-clicking the bubble both
   toggle; collapsed lanes become a thin strip with blocks + resize handle hidden.
 - **Caption gutter bubble:** clicking it selects the lane-wide caption style.
