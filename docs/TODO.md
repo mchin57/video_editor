@@ -330,7 +330,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   smoke-tested through `npm run dev` (fade feel + real export A/B)._
   _Original notes:_ `Layer.keyframes` (`LayerKeyframe[]` — `tSec` relative to `startSec`, so moving the block keeps the motion; migration v12). Interpolation is LINEAR with hold outside the range, resolved through the shared `layerTransformAt` (+`upsertKeyframe`) in `shared/layers.ts`. Preview evaluates it per playhead tick; canvas drags / corner-resizes on a keyframed layer write a keyframe at the playhead. Export bakes the same ramps into per-frame `t` expressions: `scale=…:eval=frame` AFTER the setpts shift (so absolute timeline time, composing with speed/freezes) + `overlay` x/y with `overlay_w/2` centering; keyframed still images become `-loop 1` + `fps=30` frame streams — every mechanism verified against ffmpeg 8.1.1 frame dumps (FFMPEG-NOTES "Keyframed layer motion"). UI: Inspector ▸ Keyframes (add-at-playhead, list with seek/remove, clear); base X/Y/Zoom disable while keyframed. _Limitations: no opacity keyframes (no clean per-frame alpha path in one ffmpeg pass — needs sendcmd or a slow geq); text layers excluded (they animate via `TextContent.animation`); easing is linear-only._ _Unverified: not yet smoke-tested through `npm run dev` with real media (drag-writes-keyframe feel, export A/B against preview motion)._
 
-- [~] **Import folder into library** — a directory anywhere in an import path list is now walked and its
+- [x] **Import folder into library** — a directory anywhere in an import path list is now walked and its
   media imported. Expansion happens in ONE place (`expandImportPaths`, `services/importScan.ts`, called by
   `importMany`), so the File menu, the OS drag-drop onto the window and the `importPaths` IPC all handle a
   folder identically — dropping a folder needed no new code at all. Recursive by default (depth-capped, and
@@ -340,8 +340,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   The extension filter applies only INSIDE a walked directory: an explicitly picked file is always
   attempted, since the dialog offers an "All files" filter. UI: File ▸ Import folder… (`importFolderDialog`,
   an `openDirectory` picker). _Verified: `importScan.test.ts` (10 cases) runs against a real temp tree._
-  _Unverified: not smoke-tested in `npm run dev` — picking a real folder of iPhone footage and confirming
-  every clip lands in the library with proxies generating._
+  _Smoke-tested by the owner in `npm run dev` (2026-09-04): importing a real folder works._
 - [ ] **Merge clips** — select two or more video clips on the timeline and merge them into a single new media asset in the library, which then replaces the original clips as one contiguous block. Useful for locking a multi-clip sequence before applying effects or to simplify a crowded timeline. Implementation: a "Merge selected clips" toolbar button / right-click action triggers a mini-export job — runs the same per-clip normalize + concat pipeline as the main export but outputs a single proxy-quality H.264 `.mp4` (no ASS burn, no music mix), imports the result into the library as a new asset, removes the source clips from the timeline, and places the merged asset at the first clip's `startSec`. The original source files remain in the library untouched. Edge cases: clips must be on the same lane and contiguous (or the gaps become black frames in the merge — warn the user); freeze holds and speed changes should be baked into the merged output.
 
 - [x] **Snap selected clip to end of previous clip** — ⇤ Snap on the timeline bar and the **N** keybind.
