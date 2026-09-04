@@ -256,9 +256,15 @@ export function Timeline(): JSX.Element {
   // clamps `scrollLeft` down to the new maximum, that clamp feeds straight into
   // the drag's `dx` (which adds the live `scrollLeft`), the tile jumps further
   // left, and the width shrinks again — a runaway that reads as the edge-scroll
-  // accelerating even though its rate is flat. Pinning the width to its
-  // high-water mark for the duration of the drag breaks the loop. 0 = idle.
+  // accelerating even though its rate is flat. Pinning the width breaks the loop.
+  //
+  // It must be a HIGH-WATER MARK maintained for the whole drag, not a snapshot
+  // taken at grab time: drag right and the natural width grows past a stale
+  // floor, so dragging back left without releasing is free to shrink again
+  // through that band and the runaway returns. `draggingX` gates the ratchet
+  // (below) and is cleared on release, when the track settles to its content.
   const [dragFloorW, setDragFloorW] = useState(0)
+  const [draggingX, setDraggingX] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
@@ -276,6 +282,18 @@ export function Timeline(): JSX.Element {
     [audioClips, assetById]
   )
   const total = Math.max(visualDuration(layers), audioEnd)
+
+  // The track's width from content alone. Deliberately does NOT include
+  // `dragFloorW` — the floor ratchets off this, so folding the floor back in
+  // would make it feed itself and the track could only ever grow.
+  const naturalW = Math.max(total * pxPerSec + 24, 200)
+  // Ratchet the floor up while a horizontal drag is live, so the pin tracks the
+  // widest the track has been THIS drag (drag right, then left without
+  // releasing). Settles immediately: the floor only changes when `naturalW`
+  // does, and re-running with an unchanged `naturalW` is a no-op.
+  useEffect(() => {
+    if (draggingX) setDragFloorW((f) => Math.max(f, naturalW))
+  }, [draggingX, naturalW])
 
   // Group the unified stack into typed lanes (a visual grouping only).
   // Compound clips are clip-like, so they ride in the Clips lane.
@@ -378,12 +396,15 @@ export function Timeline(): JSX.Element {
     sc: HTMLElement,
     onScroll: () => void
   ): { setX: (x: number) => void; stop: () => void } => {
-    setDragFloorW(trackInnerRef.current?.scrollWidth ?? 0)
+    // Arm the ratchet; the effect above seeds and then maintains the floor from
+    // the live content width, so it keeps up with a drag that reverses.
+    setDraggingX(true)
     const s = edgeAutoScroll(sc, onScroll)
     return {
       setX: s.setX,
       stop: () => {
         s.stop()
+        setDraggingX(false)
         setDragFloorW(0) // release; the track settles to its true width
       }
     }
@@ -1174,7 +1195,7 @@ export function Timeline(): JSX.Element {
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
             className="relative h-full cursor-pointer"
-            style={{ width: Math.max(total * pxPerSec + 24, 200, dragFloorW), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
+            style={{ width: Math.max(naturalW, dragFloorW), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
           >
             {/* Ruler */}
             <div className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30" style={{ height: RULER_H }} />

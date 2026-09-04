@@ -67,6 +67,38 @@ test('the scrollable width never shrinks while dragging a tile leftwards', async
   for (const w of widths) expect(w).toBeGreaterThanOrEqual(widthAtGrab)
 })
 
+test('reversing mid-drag (right, then left without releasing) still never shrinks', async ({
+  appPage: page
+}) => {
+  // Owner-reported after the first fix: pinning the width ONCE at grab time
+  // leaves a stale floor. Dragging right grows the natural width past it, so
+  // dragging back left is free to shrink through that band and the runaway
+  // returns. The floor has to ratchet with the drag.
+  await arrangeFarOutClip(page)
+  await page.getByTestId('tile-layer-L1').scrollIntoViewIfNeeded()
+  const box = (await page.getByTestId('tile-layer-L1').boundingBox())!
+  const cx = box.x + box.width / 2
+  const cy = box.y + box.height / 2
+
+  await page.mouse.move(cx, cy)
+  await page.mouse.down()
+
+  // Out to the right first — this is what grows the track past the grab width.
+  for (let i = 1; i <= 5; i++) await page.mouse.move(cx + i * 40, cy)
+  const peak = await scrollWidth(page)
+
+  // ...then all the way back left, still holding.
+  const widths: number[] = []
+  for (let i = 1; i <= 12; i++) {
+    await page.mouse.move(cx + 200 - i * 40, cy)
+    widths.push(await scrollWidth(page))
+  }
+  await page.mouse.up()
+
+  // Every sample on the way back must hold at the peak the drag reached.
+  for (const w of widths) expect(w).toBeGreaterThanOrEqual(peak)
+})
+
 test('the width is released after the drag, so the track settles to its content', async ({
   appPage: page
 }) => {
