@@ -8,6 +8,7 @@ import { useEditor } from './state/store'
 import { useUi } from './state/ui'
 import { usePlayback } from './state/playback'
 import { playedVideoDuration } from '@shared/layers'
+import { appliedGain, isRouted, previewAudioState } from './lib/mediaGain'
 import { useDock } from './state/dock'
 // dockview's stylesheet first so index.css overrides win at equal specificity.
 import 'dockview-react/dist/styles/dockview.css'
@@ -29,10 +30,25 @@ declare global {
        *  `endSec − startSec === playedVideoDuration(content)` without
        *  re-deriving the (nonlinear) math in the test. */
       playedVideoDuration: typeof playedVideoDuration
+      /** Preview level actually in force on a media element. A boost lives in a
+       *  GainNode, not `element.volume`, so specs cannot read it off the DOM. */
+      appliedGain: typeof appliedGain
+      isRouted: typeof isRouted
+      previewAudioState: typeof previewAudioState
     }
   }
 }
-window.__reelStores = { useProject, useEditor, useUi, usePlayback, useDock, playedVideoDuration }
+window.__reelStores = {
+  useProject,
+  useEditor,
+  useUi,
+  usePlayback,
+  useDock,
+  playedVideoDuration,
+  appliedGain,
+  isRouted,
+  previewAudioState
+}
 
 // Register the bundled-font @font-face rules before first paint so previews use
 // the same faces the export burns.

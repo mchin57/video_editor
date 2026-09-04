@@ -295,8 +295,8 @@ function AudioFollower({
   const active = time >= clip.startSec - 0.001 && time < clip.startSec + (eo - clip.inSec)
   const target = clip.inSec + (time - clip.startSec)
 
-  // Element `volume` clamps at 1.0, so a boosted clip needs the WebAudio path
-  // to match the export's `volume=` filter. @see lib/mediaGain.ts
+  // Element `volume` clamps at 1.0, so a boosted clip is routed through a
+  // GainNode to match the export's `volume=` filter. @see lib/mediaGain.ts
   useMediaGain(ref, clip.gainDb)
 
   useEffect(() => {
@@ -317,6 +317,10 @@ function AudioFollower({
     <audio
       ref={ref}
       data-testid="audio-follower"
+      // Before `src` on purpose: React sets attributes in prop order, and an
+      // element that fetches once without this is tainted for good — a GainNode
+      // on it would emit silence. @see lib/mediaGain.ts
+      crossOrigin="anonymous"
       src={src}
       preload="auto"
     />
@@ -429,6 +433,9 @@ function VideoLayerView({
     >
       <video
         ref={ref}
+        // Before `src` — see the AudioFollower note; a layer clip can be
+        // boosted too, and a tainted element cannot be un-tainted.
+        crossOrigin="anonymous"
         src={videoProxyUrl(asset)}
         muted={silenced}
         playsInline
