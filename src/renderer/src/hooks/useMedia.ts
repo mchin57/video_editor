@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
-import { extractAudioDialog, importDialog, importPaths, listProjectMedia, renderAudioFx } from '@/ipc/client'
+import {
+  extractAudioDialog,
+  importDialog,
+  importFolderDialog,
+  importPaths,
+  listProjectMedia,
+  renderAudioFx
+} from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { activeComp, useProject } from '@/state/projectStore'
 
@@ -20,7 +27,10 @@ export function useLibrary(): ReturnType<typeof useQuery<MediaAsset[]>> {
   })
 }
 
-/** Import via the OS dialog (no args) or from explicit paths (drag-and-drop). */
+/**
+ * Import via the OS dialog (no args) or from explicit paths (drag-and-drop).
+ * A path may be a FOLDER — main expands it to the media inside.
+ */
 export function useImportMedia(): ReturnType<
   typeof useMutation<MediaAsset[], Error, string[] | undefined>
 > {
@@ -28,13 +38,30 @@ export function useImportMedia(): ReturnType<
   const select = useEditor((s) => s.select)
   return useMutation<MediaAsset[], Error, string[] | undefined>({
     mutationFn: (paths) => (paths && paths.length ? importPaths(paths) : importDialog()),
-    onSuccess: (assets) => {
-      // Scope the freshly imported assets to the current project, then refresh.
-      useProject.getState().addMedia(assets.map((a) => a.id))
-      void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
-      if (assets[0]) select(assets[0].id)
-    }
+    onSuccess: (assets) => onImported(assets, qc, select)
   })
+}
+
+/** File ▸ Import folder… — pick directories, import every supported file in them. */
+export function useImportFolder(): ReturnType<typeof useMutation<MediaAsset[], Error, void>> {
+  const qc = useQueryClient()
+  const select = useEditor((s) => s.select)
+  return useMutation<MediaAsset[], Error, void>({
+    mutationFn: () => importFolderDialog(),
+    onSuccess: (assets) => onImported(assets, qc, select)
+  })
+}
+
+/** Shared post-import step for every import route: scope the new assets to the
+ *  project, refresh the library, and select the first one. */
+function onImported(
+  assets: MediaAsset[],
+  qc: ReturnType<typeof useQueryClient>,
+  select: (id: string) => void
+): void {
+  useProject.getState().addMedia(assets.map((a) => a.id))
+  void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
+  if (assets[0]) select(assets[0].id)
 }
 
 /**

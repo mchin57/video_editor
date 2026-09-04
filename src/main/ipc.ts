@@ -9,6 +9,7 @@ import type { PresetId } from '@shared/export'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir, getSubdir } from './config'
 import { generateStill } from './services/still'
+import { expandImportPaths } from './services/importScan'
 import { hdrToSdrChain } from './services/proxy'
 import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
@@ -33,10 +34,14 @@ import { getTranscript, transcribeMedia, whisperAvailable } from './services/whi
 import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 
-/** Import each path (fast hash+probe), then kick proxy generation in the background. */
+/**
+ * Import each path (fast hash+probe), then kick proxy generation in the
+ * background. Any directory in `paths` is expanded to the media files inside it
+ * first, so a picked or dropped FOLDER imports its contents.
+ */
 async function importMany(paths: string[]): Promise<MediaAsset[]> {
   const assets: MediaAsset[] = []
-  for (const path of paths) {
+  for (const path of await expandImportPaths(paths)) {
     try {
       const asset = await importFile(path)
       assets.push(asset)
@@ -85,6 +90,23 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.importPaths, (_event, paths: string[]) => importMany(paths))
+
+  // File ▸ Import folder… — same pipeline, the picker just yields directories.
+  // (Dropping a folder on the window needs no separate channel: importMany
+  // expands whatever it is handed.)
+  ipcMain.handle(IPC.importFolderDialog, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Import folder',
+      buttonLabel: 'Import',
+      properties: ['openDirectory', 'multiSelections']
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled) return []
+    return importMany(result.filePaths)
+  })
 
   // Pick a video (or any media) file and pull its audio track into the library as
   // a standalone audio asset — no timeline placement required.

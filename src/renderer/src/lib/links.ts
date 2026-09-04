@@ -70,6 +70,9 @@ export const refKeys = (refs: TimelineItemRef[]): Set<string> => new Set(refs.ma
  *  knows — callers pass a lookup over it. */
 export type SourceDuration = (mediaId: string) => number
 
+/** The timeline's visual bands, in render order. */
+export type TileLane = 'clips' | 'layout' | 'text' | 'image' | 'caption' | 'audio' | 'fx'
+
 /**
  * One timeline tile, flattened out of whichever array it lives in — the common
  * shape every group operation works against, so the three-array walk exists in
@@ -81,6 +84,11 @@ export interface Tile {
   /** Timeline end. `Infinity` for a whole-source audio clip whose source
    *  duration isn't known yet (matching `splitAudioClip`'s tolerance). */
   endSec: number
+  /** Which timeline BAND the tile is drawn in — the same grouping the Timeline
+   *  renders (compound clips ride with video; an fx track has its own band).
+   *  Purely visual to the renderer, but it is what "the previous clip" means to
+   *  an operation like `snapToPreviousDelta`. */
+  lane: TileLane
   linkGroupId?: string
   /** Whether this tile may join a link group (layout layers may not). */
   linkable: boolean
@@ -107,13 +115,16 @@ function audioTileEnd(a: AudioClip, sourceDurationSec: number): number {
 export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0): Tile[] {
   const tiles: Tile[] = []
   for (const l of p.layers) {
+    const k = l.content.kind
     tiles.push({
       ref: { kind: 'layer', id: l.id },
       startSec: l.startSec,
       endSec: l.endSec,
+      // A compound clip is clip-like, so it rides in the Clips lane.
+      lane: k === 'layout' ? 'layout' : k === 'text' ? 'text' : k === 'image' ? 'image' : 'clips',
       linkGroupId: l.linkGroupId,
-      linkable: l.content.kind !== 'layout',
-      splittable: l.content.kind !== 'layout'
+      linkable: k !== 'layout',
+      splittable: k !== 'layout'
     })
   }
   for (const s of p.captions.segments) {
@@ -121,6 +132,7 @@ export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0):
       ref: { kind: 'caption', id: s.id },
       startSec: s.startSec,
       endSec: s.endSec,
+      lane: 'caption',
       linkGroupId: s.linkGroupId,
       linkable: true,
       splittable: true
@@ -131,6 +143,7 @@ export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0):
       ref: { kind: 'audio', id: a.id },
       startSec: a.startSec,
       endSec: audioTileEnd(a, srcDur(a.mediaId)),
+      lane: a.fx ? 'fx' : 'audio',
       linkGroupId: a.linkGroupId,
       linkable: true,
       splittable: true
@@ -309,6 +322,56 @@ export function moveItemsBy(p: Composition, refs: TimelineItemRef[], delta: numb
       keys.has(refKey({ kind: 'audio', id: a.id })) ? { ...a, startSec: a.startSec + d } : a
     )
   }
+}
+
+/**
+ * How far `refs` must move to butt up against whatever precedes them — the
+ * delta to hand `moveItemsBy`. `null` when there is nothing to do (already
+ * flush, or the refs don't resolve).
+ *
+ * The set moves as one, so ONE tile decides: the earliest-starting member is the
+ * anchor, and its LANE is the lane searched. A candidate is any tile outside the
+ * set, in that lane, starting before the anchor; the target is the latest end
+ * among them — the nearest preceding neighbour. With no candidate the anchor
+ * snaps to 0.
+ *
+ * The delta is deliberately signed. A gap closes leftwards, but an OVERLAP
+ * closes rightwards: a tile that starts before the anchor and ends after it is
+ * still "the previous clip", and butting against it means moving out of it.
+ * (Picking only candidates that end before the anchor would skip an overlapping
+ * neighbour and snap to some earlier one instead — further from what the user
+ * pointed at, not closer.)
+ *
+ * Open-ended audio tiles (unknown source duration → `Infinity`) can't be snapped
+ * to and are skipped as candidates.
+ *
+ * Lives here rather than in `lib/timeline.ts` (where the backlog first put it)
+ * because it is a whole-SET operation over the flattened tile model, next to the
+ * `moveItemsBy` it feeds — timeline.ts owns single-item source-time math and is
+ * imported by this module, so the dependency only runs one way.
+ */
+export function snapToPreviousDelta(
+  p: Composition,
+  refs: TimelineItemRef[],
+  srcDur?: SourceDuration
+): number | null {
+  const keys = refKeys(refs)
+  const tiles = timelineTiles(p, srcDur)
+  const moving = tiles.filter((t) => keys.has(refKey(t.ref)))
+  if (moving.length === 0) return null
+  const anchor = moving.reduce((a, b) => (b.startSec < a.startSec ? b : a))
+
+  let target = 0
+  for (const t of tiles) {
+    if (keys.has(refKey(t.ref))) continue
+    if (t.lane !== anchor.lane) continue
+    if (t.startSec >= anchor.startSec - EPS) continue
+    if (!Number.isFinite(t.endSec)) continue
+    target = Math.max(target, t.endSec)
+  }
+
+  const delta = target - anchor.startSec
+  return Math.abs(delta) < EPS ? null : delta
 }
 
 /**

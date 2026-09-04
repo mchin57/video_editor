@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { useProject } from '@/state/projectStore'
-import { useExtractAudio } from '@/hooks/useMedia'
+import { useExtractAudio, useImportFolder } from '@/hooks/useMedia'
 
 /** Last path segment, handling both Windows and POSIX separators. */
 function basename(path: string): string {
@@ -42,6 +42,7 @@ export function FileMenu(): JSX.Element {
   const save = useProject((s) => s.save)
   const saveAs = useProject((s) => s.saveAs)
   const extractAudio = useExtractAudio()
+  const importFolder = useImportFolder()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -89,6 +90,7 @@ export function FileMenu(): JSX.Element {
           <MenuItem label="Save" shortcut="Ctrl+S" onClick={run(save)} />
           <MenuItem label="Save As…" shortcut="Ctrl+Shift+S" onClick={run(saveAs)} />
           <div className="my-1 h-px bg-white/10" />
+          <MenuItem label="Import folder…" shortcut="" onClick={run(() => importFolder.mutate())} />
           <MenuItem
             label="Extract audio from clip…"
             shortcut=""

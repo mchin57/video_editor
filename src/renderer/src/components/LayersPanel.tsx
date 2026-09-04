@@ -5,6 +5,7 @@ import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
+import { startPointerDrag } from '@/lib/pointerDrag'
 
 const ROW_H = 30 // px — must match the row height below for drag math
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
@@ -68,25 +69,23 @@ export function LayersPanel(): JSX.Element {
     orderRef.current = base
     setDrag({ id, order: base })
     const listTop = (): number => listRef.current?.getBoundingClientRect().top ?? 0
-    const onMove = (ev: PointerEvent): void => {
-      const idx = clamp(Math.floor((ev.clientY - listTop()) / ROW_H), 0, base.length - 1)
-      const without = base.filter((x) => x !== id)
-      without.splice(idx, 0, id)
-      orderRef.current = without
-      setDrag({ id, order: without })
-    }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      const finalOrder = orderRef.current
-      if (finalOrder) {
-        const fullFrontToBack = bgVisible ? [...finalOrder, bgVisible.id] : finalOrder
-        reorderLayers(fullFrontToBack)
+    startPointerDrag(
+      (ev) => {
+        const idx = clamp(Math.floor((ev.clientY - listTop()) / ROW_H), 0, base.length - 1)
+        const without = base.filter((x) => x !== id)
+        without.splice(idx, 0, id)
+        orderRef.current = without
+        setDrag({ id, order: without })
+      },
+      () => {
+        const finalOrder = orderRef.current
+        if (finalOrder) {
+          const fullFrontToBack = bgVisible ? [...finalOrder, bgVisible.id] : finalOrder
+          reorderLayers(fullFrontToBack)
+        }
+        setOrder(null)
       }
-      setOrder(null)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    )
   }
 
   const label = (l: Layer): string => {

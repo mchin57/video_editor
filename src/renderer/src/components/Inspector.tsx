@@ -45,7 +45,7 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { Check, Field, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
+import { Check, Field, NumberInput, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
 
@@ -306,14 +306,7 @@ function FreezeFrames({
     <div>
       <div className="mb-2 flex items-end gap-2">
         <Field label="Hold (s)">
-          <input
-            type="number"
-            step="0.5"
-            min="0.1"
-            value={hold}
-            onChange={(e) => setHold(Math.max(0.1, Number(e.target.value)))}
-            className={inputCls}
-          />
+          <NumberInput step="0.5" min={0.1} value={hold} onCommit={setHold} />
         </Field>
         <button
           onClick={() => addFreeze(layer.id, videoSourceTime(content, layer, usePlayback.getState().time), hold)}
@@ -400,23 +393,24 @@ function LayerEditor(): JSX.Element | null {
           tile's length out from under the rest of its group. */}
       <div className="flex gap-2">
         <Field label="Start (s)">
-          <input
-            type="number"
+          <NumberInput
             step="0.1"
-            min="0"
-            value={layer.startSec.toFixed(1)}
+            min={0}
+            value={layer.startSec}
+            format={(v) => v.toFixed(1)}
             disabled={linked}
-            onChange={(e) => update(id, { startSec: Math.max(0, Number(e.target.value)) })}
+            onCommit={(v) => update(id, { startSec: v })}
             className={`${inputCls} ${disabledCls}`}
           />
         </Field>
         <Field label="End (s)">
-          <input
-            type="number"
+          <NumberInput
             step="0.1"
-            value={layer.endSec.toFixed(1)}
+            min={layer.startSec + 0.2}
+            value={layer.endSec}
+            format={(v) => v.toFixed(1)}
             disabled={linked}
-            onChange={(e) => update(id, { endSec: Math.max(layer.startSec + 0.2, Number(e.target.value)) })}
+            onCommit={(v) => update(id, { endSec: v })}
             className={`${inputCls} ${disabledCls}`}
           />
         </Field>
@@ -522,25 +516,25 @@ function LayerEditor(): JSX.Element | null {
           <CollapsibleSection id="trim" title="Trim & audio">
           <div className="flex gap-2">
             <Field label="Trim in (s)">
-              <input
-                type="number"
+              <NumberInput
                 step="0.1"
-                min="0"
-                value={c.inSec.toFixed(1)}
+                min={0}
+                max={c.outSec - 0.05}
+                value={c.inSec}
+                format={(v) => v.toFixed(1)}
                 disabled={linked}
-                onChange={(e) =>
-                  updateContent(id, { inSec: Math.max(0, Math.min(Number(e.target.value), c.outSec - 0.05)) })
-                }
+                onCommit={(v) => updateContent(id, { inSec: v })}
                 className={`${inputCls} ${disabledCls}`}
               />
             </Field>
             <Field label="Trim out (s)">
-              <input
-                type="number"
+              <NumberInput
                 step="0.1"
-                value={c.outSec.toFixed(1)}
+                min={c.inSec + 0.05}
+                value={c.outSec}
+                format={(v) => v.toFixed(1)}
                 disabled={linked}
-                onChange={(e) => updateContent(id, { outSec: Math.max(c.inSec + 0.05, Number(e.target.value)) })}
+                onCommit={(v) => updateContent(id, { outSec: v })}
                 className={`${inputCls} ${disabledCls}`}
               />
             </Field>
@@ -1044,16 +1038,14 @@ function TextAnimationFields({
           </select>
         </Field>
         <Field label="In (s)">
-          <input
-            type="number"
+          <NumberInput
             min={0.1}
             max={10}
             step={0.1}
             value={anim.inSec}
             disabled={disabled || anim.in === 'none' || anim.in === 'wordHighlight'}
             title={anim.in === 'wordHighlight' ? 'Word-by-word spans the whole layer duration' : undefined}
-            onChange={(e) => patch({ inSec: Math.max(0.1, Number(e.target.value) || 0.1) })}
-            className={inputCls}
+            onCommit={(v) => patch({ inSec: v })}
           />
         </Field>
       </div>
@@ -1073,15 +1065,13 @@ function TextAnimationFields({
           </select>
         </Field>
         <Field label="Out (s)">
-          <input
-            type="number"
+          <NumberInput
             min={0.1}
             max={10}
             step={0.1}
             value={anim.outSec}
             disabled={disabled || anim.out === 'none'}
-            onChange={(e) => patch({ outSec: Math.max(0.1, Number(e.target.value) || 0.1) })}
-            className={inputCls}
+            onCommit={(v) => patch({ outSec: v })}
           />
         </Field>
       </div>
@@ -1184,23 +1174,24 @@ function CaptionEditor(): JSX.Element | null {
       </Field>
       <div className="flex gap-2">
         <Field label="Start (s)">
-          <input
-            type="number"
+          <NumberInput
             step="0.1"
-            min="0"
-            value={seg.startSec.toFixed(1)}
+            min={0}
+            value={seg.startSec}
+            format={(v) => v.toFixed(1)}
             disabled={linked}
-            onChange={(e) => update(seg.id, { startSec: Math.max(0, Number(e.target.value)) })}
+            onCommit={(v) => update(seg.id, { startSec: v })}
             className={`${inputCls} ${disabledCls}`}
           />
         </Field>
         <Field label="End (s)">
-          <input
-            type="number"
+          <NumberInput
             step="0.1"
-            value={seg.endSec.toFixed(1)}
+            min={seg.startSec + 0.1}
+            value={seg.endSec}
+            format={(v) => v.toFixed(1)}
             disabled={linked}
-            onChange={(e) => update(seg.id, { endSec: Math.max(seg.startSec + 0.1, Number(e.target.value)) })}
+            onCommit={(v) => update(seg.id, { endSec: v })}
             className={`${inputCls} ${disabledCls}`}
           />
         </Field>
@@ -1298,39 +1289,33 @@ function AudioClipEditor(): JSX.Element | null {
       {/* An audio clip's Start is a MOVE (its trim doesn't change), so unlike a
           layer's it translates onto a group: the whole group shifts by the delta. */}
       <Field label={linked ? 'Start (s) · moves the group' : 'Start (s)'}>
-        <input
-          type="number"
+        <NumberInput
           step="0.1"
-          min="0"
-          value={clip.startSec.toFixed(1)}
-          onChange={(e) => {
-            const next = Math.max(0, Number(e.target.value))
+          min={0}
+          value={clip.startSec}
+          format={(v) => v.toFixed(1)}
+          onCommit={(next) => {
             if (!linked) return update(clip.id, { startSec: next })
             const p = useProject.getState().project
             if (p) moveItems(expandGroup(p, { kind: 'audio', id: clip.id }), next - clip.startSec)
           }}
-          className={inputCls}
         />
       </Field>
       <div className="flex gap-2">
         <Field label="Fade in (s)">
-          <input
-            type="number"
+          <NumberInput
             step="0.5"
-            min="0"
+            min={0}
             value={clip.fadeInSec}
-            onChange={(e) => update(clip.id, { fadeInSec: Math.max(0, Number(e.target.value)) })}
-            className={inputCls}
+            onCommit={(v) => update(clip.id, { fadeInSec: v })}
           />
         </Field>
         <Field label="Fade out (s)">
-          <input
-            type="number"
+          <NumberInput
             step="0.5"
-            min="0"
+            min={0}
             value={clip.fadeOutSec}
-            onChange={(e) => update(clip.id, { fadeOutSec: Math.max(0, Number(e.target.value)) })}
-            className={inputCls}
+            onCommit={(v) => update(clip.id, { fadeOutSec: v })}
           />
         </Field>
       </div>

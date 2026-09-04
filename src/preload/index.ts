@@ -17,6 +17,7 @@ const api = {
   // Media library (M1)
   importDialog: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importDialog),
   importPaths: (paths: string[]): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importPaths, paths),
+  importFolderDialog: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importFolderDialog),
   extractAudioDialog: (): Promise<MediaAsset | null> => ipcRenderer.invoke(IPC.extractAudioDialog),
   listProjectMedia: (ids: string[]): Promise<MediaAsset[]> =>
     ipcRenderer.invoke(IPC.listProjectMedia, ids),

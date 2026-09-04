@@ -3,7 +3,7 @@ import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
 import { useBrandColors } from '@/state/brandColors'
 import { FontPicker } from './FontPicker'
-import { Check, Field, colorCls, inputCls } from './ui'
+import { Check, Field, NumberInput, colorCls } from './ui'
 
 /** The styling knobs shared by a text overlay and a caption — the shared
  *  `TextStyleBase` that both `TextContent` and `CaptionStyle` extend. */
@@ -92,13 +92,11 @@ export function TextStyleControls({
 
       <div className="flex items-end gap-2">
         <Field label="Font size">
-          <input
-            type="number"
+          <NumberInput
             step="2"
-            min="12"
+            min={12}
             value={style.fontSizePx}
-            onChange={(e) => onPatch({ fontSizePx: Math.max(12, Number(e.target.value)) })}
-            className={inputCls}
+            onCommit={(v) => onPatch({ fontSizePx: v })}
           />
         </Field>
         <Field label="Color">
@@ -185,13 +183,12 @@ export function TextStyleControls({
                 />
               </Field>
               <Field label="Padding">
-                <input
-                  type="number"
+                <NumberInput
                   step="2"
-                  min="0"
-                  value={Math.round(pill.padPx)}
-                  onChange={(e) => onPatch({ pill: { ...pill, padPx: Math.max(0, Number(e.target.value)) } })}
-                  className={inputCls}
+                  min={0}
+                  value={pill.padPx}
+                  format={(v) => String(Math.round(v))}
+                  onCommit={(v) => onPatch({ pill: { ...pill, padPx: v } })}
                 />
               </Field>
             </div>

@@ -36,6 +36,7 @@ import {
   expandGroup,
   expandSelection,
   moveItemsBy,
+  snapToPreviousDelta,
   refKey,
   refKeys,
   tileOf,
@@ -43,7 +44,7 @@ import {
   trimItemsBy,
   type SourceDuration
 } from '@/lib/links'
-import { startPointerDrag } from '@/lib/pointerDrag'
+import { edgeAutoScroll, startPointerDrag } from '@/lib/pointerDrag'
 import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
@@ -71,61 +72,6 @@ const EMPTY_AUDIO: AudioClip[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
-/**
- * Auto-scrolls a container while a drag hovers near an edge. Feed the pointer's
- * X and/or Y on every move (`setX`/`setY`; an axis stays off until first fed); a
- * rAF loop nudges `scrollLeft`/`scrollTop` proportional to edge proximity and
- * calls `onScroll` after each real nudge, so the drag handler can re-apply its
- * position (which reads the live scroll offset). Horizontal callers (block
- * drags) use only `setX`; the vertical lane-resize uses only `setY`. Returns
- * `setX`/`setY`/`stop`; the loop starts immediately.
- */
-function edgeAutoScroll(
-  el: HTMLElement,
-  onScroll: () => void
-): { setX: (x: number) => void; setY: (y: number) => void; stop: () => void } {
-  const EDGE = 40 // px from an edge where auto-scroll kicks in
-  const MAX = 20 // px/frame at the very edge
-  let x = -1
-  let y = -1
-  let raf = 0
-  const tick = (): void => {
-    raf = requestAnimationFrame(tick)
-    const rect = el.getBoundingClientRect()
-    let scrolled = false
-    if (x >= 0) {
-      let v = 0
-      if (x < rect.left + EDGE) v = -Math.min(1, (rect.left + EDGE - x) / EDGE) * MAX
-      else if (x > rect.right - EDGE) v = Math.min(1, (x - (rect.right - EDGE)) / EDGE) * MAX
-      if (v !== 0) {
-        const before = el.scrollLeft
-        el.scrollLeft = Math.max(0, before + v)
-        if (el.scrollLeft !== before) scrolled = true
-      }
-    }
-    if (y >= 0) {
-      let v = 0
-      if (y < rect.top + EDGE) v = -Math.min(1, (rect.top + EDGE - y) / EDGE) * MAX
-      else if (y > rect.bottom - EDGE) v = Math.min(1, (y - (rect.bottom - EDGE)) / EDGE) * MAX
-      if (v !== 0) {
-        const before = el.scrollTop
-        el.scrollTop = Math.max(0, before + v)
-        if (el.scrollTop !== before) scrolled = true
-      }
-    }
-    if (scrolled) onScroll()
-  }
-  raf = requestAnimationFrame(tick)
-  return {
-    setX: (nx: number) => {
-      x = nx
-    },
-    setY: (ny: number) => {
-      y = ny
-    },
-    stop: () => cancelAnimationFrame(raf)
-  }
-}
 const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
   id: l.id,
   startSec: l.startSec,
@@ -245,6 +191,7 @@ export function Timeline(): JSX.Element {
   const addAudioClip = useProject((s) => s.addAudioClip)
   const removeItems = useProject((s) => s.removeItems)
   const splitItemsAt = useProject((s) => s.splitItemsAt)
+  const snapItemsToPrevious = useProject((s) => s.snapItemsToPrevious)
   const linkItems = useProject((s) => s.linkItems)
   const unlinkItems = useProject((s) => s.unlinkItems)
   const canUndo = useProject((s) => s.past.length > 0)
@@ -849,6 +796,11 @@ export function Timeline(): JSX.Element {
   const canDelete = selection.length > 0
   const deleteSelected = (): void => removeItems(selection)
 
+  // Butting the selection against its lane's previous tile. Disabled when it is
+  // already flush, so the button reflects whether pressing it would do anything.
+  const canSnapPrev = !!comp && snapToPreviousDelta(comp, selection, srcDur) !== null
+  const snapSelectedToPrevious = (): void => snapItemsToPrevious(selection, srcDur)
+
   const canLink = !!comp && canLinkItems(comp, selection)
   const canUnlink = !!comp && canUnlinkItems(comp, selection)
   const linkSelected = (): void => linkItems(selection)
@@ -1068,6 +1020,13 @@ export function Timeline(): JSX.Element {
           disabled={!canSplit}
         >
           ✂ Split
+        </ToolbarButton>
+        <ToolbarButton
+          title="Butt the selection against the previous clip in its lane, closing the gap (N). With nothing before it, snaps to the start."
+          onClick={snapSelectedToPrevious}
+          disabled={!canSnapPrev}
+        >
+          ⇤ Snap
         </ToolbarButton>
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text

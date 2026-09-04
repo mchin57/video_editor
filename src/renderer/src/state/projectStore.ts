@@ -197,6 +197,10 @@ interface ProjectState {
    *  their relative offsets and durations (the timeline drag applies the same
    *  helper live, then commits once). */
   moveItemsBy: (refs: TimelineItemRef[], delta: number) => void
+  /** Butt `refs` up against the tile that precedes them in their lane (or the
+   *  timeline start), closing a gap or an overlap. One undo step; a no-op when
+   *  they are already flush. */
+  snapItemsToPrevious: (refs: TimelineItemRef[], srcDur?: links.SourceDuration) => void
   /**
    * Split every tile in `refs` that the playhead at `atSec` crosses — tiles it
    * misses are left whole. `srcDur` resolves an audio source's duration (only
@@ -567,6 +571,14 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     moveItemsBy: (refs, delta) => commitComp((p) => links.moveItemsBy(p, refs, delta)),
+
+    snapItemsToPrevious: (refs, srcDur) => {
+      const comp = activeComp(get())
+      if (!comp) return
+      const delta = links.snapToPreviousDelta(comp, refs, srcDur)
+      if (delta === null) return // already flush — don't push an empty undo step
+      commitComp((p) => links.moveItemsBy(p, refs, delta))
+    },
 
     splitItemsAt: (refs, atSec, srcDur) => {
       commitComp((p) => links.splitItemsAt(p, refs, atSec, srcDur, newId))
