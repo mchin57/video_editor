@@ -1,9 +1,13 @@
 /**
  * whisper.cpp transcription. Extracts 16k mono audio from a media's original,
- * runs whisper-cli word-level (-ml 1 -sow -oj), parses to a Transcript (source
- * time), and caches it as media/<id>/transcript.json. Discovery looks under
+ * runs whisper-cli word-level (-ml 1 -sow -ojf, with DTW token timestamps when
+ * the model maps to a `-dtw` preset), parses to a Transcript (source time), and
+ * caches it as media/<id>/transcript.json. Discovery looks under
  * <dataDir>/bin/whisper (whisper-cli in Release/, bin/ or build/bin/, with a
  * .bin model alongside).
+ *
+ * The whole ORIGINAL is transcribed, never a per-clip slice; clip trims are
+ * applied afterwards in the renderer (renderer/lib/captions.ts).
  */
 
 import { spawn } from 'node:child_process'
@@ -14,7 +18,8 @@ import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { getAsset } from './mediaStore'
-import { parseWhisperJson, type WhisperJson } from './whisperParse'
+import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
+import { buildWhisperArgs, dtwPreset } from './whisperArgs'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 
 const transcriptPath = (id: string): string => join(getSubdir('media'), id, 'transcript.json')
@@ -56,17 +61,8 @@ export function whisperAvailable(): boolean {
   return discoverWhisper() !== null
 }
 
-export async function getTranscript(mediaId: string): Promise<Transcript | null> {
-  try {
-    return JSON.parse(await fsp.readFile(transcriptPath(mediaId), 'utf8')) as Transcript
-  } catch {
-    return null
-  }
-}
-
-function runWhisper(cli: string, model: string, wav: string, outPrefix: string): Promise<void> {
+function runWhisper(cli: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ['-m', model, '-f', wav, '-ml', '1', '-sow', '-oj', '-of', outPrefix, '-np']
     const child = spawn(cli, args, { windowsHide: true })
     let tail = ''
     child.stderr.on('data', (b: Buffer) => {
@@ -77,6 +73,38 @@ function runWhisper(cli: string, model: string, wav: string, outPrefix: string):
       code === 0 ? resolve() : reject(new Error(`whisper exited ${code}: ${tail.slice(-500)}`))
     )
   })
+}
+
+/** Run whisper over a wav, asking for DTW token timestamps where possible. */
+async function runTranscription(
+  cli: string,
+  model: string,
+  wav: string,
+  outPrefix: string
+): Promise<void> {
+  const preset = dtwPreset(model)
+  if (preset) {
+    try {
+      await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, preset))
+      return
+    } catch {
+      // An older binary without -dtw/-nfa still transcribes; the parser will
+      // fall back to segment offsets and stamp the transcript accordingly.
+    }
+  }
+  await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, null))
+}
+
+export async function getTranscript(mediaId: string): Promise<Transcript | null> {
+  try {
+    const cached = JSON.parse(await fsp.readFile(transcriptPath(mediaId), 'utf8')) as Transcript
+    // Transcripts cached before word-accurate timing existed carry smeared word
+    // times that drop words at the head of a trimmed clip. Treat them as stale
+    // so the next caption run redoes them instead of serving them forever.
+    return cached.timing ? cached : null
+  } catch {
+    return null
+  }
 }
 
 /** Transcribe a media file (cached). Reports progress on the jobs channel. */
@@ -103,15 +131,17 @@ export async function transcribeMedia(mediaId: string): Promise<Transcript> {
     ], 0)
     setProgress(job.id, 0.3)
 
-    await runWhisper(whisper.cli, whisper.model, wav, rawPrefix)
+    await runTranscription(whisper.cli, whisper.model, wav, rawPrefix)
     setProgress(job.id, 0.9)
 
     const json = JSON.parse(await fsp.readFile(`${rawPrefix}.json`, 'utf8')) as WhisperJson
+    const { words, timing } = parseWhisperTranscript(json)
     const transcript: Transcript = {
       mediaId,
-      words: parseWhisperJson(json),
+      words,
       model: basename(whisper.model),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      timing
     }
     await fsp.writeFile(transcriptPath(mediaId), JSON.stringify(transcript, null, 2))
 
