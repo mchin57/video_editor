@@ -413,6 +413,55 @@ bug above was fixed and rasterised text actually reached the output.
   1.598, against a preview of 1.596.
 
 
+## whisper word timings (verified whisper.cpp / whisper-cli, ggml-small.en, 2026-09)
+
+The caption pipeline transcribes the WHOLE original once per media asset
+(`whisper.ts`), and clip trims are applied afterwards in the renderer
+(`renderer/lib/captions.ts`). There is no per-clip audio slice — do not go
+looking for an `-ss` in the transcription path.
+
+- **`-ml 1 -sow -oj` offsets are SEGMENT bounds, not word bounds.** Entries tile
+  edge to edge, so the leading words of a segment get smeared back across
+  whatever silence precedes the speech, and the word before a pause absorbs the
+  whole pause. Measured on real media: the offsets put the first word at 0.00s
+  when nothing is spoken until 2.42s (ffmpeg `silencedetect` independently said
+  2.338s). The error decays monotonically — 2.42s, 2.18s, 1.86s … under 0.25s
+  after about eight words — which is exactly why captions dropped words mostly
+  at the START of a trimmed clip and only occasionally at the end.
+- **Real word timings come from `-dtw <preset>`, which needs `-ojf`.** Per-token
+  `t_dtw` appears only in `--output-json-full`; plain `-oj` emits no `tokens`.
+- **`-nfa` is MANDATORY alongside `-dtw`.** Flash attention is ON by default and
+  silently disables DTW: the binary prints `dtw_token_timestamps is not
+  supported with flash_attn - disabling` and every `t_dtw` comes back `-1`, so
+  the change looks like it did nothing. Cost of `-nfa`: about 17% (3108ms to
+  3649ms on a 12s clip).
+- **`t_dtw` is in CENTIseconds** (1 unit = 10ms), unlike `offsets`, which are
+  milliseconds. Divide by 100.
+- **A preset that does not match the model yields GARBAGE and still exits 0.**
+  `-dtw base.en` against a `small.en` model put the first word at 5.66s and then
+  collapsed four consecutive words onto 8.18s, with no warning. An unrecognised
+  name is safer by comparison — it aborts with exit 3. So `dtwPreset()` returns
+  null rather than guess, and `parseWhisperTranscript` gates the result
+  (complete, monotonic, not collapsed) before trusting it.
+- **Preset names use dots, not dashes:** `large.v3` is accepted and `large-v3`
+  is rejected, yet model FILES are named `ggml-large-v3.bin`. Valid presets:
+  tiny, tiny.en, base, base.en, small, small.en, medium, medium.en, large.v1,
+  large.v2, large.v3, large.v3.turbo.
+- **`t_dtw` is `-1` on whisper's own control tokens** (`[_BEG_]`, `[_TT_nnn]`);
+  read past them to the first real text token.
+- **Word windows still tile even with DTW** (a word ends where the next begins),
+  so they are capped (`MAX_WORD_SEC`) — uncapped, the word before a pause spans
+  a cut made during it and captions itself on BOTH sides. Real speech measured
+  p50 0.24s / p90 0.86s / max 0.94s, so the cap never truncates a real word.
+- **Bracketed annotations leak through `-ml 1`.** `(birds chirping)` arrives as
+  two entries, `(birds` and `chirping)`, so a whole-string noise regex matches
+  neither. Real transcripts in the library carry these as caption words. `-sns`
+  (`--suppress-nst`) exists and is untried. STILL OPEN.
+- Transcripts are cached at `media/<id>/transcript.json` with no re-run flag.
+  The `timing` field doubles as the cache version: a transcript missing it is
+  treated as stale and re-transcribed. Change the whisper flags and you must
+  bump that, or every existing transcript keeps its old timings forever.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +
