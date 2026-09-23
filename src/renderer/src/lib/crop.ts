@@ -1,12 +1,12 @@
 /**
- * Crop math for fitting arbitrary (e.g. landscape) source frames into the 9:16
- * output. Crop rectangles are stored in SOURCE/display pixels on each clip and
+ * Crop math for fitting arbitrary source frames into the project's output aspect
+ * (9:16 by default). Crop rectangles are stored in SOURCE/display pixels on each clip and
  * baked at export; the preview applies them with CSS. All pure + unit-tested.
  */
 
 import type { CropRect } from '@shared/project'
 
-/** Output aspect ratio width/height (9:16). */
+/** The default crop aspect (9:16, the Reel frame); callers pass the project's. */
 export const OUTPUT_ASPECT = 9 / 16
 
 /** Largest centered crop of `aspect` (w/h) that fits inside srcW x srcH. */

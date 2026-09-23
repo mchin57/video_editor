@@ -29,7 +29,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(21)
+    expect(p.version).toBe(22)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -101,7 +101,7 @@ describe('migrateProject — noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
-    expect(p.version).toBe(21)
+    expect(p.version).toBe(22)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
@@ -189,7 +189,7 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
     const cells = (p.layers[0].content as { cells: { mute: boolean }[] }).cells
     expect(cells[0].mute).toBe(false) // the comp panel is audible again
     expect(cells[1].mute).toBe(true) // the clip cell is untouched
-    expect(p.version).toBe(21)
+    expect(p.version).toBe(22)
   })
 
   it('reaches comp cells nested inside a compound layer', () => {
@@ -252,7 +252,7 @@ describe('migrateProject — chorus renamed to ensemble (v20)', () => {
       ensemble: { voices: 3, spreadMs: 32, detuneCents: 14 }
     })
     expect('chorus' in fx.settings).toBe(false)
-    expect(p.version).toBe(21)
+    expect(p.version).toBe(22)
   })
 
   it('reaches effect tracks inside a nested composition', () => {
@@ -327,7 +327,7 @@ describe('migrateProject — per-clip audio mute (v21)', () => {
         }
       ]
     })
-    expect(p.version).toBe(21)
+    expect(p.version).toBe(22)
     expect(p.audioClips[0].mute).toBeUndefined()
     expect(audioClipAudible(p.audioClips[0])).toBe(true)
   })
@@ -355,5 +355,25 @@ describe('migrateProject — per-clip audio mute (v21)', () => {
     // The level survives muting — that is the point of a separate flag.
     expect(p.audioClips[0].mute).toBe(true)
     expect(p.audioClips[0].gainDb).toBe(-6)
+  })
+})
+
+describe('migrateProject v22 (format registry)', () => {
+  it('keeps every known preset id, old and new', () => {
+    for (const preset of ['reel', 'story', 'square', 'carousel', 'landscape', 'feed']) {
+      expect(migrateProject({ version: 21, preset, layers: [], audioClips: [] }).preset).toBe(preset)
+    }
+  })
+
+  it('normalises an unknown or missing preset to the default instead of crashing lookups', () => {
+    expect(migrateProject({ version: 21, preset: 'imax-70mm', layers: [], audioClips: [] }).preset).toBe('reel')
+    expect(migrateProject({ version: 21, layers: [], audioClips: [] }).preset).toBe('reel')
+  })
+
+  it('moves no layer when the format is part of the document', () => {
+    const layer = { id: 'v', hidden: false, startSec: 0, endSec: 2, x: 123, y: 456, scale: 0.7, content: { kind: 'text', text: 'hi' } }
+    const p = migrateProject({ version: 21, preset: 'square', layers: [layer], audioClips: [] })
+    expect(p.layers[0]).toMatchObject({ x: 123, y: 456, scale: 0.7 })
+    expect(p.version).toBe(22)
   })
 })

@@ -5,7 +5,7 @@ import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
-import type { PresetId } from '@shared/export'
+import type { PresetId } from '@shared/formats'
 import type { Settings } from '@shared/settings'
 import type { Transcript } from '@shared/transcript'
 

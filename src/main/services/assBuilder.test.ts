@@ -129,6 +129,15 @@ describe('buildAss', () => {
       expect(s).toContain('\\fad(350,0)')
     })
 
+    it('slide travel follows the output scale, not the target height', () => {
+      // A 16:9 target renders 1:1 — the travel must NOT shrink to 90×1080/1920.
+      const wide = buildAss([anim({ in: 'slideUp', inSec: 0.35 })], { width: 1920, height: 1080 })
+      expect(wide).toContain('\\move(540,690,540,600,0,350)')
+      // A half-resolution render halves it.
+      const half = buildAss([anim({ in: 'slideUp', inSec: 0.35 })], target, null, 0.5)
+      expect(half).toContain('\\move(540,645,540,600,0,350)')
+    })
+
     it('slide in + slide out split into entrance/static/exit events (one \\move each)', () => {
       const s = buildAss([anim({ in: 'slideUp', inSec: 0.3, out: 'slideDown', outSec: 0.4 })], target)
       const events = s.split('\n').filter((l) => l.startsWith('Dialogue:'))

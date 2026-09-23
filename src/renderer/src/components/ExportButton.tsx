@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react'
-import { EXPORT_PRESETS } from '@shared/export'
+import { presetFor } from '@shared/formats'
 import { useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { exportProject, revealFile } from '@/ipc/client'
@@ -54,7 +54,7 @@ export function ExportButton(): JSX.Element {
         onClick={run}
         disabled={busy || clipCount === 0}
         className="rounded-md bg-sky-500/90 px-3 py-1 text-xs font-medium text-white hover:bg-sky-400 disabled:opacity-50"
-        title={clipCount === 0 ? 'Add a clip to the timeline first' : `Export ${EXPORT_PRESETS[preset].name}`}
+        title={clipCount === 0 ? 'Add a clip to the timeline first' : `Export ${presetFor(preset).name}`}
       >
         {busy ? `Exporting… ${pct}%` : 'Export'}
       </button>

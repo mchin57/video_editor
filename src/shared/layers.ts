@@ -1,17 +1,73 @@
 /**
  * Pure, dependency-free helpers for the unified layer stack. Shared by the
  * preview (renderer) and the exporter (main) so placement/timing/stacking math
- * is computed identically on both sides. Coordinates are logical 1080x1920 px.
+ * is computed identically on both sides. Coordinates are canonical logical
+ * 1080x1920 px; the project's output frame is a window on them (`frame.ts`).
  */
 
 import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent } from './project'
 import { playedBetween, sourceAfterPlayed } from './speed'
 import { DEFAULT_FONT_ID } from './fonts'
+import { FRAME, FULL_FRAME, type FrameRect } from './frame'
 
-/** The single source of truth for the logical output space (1080x1920 px).
- *  Renderer code imports this as `LOGICAL` (see `lib/coords.ts`). @see docs/SHARED.md */
-export const FRAME = { width: 1080, height: 1920 } as const
+// The canonical space + output-frame window live in the leaf `frame.ts` (see its
+// header for the init-order reason); re-exported so `layers.ts` stays the one
+// geometry import for callers.
+export { centeredFrame, FRAME, frameToOutput, FULL_FRAME, type FrameRect } from './frame'
 export const HOOK_WINDOW_SEC = 3
+
+// --- Frame fit (shared by preview + export) ----------------------------------
+
+/**
+ * Layer `scale` at which media of `aspect` exactly fits ("contains") `frame`.
+ * `containBox` sizes media against the CANONICAL frame, so in any other format
+ * scale 1 is not "fits the frame" — this is the conversion (always 1 in 9:16).
+ * New media layers start at it, and the Inspector reads zoom relative to it.
+ */
+export function fitScale(aspect: number, frame: FrameRect = FULL_FRAME): number {
+  return containBox(aspect, 1, { width: frame.w, height: frame.h }).w / containBox(aspect, 1).w
+}
+
+/**
+ * The scale at which a layer exactly fits `frame` — what the Inspector shows as
+ * 100% zoom. Video fits by its crop (else its source) aspect, an image by its
+ * cropped + rotated aspect; text, layouts and compound clips are sized
+ * frame-relative already (font px / `layoutCellRect`), so theirs is 1. An
+ * unknown source aspect (media not probed yet) also reads as 1.
+ */
+export function layerFitScale(layer: Pick<Layer, 'content'>, sourceAspect: number | undefined, frame: FrameRect): number {
+  const c = layer.content
+  if (c.kind === 'video') {
+    const aspect = c.crop ? c.crop.w / c.crop.h : sourceAspect
+    return aspect && aspect > 0 ? fitScale(aspect, frame) : 1
+  }
+  if (c.kind === 'image' && sourceAspect && sourceAspect > 0) {
+    return fitScale(effectiveImageAspect(sourceAspect, c.crop, c.rotateQuarters), frame)
+  }
+  return 1
+}
+
+/**
+ * A media layer rescaled so its size RELATIVE TO THE FRAME survives an aspect
+ * change of its source (a crop set or cleared): the base scale and every
+ * keyframe scale move by `fitScale(to) / fitScale(from)`. In the 9:16 frame the
+ * factor is 1 and the layer comes back unchanged — so "Crop to 16:9" in a 16:9
+ * project fills it exactly as "Crop to 9:16" always filled a Reel.
+ */
+export function rescaleForAspect<L extends Pick<Layer, 'scale' | 'keyframes'>>(
+  layer: L,
+  fromAspect: number,
+  toAspect: number,
+  frame: FrameRect
+): L {
+  const k = fitScale(toAspect, frame) / fitScale(fromAspect, frame)
+  if (!Number.isFinite(k) || Math.abs(k - 1) < 1e-9) return layer
+  return {
+    ...layer,
+    scale: layer.scale * k,
+    ...(layer.keyframes ? { keyframes: layer.keyframes.map((kf) => ({ ...kf, scale: kf.scale * k })) } : {})
+  }
+}
 
 // --- Geometry (shared by preview + export) ----------------------------------
 
@@ -348,13 +404,25 @@ export function hookCovered(layers: Layer[]): boolean {
 
 const DEFAULT_PILL: PillStyle = { enabled: true, color: '#000000cc', padPx: 18 }
 
-/** A full-frame video layer placed at `startSec` for `durationSec`. */
+/** Where a new media layer lands: the output frame, and the media's aspect (w/h)
+ *  so it can start fitted to that frame. Absent = the 9:16 frame / scale 1. */
+export interface PlaceIn {
+  frame?: FrameRect
+  aspect?: number
+}
+
+/** Scale that fits media into the frame it is placed in (1 when unknown). */
+const placedFit = (place: PlaceIn): number =>
+  place.aspect && place.aspect > 0 ? fitScale(place.aspect, place.frame) : 1
+
+/** A frame-filling video layer placed at `startSec` for `durationSec`, centered
+ *  and fitted to `place.frame` (contain). */
 export function makeVideoLayer(
   id: string,
   mediaId: string,
   startSec: number,
   durationSec: number,
-  opts: { mute?: boolean } = {}
+  opts: { mute?: boolean } & PlaceIn = {}
 ): Layer {
   const dur = Math.max(0.1, durationSec)
   return {
@@ -364,13 +432,19 @@ export function makeVideoLayer(
     endSec: Math.max(0, startSec) + dur,
     x: FRAME.width / 2,
     y: FRAME.height / 2,
-    scale: 1,
+    scale: placedFit(opts),
     content: { kind: 'video', mediaId, inSec: 0, outSec: dur, mute: opts.mute ?? false, gainDb: 0, crop: null }
   }
 }
 
 /** A centered image layer (~half the frame), for the given time window. */
-export function makeImageLayer(id: string, mediaId: string, startSec: number, endSec: number): Layer {
+export function makeImageLayer(
+  id: string,
+  mediaId: string,
+  startSec: number,
+  endSec: number,
+  place: PlaceIn = {}
+): Layer {
   return {
     id,
     hidden: false,
@@ -378,20 +452,26 @@ export function makeImageLayer(id: string, mediaId: string, startSec: number, en
     endSec: Math.max(startSec + 0.5, endSec),
     x: FRAME.width / 2,
     y: FRAME.height / 2,
-    scale: 0.5,
+    scale: 0.5 * placedFit(place),
     content: { kind: 'image', mediaId, opacity: 1 }
   }
 }
 
-/** A default text layer placed at the given time window. */
-export function makeTextLayer(id: string, startSec: number, endSec: number): Layer {
+/** A default text layer placed at the given time window, a third of the way
+ *  down the output frame. */
+export function makeTextLayer(
+  id: string,
+  startSec: number,
+  endSec: number,
+  frame: FrameRect = FULL_FRAME
+): Layer {
   return {
     id,
     hidden: false,
     startSec: Math.max(0, startSec),
     endSec: Math.max(startSec + 0.5, endSec),
     x: FRAME.width / 2,
-    y: FRAME.height * 0.32,
+    y: frame.y + frame.h * 0.32,
     scale: 1,
     content: {
       kind: 'text',

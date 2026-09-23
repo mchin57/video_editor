@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -28,11 +30,12 @@ import {
 } from '@shared/project'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
-import { cellSpan, layoutCellRect } from '@shared/layouts'
-import type { MediaAsset } from '@shared/media'
+import { cellSpan, FULL_CELL, layoutCellRect } from '@shared/layouts'
+import { assetAspect, type MediaAsset } from '@shared/media'
 import { fontCssFamily } from '@shared/fonts'
 import {
   effectiveImageAspect,
+  FULL_FRAME,
   isFrozenAt,
   layersAtTime,
   layerTransformAt,
@@ -42,18 +45,19 @@ import {
   upsertKeyframe,
   videoSourceTime,
   visualDuration,
+  type FrameRect,
   type ResizeBox,
   type ResizeHandle
 } from '@shared/layers'
 import { clampAnimWindows, effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
 import { activeSparkle, sparkleStateAt, sparklesFor, type Sparkle } from '@shared/sparkle'
-import { LOGICAL, SAFE_ZONES } from '@/lib/coords'
+import { LOGICAL } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
-import { activeComp, useProject } from '@/state/projectStore'
+import { activeComp, projectFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 
@@ -73,10 +77,41 @@ const EMPTY_LAYERS: Layer[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 
 /** A logical-px length expressed in the container-query unit text is sized in, so
- *  fonts/strokes/shadows scale with the stage like the burned output does. */
+ *  fonts/strokes/shadows scale with the stage like the burned output does. The
+ *  container is the canonical canvas (`frameCanvasStyle`), 1080 logical px wide. */
 const cqw = (px: number): string => `${(px / LOGICAL.width) * 100}cqw`
 /** Vertical counterpart of `cqw`, for positioning by the logical y axis. */
 const cqh = (px: number): string => `${(px / LOGICAL.height) * 100}cqh`
+
+/**
+ * The project's output frame (a window on the canonical space — `shared/frame.ts`),
+ * provided once by the stage so every level of the recursive render — root
+ * stack, layouts, nested comps — resolves frame-relative geometry the same way.
+ */
+const FrameCtx = createContext<FrameRect>(FULL_FRAME)
+
+/**
+ * The canonical 1080×1920 canvas, positioned inside a frame-shaped parent so
+ * the parent shows exactly `frame`. Layers render inside it in canonical
+ * coordinates (percentages of LOGICAL, `cqw`/`cqh` of this box), so nothing
+ * about a layer changes with the format — the parent's `overflow: hidden` does
+ * the cropping. The CSS twin of the export's `frameToOutput`. Identity in 9:16.
+ */
+function frameCanvasStyle(frame: FrameRect): CSSProperties {
+  return {
+    position: 'absolute',
+    left: pct(-frame.x, frame.w),
+    top: pct(-frame.y, frame.h),
+    width: pct(LOGICAL.width, frame.w),
+    height: pct(LOGICAL.height, frame.h),
+    containerType: 'size'
+  }
+}
+
+/** Auto-wrap widths, as fractions of the FRAME width (the export wraps against
+ *  the output raster, which is the frame). */
+const TEXT_WRAP_FRAC = 0.92
+const CAPTION_WRAP_FRAC = 0.88
 
 /** The decoration knobs shared by a text overlay and a caption (the fill +
  *  pill/stroke/shadow subset of the shared `TextStyleBase`). */
@@ -254,14 +289,23 @@ const handleCursor = (h: ResizeHandle): string =>
   h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize'
 
 /** The edge/corner resize handles drawn on the selected layer's box. Positioned
- *  in a non-scaled overlay (so they stay a constant size), driven by the measured
- *  box; `onStart` begins the drag for the grabbed handle. */
+ *  in a non-scaled overlay over the FRAME (so they stay a constant size and are
+ *  not clipped by it), driven by the measured box; `onStart` begins the drag for
+ *  the grabbed handle.
+ *
+ *  A handle whose true spot lies outside the frame — a 9:16 clip in a 16:9 or
+ *  square frame reaches well past the top and bottom — is pinned to the frame
+ *  edge instead, so every clip stays resizable whatever its aspect. The drag
+ *  math uses pointer DELTAS against the real box (`resizeBox`), so a pinned
+ *  handle resizes exactly like the real corner would. */
 function ResizeHandles({
   box,
+  frame,
   handles,
   onStart
 }: {
   box: ResizeBox
+  frame: FrameRect
   handles: ResizeHandle[]
   onStart: (e: ReactPointerEvent, handle: ResizeHandle) => void
 }): JSX.Element {
@@ -270,11 +314,15 @@ function ResizeHandles({
       {handles.map((h) => {
         const x = box.cx + (h.includes('e') ? box.w / 2 : h.includes('w') ? -box.w / 2 : 0)
         const y = box.cy + (h.includes('s') ? box.h / 2 : h.includes('n') ? -box.h / 2 : 0)
+        const px = clamp(x, frame.x, frame.x + frame.w)
+        const py = clamp(y, frame.y, frame.y + frame.h)
         return (
           <span
             key={h}
+            data-handle={h}
+            data-pinned={px !== x || py !== y ? '' : undefined}
             onPointerDown={(e) => onStart(e, h)}
-            style={{ left: pct(x, LOGICAL.width), top: pct(y, LOGICAL.height), cursor: handleCursor(h) }}
+            style={{ left: pct(px - frame.x, frame.w), top: pct(py - frame.y, frame.h), cursor: handleCursor(h) }}
             className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-sky-500 bg-white shadow"
           />
         )
@@ -645,6 +693,7 @@ function StackLayer({
   /** Silenced by an ancestor comp (a muted cell it fills). */
   muted?: boolean
 }): JSX.Element | null {
+  const frame = useContext(FrameCtx)
   const layer = withKeyframedTransform(rawLayer, time)
 
         // Keyframed opacity (video/image): same shared interpolation the export
@@ -753,7 +802,7 @@ function StackLayer({
           // The wrapper is the layer's transformed FULL-FRAME rect; cells sit
           // inside at their plain preset fractions (the wrapper carries the
           // move/zoom) — same numbers `layoutCellRect` gives the export.
-          const frameRect = layoutCellRect(layer, { x: 0, y: 0, w: LOGICAL.width, h: LOGICAL.height })
+          const frameRect = layoutCellRect(layer, FULL_CELL, frame)
           const box: CSSProperties = {
             position: 'absolute',
             left: pct(frameRect.x, LOGICAL.width),
@@ -783,7 +832,7 @@ function StackLayer({
           // Like a layout, the box is the layer-transformed FULL-FRAME rect;
           // the nested comp fills it on its own local clock (comp t=0 at the
           // layer start). Compounds ignore transform keyframes (v1 rule).
-          const frameRect = layoutCellRect(layer, { x: 0, y: 0, w: LOGICAL.width, h: LOGICAL.height })
+          const frameRect = layoutCellRect(layer, FULL_CELL, frame)
           const box: CSSProperties = {
             position: 'absolute',
             left: pct(frameRect.x, LOGICAL.width),
@@ -854,7 +903,7 @@ function StackLayer({
               fontFamily: fontCssFamily(content.fontFamily),
               fontWeight: 'normal',
               width: content.widthPx != null ? cqw(content.widthPx) : undefined,
-              maxWidth: content.widthPx != null ? undefined : '92%',
+              maxWidth: content.widthPx != null ? undefined : cqw(frame.w * TEXT_WRAP_FRAC),
               zIndex: z
             }}
             className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
@@ -928,11 +977,13 @@ function Sparkles({
 const noopPointer = (): void => {}
 
 /**
- * A nested composition rendered inside a rect. The comp keeps its own
- * 1080×1920 canvas, sized to COVER the container (center-crop — the comp twin
- * of a layout cell's `object-fit: cover`, matching what the export's
- * pre-render + coverCrop produce), and its stack renders recursively through
- * `StackLayer` on the LOCAL clock (comp time 0 = the parent window start).
+ * A nested composition rendered inside a rect. The comp is seen through the
+ * project's output frame, like the root — a frame-shaped box sized to COVER the
+ * container (center-crop — the comp twin of a layout cell's `object-fit: cover`,
+ * matching what the export's frame-sized pre-render + coverCrop produce; a
+ * compound clip's box IS frame-shaped, so it fits exactly), holding the comp's
+ * canonical canvas. Its stack renders recursively through `StackLayer` on the
+ * LOCAL clock (comp time 0 = the parent window start).
  *
  * Read-only: enter the comp to edit it. A comp shown here plays its VIDEO
  * only — nested audio and captions arrive with the export's pre-render
@@ -957,6 +1008,7 @@ function CompFill({
    *  which skips a muted cell's intermediate audio entirely. */
   muted?: boolean
 }): JSX.Element | null {
+  const frame = useContext(FrameCtx)
   if (depth > MAX_COMP_DEPTH) return null
   const srcDur = (id: string): number => assetById.get(id)?.probe.durationSec ?? 0
   if (time < 0 || time >= compositionDuration(comp, srcDur)) return null
@@ -969,42 +1021,48 @@ function CompFill({
         left: '50%',
         top: '50%',
         transform: 'translate(-50%, -50%)',
-        width: `max(100cqw, calc(100cqh * ${LOGICAL.width / LOGICAL.height}))`,
-        aspectRatio: `${LOGICAL.width} / ${LOGICAL.height}`,
-        containerType: 'size',
+        width: `max(100cqw, calc(100cqh * ${frame.w / frame.h}))`,
+        aspectRatio: `${frame.w} / ${frame.h}`,
         overflow: 'hidden'
       }}
     >
-      {/* The comp's own audio track — without this a comp whose clips are
-          muted and extracted to its audio lane would play silent. */}
-      {!muted && (
-        <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />
-      )}
-      {active.map((l, i) => (
-        <StackLayer
-          key={l.id}
-          rawLayer={l}
-          z={10 + i}
-          time={time}
-          playing={playing}
-          assetById={assetById}
-          selected={false}
-          onMoveDown={noopPointer}
-          depth={depth}
-          muted={muted}
-        />
-      ))}
+      <div style={frameCanvasStyle(frame)}>
+        {/* The comp's own audio track — without this a comp whose clips are
+            muted and extracted to its audio lane would play silent. */}
+        {!muted && (
+          <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />
+        )}
+        {active.map((l, i) => (
+          <StackLayer
+            key={l.id}
+            rawLayer={l}
+            z={10 + i}
+            time={time}
+            playing={playing}
+            assetById={assetById}
+            selected={false}
+            onMoveDown={noopPointer}
+            depth={depth}
+            muted={muted}
+          />
+        ))}
+      </div>
     </div>
   )
 }
 
 /**
- * The 9:16 playback surface. Composites the unified layer stack (multiple videos
- * /images/text at once), driven by a single wall-clock master so several videos
- * can play together. Layers move/zoom in the logical 1080x1920 space and are
- * cropped by the stage; uncovered areas are black.
+ * The playback surface, shaped like the project's output format. Composites the
+ * unified layer stack (multiple videos/images/text at once), driven by a single
+ * wall-clock master so several videos can play together. Layers move/zoom in
+ * the canonical 1080x1920 logical space; the stage shows the format's frame — a
+ * window on that space — and crops the rest, exactly as the export does.
+ * Uncovered areas are black. Fills its parent (the dock panel sizes it to the
+ * frame's aspect).
  */
 export function PreviewStage(): JSX.Element {
+  const format = useProject(projectFormat)
+  const frame = format.frame
   const project = useProject(activeComp)
   const layers = project?.layers ?? EMPTY_LAYERS
   const audioClips = project?.audioClips ?? EMPTY_AUDIO
@@ -1023,10 +1081,15 @@ export function PreviewStage(): JSX.Element {
   const previewLayers: Layer[] = useMemo(() => {
     if (layers.length) return layers
     if (selectedAsset?.probe.video && selectedAsset.proxyReady) {
-      return [makeVideoLayer('__preview__', selectedAsset.id, 0, selectedAsset.probe.durationSec)]
+      return [
+        makeVideoLayer('__preview__', selectedAsset.id, 0, selectedAsset.probe.durationSec, {
+          frame,
+          aspect: assetAspect(selectedAsset)
+        })
+      ]
     }
     return EMPTY_LAYERS
-  }, [layers, selectedAsset])
+  }, [layers, selectedAsset, frame])
 
   const audioEnd = useMemo(
     () =>
@@ -1209,8 +1272,9 @@ export function PreviewStage(): JSX.Element {
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
     // A keyframed layer's box moves with the playhead — re-measure per tick.
+    // A format change resizes the canvas (and reshapes layouts/text wraps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLayer, selectedLayer?.keyframes?.length ? time : 0])
+  }, [selectedLayer, selectedLayer?.keyframes?.length ? time : 0, frame])
 
   // All captions on screen now (audio clips are captioned independently, so two
   // overlapping clips can show two captions at once — stack them).
@@ -1219,103 +1283,127 @@ export function PreviewStage(): JSX.Element {
     : []
   const hasContent = previewLayers.length > 0
 
+  // A press on empty stage (the frame outside the canvas, or the canvas itself)
+  // clears the layer selection.
+  const deselectOnBackground = (e: ReactPointerEvent): void => {
+    if (e.target === e.currentTarget) useUi.getState().selectLayer(null)
+  }
+
   return (
-    <div
-      ref={stageRef}
-      style={{ containerType: 'size' }}
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) useUi.getState().selectLayer(null)
-      }}
-      className="relative isolate aspect-[9/16] h-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10"
-    >
-      {/* Audio track of the composition being edited. Nested comps render
-          their own through CompFill, so every level reaches the mix. */}
-      <CompAudioTrack clips={audioClips} assetById={assetById} time={time} playing={playing} />
+    <FrameCtx.Provider value={frame}>
+      <div className="relative isolate h-full w-full" data-testid="preview-stage" data-format={format.id}>
+        {/* The FRAME: the project's output shape. Clips everything to it. */}
+        <div
+          data-testid="preview-frame"
+          onPointerDown={deselectOnBackground}
+          className="absolute inset-0 isolate overflow-hidden rounded-xl bg-black ring-1 ring-white/10"
+        >
+          {/* The canonical canvas the whole stack lives in (pointer math and
+              box measuring read THIS element — it is 1080 logical px wide). */}
+          <div ref={stageRef} data-testid="preview-canvas" style={frameCanvasStyle(frame)} onPointerDown={deselectOnBackground}>
+            {/* Audio track of the composition being edited. Nested comps render
+                their own through CompFill, so every level reaches the mix. */}
+            <CompAudioTrack clips={audioClips} assetById={assetById} time={time} playing={playing} />
 
-      {/* The composited layer stack, back (index 0) → front. */}
-      {activeLayers.map((rawLayer, i) => (
-        <StackLayer
-          key={rawLayer.id}
-          rawLayer={rawLayer}
-          z={10 + i}
-          time={time}
-          playing={playing}
-          assetById={assetById}
-          selected={rawLayer.id === selectedLayerId}
-          onMoveDown={(e) => startLayerMove(e, withKeyframedTransform(rawLayer, time))}
-        />
-      ))}
+            {/* The composited layer stack, back (index 0) → front. */}
+            {activeLayers.map((rawLayer, i) => (
+              <StackLayer
+                key={rawLayer.id}
+                rawLayer={rawLayer}
+                z={10 + i}
+                time={time}
+                playing={playing}
+                assetById={assetById}
+                selected={rawLayer.id === selectedLayerId}
+                onMoveDown={(e) => startLayerMove(e, withKeyframedTransform(rawLayer, time))}
+              />
+            ))}
 
-      {/* Edge/corner resize handles on the selected layer (corners scale
-          uniformly, edges stretch media / re-wrap text). */}
-      {selectedLayer && handleBox && (
-        <ResizeHandles
-          box={handleBox}
-          handles={
-            selectedLayer.content.kind === 'text'
-              ? TEXT_HANDLES
-              : selectedLayer.content.kind === 'layout'
-                ? CORNER_HANDLES
-                : MEDIA_HANDLES
-          }
-          onStart={(e, handle) => startLayerResize(e, withKeyframedTransform(selectedLayer, time), handle)}
-        />
-      )}
+            {/* Active captions: each rendered at its own effective style (lane-wide or
+                per-caption override), positioned by center, draggable to reposition. */}
+            {captions &&
+              activeCaptions.map((seg) => {
+                const st = effectiveCaptionStyle(captions, seg)
+                const selected = seg.id === selectedCaptionId
+                return (
+                  <div
+                    key={seg.id}
+                    onPointerDown={(e) => startCaptionMove(e, seg)}
+                    style={{
+                      position: 'absolute',
+                      left: pct(st.x, LOGICAL.width),
+                      top: pct(st.y, LOGICAL.height),
+                      transform: `translate(-50%, -50%) rotate(${st.rotationDeg}deg)`,
+                      transformOrigin: 'center',
+                      fontSize: cqw(st.fontSizePx),
+                      fontFamily: fontCssFamily(st.fontFamily),
+                      fontWeight: 'normal',
+                      maxWidth: cqw(frame.w * CAPTION_WRAP_FRAC),
+                      zIndex: 300
+                    }}
+                    className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
+                      selected ? 'outline-dashed outline-2 outline-emerald-400' : ''
+                    }`}
+                  >
+                    <StyledText s={st} text={seg.text} />
+                  </div>
+                )
+              })}
+          </div>
 
-      {!hasContent && (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-600">
-          Add a clip to the timeline to begin
-        </div>
-      )}
-
-      {/* Active captions: each rendered at its own effective style (lane-wide or
-          per-caption override), positioned by center, draggable to reposition. */}
-      {captions &&
-        activeCaptions.map((seg) => {
-          const st = effectiveCaptionStyle(captions, seg)
-          const selected = seg.id === selectedCaptionId
-          return (
-            <div
-              key={seg.id}
-              onPointerDown={(e) => startCaptionMove(e, seg)}
-              style={{
-                position: 'absolute',
-                left: pct(st.x, LOGICAL.width),
-                top: pct(st.y, LOGICAL.height),
-                transform: `translate(-50%, -50%) rotate(${st.rotationDeg}deg)`,
-                transformOrigin: 'center',
-                fontSize: cqw(st.fontSizePx),
-                fontFamily: fontCssFamily(st.fontFamily),
-                fontWeight: 'normal',
-                maxWidth: '88%',
-                zIndex: 300
-              }}
-              className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
-                selected ? 'outline-dashed outline-2 outline-emerald-400' : ''
-              }`}
-            >
-              <StyledText s={st} text={seg.text} />
+          {!hasContent && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-zinc-600">
+              Add a clip to the timeline to begin
             </div>
-          )
-        })}
+          )}
 
-      {/* Hook zone (first 3 seconds) */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-[400] flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
-        Hook zone · first 3s
+          {/* Hook zone (first 3 seconds) */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-[400] flex h-[6%] items-center justify-center border-b border-amber-400/30 bg-amber-400/10 text-[10px] uppercase tracking-wide text-amber-300/80">
+            Hook zone · first 3s
+          </div>
+          {/* The format's platform UI safe zones (Instagram's caption bar and
+              action rail on the Reel/Story presets), in frame px. Borders only
+              on the sides that face into the frame. */}
+          {format.safeZones?.map((z, i) => (
+            <div
+              key={i}
+              data-testid="safe-zone"
+              className="pointer-events-none absolute z-[400] border-rose-400/40 bg-rose-500/10"
+              style={{
+                left: pct(z.x, frame.w),
+                top: pct(z.y, frame.h),
+                width: pct(z.w, frame.w),
+                height: pct(z.h, frame.h),
+                borderLeftWidth: z.x > 0 ? 1 : 0,
+                borderTopWidth: z.y > 0 ? 1 : 0,
+                borderRightWidth: z.x + z.w < frame.w ? 1 : 0,
+                borderBottomWidth: z.y + z.h < frame.h ? 1 : 0
+              }}
+            />
+          ))}
+          <div className="pointer-events-none absolute left-2 top-2 z-[400] text-[10px] uppercase tracking-wide text-zinc-500">
+            {format.ratioLabel} · {format.width} × {format.height}
+          </div>
+        </div>
+
+        {/* Edge/corner resize handles on the selected layer (corners scale
+            uniformly, edges stretch media / re-wrap text) — OUTSIDE the frame's
+            clip so a handle on the frame edge stays whole and grabbable. */}
+        {selectedLayer && handleBox && (
+          <ResizeHandles
+            box={handleBox}
+            frame={frame}
+            handles={
+              selectedLayer.content.kind === 'text'
+                ? TEXT_HANDLES
+                : selectedLayer.content.kind === 'layout'
+                  ? CORNER_HANDLES
+                  : MEDIA_HANDLES
+            }
+            onStart={(e, handle) => startLayerResize(e, withKeyframedTransform(selectedLayer, time), handle)}
+          />
+        )}
       </div>
-      {/* Bottom safe zone */}
-      <div
-        className="pointer-events-none absolute left-0 z-[400] w-full border-t border-rose-400/40 bg-rose-500/10"
-        style={{ top: pct(SAFE_ZONES.bottom.y, LOGICAL.height), height: pct(SAFE_ZONES.bottom.h, LOGICAL.height) }}
-      />
-      {/* Right action rail */}
-      <div
-        className="pointer-events-none absolute top-0 z-[400] h-full border-l border-rose-400/40 bg-rose-500/10"
-        style={{ left: pct(SAFE_ZONES.rightRail.x, LOGICAL.width), width: pct(SAFE_ZONES.rightRail.w, LOGICAL.width) }}
-      />
-      <div className="pointer-events-none absolute left-2 top-2 z-[400] text-[10px] uppercase tracking-wide text-zinc-500">
-        {LOGICAL.width} × {LOGICAL.height}
-      </div>
-    </div>
+    </FrameCtx.Provider>
   )
 }

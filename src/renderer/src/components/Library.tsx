@@ -1,9 +1,9 @@
 import { type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
-import { isImageAsset } from '@shared/media'
+import { assetAspect, isImageAsset } from '@shared/media'
 import { useLibrary, useImportMedia } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
-import { activeComp, useProject } from '@/state/projectStore'
+import { activeComp, getFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { makeImageLayer, visualDuration } from '@shared/layers'
@@ -39,14 +39,14 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const addVideoAt = (startSec: number): void => {
     if (!asset.proxyReady) return
     const id = crypto.randomUUID()
-    addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio)
+    addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio, assetAspect(asset))
     // A clip with audio lands as a LINKED pair — select the whole group.
     selectTile(useProject.getState().project, { kind: 'layer', id })
   }
   const addImageAt = (startSec: number): void => {
     if (!asset.proxyReady) return
     const id = crypto.randomUUID()
-    addLayer(makeImageLayer(id, asset.id, startSec, startSec + 3))
+    addLayer(makeImageLayer(id, asset.id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) }))
     selectLayer(id)
   }
   const addBtn = `rounded bg-sky-500/20 px-1 py-0.5 text-center text-[10px] font-semibold text-sky-300 transition hover:bg-sky-500/40 whitespace-nowrap ${

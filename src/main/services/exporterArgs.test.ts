@@ -39,6 +39,19 @@ describe('targetForPreset', () => {
   it('maps presets to output sizes', () => {
     expect(targetForPreset('reel')).toEqual({ width: 1080, height: 1920 })
     expect(targetForPreset('square')).toEqual({ width: 1080, height: 1080 })
+    expect(targetForPreset('landscape')).toEqual({ width: 1920, height: 1080 })
+    expect(targetForPreset('feed')).toEqual({ width: 1080, height: 1350 })
+    expect(targetForPreset('cinematic')).toEqual({ width: 2520, height: 1080 })
+  })
+  it('falls back to the Reel size for an unknown preset id', () => {
+    expect(targetForPreset('nope')).toEqual({ width: 1080, height: 1920 })
+  })
+  it('a landscape base canvas is 1920x1080', () => {
+    const s = buildExportArgs(
+      plan({ target: targetForPreset('landscape'), visuals: [{ kind: 'video', video: vid }] }),
+      'out.mp4'
+    ).join(' ')
+    expect(s).toContain('-f lavfi -i color=c=black:s=1920x1080:r=30:d=10.000')
   })
 })
 

@@ -12,7 +12,7 @@
  */
 
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
-import { EXPORT_PRESETS, type PresetId } from '@shared/export'
+import { presetFor } from '@shared/formats'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
 import { cropFilter, f3, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
 
@@ -76,8 +76,9 @@ export interface Target {
   height: number
 }
 
-export function targetForPreset(preset: PresetId): Target {
-  const p = EXPORT_PRESETS[preset]
+/** Output size for a preset id (an unknown id falls back like `presetFor`). */
+export function targetForPreset(preset: string): Target {
+  const p = presetFor(preset)
   return { width: p.width, height: p.height }
 }
 

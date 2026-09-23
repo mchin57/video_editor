@@ -15,7 +15,7 @@
  * stay on their own tracks.
  */
 
-import type { PresetId } from './export'
+import { DEFAULT_PRESET_ID, isPresetId, type PresetId } from './formats'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
 import type { AudioFx } from './audioFx'
@@ -679,8 +679,8 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 21,
-    preset: 'reel',
+    version: 22,
+    preset: DEFAULT_PRESET_ID,
     ...createEmptyComposition(),
     denoiseDefault: false,
     stabilizeDefault: null,
@@ -978,7 +978,14 @@ export function migrateProject(raw: unknown): Project {
   // v21 adds per-clip audio mute (`AudioClip.mute`). Purely additive — absent
   // means audible, which is what every older project means — so nothing about
   // existing content changes and no rewrite step is needed.
-  if (typeof p.version !== 'number' || p.version < 21) p.version = 21
+  // v22 makes `preset` a key of the format registry (shared/formats.ts — ten
+  // aspect ratios, vertical to 21:9) and a non-9:16 format a window CENTRED on
+  // the canonical 1080×1920 space rather than a squash of it. No layer data
+  // moves (a format only ever changes the frame), but an id this build does not
+  // know — a newer build's format, a hand-edited file — normalises to the
+  // default instead of leaving every preset lookup undefined.
+  if (!isPresetId(p.preset)) p.preset = DEFAULT_PRESET_ID
+  if (typeof p.version !== 'number' || p.version < 22) p.version = 22
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

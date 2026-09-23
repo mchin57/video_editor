@@ -13,15 +13,22 @@ import { Inspector } from '@/components/Inspector'
 import { Timeline } from '@/components/Timeline'
 import { loadDefaultLayout, loadDockLayout, saveDockLayout } from '@/lib/dockLayout'
 import { applyLayout, useDock } from '@/state/dock'
+import { projectFormat, useProject } from '@/state/projectStore'
 
-/** 9:16 stage fitted inside the panel regardless of its shape (PreviewStage's
- *  own root is height-driven `aspect-[9/16] h-full`, which would overflow a
- *  narrow panel). 24px = 12px breathing room per side. */
+/** The stage, fitted inside the panel at the project format's aspect ratio
+ *  whatever the panel's shape (PreviewStage fills this box). 24px = 12px
+ *  breathing room per side. */
 function PreviewPanel(): JSX.Element {
+  const { width, height } = useProject(projectFormat)
   return (
     <DockPanel>
       <div className="flex h-full items-center justify-center" style={{ containerType: 'size' }}>
-        <div style={{ height: 'min(100cqh - 24px, calc((100cqw - 24px) * 16 / 9))' }}>
+        <div
+          style={{
+            width: `min(100cqw - 24px, calc((100cqh - 24px) * ${width} / ${height}))`,
+            aspectRatio: `${width} / ${height}`
+          }}
+        >
           <PreviewStage />
         </div>
       </div>

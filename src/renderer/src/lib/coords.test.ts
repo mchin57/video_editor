@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import {
-  LOGICAL,
-  SAFE_ZONES,
-  stageScale,
-  rectsOverlap,
-  intrudesSafeZone,
-  clampToCanvas
-} from './coords'
+import { EXPORT_PRESETS, INSTAGRAM_SAFE_ZONES } from '@shared/formats'
+import { LOGICAL, stageScale, rectsOverlap, intrudesSafeZone as intrudes, clampToCanvas } from './coords'
+
+const ig = EXPORT_PRESETS.reel.safeZones!
+const intrudesSafeZone = (box: Parameters<typeof intrudes>[0]): boolean => intrudes(box, ig)
 
 describe('coords', () => {
   it('uses a 1080x1920 logical space', () => {
@@ -46,7 +43,11 @@ describe('coords', () => {
   })
 
   it('keeps the documented safe-zone geometry', () => {
-    expect(SAFE_ZONES.bottom.y).toBe(1440)
-    expect(SAFE_ZONES.rightRail.x).toBe(972)
+    expect(INSTAGRAM_SAFE_ZONES.bottom.y).toBe(1440)
+    expect(INSTAGRAM_SAFE_ZONES.rightRail.x).toBe(972)
+  })
+
+  it('a format without safe zones has nothing to intrude on', () => {
+    expect(intrudes({ x: 100, y: 1500, w: 800, h: 120 }, [])).toBe(false)
   })
 })

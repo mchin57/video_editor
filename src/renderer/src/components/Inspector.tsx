@@ -21,7 +21,15 @@ import {
   isNeutralColor,
   videoSpeed
 } from '@shared/project'
-import { hookCovered, kfOpacity, videoSourceTime, videoTimelineTime } from '@shared/layers'
+import {
+  hookCovered,
+  kfOpacity,
+  layerFitScale,
+  videoSourceTime,
+  videoTimelineTime,
+  type FrameRect
+} from '@shared/layers'
+import { assetAspect } from '@shared/media'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import {
   DEFAULT_IN_SEC,
@@ -38,7 +46,7 @@ import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
 import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
-import { activeComp, useProject } from '@/state/projectStore'
+import { activeComp, projectFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
@@ -359,6 +367,8 @@ function LayerEditor(): JSX.Element | null {
   const setStillsOpen = useUi((s) => s.setStillsOpen)
   const setImageEditOpen = useUi((s) => s.setImageEditOpen)
   const stabilizeDefault = useProject((s) => s.project?.stabilizeDefault ?? null)
+  const format = useProject(projectFormat)
+  const setVideoCrop = useProject((s) => s.setVideoCrop)
   const { data: assets = [] } = useLibrary()
   if (!layer) return null
   const id = layer.id
@@ -366,6 +376,11 @@ function LayerEditor(): JSX.Element | null {
   const c = layer.content
   const asset =
     c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
+  // Position and zoom READ frame-relative (0,0 = the frame's top-left, 100% =
+  // fits the frame); the document stays in canonical coords, so a format switch
+  // never rewrites them. Identity in 9:16.
+  const frame = format.frame
+  const zoomBase = layerFitScale(layer, assetAspect(asset), frame)
   const kindName =
     c.kind === 'video'
       ? 'Video layer'
@@ -426,9 +441,9 @@ function LayerEditor(): JSX.Element | null {
           <input
             type="number"
             step="5"
-            value={Math.round(layer.x)}
+            value={Math.round(layer.x - frame.x)}
             disabled={keyframed}
-            onChange={(e) => update(id, { x: Number(e.target.value) })}
+            onChange={(e) => update(id, { x: Number(e.target.value) + frame.x })}
             className={inputCls}
           />
         </Field>
@@ -436,22 +451,22 @@ function LayerEditor(): JSX.Element | null {
           <input
             type="number"
             step="5"
-            value={Math.round(layer.y)}
+            value={Math.round(layer.y - frame.y)}
             disabled={keyframed}
-            onChange={(e) => update(id, { y: Number(e.target.value) })}
+            onChange={(e) => update(id, { y: Number(e.target.value) + frame.y })}
             className={inputCls}
           />
         </Field>
       </div>
 
-      <Field label={`Zoom · ${Math.round(layer.scale * 100)}%`}>
+      <Field label={`Zoom · ${Math.round((layer.scale / zoomBase) * 100)}%`}>
         <div className={keyframed ? 'pointer-events-none opacity-40' : ''}>
           <LiveRange
             min={0.05}
             max={4}
             step={0.01}
-            value={layer.scale}
-            transform={(p, v) => mut(p, (l) => ({ ...l, scale: v }))}
+            value={layer.scale / zoomBase}
+            transform={(p, v) => mut(p, (l) => ({ ...l, scale: v * zoomBase }))}
           />
         </div>
       </Field>
@@ -487,7 +502,7 @@ function LayerEditor(): JSX.Element | null {
           layouts and compounds have no export keyframe path) */}
       {c.kind !== 'text' && c.kind !== 'layout' && c.kind !== 'compound' && (
         <CollapsibleSection id="keyframes" title="Keyframes">
-          <KeyframesSection layer={layer} />
+          <KeyframesSection layer={layer} frame={frame} zoomBase={zoomBase} />
         </CollapsibleSection>
       )}
 
@@ -553,11 +568,11 @@ function LayerEditor(): JSX.Element | null {
               onClick={() => setCropEditing(true)}
               className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
             >
-              {c.crop ? 'Edit crop' : 'Crop to 9:16'}
+              {c.crop ? 'Edit crop' : `Crop to ${format.ratioLabel}`}
             </button>
             {c.crop && (
               <button
-                onClick={() => updateContent(id, { crop: null })}
+                onClick={() => setVideoCrop(id, null, assetAspect(asset) ?? c.crop!.w / c.crop!.h)}
                 className="rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-400 hover:bg-white/10"
               >
                 Remove crop
@@ -751,7 +766,16 @@ function LayerEditor(): JSX.Element | null {
  * Motion previews and exports through the same shared interpolation
  * (`layerTransformAt`).
  */
-function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
+function KeyframesSection({
+  layer,
+  frame,
+  zoomBase
+}: {
+  layer: Layer
+  /** Keyframe values display frame-relative, like the Transform fields. */
+  frame: FrameRect
+  zoomBase: number
+}): JSX.Element {
   const addKf = useProject((s) => s.addLayerKeyframe)
   const removeKf = useProject((s) => s.removeLayerKeyframe)
   const clearKfs = useProject((s) => s.clearLayerKeyframes)
@@ -781,7 +805,7 @@ function KeyframesSection({ layer }: { layer: Layer }): JSX.Element {
                 </button>
                 <span className="w-10 font-mono">{k.tSec.toFixed(2)}s</span>
                 <span className="flex-1 truncate text-zinc-500">
-                  x{Math.round(k.x)} y{Math.round(k.y)} · {Math.round(k.scale * 100)}%
+                  x{Math.round(k.x - frame.x)} y{Math.round(k.y - frame.y)} · {Math.round((k.scale / zoomBase) * 100)}%
                 </span>
                 <input
                   type="number"
