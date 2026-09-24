@@ -1,24 +1,26 @@
 /**
- * Renders gradient-filled text to a transparent, output-sized PNG so the
- * exporter can composite it as an overlay — ASS/libass has no gradient support,
- * so gradient text (and captions) can't burn through the normal ass= path.
+ * The export's Chromium: a hidden, transparent Electron window that draws text
+ * blocks with the SAME CSS the preview uses (`shared/textStyle.ts`). Two jobs:
  *
- * We draw the text with the SAME CSS the preview uses (gradient via
- * background-clip:text, stroke via -webkit-text-stroke + paint-order, shadow via
- * text-shadow, optional pill) inside a hidden, transparent Electron window
- * positioned off-screen, then capturePage() → PNG. One window is reused for the
- * whole export. All geometry is in OUTPUT px (the exporter pre-scales).
+ *  - RENDER gradient text/captions (and fixed-width text) to a transparent,
+ *    output-sized PNG composited as an overlay — libass has no gradients.
+ *  - LAY OUT every block libass burns (text layers and captions alike): line
+ *    breaks, line positions and pill boxes come back from here, so each line
+ *    burns exactly where the preview put it (see `textLayout.ts`).
  *
- * If rendering fails the caller falls back to a flat-colour ASS burn, so a
- * gradient never breaks an export.
+ * One window is reused for the whole export. All geometry is in OUTPUT px (the
+ * exporter pre-scales). If it fails the caller falls back (a flat ASS burn for
+ * a render, newline-only lines for a layout), so text never breaks an export.
  */
 
 import { BrowserWindow, type NativeImage } from 'electron'
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { pillRadiusPx, type GradientStyle, type PillStyle, type ShadowStyle, type StrokeStyle } from '@shared/project'
-import { FONTS, resolveFont } from '@shared/fonts'
+import type { GradientStyle, PillStyle, ShadowStyle, StrokeStyle } from '@shared/project'
+import { FONTS } from '@shared/fonts'
+import { cssText, textBoxCss, textFillCss, textPillCss, type CssLength } from '@shared/textStyle'
+import { groupLines, MEASURE_BLOCKS_SCRIPT, type LaidOutLine, type RawBlockMeasure } from './textLayout'
 
 /** One text element to rasterise (geometry already in output px). */
 export interface TextImageSpec {
@@ -37,6 +39,12 @@ export interface TextImageSpec {
   shadow?: ShadowStyle | null
   /** Explicit wrap-box width in output px (from a text side-resize). Absent = hug. */
   widthPx?: number
+  /** Auto-wrap width in output px when there is no `widthPx` — the preview's
+   *  frame-relative wrap (`textWrapWidth`), scaled like everything else. */
+  wrapWidthPx: number
+  /** Output px per logical px of decoration, for the default legibility shadow
+   *  (a logical constant; every other length arrives pre-scaled). Default 1. */
+  decoScale?: number
   /** Clockwise rotation in degrees. */
   rotationDeg?: number
 }
@@ -44,14 +52,40 @@ export interface TextImageSpec {
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+const px: CssLength = (n) => `${n}px`
+
 /**
- * Line height for the overlay box. Must equal what the preview puts on its text
- * layer, which is Tailwind's `leading-tight` — read out of the built stylesheet
- * as `--leading-tight: 1.25`, not assumed. It sets the line box the pill's
- * background is drawn around, so a mismatch shows up as a pill of the wrong
- * height and as different wrap spacing on multi-line text.
+ * The three declaration blocks of one text block — the box, the pill wrapper,
+ * the glyph span — built from the SAME shared definitions the preview renders
+ * with (`shared/textStyle.ts`), in output px. The box is centred by transform,
+ * like the preview's `TextBlock`: positioning it by `left` would cap its
+ * shrink-wrap at the space right of its centre (the old half-frame wrap).
  */
-const LINE_HEIGHT = 1.25
+function blockCss(spec: TextImageSpec, rotate: boolean): { box: string; pill: string; txt: string } {
+  const rot = rotate && spec.rotationDeg ? ` rotate(${spec.rotationDeg}deg)` : ''
+  // NOTE: the font lives on the BOX (inside textBoxCss), never on the glyph
+  // span. The pill is an inline span BETWEEN the two, and an inline box's
+  // background is sized from ITS OWN font metrics — with the font only on the
+  // glyph span the pill inherited the default 16px and the glyphs spilled out
+  // of it (measured: 16px pill vs 76px text).
+  const box = [
+    'position:absolute',
+    'left:0',
+    'top:0',
+    `transform:translate(calc(${spec.xCenter}px - 50%),calc(${spec.yCenter}px - 50%))${rot}`,
+    cssText(textBoxCss(spec, { widthPx: spec.widthPx, wrapWidthPx: spec.wrapWidthPx }, px))
+  ].join(';')
+  return {
+    box,
+    pill: spec.pill.enabled ? cssText(textPillCss(spec.pill, px)) : '',
+    txt: cssText(textFillCss(spec, px, spec.decoScale ?? 1))
+  }
+}
+
+const blockMarkup = (spec: TextImageSpec): string => {
+  const inner = `<span class="txt">${esc(spec.text)}</span>`
+  return spec.pill.enabled ? `<span class="pill">${inner}</span>` : inner
+}
 
 /** `@font-face` rules for every bundled font, loaded from disk (file://). */
 function fontFaceCss(fontsDir: string | null): string {
@@ -71,74 +105,36 @@ export function buildHtml(
   H: number,
   fontsDir: string | null
 ): string {
-  const def = resolveFont(spec.fontFamily)
-  const pillOn = spec.pill.enabled
-  // NOTE: the font goes on the BOX, not here — see the `box` array below. This
-  // span only carries the paint (fill/stroke/shadow).
-  const span: string[] = []
-  // Gradient fill via background-clip:text, else a flat colour.
-  if (spec.gradient) {
-    span.push(
-      `background:linear-gradient(${spec.gradient.angle}deg,${spec.gradient.from},${spec.gradient.to})`,
-      '-webkit-background-clip:text',
-      'background-clip:text',
-      '-webkit-text-fill-color:transparent',
-      'color:transparent'
-    )
-  } else {
-    span.push(`color:${spec.color}`)
-  }
-  if (!pillOn && spec.stroke && spec.stroke.widthPx > 0) {
-    span.push(
-      `-webkit-text-stroke:${spec.stroke.widthPx}px ${spec.stroke.color}`,
-      'paint-order:stroke fill'
-    )
-  }
-  if (spec.shadow && (spec.shadow.distancePx > 0 || spec.shadow.blur > 0)) {
-    const d = spec.shadow.distancePx
-    span.push(`text-shadow:${d}px ${d}px ${spec.shadow.blur}px ${spec.shadow.color}`)
-  }
-  // Pill: an inline wrapper so box-decoration-break clones a padded, rounded
-  // background onto each wrapped line (per-line, hugging each line's width). The
-  // inner text is position:relative so all glyphs paint in the positioned phase,
-  // above every line's background — otherwise a lower line's padding bleeds up
-  // and paints over the line above. Matches PreviewStage.StyledText.
-  const pillCss = pillOn
-    ? `background:${spec.pill.color};padding:${spec.pill.padPx}px;` +
-      `border-radius:${pillRadiusPx(spec.pill.padPx)}px;` +
-      `-webkit-box-decoration-break:clone;box-decoration-break:clone`
-    : ''
-  if (pillOn) span.push('position:relative')
-  const rot = spec.rotationDeg ? ` rotate(${spec.rotationDeg}deg)` : ''
-  const box = [
-    'position:absolute',
-    `left:${spec.xCenter}px`,
-    `top:${spec.yCenter}px`,
-    `transform:translate(-50%,-50%)${rot}`,
-    spec.widthPx != null ? `width:${spec.widthPx}px` : 'max-width:88%',
-    'text-align:center',
-    'white-space:pre-wrap',
-    // The font MUST be declared here, on the wrapper, exactly as the preview
-    // declares it on its overlay div. The pill is an inline span BETWEEN this
-    // box and the text, and an inline box's background is sized from ITS OWN
-    // font metrics — so with the font set only on the inner text span the pill
-    // inherited the default 16px, drew a box sized for 16px type, and the real
-    // glyphs spilled straight out of it. (Measured: pill computed font-size
-    // 16px here vs 76px in the preview.)
-    `font-family:"${def.label}",system-ui,sans-serif`,
-    'font-weight:normal',
-    `font-size:${spec.fontSizePx}px`,
-    `line-height:${LINE_HEIGHT}`
-  ]
-  const inner = `<span class="txt">${esc(spec.text)}</span>`
-  const content = pillOn ? `<span class="pill">${inner}</span>` : inner
+  const css = blockCss(spec, true)
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;padding:0;width:${W}px;height:${H}px;background:transparent;overflow:hidden}
 ${fontFaceCss(fontsDir)}
-.box{${box.join(';')}}
-.pill{${pillCss}}
-.txt{${span.join(';')}}
-</style></head><body><div class="box">${content}</div></body></html>`
+.box{${css.box}}
+.pill{${css.pill}}
+.txt{${css.txt}}
+</style></head><body><div class="box">${blockMarkup(spec)}</div></body></html>`
+}
+
+/**
+ * One page holding EVERY block to lay out (each `[data-block]`, unrotated —
+ * rotation is applied by the burn about the block centre), for
+ * `MEASURE_BLOCKS_SCRIPT`. Same CSS as `buildHtml`, so the line breaks,
+ * leading and pill boxes measured here are the ones the preview draws.
+ */
+export function buildLayoutHtml(specs: TextImageSpec[], W: number, H: number, fontsDir: string | null): string {
+  const blocks = specs
+    .map((spec, i) => {
+      const css = blockCss(spec, false)
+      const markup = blockMarkup(spec)
+        .replace('<span class="pill">', `<span class="pill" style='${css.pill}'>`)
+        .replace('<span class="txt">', `<span class="txt" style='${css.txt}'>`)
+      return `<div data-block="${i}" style='${css.box}'>${markup}</div>`
+    })
+    .join('')
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;width:${W}px;height:${H}px;background:transparent;overflow:hidden}
+${fontFaceCss(fontsDir)}
+</style></head><body>${blocks}</body></html>`
 }
 
 const delay = (ms: number): Promise<void> => new Promise((res) => setTimeout(res, ms))
@@ -168,6 +164,9 @@ export function normaliseCapture(img: NativeImage, width: number, height: number
 export interface TextRenderer {
   /** Render `spec` to `outPath` (a .png). Throws on failure. */
   render: (spec: TextImageSpec, outPath: string) => Promise<void>
+  /** Lay every block out with the preview's CSS and report its lines (one
+   *  page, one pass). Throws on failure. */
+  layout: (specs: TextImageSpec[]) => Promise<LaidOutLine[][]>
   dispose: () => void
 }
 
@@ -220,6 +219,16 @@ export function createTextRenderer(
       await delay(70) // let a frame paint after show
       const img = await w.webContents.capturePage()
       await fsp.writeFile(outPath, normaliseCapture(img, width, height).toPNG())
+    },
+    async layout(specs) {
+      if (specs.length === 0) return []
+      const w = ensureWin()
+      const htmlPath = join(tmpDir, `layout_${n++}.html`)
+      await fsp.writeFile(htmlPath, buildLayoutHtml(specs, width, height, fontsDir), 'utf8')
+      await w.loadFile(htmlPath)
+      const raw = (await w.webContents.executeJavaScript(MEASURE_BLOCKS_SCRIPT)) as RawBlockMeasure[]
+      if (!Array.isArray(raw) || raw.length !== specs.length) throw new Error('text layout: block count mismatch')
+      return raw.map(groupLines)
     },
     dispose() {
       if (win && !win.isDestroyed()) win.destroy()

@@ -10,9 +10,10 @@
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { CaptionStyle, Composition, Project, Stabilize } from '@shared/project'
+import type { Composition, Project, Stabilize, TextStyleBase } from '@shared/project'
 import {
   audioClipAudible,
+  effectiveCaptionStyle,
   effectiveDenoise,
   effectiveOut,
   effectiveStabilize,
@@ -25,6 +26,7 @@ import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { cellSpan, coverCrop, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { clampAnimWindows, effectiveTextAnimation } from '@shared/textAnim'
 import { activeSparkle, sparklesFor } from '@shared/sparkle'
+import { textWrapWidth } from '@shared/textStyle'
 import { presetFor, type PresetId } from '@shared/formats'
 import { alphaInputDecoder } from '@shared/media'
 import {
@@ -34,7 +36,7 @@ import {
   opacityKeyframePoints,
   stretchedBox
 } from '@shared/layers'
-import type { Layer, TextContent } from '@shared/project'
+import type { Layer } from '@shared/project'
 import type { ExportKeyframe, OpacityAnim } from './exporterArgs'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
@@ -52,7 +54,8 @@ import {
   type Target
 } from './exporterArgs'
 import { buildAss, type AssOverlay, type AssSparkle } from './assBuilder'
-import { createTextRenderer, type TextRenderer } from './textImage'
+import { createTextRenderer, type TextImageSpec, type TextRenderer } from './textImage'
+import type { LaidOutLine } from './textLayout'
 import { decorationScale, scaledPill, scaledShadow, scaledStroke } from './textScale'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
@@ -62,23 +65,58 @@ import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
 type OutputMap = ReturnType<typeof frameToOutput>
 
 /**
- * An overlay carrying ONLY sparkles, for text whose glyphs burned as a PNG.
- * The text fields are inert — `buildAss` emits no text events for empty text —
- * but `AssOverlay` requires them, so they carry the layer's real values rather
- * than placeholders.
+ * One text block — a text layer or a caption, the same thing — as the export
+ * sees it: the preview's layout inputs mapped to output px. `k` is the layer's
+ * own scale (1 for a caption): the preview lays the block out unscaled and
+ * scales it whole, so the font, fixed width, auto-wrap width and decorations
+ * all grow by `k` together.
  */
-function sparkleOnlyOverlay(c: TextContent, l: Layer, m: OutputMap): AssOverlay {
+function textBlockSpec(
+  text: string,
+  st: TextStyleBase,
+  at: { x: number; y: number },
+  k: number,
+  m: OutputMap,
+  frameW: number,
+  extra: { widthPx?: number; rotationDeg?: number } = {}
+): TextImageSpec {
+  const deco = decorationScale(k, m.s)
   return {
-    text: '',
-    startSec: l.startSec,
-    endSec: l.endSec,
-    x: r(m.x(l.x)),
-    y: r(m.y(l.y)),
-    anchor: 'center',
-    fontFamily: c.fontFamily,
-    fontSizePx: c.fontSizePx * l.scale * m.s,
-    color: c.color,
-    pill: c.pill
+    text,
+    xCenter: m.x(at.x),
+    yCenter: m.y(at.y),
+    fontFamily: st.fontFamily,
+    fontSizePx: st.fontSizePx * k * m.s,
+    color: st.color,
+    gradient: st.gradient ?? undefined,
+    pill: scaledPill(st.pill, deco),
+    stroke: scaledStroke(st.stroke, deco) ?? null,
+    shadow: scaledShadow(st.shadow, deco) ?? null,
+    widthPx: extra.widthPx != null ? extra.widthPx * k * m.s : undefined,
+    wrapWidthPx: textWrapWidth(frameW) * k * m.s,
+    decoScale: deco,
+    rotationDeg: extra.rotationDeg
+  }
+}
+
+/** The libass burn of a block spec over [startSec, endSec) (lines added once
+ *  Chromium has laid it out). A gradient that couldn't rasterise burns flat in
+ *  its first colour. */
+function blockOverlay(spec: TextImageSpec, startSec: number, endSec: number): AssOverlay {
+  return {
+    text: spec.text,
+    startSec,
+    endSec,
+    x: spec.xCenter,
+    y: spec.yCenter,
+    fontFamily: spec.fontFamily,
+    fontSizePx: spec.fontSizePx,
+    color: spec.gradient ? spec.gradient.from : spec.color,
+    pill: spec.pill,
+    stroke: spec.stroke,
+    shadow: spec.shadow,
+    decoScale: spec.decoScale,
+    rotationDeg: spec.rotationDeg
   }
 }
 
@@ -251,8 +289,13 @@ async function renderComposition(
   const visuals: ExportVisual[] = []
   const audio: ExportAudio[] = []
   let textN = 0
-  // Gradient text/captions can't burn via libass — rasterise them to PNGs with
-  // a reused off-screen renderer (created lazily; disposed before encoding).
+  // Text blocks — text layers and captions alike — that burn through libass.
+  // Chromium lays them ALL out in one pass after the walk (so each line burns
+  // where the preview put it), then their ASS files are written.
+  const burned: { spec: TextImageSpec; overlay: AssOverlay; file: string }[] = []
+  // The export's Chromium (created lazily; disposed before encoding): it lays
+  // out every burned block, and rasterises the ones libass can't draw
+  // (gradients, fixed wrap widths) to PNGs.
   const fontsDir = getBundledFontsDir()
   const rendererRef: { current: TextRenderer | null } = { current: null }
   let gradN = 0
@@ -582,14 +625,13 @@ async function renderComposition(
       }
     } else if (c.kind === 'text') {
       if (c.text.trim().length === 0) continue
-      const fontSizePx = c.fontSizePx * l.scale * s
-      // Decoration scale. The preview scales the WHOLE overlay
-      // (`transform: scale(layer.scale)`), so a resized text layer grows its
-      // pill padding, stroke and shadow along with the glyphs. Scaling those by
-      // the output scale alone — as this once did — left a 1.43x-resized overlay
-      // wearing a pill sized for the unscaled text. `l.scale` belongs in here
-      // exactly as it already does in `fontSizePx` above.
-      const decoScale = decorationScale(l.scale, s)
+      // The preview scales the WHOLE overlay (`transform: scale(layer.scale)`),
+      // so a resized text layer grows its font, wrap width, pill padding,
+      // stroke and shadow together — `textBlockSpec` applies `l.scale` to all
+      // of them (scaling decorations by the output scale alone once left a
+      // 1.43x-resized overlay wearing a pill sized for the unscaled text).
+      const spec = textBlockSpec(c.text, c, l, l.scale, m, frame.w, { widthPx: c.widthPx })
+      const fontSizePx = spec.fontSizePx
       // Sparkles are computed from the SAME shared helper the preview uses, at
       // the output-scaled font size — every offset it returns is a multiple of
       // that size, so the layout matches the preview at any preset. Positions
@@ -614,78 +656,45 @@ async function renderComposition(
             rotDeg: sp.rotDeg
           }))
         : []
-      // A gradient (libass can't do it) OR an explicit wrap width (libass can't
-      // wrap to an arbitrary width under \pos) burns as a full-frame PNG overlay,
-      // rasterised with the same CSS the preview uses so the two match exactly.
+      // A gradient (libass can't do it) OR an explicit wrap width burns as a
+      // full-frame PNG overlay, rasterised with the same CSS the preview uses.
       if (c.gradient || c.widthPx != null) {
         try {
-          const image = await renderTextImage(
-            {
-              text: c.text,
-              xCenter: m.x(l.x),
-              yCenter: m.y(l.y),
-              fontFamily: c.fontFamily,
-              fontSizePx,
-              color: c.color,
-              gradient: c.gradient ?? undefined,
-              widthPx: c.widthPx != null ? c.widthPx * l.scale * s : undefined,
-              pill: scaledPill(c.pill, decoScale),
-              stroke: scaledStroke(c.stroke, decoScale) ?? null,
-              shadow: scaledShadow(c.shadow, decoScale) ?? null
-            },
-            l.startSec,
-            l.endSec
-          )
+          const image = await renderTextImage(spec, l.startSec, l.endSec)
           visuals.push({ kind: 'image', image })
           // The glyphs are an image now, but the sparkles are still vector ASS
           // events — burn them on their own, above the picture, so a gradient
-          // or wrapped overlay is not silently stripped of its effect.
+          // or wrapped overlay is not silently stripped of its effect. (Empty
+          // text: `buildAss` emits the sparkles only.)
           if (sparkles.length > 0) {
             const sparkleAss = `text_${textN++}.ass`
-            await fsp.writeFile(
-              join(tmp, sparkleAss),
-              buildAss(
-                [{ ...sparkleOnlyOverlay(c, l, m), sparkles, sparkleColor: sparkleEffect!.color }],
-                target,
-                null,
-                s
-              ),
-              'utf8'
-            )
+            const sparkleOnly = { ...blockOverlay(spec, l.startSec, l.endSec), text: '', sparkles, sparkleColor: sparkleEffect!.color }
+            await fsp.writeFile(join(tmp, sparkleAss), buildAss([sparkleOnly], target, s), 'utf8')
             visuals.push({ kind: 'text', assFile: sparkleAss })
           }
           continue
         } catch {
           // Rasterising failed — fall through to a flat-colour ASS burn so the
-          // overlay still appears (losing the gradient / exact wrap width).
+          // overlay still appears (losing the gradient; the layout keeps the
+          // wrap width).
         }
       }
-      const assName = `text_${textN++}.ass`
-      const overlay: AssOverlay = {
-        text: c.text,
-        startSec: l.startSec,
-        endSec: l.endSec,
-        x: r(m.x(l.x)),
-        y: r(m.y(l.y)),
-        anchor: 'center',
-        fontFamily: c.fontFamily,
-        fontSizePx,
-        color: c.gradient ? c.gradient.from : c.color,
-        // Same decoration scale as the raster path above: a resized layer's
-        // pill/stroke/shadow grow with its glyphs, because that is what the
-        // preview's `scale(layer.scale)` does to the whole overlay. The pill
-        // was passed through completely unscaled here.
-        pill: scaledPill(c.pill, decoScale),
-        stroke: scaledStroke(c.stroke, decoScale),
-        shadow: scaledShadow(c.shadow, decoScale),
-        // Resolved (not raw): rasterised text (gradient/wrap fallback) never
-        // animates, and the preview resolves through the same helper.
-        animation: textAnim,
-        sparkles,
-        sparkleColor: sparkleEffect?.color
-      }
-      await fsp.writeFile(join(tmp, assName), buildAss([overlay], target, null, s), 'utf8')
-      visuals.push({ kind: 'text', assFile: assName })
+      // Burned through libass: reserve its slot in the stack now, write it
+      // once the whole comp has been laid out.
+      const file = `text_${textN++}.ass`
+      visuals.push({ kind: 'text', assFile: file })
+      burned.push({
+        spec,
+        file,
+        overlay: {
+          ...blockOverlay(spec, l.startSec, l.endSec),
+          // Resolved (not raw): rasterised text (gradient/wrap fallback) never
+          // animates, and the preview resolves through the same helper.
+          animation: textAnim,
+          sparkles,
+          sparkleColor: sparkleEffect?.color
+        }
+      })
     }
   }
 
@@ -715,66 +724,49 @@ async function renderComposition(
     })
   }
 
-  // Captions (auto-generated) burn on top of everything. Scale each caption style
-  // (lane-wide + any per-segment overrides) from logical into output px.
+  // Captions burn on top of everything, through the SAME block path as a text
+  // layer (a caption is a text block at scale 1 that may be rotated): each
+  // segment at its effective style (per-segment override, else the lane's). A
+  // gradient caption rasterises to a PNG composited over the caption track; a
+  // failed render falls back to a flat burn.
   let captionsAss: string | undefined
   const captionOverlays: ExportImage[] = []
-  if (comp.captions.enabled && comp.captions.segments.some((s) => s.enabled)) {
-    captionsAss = 'captions.ass'
-    const scaleStyle = (st: CaptionStyle): CaptionStyle => ({
-      ...st,
-      x: m.x(st.x),
-      y: m.y(st.y),
-      fontSizePx: st.fontSizePx * s,
-      pill: scaledPill(st.pill, s),
-      stroke: scaledStroke(st.stroke, s),
-      shadow: scaledShadow(st.shadow, s)
-    })
-    // Gradient-styled captions can't burn via libass — rasterise each to a PNG
-    // composited ON TOP of the caption track. Track which rendered so the ASS
-    // builder skips them (and a failed render falls back to a flat burn).
-    const renderedGrad = new Set<string>()
+  if (comp.captions.enabled) {
     for (const seg of comp.captions.segments) {
       if (!seg.enabled || seg.text.trim().length === 0) continue
-      const eff = seg.style ?? comp.captions.style
-      if (!eff.gradient) continue
-      const st = scaleStyle(eff)
-      try {
-        const image = await renderTextImage(
-          {
-            text: seg.text,
-            xCenter: st.x,
-            yCenter: st.y,
-            fontFamily: st.fontFamily,
-            fontSizePx: st.fontSizePx,
-            color: st.color,
-            gradient: st.gradient!,
-            pill: st.pill,
-            stroke: st.stroke ?? null,
-            shadow: st.shadow ?? null,
-            rotationDeg: st.rotationDeg
-          },
-          seg.startSec,
-          seg.endSec
-        )
-        captionOverlays.push(image)
-        renderedGrad.add(seg.id)
-      } catch {
-        // leave un-rendered → flat fallback below
+      const st = effectiveCaptionStyle(comp.captions, seg)
+      const spec = textBlockSpec(seg.text, st, st, 1, m, frame.w, { rotationDeg: st.rotationDeg })
+      if (st.gradient) {
+        try {
+          captionOverlays.push(await renderTextImage(spec, seg.startSec, seg.endSec))
+          continue
+        } catch {
+          // un-rendered → burns flat below
+        }
       }
+      captionsAss = 'captions.ass'
+      burned.push({ spec, file: captionsAss, overlay: blockOverlay(spec, seg.startSec, seg.endSec) })
     }
-    const scaled = {
-      ...comp.captions,
-      style: scaleStyle(comp.captions.style),
-      segments: comp.captions.segments.map((s) => {
-        if (!s.style) return s
-        const sc = scaleStyle(s.style)
-        // Keep gradient only if rasterised (buildAss skips gradient segments);
-        // otherwise drop it so the caption still burns, flat.
-        return { ...s, style: { ...sc, gradient: renderedGrad.has(s.id) ? sc.gradient : null } }
-      })
+  }
+
+  // Lay every burned block out in ONE Chromium pass, with the preview's CSS,
+  // then write the ASS files. If the layout pass fails the blocks still burn
+  // (newline-only lines, no auto-wrap — `fallbackLines`), at the right size.
+  if (burned.length > 0) {
+    let laid: LaidOutLine[][] | null = null
+    try {
+      laid = await ensureRenderer().layout(burned.map((b) => b.spec))
+    } catch {
+      laid = null
     }
-    await fsp.writeFile(join(tmp, captionsAss), buildAss([], target, scaled), 'utf8')
+    const byFile = new Map<string, AssOverlay[]>()
+    burned.forEach((b, i) => {
+      const overlay = laid ? { ...b.overlay, lines: laid[i] } : b.overlay
+      byFile.set(b.file, [...(byFile.get(b.file) ?? []), overlay])
+    })
+    for (const [file, overlays] of byFile) {
+      await fsp.writeFile(join(tmp, file), buildAss(overlays, target, s), 'utf8')
+    }
   }
 
   const visEnd = comp.layers.reduce((m, l) => (l.hidden ? m : Math.max(m, l.endSec)), 0)

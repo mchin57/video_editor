@@ -462,6 +462,55 @@ looking for an `-ss` in the transcription path.
   treated as stale and re-transcribed. Change the whisper flags and you must
   bump that, or every existing transcript keeps its old timings forever.
 
+## libass text metrics — why burned text did not match the preview (verified ffmpeg 8.1.1 / bundled libass, 2026-09)
+
+Measured by rendering hand-written ASS with the bundled fonts on a flat grey
+canvas and reading the pixels, against the same text laid out by Chromium
+(the preview / rasteriser) at the same size.
+
+- **`\fs` is NOT the em size.** libass scales a face so its OS/2 Windows
+  metrics (`usWinAscent + usWinDescent`) equal `\fs`; CSS `font-size` is the
+  em. Burning `\fs` = the CSS size drew every face too small, by its own factor:
+  Montserrat 0.64x (1.562 em line box), Poppins 0.57x, Anton 0.58x, Pacifico
+  0.52x, Bebas 0.77x. With `\fs = cssPx × (winAscent + winDescent) / unitsPerEm`
+  (`assFontSize`, metrics in `shared/fonts.ts`, pinned to the TTFs by
+  `fonts.test.ts`) ink width matches Chromium within ±2% on six faces.
+- **Line pitch for `\N` = that same Windows height** (118.7px for Montserrat at
+  76px CSS; the preview's leading is 1.25em = 95px), and **`\fscy` scales the
+  pitch with the glyphs** — there is no way to set libass leading. Hence one
+  event per line, placed where Chromium put it (`textLayout.ts`), with
+  `WrapStyle: 2` (verified: no wrapping at all, even past the frame edge).
+- **`\an5` centres the line box on `\pos`**; the baseline sits
+  `cssPx × (winAscent − winDescent) / (2 × unitsPerEm)` below it
+  (`assBaselineBelowPos`).
+- **Chromium's text box (Windows / DirectWrite)** is the typo metrics when
+  USE_TYPO_METRICS is set, else the Windows metrics (Bebas, Archivo Black),
+  ascent and descent each rounded to whole px. Canvas
+  `measureText().fontBoundingBoxAscent` equals the laid-out baseline offset —
+  what the layout pass reads. Faces taller than the leading (Poppins 1.40em,
+  Pacifico 1.76em) have OVERLAPPING line boxes; line grouping must go by the
+  box top, not its bottom.
+- **BorderStyle-3 box = the line's Windows box + `\bord` on every side**, square
+  corners, one per line (adjacent lines' boxes overlap); `\xbord`/`\ybord`
+  split the padding. **The alpha byte inside `\3c&HAA…` is ignored** (a
+  `#000000cc` pill burned solid black); `\3a` carries it. Pills are now `\p1`
+  rounded-rect drawings of the box Chromium measured, with `\1a`.
+- **`\bord` is drawn wholly outside the glyph**; a CSS `-webkit-text-stroke` of
+  the same width with `paint-order: stroke fill` shows only half (8px CSS →
+  3.5–4px visible). Burn `\bord = width / 2`.
+- **An empty leading `{\k100}` is a delay** (the next syllable lights 1s later)
+  — how a karaoke line waits for the words on the lines before it.
+- **`\org(x,y)` + `\frz` on separate events rotates them as one block** about
+  the shared origin (a rotated multi-line caption).
+- **`\p1` drawings with `\an5` centre their bbox on `\pos`** (400x130 path →
+  exactly 400x130 at the right place), `\1a&H33&` = 80% opaque.
+- Known limit: karaoke's unlit words dim only their FILL (`\2a`); the outline
+  and shadow stay full strength, where the preview fades the whole word.
+
+After: libass burn vs the preview's CSS (Chromium at output size), line by
+line — tops/bottoms ≤1px, centres ≤0.5px, widths 0.995–1.007, same line
+count, pill boxes identical. `e2e/textParity.spec.ts` pins it on real exports.
+
 ## Non-9:16 output frames — sizes & off-canvas overlays (verified ffmpeg 8.1.1, 2026-09)
 
 - **Every built-in format encodes at its derived size.** The real exporter, on

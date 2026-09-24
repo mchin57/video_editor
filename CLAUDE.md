@@ -49,6 +49,10 @@ homes — check it before writing any of these:**
 - a Default/On/Off override control → `OverrideToggle` in `Inspector.tsx`
 - an array map-by-id / splice in a store action → `lib/arrays.ts`
 - a text/caption style type → extend `TextStyleBase` (`shared/project.ts`)
+- how a text block looks (box, wrap, leading, paint, pill) → `shared/textStyle.ts` — text layers
+  and captions are ONE thing: the preview's `TextBlock` and the export both build from it, and
+  burned text is laid out by Chromium, never wrapped or spaced by libass
+  (docs/FFMPEG-NOTES.md "libass text metrics")
 - an inherit / force-on / force-off setting → `resolveOverride` (`shared/project.ts`)
 - the 1080×1920 constant → `FRAME` (`shared/frame.ts`, re-exported by `layers.ts`; `LOGICAL` in the renderer)
 - an output format / aspect ratio / platform safe zone → the registry in `shared/formats.ts`

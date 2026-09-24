@@ -26,6 +26,16 @@ export interface FontDef {
   assName: string
   /** libass Bold flag. 0 for all bundled faces (each is its own family). */
   assBold: 0 | 1
+  /**
+   * The face's OS/2 Windows metrics (`usWinAscent`/`usWinDescent`, font units)
+   * — what libass sizes and spaces text by: it scales the font so ascent +
+   * descent equals `\fs`, and lines sit exactly that far apart. CSS sizes the
+   * EM instead, so these are how the ASS burn matches the preview
+   * (`shared/textStyle.ts`). Copied from the TTF; `fonts.test.ts` re-reads
+   * every file and fails if they drift. Verified against libass — see
+   * docs/FFMPEG-NOTES.md "libass text metrics".
+   */
+  win: { ascent: number; descent: number; unitsPerEm: number }
 }
 
 /** Category display order + labels for the grouped picker. */
@@ -37,24 +47,24 @@ export const FONT_CATEGORIES: { id: FontCategory; label: string }[] = [
 
 export const FONTS: FontDef[] = [
   // --- Caption workhorses (heavy geometric, muted-viewer legibility) ---
-  { id: 'montserrat-extrabold', label: 'Montserrat ExtraBold', category: 'caption', file: 'Montserrat-ExtraBold.ttf', assName: 'Montserrat ExtraBold', assBold: 0 },
-  { id: 'montserrat-black', label: 'Montserrat Black', category: 'caption', file: 'Montserrat-Black.ttf', assName: 'Montserrat Black', assBold: 0 },
-  { id: 'poppins-extrabold', label: 'Poppins ExtraBold', category: 'caption', file: 'Poppins-ExtraBold.ttf', assName: 'Poppins ExtraBold', assBold: 0 },
-  { id: 'poppins-black', label: 'Poppins Black', category: 'caption', file: 'Poppins-Black.ttf', assName: 'Poppins Black', assBold: 0 },
-  { id: 'barlow-semicondensed-extrabold', label: 'Barlow Semi Condensed', category: 'caption', file: 'BarlowSemiCondensed-ExtraBold.ttf', assName: 'Barlow Semi Condensed ExtraBold', assBold: 0 },
+  { id: 'montserrat-extrabold', label: 'Montserrat ExtraBold', category: 'caption', file: 'Montserrat-ExtraBold.ttf', assName: 'Montserrat ExtraBold', assBold: 0, win: { ascent: 1109, descent: 453, unitsPerEm: 1000 } },
+  { id: 'montserrat-black', label: 'Montserrat Black', category: 'caption', file: 'Montserrat-Black.ttf', assName: 'Montserrat Black', assBold: 0, win: { ascent: 1109, descent: 453, unitsPerEm: 1000 } },
+  { id: 'poppins-extrabold', label: 'Poppins ExtraBold', category: 'caption', file: 'Poppins-ExtraBold.ttf', assName: 'Poppins ExtraBold', assBold: 0, win: { ascent: 1135, descent: 627, unitsPerEm: 1000 } },
+  { id: 'poppins-black', label: 'Poppins Black', category: 'caption', file: 'Poppins-Black.ttf', assName: 'Poppins Black', assBold: 0, win: { ascent: 1135, descent: 627, unitsPerEm: 1000 } },
+  { id: 'barlow-semicondensed-extrabold', label: 'Barlow Semi Condensed', category: 'caption', file: 'BarlowSemiCondensed-ExtraBold.ttf', assName: 'Barlow Semi Condensed ExtraBold', assBold: 0, win: { ascent: 1089, descent: 261, unitsPerEm: 1000 } },
 
   // --- Hook / display (big, loud, impact titles) ---
-  { id: 'anton', label: 'Anton', category: 'display', file: 'Anton-Regular.ttf', assName: 'Anton', assBold: 0 },
-  { id: 'bebas-neue', label: 'Bebas Neue', category: 'display', file: 'BebasNeue-Regular.ttf', assName: 'Bebas Neue', assBold: 0 },
-  { id: 'archivo-black', label: 'Archivo Black', category: 'display', file: 'ArchivoBlack-Regular.ttf', assName: 'Archivo Black', assBold: 0 },
-  { id: 'barlow-condensed-black', label: 'Barlow Condensed', category: 'display', file: 'BarlowCondensed-Black.ttf', assName: 'Barlow Condensed Black', assBold: 0 },
+  { id: 'anton', label: 'Anton', category: 'display', file: 'Anton-Regular.ttf', assName: 'Anton', assBold: 0, win: { ascent: 2876, descent: 674, unitsPerEm: 2048 } },
+  { id: 'bebas-neue', label: 'Bebas Neue', category: 'display', file: 'BebasNeue-Regular.ttf', assName: 'Bebas Neue', assBold: 0, win: { ascent: 950, descent: 350, unitsPerEm: 1000 } },
+  { id: 'archivo-black', label: 'Archivo Black', category: 'display', file: 'ArchivoBlack-Regular.ttf', assName: 'Archivo Black', assBold: 0, win: { ascent: 1035, descent: 312, unitsPerEm: 1000 } },
+  { id: 'barlow-condensed-black', label: 'Barlow Condensed', category: 'display', file: 'BarlowCondensed-Black.ttf', assName: 'Barlow Condensed Black', assBold: 0, win: { ascent: 1075, descent: 274, unitsPerEm: 1000 } },
 
   // --- Stylized / personality (accents — use sparingly) ---
-  { id: 'permanent-marker', label: 'Permanent Marker', category: 'stylized', file: 'PermanentMarker-Regular.ttf', assName: 'Permanent Marker', assBold: 0 },
-  { id: 'bangers', label: 'Bangers', category: 'stylized', file: 'Bangers-Regular.ttf', assName: 'Bangers', assBold: 0 },
-  { id: 'pacifico', label: 'Pacifico', category: 'stylized', file: 'Pacifico-Regular.ttf', assName: 'Pacifico', assBold: 0 },
-  { id: 'shrikhand', label: 'Shrikhand', category: 'stylized', file: 'Shrikhand-Regular.ttf', assName: 'Shrikhand', assBold: 0 },
-  { id: 'abril-fatface', label: 'Abril Fatface', category: 'stylized', file: 'AbrilFatface-Regular.ttf', assName: 'Abril Fatface', assBold: 0 }
+  { id: 'permanent-marker', label: 'Permanent Marker', category: 'stylized', file: 'PermanentMarker-Regular.ttf', assName: 'Permanent Marker', assBold: 0, win: { ascent: 1136, descent: 325, unitsPerEm: 1024 } },
+  { id: 'bangers', label: 'Bangers', category: 'stylized', file: 'Bangers-Regular.ttf', assName: 'Bangers', assBold: 0, win: { ascent: 1401, descent: 356, unitsPerEm: 1000 } },
+  { id: 'pacifico', label: 'Pacifico', category: 'stylized', file: 'Pacifico-Regular.ttf', assName: 'Pacifico', assBold: 0, win: { ascent: 1478, descent: 457, unitsPerEm: 1000 } },
+  { id: 'shrikhand', label: 'Shrikhand', category: 'stylized', file: 'Shrikhand-Regular.ttf', assName: 'Shrikhand', assBold: 0, win: { ascent: 1026, descent: 432, unitsPerEm: 1000 } },
+  { id: 'abril-fatface', label: 'Abril Fatface', category: 'stylized', file: 'AbrilFatface-Regular.ttf', assName: 'Abril Fatface', assBold: 0, win: { ascent: 1058, descent: 291, unitsPerEm: 1000 } }
 ]
 
 /** The default font id (heavy geometric — the Reels caption workhorse). */

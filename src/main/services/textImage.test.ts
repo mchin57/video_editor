@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { NativeImage } from 'electron'
-import { buildHtml, normaliseCapture } from './textImage'
+import { buildHtml, buildLayoutHtml, normaliseCapture } from './textImage'
 
 /** Minimal NativeImage stand-in: this helper only ever asks for the size and
  *  (maybe) resizes, so nothing else needs to exist. */
@@ -65,7 +65,8 @@ describe('buildHtml — the pill inherits the text metrics', () => {
     fontFamily: 'montserrat-extrabold',
     fontSizePx: 108.89,
     color: '#ffffff',
-    pill: { enabled: true, color: '#000000ff', padPx: 25.79 }
+    pill: { enabled: true, color: '#000000ff', padPx: 25.79 },
+    wrapWidthPx: 993.6
   }
   /** The declaration block of one CSS rule in the generated page. */
   const css = (html: string, cls: string): string =>
@@ -89,14 +90,55 @@ describe('buildHtml — the pill inherits the text metrics', () => {
     expect(css(buildHtml(spec, 1080, 1920, null), 'txt')).not.toContain('font-size')
   })
 
-  it('uses the same line-height as the preview (Tailwind leading-tight)', () => {
-    // Read from the built stylesheet as --leading-tight: 1.25. It sets the line
-    // box the pill background is drawn around, so a mismatch is a wrong-height
-    // pill and different multi-line spacing.
+  it('uses the same line-height as the preview (shared TEXT_LINE_HEIGHT)', () => {
+    // It sets the line box the pill background is drawn around, so a mismatch is
+    // a wrong-height pill and different multi-line spacing.
     expect(css(buildHtml(spec, 1080, 1920, null), 'box')).toContain('line-height:1.25')
   })
 
   it('still carries the fill on the text span', () => {
     expect(css(buildHtml(spec, 1080, 1920, null), 'txt')).toContain('color:#ffffff')
+  })
+})
+
+describe('buildHtml — the box wraps like the preview', () => {
+  const spec = {
+    text: 'a caption near the bottom',
+    xCenter: 540,
+    yCenter: 1340,
+    fontFamily: 'montserrat-extrabold',
+    fontSizePx: 64,
+    color: '#ffffff',
+    pill: { enabled: false, color: '#000000cc', padPx: 18 },
+    wrapWidthPx: 993.6
+  }
+  const box = (s: typeof spec & { widthPx?: number; rotationDeg?: number }): string =>
+    buildHtml(s, 1080, 1920, null).match(/\.box\{([^}]*)\}/)![1]
+
+  it('is centred by TRANSFORM, never by left (a left edge caps the shrink-wrap)', () => {
+    // The old `left:540px; translate(-50%)` box could only shrink-wrap into the
+    // 540px right of its centre, so gradient captions wrapped at half the frame.
+    const b = box(spec)
+    expect(b).toContain('left:0;top:0')
+    expect(b).toContain('transform:translate(calc(540px - 50%),calc(1340px - 50%))')
+  })
+
+  it('auto-wraps at the shared frame-relative width, or a fixed width when resized', () => {
+    expect(box(spec)).toContain('width:max-content;max-width:993.6px')
+    const fixed = box({ ...spec, widthPx: 700 })
+    expect(fixed).toContain('width:700px')
+    expect(fixed).not.toContain('max-width')
+  })
+
+  it('rotates the rendered box but lays out unrotated', () => {
+    expect(box({ ...spec, rotationDeg: 8 })).toContain('rotate(8deg)')
+    const layout = buildLayoutHtml([{ ...spec, rotationDeg: 8 }], 1080, 1920, null)
+    expect(layout).not.toContain('rotate(')
+    expect(layout).toContain('data-block="0"')
+  })
+
+  it('carries the default legibility shadow, scaled — the raster path had none', () => {
+    const txt = buildHtml({ ...spec, decoScale: 2 } as typeof spec, 1080, 1920, null).match(/\.txt\{([^}]*)\}/)![1]
+    expect(txt).toContain('text-shadow:0 5.4px 12.96px rgba(0,0,0,0.9), 0 0 6.48px rgba(0,0,0,0.9)')
   })
 })
