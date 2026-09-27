@@ -16,7 +16,6 @@ import type {
   Composition,
   Layer,
   LayoutContent,
-  PillStyle,
   TextStyleBase,
   VideoContent
 } from '@shared/project'
@@ -25,14 +24,13 @@ import {
   audioClipEnd,
   effectiveCaptionStyle,
   effectiveOut,
-  pillRadiusPx,
   videoSpeed
 } from '@shared/project'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { cellSpan, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { assetAspect, type MediaAsset } from '@shared/media'
-import { fontCssFamily } from '@shared/fonts'
+import { textBoxCss, textFillCss, textPillCss, textWrapWidth, type TextDeco } from '@shared/textStyle'
 import {
   effectiveImageAspect,
   FULL_FRAME,
@@ -108,58 +106,13 @@ function frameCanvasStyle(frame: FrameRect): CSSProperties {
   }
 }
 
-/** Auto-wrap widths, as fractions of the FRAME width (the export wraps against
- *  the output raster, which is the frame). */
-const TEXT_WRAP_FRAC = 0.92
-const CAPTION_WRAP_FRAC = 0.88
-
-/** The decoration knobs shared by a text overlay and a caption (the fill +
- *  pill/stroke/shadow subset of the shared `TextStyleBase`). */
-type TextDeco = Pick<TextStyleBase, 'color' | 'pill' | 'stroke' | 'shadow' | 'gradient'>
-
-/** Fill (flat color or gradient) + stroke + shadow for the text glyphs. Mirrors
- *  the export: gradient via background-clip:text, stroke outside the glyph via
- *  paint-order, shadow as a diagonal text-shadow. */
-function fillStyle(s: TextDeco): CSSProperties {
-  const css: CSSProperties = {}
-  if (s.gradient) {
-    css.backgroundImage = `linear-gradient(${s.gradient.angle}deg, ${s.gradient.from}, ${s.gradient.to})`
-    css.WebkitBackgroundClip = 'text'
-    css.backgroundClip = 'text'
-    css.color = 'transparent'
-    css.WebkitTextFillColor = 'transparent'
-  } else {
-    css.color = s.color
-  }
-  if (s.stroke && s.stroke.widthPx > 0) {
-    css.WebkitTextStroke = `${cqw(s.stroke.widthPx)} ${s.stroke.color}`
-    css.paintOrder = 'stroke fill'
-  }
-  if (s.shadow && (s.shadow.distancePx > 0 || s.shadow.blur > 0)) {
-    css.textShadow = `${cqw(s.shadow.distancePx)} ${cqw(s.shadow.distancePx)} ${cqw(s.shadow.blur)} ${s.shadow.color}`
-  } else if (!s.pill.enabled && !s.stroke) {
-    // Default legibility shadow when nothing else separates the text.
-    css.textShadow = '0 0.25cqw 0.6cqw rgba(0,0,0,0.9), 0 0 0.3cqw rgba(0,0,0,0.9)'
-  }
-  return css
-}
-
-/** The per-line pill behind the text: an inline wrapper, so box-decoration-break
- *  clones a padded, rounded background onto EACH wrapped line — lines of
- *  different lengths get different-width pills. */
-function pillWrapStyle(pill: PillStyle): CSSProperties {
-  return {
-    background: pill.color,
-    padding: cqw(pill.padPx),
-    borderRadius: cqw(pillRadiusPx(pill.padPx)),
-    boxDecorationBreak: 'clone',
-    WebkitBoxDecorationBreak: 'clone'
-  }
-}
+/** Fill + outline + shadow for the glyphs — the shared definition
+ *  (`shared/textStyle.ts`) the export rasteriser also draws with. */
+const fillStyle = (s: TextDeco): CSSProperties => textFillCss(s, cqw) as CSSProperties
 
 /** Unrevealed typewriter glyphs: keep their layout space, hide every paint —
- *  the CSS mirror of the ASS `\1a\3a\4a &HFF&` reveal (with a pill, the box
- *  stays; only fill/stroke/shadow vanish — verified parity). */
+ *  the CSS mirror of the ASS `\1a\3a\4a &HFF&` reveal (the pill, a separate
+ *  box, stays; only fill/outline/shadow vanish — verified parity). */
 function hiddenGlyphStyle(s: TextDeco): CSSProperties {
   const css = fillStyle(s)
   css.color = 'transparent'
@@ -167,14 +120,13 @@ function hiddenGlyphStyle(s: TextDeco): CSSProperties {
   css.textShadow = 'none'
   if (css.WebkitTextStroke) css.WebkitTextStroke = String(css.WebkitTextStroke).replace(/ .*$/, ' transparent')
   delete css.backgroundImage
+  delete css.filter
   return css
 }
 
 /** Text glyphs with their fill/stroke/shadow, wrapped in a per-line pill when
- *  enabled. The inner text span is `position:relative` so ALL glyphs paint in the
- *  positioned phase — above every line's background. Without it, a lower line's
- *  padded background bleeds up into the line above and paints OVER its text
- *  (the reported multi-line bug). Mirrored in the export (`textImage.buildHtml`).
+ *  enabled (`textPillCss`; with a pill the glyph spans are `position:relative`
+ *  so every line's text paints above every line's background).
  *
  *  `reveal` (typewriter: characters visible) and `litWords` (word-by-word
  *  karaoke: words highlighted) come from the shared `textAnimStateAt`, so the
@@ -190,13 +142,12 @@ function StyledText({
   reveal?: number | null
   litWords?: number | null
 }): JSX.Element {
-  const rel = (css: CSSProperties): CSSProperties => (s.pill.enabled ? { ...css, position: 'relative' } : css)
   let inner: React.ReactNode
   if (reveal != null && reveal < text.length) {
     inner = (
       <>
-        <span style={rel(fillStyle(s))}>{text.slice(0, reveal)}</span>
-        <span style={rel(hiddenGlyphStyle(s))}>{text.slice(reveal)}</span>
+        <span style={fillStyle(s)}>{text.slice(0, reveal)}</span>
+        <span style={hiddenGlyphStyle(s)}>{text.slice(reveal)}</span>
       </>
     )
   } else if (litWords != null) {
@@ -205,16 +156,76 @@ function StyledText({
       if (tok.length === 0 || /^\s+$/.test(tok)) return tok
       const lit = w++ < litWords
       return (
-        <span key={i} style={rel({ ...fillStyle(s), opacity: lit ? 1 : KARAOKE_DIM_OPACITY })}>
+        <span key={i} style={{ ...fillStyle(s), opacity: lit ? 1 : KARAOKE_DIM_OPACITY }}>
           {tok}
         </span>
       )
     })
   } else {
-    inner = <span style={rel(fillStyle(s))}>{text}</span>
+    inner = <span style={fillStyle(s)}>{text}</span>
   }
   if (!s.pill.enabled) return <>{inner}</>
-  return <span style={pillWrapStyle(s.pill)}>{inner}</span>
+  return <span style={textPillCss(s.pill, cqw) as CSSProperties}>{inner}</span>
+}
+
+/**
+ * ONE text block — a text layer and a caption render through this same box
+ * (`textBoxCss`, the definition the export rasteriser and line layout share).
+ * Centred on (x, y) by TRANSFORM, never `left`: an absolutely positioned box
+ * only shrink-wraps into the space right of its `left`, which is how captions
+ * (placed at `left: x%`) came to wrap at half the frame. Transform order is
+ * translate → rotate (captions) → scale (text layers), so a scaled layer lays
+ * out unscaled and grows as a whole, exactly as the export sizes it.
+ */
+function TextBlock({
+  s,
+  x,
+  y,
+  wrap,
+  rotationDeg = 0,
+  scale = 1,
+  opacity,
+  zIndex,
+  className,
+  onPointerDown,
+  handleTarget,
+  children
+}: {
+  s: Pick<TextStyleBase, 'fontFamily' | 'fontSizePx'>
+  x: number
+  y: number
+  wrap: { widthPx?: number; wrapWidthPx: number }
+  rotationDeg?: number
+  scale?: number
+  opacity?: number
+  zIndex: number
+  className: string
+  onPointerDown: (e: ReactPointerEvent) => void
+  /** Tag the box for the stage's resize-handle measuring (selected layer). */
+  handleTarget?: boolean
+  children: React.ReactNode
+}): JSX.Element {
+  const rot = rotationDeg ? ` rotate(${rotationDeg}deg)` : ''
+  const sc = scale !== 1 ? ` scale(${scale})` : ''
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      data-resizebox={handleTarget ? '' : undefined}
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        transform: `translate(calc(${cqw(x)} - 50%), calc(${cqh(y)} - 50%))${rot}${sc}`,
+        transformOrigin: 'center',
+        opacity: opacity != null && opacity < 1 ? opacity : undefined,
+        zIndex,
+        ...(textBoxCss(s, wrap, cqw) as CSSProperties)
+      }}
+      className={`select-none ${className}`}
+    >
+      {children}
+    </div>
+  )
 }
 
 /** Absolute box (in %) for a media layer, sized to its aspect at the layer's
@@ -863,12 +874,11 @@ function StackLayer({
           )
         }
 
-        // Text layer. Position via transform (left/top = 0) so the wrap width is
-        // independent of x — anchoring by `left:x%` made the box narrower as it
-        // moved right. Explicit `widthPx` (from a side-resize) fixes the wrap
-        // width; otherwise it hugs content up to a position-independent max.
-        // Animation state comes from the shared per-frame helper (playhead-
-        // driven, so scrub/pause stay exact — never CSS animations).
+        // Text layer — the same `TextBlock` a caption renders through. Explicit
+        // `widthPx` (from a side-resize) fixes the wrap width; otherwise it hugs
+        // content up to the shared frame-relative wrap width. Animation state
+        // comes from the shared per-frame helper (playhead-driven, so
+        // scrub/pause stay exact — never CSS animations).
         const content = layer.content
         const textAnim = effectiveTextAnimation(content)
         const anim = textAnimStateAt(textAnim, layer.startSec, layer.endSec, content.text, time)
@@ -888,33 +898,24 @@ function StackLayer({
             })
           : []
         return (
-          <div
+          <TextBlock
             key={layer.id}
+            s={content}
+            x={layer.x}
+            y={layer.y + anim.dy}
+            wrap={{ widthPx: content.widthPx, wrapWidthPx: textWrapWidth(frame.w) }}
+            scale={layer.scale * anim.scale}
+            opacity={anim.opacity}
+            zIndex={z}
             onPointerDown={onMoveDown}
-            data-resizebox={selected ? '' : undefined}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              transform: `translate(calc(${cqw(layer.x)} - 50%), calc(${cqh(layer.y + anim.dy)} - 50%)) scale(${layer.scale * anim.scale})`,
-              transformOrigin: 'center',
-              opacity: anim.opacity < 1 ? anim.opacity : undefined,
-              fontSize: cqw(content.fontSizePx),
-              fontFamily: fontCssFamily(content.fontFamily),
-              fontWeight: 'normal',
-              width: content.widthPx != null ? cqw(content.widthPx) : undefined,
-              maxWidth: content.widthPx != null ? undefined : cqw(frame.w * TEXT_WRAP_FRAC),
-              zIndex: z
-            }}
-            className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
-              selected ? 'outline-dashed outline-2 outline-sky-400' : ''
-            }`}
+            handleTarget={selected}
+            className={`cursor-move ${selected ? 'outline-dashed outline-2 outline-sky-400' : ''}`}
           >
             <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
             {sparkleEffect && (
               <Sparkles sparkles={sparkles} color={sparkleEffect.color} tLocal={time - layer.startSec} />
             )}
-          </div>
+          </TextBlock>
         )
 }
 
@@ -1320,33 +1321,26 @@ export function PreviewStage(): JSX.Element {
             ))}
 
             {/* Active captions: each rendered at its own effective style (lane-wide or
-                per-caption override), positioned by center, draggable to reposition. */}
+                per-caption override) through the SAME TextBlock as a text layer,
+                centred on its position, draggable to reposition. */}
             {captions &&
               activeCaptions.map((seg) => {
                 const st = effectiveCaptionStyle(captions, seg)
                 const selected = seg.id === selectedCaptionId
                 return (
-                  <div
+                  <TextBlock
                     key={seg.id}
+                    s={st}
+                    x={st.x}
+                    y={st.y}
+                    wrap={{ wrapWidthPx: textWrapWidth(frame.w) }}
+                    rotationDeg={st.rotationDeg}
+                    zIndex={300}
                     onPointerDown={(e) => startCaptionMove(e, seg)}
-                    style={{
-                      position: 'absolute',
-                      left: pct(st.x, LOGICAL.width),
-                      top: pct(st.y, LOGICAL.height),
-                      transform: `translate(-50%, -50%) rotate(${st.rotationDeg}deg)`,
-                      transformOrigin: 'center',
-                      fontSize: cqw(st.fontSizePx),
-                      fontFamily: fontCssFamily(st.fontFamily),
-                      fontWeight: 'normal',
-                      maxWidth: cqw(frame.w * CAPTION_WRAP_FRAC),
-                      zIndex: 300
-                    }}
-                    className={`cursor-move select-none whitespace-pre-wrap text-center leading-tight ${
-                      selected ? 'outline-dashed outline-2 outline-emerald-400' : ''
-                    }`}
+                    className={`cursor-move ${selected ? 'outline-dashed outline-2 outline-emerald-400' : ''}`}
                   >
                     <StyledText s={st} text={seg.text} />
-                  </div>
+                  </TextBlock>
                 )
               })}
           </div>

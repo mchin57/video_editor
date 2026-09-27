@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { buildAss, assColor, type AssOverlay } from './assBuilder'
-import { DEFAULT_CAPTION_STYLE, type CaptionStyle } from '@shared/project'
+import { buildAss, assColor, pillPath, type AssOverlay } from './assBuilder'
+import type { LaidOutLine } from './textLayout'
 import { DEFAULT_FONT_ID, resolveFont } from '@shared/fonts'
+import { assBaselineBelowPos } from '@shared/textStyle'
 
-const capStyle = (over: Partial<CaptionStyle> = {}): CaptionStyle => ({ ...DEFAULT_CAPTION_STYLE, ...over })
+const FS = 80
+/** libass's centre-to-baseline drop for the default face at FS. */
+const drop = assBaselineBelowPos(DEFAULT_FONT_ID, FS)
 
+/** A block as Chromium lays it out: by default one line centred on (540, 600). */
 function overlay(over: Partial<AssOverlay> = {}): AssOverlay {
   return {
     text: 'Hook line',
@@ -12,16 +16,24 @@ function overlay(over: Partial<AssOverlay> = {}): AssOverlay {
     endSec: 4,
     x: 540,
     y: 600,
-    anchor: 'center',
     fontFamily: DEFAULT_FONT_ID,
-    fontSizePx: 80,
+    fontSizePx: FS,
     color: '#ffffff',
-    pill: { enabled: true, color: '#000000cc', padPx: 18 },
+    pill: { enabled: false, color: '#000000cc', padPx: 18 },
+    lines: [{ start: 0, end: 9, cx: 540, baseline: 600 + drop }],
     ...over
   }
 }
 
+/** Two laid-out lines of 'Hook text stays put' (break after "text"), 95px apart. */
+const TWO = 'Hook text stays put'
+const twoLines = (pill = false): LaidOutLine[] => [
+  { start: 0, end: 9, cx: 540, baseline: 552 + drop, ...(pill ? { pill: { x: 380, y: 487, w: 320, h: 130 } } : {}) },
+  { start: 10, end: 19, cx: 540, baseline: 647 + drop, ...(pill ? { pill: { x: 385, y: 582, w: 310, h: 130 } } : {}) }
+]
+
 const target = { width: 1080, height: 1920 }
+const events = (ass: string): string[] => ass.split('\n').filter((l) => l.startsWith('Dialogue:'))
 
 describe('assColor', () => {
   it('converts #RRGGBB to opaque ASS BGR', () => {
@@ -40,87 +52,146 @@ describe('assColor', () => {
 })
 
 describe('buildAss', () => {
-  it('sets PlayRes to the target (logical space)', () => {
+  it('sets PlayRes to the target and never lets libass re-wrap', () => {
     const s = buildAss([overlay()], target)
     expect(s).toContain('PlayResX: 1080')
     expect(s).toContain('PlayResY: 1920')
+    // Lines arrive laid out by Chromium; libass wrapping would re-break them.
+    expect(s).toContain('WrapStyle: 2')
   })
-  it('emits a Dialogue with timing, position, size and color', () => {
+
+  it('emits a Dialogue with timing, position, size and colour', () => {
     const s = buildAss([overlay()], target)
-    expect(s).toContain('Dialogue: 0,0:00:01.00,0:00:04.00,Pill')
+    expect(s).toContain('Dialogue: 1,0:00:01.00,0:00:04.00,Plain')
     expect(s).toContain('\\pos(540,600)')
-    expect(s).toContain('\\fs80')
+    expect(s).toContain('\\c&HFFFFFF&')
     expect(s).toContain('Hook line')
   })
+
+  it('sizes glyphs for libass: \\fs = the CSS size x the face’s Windows line height', () => {
+    // libass scales a face so winAscent + winDescent = \fs; CSS sizes the em.
+    // Montserrat ExtraBold: (1109 + 453) / 1000 → 80px CSS = \fs125 (was \fs80,
+    // i.e. 0.64x the preview). Every face has its own factor.
+    expect(buildAss([overlay()], target)).toContain('\\fs125')
+    const anton = resolveFont('anton').win
+    const fs = (80 * (anton.ascent + anton.descent)) / anton.unitsPerEm // 138.67
+    expect(buildAss([overlay({ fontFamily: 'anton' })], target)).toContain(`\\fs${Math.round(fs * 10) / 10}`)
+  })
+
+  it('burns one event per laid-out line, each at its own measured position', () => {
+    const ev = events(buildAss([overlay({ text: TWO, lines: twoLines() })], target))
+    expect(ev).toHaveLength(2)
+    // \pos = measured baseline less libass's centre-to-baseline drop
+    expect(ev[0]).toContain('\\pos(540,552)')
+    expect(ev[0].endsWith('}Hook text')).toBe(true)
+    expect(ev[1]).toContain('\\pos(540,647)')
+    expect(ev[1].endsWith('}stays put')).toBe(true)
+  })
+
+  it('without a layout, falls back to newline-only lines centred on (x, y)', () => {
+    const one = events(buildAss([overlay({ lines: undefined })], target))
+    expect(one).toHaveLength(1)
+    expect(one[0]).toContain('\\pos(540,600)')
+    const two = events(buildAss([overlay({ text: 'a\nb', lines: undefined })], target))
+    expect(two.map((e) => e.slice(e.lastIndexOf('}') + 1))).toEqual(['a', 'b'])
+  })
+
   it('emits the resolved \\fn font name and \\b0 (no libass faux-bold)', () => {
     const s = buildAss([overlay({ fontFamily: 'anton' })], target)
     expect(s).toContain(`\\fn${resolveFont('anton').assName}`) // \fnAnton
     expect(s).toContain('\\b0')
   })
-  it('burns stroke via \\bord/\\3c only when the pill is off', () => {
+
+  it('burns an outline at HALF its CSS width, and none under a pill', () => {
+    // CSS centres the stroke on the glyph edge and paint-order hides the inner
+    // half; libass draws \bord wholly outside — verified 8px CSS ≈ 4px visible.
     const withStroke = (pill: boolean): string =>
       buildAss([overlay({ pill: { enabled: pill, color: '#000000cc', padPx: 18 }, stroke: { widthPx: 8, color: '#000000' } })], target)
-    expect(withStroke(false)).toContain('\\bord8')
-    // pill on → stroke suppressed (the box owns \bord/\3c)
-    expect(withStroke(true)).not.toContain('\\bord8')
+    expect(withStroke(false)).toContain('\\bord4\\3c&H000000&')
+    expect(withStroke(true)).not.toContain('\\bord4')
   })
+
   it('burns shadow via \\shad/\\4c (+\\blur)', () => {
     const s = buildAss([overlay({ shadow: { distancePx: 3, color: '#000000', blur: 2 } })], target)
     expect(s).toContain('\\shad3')
     expect(s).toContain('\\blur2')
   })
-  it('uses the Pill style + box color when pill enabled, Plain otherwise', () => {
-    expect(buildAss([overlay({ pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)).toContain('Pill,,')
-    const plain = buildAss([overlay({ pill: { enabled: false, color: '#000000cc', padPx: 18 } })], target)
-    expect(plain).toContain('Plain,,')
-    expect(plain).not.toContain('\\3c')
-  })
-  it('skips empty overlays and escapes newlines', () => {
-    expect(buildAss([overlay({ text: '   ' })], target)).not.toContain('Dialogue:')
-    expect(buildAss([overlay({ text: 'a\nb' })], target)).toContain('a\\Nb')
+
+  it('gives undecorated text the default legibility shadow, like the preview', () => {
+    const plain = buildAss([overlay()], target)
+    expect(plain).toContain('\\yshad2.7')
+    expect(plain).toContain('\\blur3.2')
+    // …scaled with the layer/output, and absent whenever something else
+    // separates the text (a pill, an outline, a shadow).
+    expect(buildAss([overlay({ decoScale: 2 })], target)).toContain('\\yshad5.4')
+    expect(buildAss([overlay({ pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)).not.toContain('\\yshad')
+    expect(buildAss([overlay({ stroke: { widthPx: 6, color: '#000000' } })], target)).not.toContain('\\yshad')
   })
 
-  it('emits caption events at the baseline when captions are enabled', () => {
-    const captions = {
-      enabled: true,
-      stylePreset: 'reels-bold',
-      yBaseline: 1340,
-      style: capStyle(),
-      segments: [
-        { id: 'c0', startSec: 0, endSec: 1, text: 'look at this', words: [], enabled: true },
-        { id: 'c1', startSec: 1, endSec: 2, text: 'hidden', words: [], enabled: false }
-      ]
-    }
-    const s = buildAss([], target, captions)
-    expect(s).toContain('Style: Caption,')
-    expect(s).toContain('Dialogue: 0,0:00:00.00,0:00:01.00,Caption,')
-    expect(s).toContain('\\pos(540,1340)')
-    expect(s).toContain('look at this')
-    expect(s).not.toContain('hidden') // disabled segment skipped
+  it('carries a translucent text colour as \\1a (colour tags drop alpha)', () => {
+    expect(buildAss([overlay({ color: '#ffffff80' })], target)).toContain('\\c&HFFFFFF&\\1a&H7F&')
   })
 
-  it('omits caption events when captions disabled', () => {
-    const captions = {
-      enabled: false,
-      stylePreset: 'reels-bold',
-      yBaseline: 1340,
-      style: capStyle(),
-      segments: [{ id: 'c0', startSec: 0, endSec: 1, text: 'nope', words: [], enabled: true }]
-    }
-    expect(buildAss([], target, captions)).not.toContain('Caption,,')
+  describe('pill', () => {
+    const pilled = (lines = twoLines(true)): string =>
+      buildAss([overlay({ text: TWO, lines, pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)
+
+    it('draws each line’s measured box as a rounded vector shape on Layer 0, under the glyphs', () => {
+      const ev = events(pilled())
+      const boxes = ev.filter((e) => e.startsWith('Dialogue: 0,'))
+      const glyphs = ev.filter((e) => e.startsWith('Dialogue: 1,'))
+      expect(boxes).toHaveLength(2)
+      expect(glyphs).toHaveLength(2)
+      // centred on the box Chromium measured (380,487 320x130 → centre 540,552)
+      expect(boxes[0]).toContain('\\pos(540,552)')
+      expect(boxes[0]).toContain(`{\\p1}${pillPath(320, 130, 11)}{\\p0}`) // radius = pillRadiusPx(18)
+      expect(boxes[1]).toContain(`{\\p1}${pillPath(310, 130, 11)}{\\p0}`)
+      // glyphs burn plain — no libass box
+      expect(glyphs[0]).toContain(',Plain,')
+    })
+
+    it('keeps the pill’s alpha (a #000000cc pill is 80% opaque, not solid)', () => {
+      const box = events(pilled())[0]
+      expect(box).toContain('\\1c&H000000&\\1a&H33&')
+    })
+
+    it('falls back to libass’s own box when the layout measured none', () => {
+      const s = buildAss([overlay({ lines: undefined, pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)
+      const [ev] = events(s)
+      expect(ev).toContain(',Pill,')
+      expect(ev).toContain('\\3c&H000000&\\3a&H33&\\bord18')
+    })
+
+    it('rounds the path corners with cubic beziers, clamped to the box', () => {
+      expect(pillPath(100, 40, 11)).toMatch(/^m 11 0 l 89 0 b /)
+      expect(pillPath(100, 10, 11)).toMatch(/^m 5 0 /) // radius ≤ half the height
+    })
+  })
+
+  it('rotates every piece of a block about its centre (captions)', () => {
+    const s = buildAss(
+      [overlay({ text: TWO, lines: twoLines(true), rotationDeg: 15, pill: { enabled: true, color: '#000000cc', padPx: 18 } })],
+      target
+    )
+    const ev = events(s)
+    expect(ev).toHaveLength(4)
+    // ASS rotates counter-clockwise; ours is clockwise → -15, about (x, y)
+    for (const e of ev) expect(e).toContain('\\org(540,600)\\frz-15')
+  })
+
+  it('skips empty overlays and never emits a newline inside an event', () => {
+    expect(buildAss([overlay({ text: '   ', lines: [] })], target)).not.toContain('Dialogue:')
+    expect(buildAss([overlay({ text: 'a\nb', lines: undefined })], target)).not.toContain('\\N')
   })
 
   describe('animations', () => {
-    const anim = (a: Partial<import('@shared/textAnim').TextAnimation>): AssOverlay =>
-      overlay({
-        pill: { enabled: false, color: '#000000cc', padPx: 18 },
-        animation: { in: 'none', inSec: 0.3, out: 'none', outSec: 0.3, ...a }
-      })
+    const anim = (a: Partial<import('@shared/textAnim').TextAnimation>, over: Partial<AssOverlay> = {}): AssOverlay =>
+      overlay({ animation: { in: 'none', inSec: 0.3, out: 'none', outSec: 0.3, ...a }, ...over })
 
     it('fade in + fade out ride one event as \\fad(inMs,outMs)', () => {
       const s = buildAss([anim({ in: 'fadeIn', inSec: 0.3, out: 'fadeOut', outSec: 0.5 })], target)
       expect(s).toContain('\\fad(300,500)')
-      expect(s.match(/Dialogue:/g)?.length).toBe(1)
+      expect(events(s)).toHaveLength(1)
     })
 
     it('slide up maps to \\move from y+slide to y over the entrance', () => {
@@ -134,50 +205,77 @@ describe('buildAss', () => {
       const wide = buildAss([anim({ in: 'slideUp', inSec: 0.35 })], { width: 1920, height: 1080 })
       expect(wide).toContain('\\move(540,690,540,600,0,350)')
       // A half-resolution render halves it.
-      const half = buildAss([anim({ in: 'slideUp', inSec: 0.35 })], target, null, 0.5)
+      const half = buildAss([anim({ in: 'slideUp', inSec: 0.35 })], target, 0.5)
       expect(half).toContain('\\move(540,645,540,600,0,350)')
     })
 
     it('slide in + slide out split into entrance/static/exit events (one \\move each)', () => {
-      const s = buildAss([anim({ in: 'slideUp', inSec: 0.3, out: 'slideDown', outSec: 0.4 })], target)
-      const events = s.split('\n').filter((l) => l.startsWith('Dialogue:'))
-      expect(events).toHaveLength(3)
-      expect(events[0]).toContain('\\move(540,690,540,600,0,300)')
-      expect(events[1]).toContain('\\pos(540,600)')
-      expect(events[2]).toContain('\\move(540,600,540,690,0,400)')
-      expect(events[2]).toContain('\\fad(0,400)')
+      const ev = events(buildAss([anim({ in: 'slideUp', inSec: 0.3, out: 'slideDown', outSec: 0.4 })], target))
+      expect(ev).toHaveLength(3)
+      expect(ev[0]).toContain('\\move(540,690,540,600,0,300)')
+      expect(ev[1]).toContain('\\pos(540,600)')
+      expect(ev[2]).toContain('\\move(540,600,540,690,0,400)')
+      expect(ev[2]).toContain('\\fad(0,400)')
       // Contiguous windows: entrance ends at 1.3, exit starts at 3.6.
-      expect(events[0]).toContain(',0:00:01.00,0:00:01.30,')
-      expect(events[1]).toContain(',0:00:01.30,0:00:03.60,')
-      expect(events[2]).toContain(',0:00:03.60,0:00:04.00,')
+      expect(ev[0]).toContain(',0:00:01.00,0:00:01.30,')
+      expect(ev[1]).toContain(',0:00:01.30,0:00:03.60,')
+      expect(ev[2]).toContain(',0:00:03.60,0:00:04.00,')
+    })
+
+    it('slides every line of a multi-line block by the same travel', () => {
+      const ev = events(buildAss([anim({ in: 'slideUp', inSec: 0.35 }, { text: TWO, lines: twoLines() })], target))
+      expect(ev[0]).toContain('\\move(540,642,540,552,0,350)')
+      expect(ev[1]).toContain('\\move(540,737,540,647,0,350)')
     })
 
     it('typewriter emits one reveal event per char with layout-preserving alpha hides', () => {
-      const s = buildAss([anim({ in: 'typewriter', inSec: 0.9, out: 'none' }), ], target)
-      const events = s.split('\n').filter((l) => l.startsWith('Dialogue:'))
+      const ev = events(buildAss([anim({ in: 'typewriter', inSec: 0.9, out: 'none' })], target))
       // 'Hook line' = 9 chars → 9 reveal events + the static remainder.
-      expect(events).toHaveLength(10)
-      expect(events[0]).toContain('H{\\1a&HFF&\\3a&HFF&\\4a&HFF&}ook line')
-      expect(events[8]).toContain('}Hook line') // full text, no hide marker
-      expect(events[9]).toContain(',0:00:01.90,0:00:04.00,')
+      expect(ev).toHaveLength(10)
+      expect(ev[0]).toContain('H{\\1a&HFF&\\3a&HFF&\\4a&HFF&}ook line')
+      expect(ev[8]).toContain('}Hook line') // full text, no hide marker
+      expect(ev[9]).toContain(',0:00:01.90,0:00:04.00,')
     })
 
-    it('typewriter with a pill keeps the box (\\3a not hidden)', () => {
+    it('typewriter reveals line by line: a line waits for the text before it', () => {
+      // 'ab cd' → steps of 1 char over 0.5s (0.1s each); line 2 starts at char 3.
+      const lines: LaidOutLine[] = [
+        { start: 0, end: 2, cx: 540, baseline: 552 + drop },
+        { start: 3, end: 5, cx: 540, baseline: 647 + drop }
+      ]
+      const ev = events(buildAss([anim({ in: 'typewriter', inSec: 0.5, out: 'none' }, { text: 'ab cd', lines })], target))
+      const line1 = ev.filter((e) => e.includes('\\pos(540,552)'))
+      const line2 = ev.filter((e) => e.includes('\\pos(540,647)'))
+      // line 1: "a" (0–0.1s), then whole from 0.1s — merged, not one per step
+      expect(line1[0]).toContain(',0:00:01.00,0:00:01.10,')
+      expect(line1[1]).toContain(',0:00:01.10,0:00:01.50,')
+      expect(line1[1].endsWith('}ab')).toBe(true)
+      // line 2: nothing until the 4th step (char 4 = "c")
+      expect(line2[0]).toContain(',0:00:01.30,0:00:01.40,')
+      expect(line2[0]).toContain('c{\\1a&HFF&\\3a&HFF&\\4a&HFF&}d')
+    })
+
+    it('typewriter keeps the pill box up for the whole reveal', () => {
       const s = buildAss(
-        [overlay({ animation: { in: 'typewriter', inSec: 0.9, out: 'none', outSec: 0.3 } })],
+        [anim({ in: 'typewriter', inSec: 0.9, out: 'none' }, { text: TWO, lines: twoLines(true), pill: { enabled: true, color: '#000000cc', padPx: 18 } })],
         target
       )
-      expect(s).toContain('{\\1a&HFF&\\4a&HFF&}')
-      expect(s).not.toContain('\\3a&HFF&')
+      const boxes = events(s).filter((e) => e.startsWith('Dialogue: 0,'))
+      expect(boxes).toHaveLength(2)
+      for (const b of boxes) expect(b).toContain(',0:00:01.00,0:00:04.00,')
     })
 
     it('word highlight emits one \\k per word with the dimmed secondary fill', () => {
-      const s = buildAss(
-        [anim({ in: 'wordHighlight', out: 'none' })], // 'Hook line' = 2 words over 3s
-        target
-      )
-      expect(s).toContain('\\2c&H00FFFFFF&\\2a&H99&')
+      const s = buildAss([anim({ in: 'wordHighlight', out: 'none' })], target) // 'Hook line' = 2 words over 3s
+      expect(s).toContain('\\2c&HFFFFFF&\\2a&H99&')
       expect(s).toContain('{\\k150}Hook {\\k150}line')
+    })
+
+    it('word highlight opens each later line with a \\k delay for the words before it', () => {
+      // 4 words over 3s = 75cs each; line 2 starts at word 3.
+      const ev = events(buildAss([anim({ in: 'wordHighlight', out: 'none' }, { text: TWO, lines: twoLines() })], target))
+      expect(ev[0].endsWith('}{\\k75}Hook {\\k75}text')).toBe(true)
+      expect(ev[1].endsWith('}{\\k150}{\\k75}stays {\\k75}put')).toBe(true)
     })
 
     it('bounce emits the \\t scale pop with the shared keyframes', () => {
@@ -196,41 +294,12 @@ describe('buildAss', () => {
 
     it('a static overlay still emits the single un-animated event', () => {
       const s = buildAss([overlay()], target)
-      expect(s.match(/Dialogue:/g)?.length).toBe(1)
+      expect(events(s)).toHaveLength(1)
       expect(s).not.toContain('\\fad')
     })
   })
-
-  it('honors a per-caption style override (color, position, rotation, pill)', () => {
-    const captions = {
-      enabled: true,
-      stylePreset: 'reels-bold',
-      yBaseline: 1340,
-      style: capStyle({ color: '#ffffff' }),
-      segments: [
-        { id: 'c0', startSec: 0, endSec: 1, text: 'global', words: [], enabled: true },
-        {
-          id: 'c1',
-          startSec: 1,
-          endSec: 2,
-          text: 'custom',
-          words: [],
-          enabled: true,
-          style: capStyle({ x: 200, y: 400, color: '#ff0000', rotationDeg: 15, pill: { enabled: true, color: '#000000cc', padPx: 20 } })
-        }
-      ]
-    }
-    const s = buildAss([], target, captions)
-    // Global caption uses the lane style (white, default baseline, Caption style).
-    expect(s).toContain('Dialogue: 0,0:00:00.00,0:00:01.00,Caption,,0,0,0,,{\\an5\\pos(540,1340)')
-    // Overridden caption: Pill style, moved, red, rotated (ASS uses CCW → -15).
-    expect(s).toContain('Dialogue: 0,0:00:01.00,0:00:02.00,Pill,')
-    expect(s).toContain('\\pos(200,400)')
-    expect(s).toContain(`\\c${assColor('#ff0000')}&`)
-    expect(s).toContain('\\frz-15')
-    expect(s).toContain('\\bord20')
-  })
 })
+
 
 // Sparkles were verified by rendering the ACTUAL generated ASS over a black
 // base and reading `signalstats` YAVG in a crop around one sparkle: it rose
@@ -250,12 +319,10 @@ describe('sparkles', () => {
     expect(buildAss([overlay()], target)).toContain('Style: Sparkle,')
   })
 
-  it('draws sparkles on Layer 1 so they sit above the glyphs', () => {
-    const ass = buildAss([overlay({ sparkles: [sparkle] })], target)
-    const events = ass.split('\n').filter((l) => l.startsWith('Dialogue:'))
-    expect(events.some((l) => l.startsWith('Dialogue: 1,') && l.includes('Sparkle'))).toBe(true)
-    // The text itself stays on Layer 0.
-    expect(events.some((l) => l.startsWith('Dialogue: 0,'))).toBe(true)
+  it('draws sparkles on Layer 2 so they sit above the glyphs (1) and pills (0)', () => {
+    const ev = events(buildAss([overlay({ sparkles: [sparkle] })], target))
+    expect(ev.some((l) => l.startsWith('Dialogue: 2,') && l.includes('Sparkle'))).toBe(true)
+    expect(ev.some((l) => l.startsWith('Dialogue: 1,') && l.includes('Plain'))).toBe(true)
   })
 
   it('emits one event per sparkle', () => {
