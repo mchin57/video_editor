@@ -1,8 +1,7 @@
 import { type JSX } from 'react'
 import { createPortal } from 'react-dom'
-import { EXPORT_PRESETS } from '@shared/export'
 import { LAYOUT_PRESETS } from '@shared/layouts'
-import { useProject } from '@/state/projectStore'
+import { projectFormat, useProject } from '@/state/projectStore'
 import { LayoutPresetPreview } from './LayoutPresetPreview'
 
 /**
@@ -28,9 +27,8 @@ export function LayoutPickerModal({
   onPick: (presetId: string) => void
   onClose: () => void
 }): JSX.Element | null {
-  const preset = useProject((s) => s.project?.preset ?? 'reel')
+  const target = useProject(projectFormat)
   if (!open) return null
-  const target = EXPORT_PRESETS[preset]
   const aspect = target.width / target.height
 
   return createPortal(

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import type { PresetId } from '@shared/export'
-import { EXPORT_PRESETS } from '@shared/export'
-import { useProject } from '@/state/projectStore'
+import { presetGroups, type PresetId } from '@shared/formats'
+import { projectFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { LayoutPickerModal } from './LayoutPickerModal'
@@ -16,7 +15,8 @@ import { Field, inputCls } from './ui'
  */
 export function FormatMenu(): JSX.Element | null {
   const hasProject = useProject((s) => !!s.project)
-  const preset = useProject((s) => s.project?.preset ?? 'reel')
+  const current = useProject(projectFormat)
+  const preset = current.id
   const setPreset = useProject((s) => s.setPreset)
   const addLayoutLayer = useProject((s) => s.addLayoutLayer)
 
@@ -58,18 +58,27 @@ export function FormatMenu(): JSX.Element | null {
         >
           <Field label="Aspect ratio">
             <select
+              data-testid="format-select"
               value={preset}
               onChange={(e) => setPreset(e.target.value as PresetId)}
-              title="Sets the preview shape and the exported output size."
+              title="Sets the preview shape and the exported output size. Nothing on the timeline moves — whatever falls outside the frame is cropped on export and comes back if you switch again."
               className={inputCls}
             >
-              {Object.values(EXPORT_PRESETS).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+              {presetGroups().map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </Field>
+          <p className="-mt-1 text-[10px] leading-snug text-zinc-500">
+            {current.width} × {current.height}
+            {current.hint ? ` · ${current.hint}` : ''}
+          </p>
 
           <div className="my-2 h-px bg-white/10" />
 

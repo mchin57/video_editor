@@ -131,3 +131,10 @@ export function alphaInputDecoder(
 export const isImageAsset = (a: MediaAsset): boolean => assetKind(a) === 'image'
 export const isAudioAsset = (a: MediaAsset): boolean => assetKind(a) === 'audio'
 export const isVideoAsset = (a: MediaAsset): boolean => assetKind(a) === 'video'
+
+/** A visual asset's display aspect (w/h), or undefined when its probe has no
+ *  usable picture size (audio, or a failed probe). Fits new layers to the frame. */
+export function assetAspect(a: Pick<MediaAsset, 'probe'> | undefined): number | undefined {
+  const v = a?.probe.video
+  return v && v.displayWidth > 0 && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : undefined
+}

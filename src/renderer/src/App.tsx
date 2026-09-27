@@ -18,7 +18,7 @@ import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { onJobProgress, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
-import { useProject } from '@/state/projectStore'
+import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { makeTextLayer } from '@shared/layers'
@@ -121,7 +121,7 @@ export default function App(): JSX.Element {
       } else if (e.key.toLowerCase() === 't') {
         const id = crypto.randomUUID()
         const start = usePlayback.getState().time
-        project.addLayer(makeTextLayer(id, start, start + 3))
+        project.addLayer(makeTextLayer(id, start, start + 3, getFormat().frame))
         useUi.getState().selectLayer(id)
       } else if (e.key === 'Escape') {
         const ui = useUi.getState()

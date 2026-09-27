@@ -10,10 +10,13 @@ Instagram Reels. Read this before adding code.
   `src/renderer/**` (React UI), and `src/shared/**` (pure code imported by **both**
   main and renderer).
 - **The 1080×1920 logical space is the contract.** Every spatial value (layers,
-  captions, crops) is in this logical space so the *same numbers* drive the
-  CSS-scaled preview and the ffmpeg/ASS export. Geometry/timing/style math that
-  must agree on both sides lives in `src/shared/` (`layers.ts`, `project.ts`) —
-  put it there, not in one side.
+  captions, crops) is in this canonical logical space so the *same numbers*
+  drive the CSS-scaled preview and the ffmpeg/ASS export. The project's output
+  format (`shared/formats.ts`: 9:16, 1:1, 16:9, …) is a *window* centred on it
+  (`shared/frame.ts`): changing format moves the window, never the layers, and
+  both sides map through it (`frameCanvasStyle` / `frameToOutput`). Geometry/
+  timing/style math that must agree on both sides lives in `src/shared/`
+  (`layers.ts`, `project.ts`) — put it there, not in one side.
 - **The project document** (`shared/project.ts`) is a single type-agnostic `layers`
   stack plus `audioClips` + `captions`. Schema changes need a bump + a step in
   `migrateProject`.
@@ -47,7 +50,9 @@ homes — check it before writing any of these:**
 - an array map-by-id / splice in a store action → `lib/arrays.ts`
 - a text/caption style type → extend `TextStyleBase` (`shared/project.ts`)
 - an inherit / force-on / force-off setting → `resolveOverride` (`shared/project.ts`)
-- the 1080×1920 constant → `FRAME` (`shared/layers.ts`; `LOGICAL` in the renderer)
+- the 1080×1920 constant → `FRAME` (`shared/frame.ts`, re-exported by `layers.ts`; `LOGICAL` in the renderer)
+- an output format / aspect ratio / platform safe zone → the registry in `shared/formats.ts`
+  (`defineAspect` + `definePreset`); read the project's with `projectFormat`
 - aspect-fit box / image rotate-aspect math → `containBox`/`effectiveImageAspect` (`shared/layers.ts`)
 - an ffmpeg `crop=`/`eq=` fragment or `toFixed(3)`/round → `services/ffmpegFilters.ts`
 - an IPC call → add the name to the destructure in `ipc/client.ts` (don't re-wrap `window.api`)

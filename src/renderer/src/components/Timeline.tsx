@@ -11,10 +11,10 @@ import type { AudioClip, CaptionSegment, Composition, Layer, Project, ScriptLine
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
-import { assetKind } from '@shared/media'
+import { assetAspect, assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { activeComp, getActiveComp, useProject } from '@/state/projectStore'
+import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
@@ -526,7 +526,7 @@ export function Timeline(): JSX.Element {
     const nid = crypto.randomUUID()
     const kind = assetKind(asset)
     if (kind === 'image') {
-      addLayer(makeImageLayer(nid, id, startSec, startSec + 3))
+      addLayer(makeImageLayer(nid, id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) }))
       selectLayer(nid)
     } else if (kind === 'audio') {
       addAudioClip({
@@ -543,7 +543,7 @@ export function Timeline(): JSX.Element {
       })
       selectAudio(nid)
     } else {
-      addVideoLayer(nid, id, startSec, asset.probe.durationSec, !!asset.probe.audio)
+      addVideoLayer(nid, id, startSec, asset.probe.durationSec, !!asset.probe.audio, assetAspect(asset))
       // A clip with audio lands as a LINKED pair — select the whole group.
       selectTile(getActiveComp(), { kind: 'layer', id: nid })
     }
@@ -879,7 +879,7 @@ export function Timeline(): JSX.Element {
   const addText = (): void => {
     const id = crypto.randomUUID()
     const start = usePlayback.getState().time
-    addLayer(makeTextLayer(id, start, start + 3))
+    addLayer(makeTextLayer(id, start, start + 3, getFormat().frame))
     selectLayer(id)
   }
 

@@ -14,7 +14,6 @@
 
 import type { CaptionsConfig, PillStyle, ShadowStyle, StrokeStyle } from '@shared/project'
 import { resolveFont } from '@shared/fonts'
-import { FRAME } from '@shared/layers'
 import {
   BOUNCE_FADE_SEC,
   BOUNCE_OVERSHOOT_FRAC,
@@ -129,10 +128,16 @@ function decoTags(pillEnabled: boolean, stroke?: StrokeStyle | null, shadow?: Sh
   return tags.join('')
 }
 
+/**
+ * `pxScale` is output px per logical px (`frameToOutput(...).s`) — the one
+ * length this builder derives itself, the slide-animation travel, is a logical
+ * constant. Every built-in format renders 1:1, hence the default.
+ */
 export function buildAss(
   overlays: AssOverlay[],
   target: Target,
-  captions?: CaptionsConfig | null
+  captions?: CaptionsConfig | null,
+  pxScale = 1
 ): string {
   const lines = [
     '[Script Info]',
@@ -190,7 +195,7 @@ export function buildAss(
     // A sparkle-only overlay (empty text) is legitimate: it carries the
     // decoration for text that burned as a PNG on the image track.
     if (o.text.trim().length === 0 && !o.sparkles?.length) continue
-    lines.push(...overlayEvents(o, target))
+    lines.push(...overlayEvents(o, pxScale))
   }
 
   return lines.join('\n') + '\n'
@@ -235,8 +240,8 @@ function sparkleEvents(o: AssOverlay): string[] {
 }
 
 /** Text events (when there is text) plus its sparkles (when there are any). */
-function overlayEvents(o: AssOverlay, target: Target): string[] {
-  const text = o.text.trim().length > 0 ? textEvents(o, target) : []
+function overlayEvents(o: AssOverlay, pxScale: number): string[] {
+  const text = o.text.trim().length > 0 ? textEvents(o, pxScale) : []
   return [...text, ...sparkleEvents(o)]
 }
 
@@ -253,7 +258,7 @@ function overlayEvents(o: AssOverlay, target: Target): string[] {
  * \1a\4a are hidden so the full-size box shows from the start (both verified —
  * docs/FFMPEG-NOTES.md).
  */
-function textEvents(o: AssOverlay, target: Target): string[] {
+function textEvents(o: AssOverlay, pxScale: number): string[] {
   const style = o.pill.enabled ? 'Pill' : 'Plain'
   const an = o.anchor === 'center' ? 5 : 7
   const x = Math.round(o.x)
@@ -277,8 +282,8 @@ function textEvents(o: AssOverlay, target: Target): string[] {
   const { inSec, outSec } = clampAnimWindows(anim, dur)
   const inMs = Math.round(inSec * 1000)
   const outMs = Math.round(outSec * 1000)
-  // Slide travel is a logical-px constant; scale it like every other vertical.
-  const slide = Math.round((SLIDE_DIST_PX * target.height) / FRAME.height)
+  // Slide travel is a logical-px constant; scale it like every other length.
+  const slide = Math.round(SLIDE_DIST_PX * pxScale)
   const events: string[] = []
 
   // Exit needs its own event only for slideDown (a second \move); fades ride

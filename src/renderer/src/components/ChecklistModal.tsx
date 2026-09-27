@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type JSX } from 'react'
 import { audioClipEnd } from '@shared/project'
-import { EXPORT_PRESETS } from '@shared/export'
+import { presetFor } from '@shared/formats'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { useLibrary } from '@/hooks/useMedia'
@@ -31,9 +31,11 @@ export function ChecklistModal(): JSX.Element | null {
     const assetDur = (id: string): number => assets.find((a) => a.id === id)?.probe.durationSec ?? 0
     const videoDur = visualDuration(project.layers)
     const audioDur = project.audioClips.reduce((m, a) => Math.max(m, audioClipEnd(a, assetDur(a.mediaId))), 0)
-    const target = EXPORT_PRESETS[project.preset]
-    const is916 = Math.abs(target.width / target.height - 9 / 16) < 0.01
-    return buildChecklist(project, { durationSec: Math.max(videoDur, audioDur), keywordBank, is916 })
+    return buildChecklist(project, {
+      durationSec: Math.max(videoDur, audioDur),
+      keywordBank,
+      format: presetFor(project.preset)
+    })
   }, [project, assets, keywordBank])
 
   if (!open || !result) return null

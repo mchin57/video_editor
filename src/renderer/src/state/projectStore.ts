@@ -3,6 +3,7 @@ import type {
   AudioClip,
   CaptionsConfig,
   Composition,
+  CropRect,
   ImageContent,
   Layer,
   LayoutCell,
@@ -31,12 +32,13 @@ import {
   layerTransformAt,
   makeVideoLayer,
   playedVideoDuration,
+  rescaleForAspect,
   upsertKeyframe,
   videoSourceTime
 } from '@shared/layers'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import { applyLayoutPreset, makeLayoutLayer } from '@shared/layouts'
-import type { PresetId } from '@shared/export'
+import { presetFor, type ExportPreset, type PresetId } from '@shared/formats'
 import { extractAudioPieces } from '@/lib/timeline'
 // Namespaced: the group ops keep the same names as the actions that expose them.
 import * as links from '@/lib/links'
@@ -108,6 +110,16 @@ export const activeComp = (s: Pick<ProjectState, 'project' | 'editPath'>): Compo
 /** Imperative twin of the `activeComp` selector, for event handlers. */
 export const getActiveComp = (): Composition | null => activeComp(useProject.getState())
 
+/**
+ * The project's output format (aspect ratio + frame window), root-scoped: a
+ * nested comp is edited and rendered through the same frame. Returns the
+ * registry's own object, so it is a stable selector result.
+ */
+export const projectFormat = (s: Pick<ProjectState, 'project'>): ExportPreset => presetFor(s.project?.preset)
+
+/** Imperative twin of `projectFormat`, for event handlers. */
+export const getFormat = (): ExportPreset => projectFormat(useProject.getState())
+
 interface ProjectState {
   project: Project | null
   past: Project[]
@@ -158,8 +170,16 @@ interface ProjectState {
   // --- Layers ---
   /** Append a layer to the FRONT of the stack (top). */
   addLayer: (layer: Layer) => void
-  /** Add a video layer (front) at `startSec`; optionally extract its audio. */
-  addVideoLayer: (id: string, mediaId: string, startSec: number, durationSec: number, hasAudio?: boolean) => void
+  /** Add a video layer (front) at `startSec`; optionally extract its audio.
+   *  `aspect` (the clip's w/h) fits it to the project's frame; absent = scale 1. */
+  addVideoLayer: (
+    id: string,
+    mediaId: string,
+    startSec: number,
+    durationSec: number,
+    hasAudio?: boolean,
+    aspect?: number
+  ) => void
   /** Add an empty multi-clip layout layer (front) at `startSec`. */
   addLayoutLayer: (id: string, presetId: string, startSec: number) => void
   /** Re-shape a layout to another preset (cells keep media/trim by index). */
@@ -178,6 +198,11 @@ interface ProjectState {
   convertLayerToComp: (layerId: string) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
   updateLayerContent: (id: string, patch: ContentPatch) => void
+  /** Set (or clear, with `null`) a video layer's crop. The crop reshapes the
+   *  clip's aspect, so its scale follows (`rescaleForAspect`) to keep its size
+   *  RELATIVE TO THE FRAME — "Crop to 16:9" fills a 16:9 frame the way "Crop to
+   *  9:16" fills a Reel. `sourceAspect` is the uncropped source's w/h. */
+  setVideoCrop: (id: string, crop: CropRect | null, sourceAspect: number) => void
   removeLayer: (id: string) => void
   toggleLayerHidden: (id: string) => void
   /** Reapply a new front→back order of the *visible* layers to the full stack. */
@@ -439,13 +464,14 @@ export const useProject = create<ProjectState>((set, get) => {
     // --- Layers ---
     addLayer: (layer) => commitComp((p) => ({ ...p, layers: [...p.layers, layer] })),
 
-    addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false) =>
+    addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false, aspect) =>
       commitComp((p) => {
         // A clip and the audio track pulled off it are ONE thing by default, so
         // the pair lands LINKED: move/trim/split/delete either and the other
         // follows (`lib/links.ts`). Unlink from the timeline bar to edit one.
         const linkGroupId = hasAudio ? newId() : undefined
-        const base = makeVideoLayer(id, mediaId, startSec, durationSec, { mute: hasAudio })
+        const frame = projectFormat(get()).frame
+        const base = makeVideoLayer(id, mediaId, startSec, durationSec, { mute: hasAudio, frame, aspect })
         const layer = linkGroupId ? { ...base, linkGroupId } : base
         const audioClips = hasAudio
           ? [
@@ -546,6 +572,18 @@ export const useProject = create<ProjectState>((set, get) => {
       commitComp((p) =>
         mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))
       ),
+
+    setVideoCrop: (id, crop, sourceAspect) => {
+      const frame = projectFormat(get()).frame
+      commitComp((p) =>
+        mapLayer(p, id, (l) => {
+          if (l.content.kind !== 'video') return l
+          const from = l.content.crop ? l.content.crop.w / l.content.crop.h : sourceAspect
+          const to = crop ? crop.w / crop.h : sourceAspect
+          return { ...rescaleForAspect(l, from, to, frame), content: { ...l.content, crop } }
+        })
+      )
+    },
 
     removeLayer: (id) => {
       commitComp((p) => links.removeItems(p, [{ kind: 'layer', id }]))

@@ -485,6 +485,26 @@ looking for an `-ss` in the transcription path.
   the parse and you must bump it, or every existing transcript keeps its old
   words forever.
 
+## Non-9:16 output frames — sizes & off-canvas overlays (verified ffmpeg 8.1.1, 2026-09)
+
+- **Every built-in format encodes at its derived size.** The real exporter, on
+  real sample media, produced h264_nvenc yuv420p at 1080×1920, 1080×1080,
+  1080×1350, 1920×1080 and 2520×1080 (the widest, 21:9); libx264
+  `-preset medium` was checked separately at 2520×1080. Sizes come from
+  `defineAspect` (short side 1080, even dims — yuv420 needs even).
+- **`overlay` with a NEGATIVE offset crops the input; it does not clamp or
+  shift it.** A 1080×1920 input at `y=-420` on a 1080-tall canvas shows input
+  rows 420..1499 at output rows 0..1079. Checked with a four-band clip whose
+  band edges land on exactly the predicted output rows (`e2e/aspectRatio.spec.ts`,
+  landscape + square exports), and with solid red at x=720, y=−420 on 2520×1080.
+  This is what makes "keep the clip's size when the format changes" free: the
+  exporter maps canonical → output (`frameToOutput`) and hands ffmpeg the
+  off-canvas coordinates as-is.
+- Trap for synthetic tests: `h264_nvenc` refuses tiny frames ("Frame Dimension
+  less than the minimum supported value" at 64×64). Irrelevant to real
+  exports (every canvas is ≥1080) — synthesize test canvases at ≥256 px, or
+  use libx264.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

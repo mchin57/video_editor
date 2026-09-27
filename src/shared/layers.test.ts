@@ -2,13 +2,18 @@ import { describe, it, expect } from 'vitest'
 import type { Layer } from './project'
 import {
   applyVisibleOrder,
+  centeredFrame,
   containBox,
   effectiveImageAspect,
+  fitScale,
   FRAME,
+  frameToOutput,
   freezeExtraSec,
+  FULL_FRAME,
   hookCovered,
   isBackgroundId,
   isFrozenAt,
+  layerFitScale,
   layersAtTime,
   layerTransformAt,
   makeImageLayer,
@@ -17,6 +22,7 @@ import {
   moveLayer,
   opacityKeyframePoints,
   playedVideoDuration,
+  rescaleForAspect,
   resizeBox,
   stretchedBox,
   upsertKeyframe,
@@ -409,6 +415,74 @@ describe('factories', () => {
     const t = makeTextLayer('t', 0, 3)
     expect(t.content.kind).toBe('text')
     expect(t.y).toBeCloseTo(1920 * 0.32, 5)
+  })
+
+  it('fit new media to the frame it is placed in', () => {
+    const frame = centeredFrame(1920, 1080)
+    // A 16:9 clip in a 16:9 frame fills it exactly…
+    const v = makeVideoLayer('v', 'm', 0, 4, { frame, aspect: 16 / 9 })
+    expect(stretchedBox(16 / 9, v.scale).w).toBeCloseTo(1920, 6)
+    // …a phone clip pillarboxes to the frame height.
+    const p = makeVideoLayer('p', 'm', 0, 4, { frame, aspect: 9 / 16 })
+    expect(stretchedBox(9 / 16, p.scale).h).toBeCloseTo(1080, 6)
+    // Images start at half of that fit; text a third of the way down the frame.
+    expect(makeImageLayer('i', 'm', 0, 3, { frame, aspect: 16 / 9 }).scale).toBeCloseTo(v.scale / 2, 9)
+    expect(makeTextLayer('t', 0, 3, frame).y).toBeCloseTo(420 + 1080 * 0.32, 9)
+    // Unknown aspect (or the 9:16 frame) keeps the old defaults.
+    expect(makeVideoLayer('u', 'm', 0, 4, { frame }).scale).toBe(1)
+    expect(makeVideoLayer('r', 'm', 0, 4, { aspect: 16 / 9 }).scale).toBe(1)
+  })
+})
+
+describe('output frame', () => {
+  it('centers a format window on the canonical space; 9:16 is the identity', () => {
+    expect(FULL_FRAME).toEqual({ x: 0, y: 0, w: 1080, h: 1920 })
+    expect(centeredFrame(1080, 1080)).toEqual({ x: 0, y: 420, w: 1080, h: 1080 })
+    expect(centeredFrame(1920, 1080)).toEqual({ x: -420, y: 420, w: 1920, h: 1080 })
+  })
+
+  it('maps canonical coords into output px uniformly, frame top-left → (0,0)', () => {
+    const m = frameToOutput(centeredFrame(1920, 1080), 1920)
+    expect(m.s).toBe(1)
+    expect([m.x(-420), m.y(420)]).toEqual([0, 0])
+    expect([m.x(540), m.y(960)]).toEqual([960, 540]) // canonical center = frame center
+    const half = frameToOutput(FULL_FRAME, 540)
+    expect([half.s, half.x(1080), half.y(1920)]).toEqual([0.5, 540, 960])
+  })
+
+  it('fitScale is 1 in the 9:16 frame and converts elsewhere', () => {
+    expect(fitScale(16 / 9)).toBe(1)
+    expect(fitScale(9 / 16, centeredFrame(1080, 1080))).toBeCloseTo(0.5625, 9)
+    expect(fitScale(16 / 9, centeredFrame(1920, 1080))).toBeCloseTo(1920 / 1080, 9)
+    expect(fitScale(1, centeredFrame(1080, 1080))).toBe(1)
+  })
+
+  it('layerFitScale: the 100% zoom per layer kind', () => {
+    const wide = centeredFrame(1920, 1080)
+    const video = makeVideoLayer('v', 'm', 0, 2)
+    expect(layerFitScale(video, 9 / 16, FULL_FRAME)).toBe(1)
+    expect(layerFitScale(video, 9 / 16, wide)).toBeCloseTo(0.5625, 9)
+    // A crop wins over the source aspect.
+    const cropped = { ...video, content: { ...(video.content as VideoContent), crop: { x: 0, y: 0, w: 1600, h: 900 } } }
+    expect(layerFitScale(cropped, 9 / 16, wide)).toBeCloseTo(1920 / 1080, 9)
+    // An image rotated a quarter turn fits by its swapped aspect.
+    const img = makeImageLayer('i', 'm', 0, 2)
+    const rotated = { ...img, content: { kind: 'image' as const, mediaId: 'm', opacity: 1, rotateQuarters: 1 } }
+    expect(layerFitScale(rotated, 16 / 9, wide)).toBeCloseTo(fitScale(9 / 16, wide), 9)
+    // Text and unknown media read as raw scale.
+    expect(layerFitScale(makeTextLayer('t', 0, 1), undefined, wide)).toBe(1)
+    expect(layerFitScale(video, undefined, wide)).toBe(1)
+  })
+
+  it('rescaleForAspect keeps a layer the same size relative to the frame', () => {
+    const frame = centeredFrame(1920, 1080)
+    const layer = { scale: 0.5625, keyframes: [{ tSec: 0, x: 0, y: 0, scale: 1.125 }] }
+    // Phone clip fitted to a 16:9 frame, then cropped to 16:9: it now fills it.
+    const cropped = rescaleForAspect(layer, 9 / 16, 16 / 9, frame)
+    expect(stretchedBox(16 / 9, cropped.scale).w).toBeCloseTo(1920, 6)
+    expect(cropped.keyframes![0].scale).toBeCloseTo(cropped.scale * 2, 9)
+    // In 9:16 nothing changes — the same object comes back.
+    expect(rescaleForAspect(layer, 9 / 16, 16 / 9, FULL_FRAME)).toBe(layer)
   })
 })
 

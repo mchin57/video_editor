@@ -22,12 +22,18 @@ import {
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { hasSpeedRamp, speedSegments } from '@shared/speed'
-import { cellSpan, coverCrop, layoutCellRect } from '@shared/layouts'
+import { cellSpan, coverCrop, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { clampAnimWindows, effectiveTextAnimation } from '@shared/textAnim'
 import { activeSparkle, sparklesFor } from '@shared/sparkle'
-import type { PresetId } from '@shared/export'
+import { presetFor, type PresetId } from '@shared/formats'
 import { alphaInputDecoder } from '@shared/media'
-import { effectiveImageAspect, FRAME, opacityKeyframePoints, stretchedBox } from '@shared/layers'
+import {
+  effectiveImageAspect,
+  FRAME,
+  frameToOutput,
+  opacityKeyframePoints,
+  stretchedBox
+} from '@shared/layers'
 import type { Layer, TextContent } from '@shared/project'
 import type { ExportKeyframe, OpacityAnim } from './exporterArgs'
 import { getSubdir, getBundledFontsDir } from '../config'
@@ -52,22 +58,25 @@ import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
 import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
 
+/** Canonical logical → output px for one render (`frameToOutput`). */
+type OutputMap = ReturnType<typeof frameToOutput>
+
 /**
  * An overlay carrying ONLY sparkles, for text whose glyphs burned as a PNG.
  * The text fields are inert — `buildAss` emits no text events for empty text —
  * but `AssOverlay` requires them, so they carry the layer's real values rather
  * than placeholders.
  */
-function sparkleOnlyOverlay(c: TextContent, l: Layer, sx: number, sy: number): AssOverlay {
+function sparkleOnlyOverlay(c: TextContent, l: Layer, m: OutputMap): AssOverlay {
   return {
     text: '',
     startSec: l.startSec,
     endSec: l.endSec,
-    x: r(l.x * sx),
-    y: r(l.y * sy),
+    x: r(m.x(l.x)),
+    y: r(m.y(l.y)),
     anchor: 'center',
     fontFamily: c.fontFamily,
-    fontSizePx: c.fontSizePx * l.scale * sy,
+    fontSizePx: c.fontSizePx * l.scale * m.s,
     color: c.color,
     pill: c.pill
   }
@@ -174,8 +183,14 @@ async function renderComposition(
   o: { alpha: boolean; depth: number }
 ): Promise<string> {
   const { target, caps, ffmpeg, jobId, opts } = ctx
-  const sx = target.width / FRAME.width
-  const sy = target.height / FRAME.height
+  // Canonical logical → output px. The project's format is a window centred on
+  // the canonical 1080×1920 space (shared/frame.ts): positions shift by the
+  // frame origin and every length scales by ONE uniform factor `s` (1 for every
+  // built-in format — the output is the frame, px for px). Nested comps render
+  // through the same frame, so an intermediate is frame-shaped too.
+  const frame = presetFor(opts.preset).frame
+  const m = frameToOutput(frame, target.width)
+  const s = m.s
 
   const tmp = join(ctx.tmpRoot, `r${ctx.n.v++}`)
   await fsp.mkdir(tmp, { recursive: true })
@@ -224,15 +239,15 @@ async function renderComposition(
       const b = stretchedBox(aspect, k.scale, l.stretchX ?? 1, l.stretchY ?? 1)
       return {
         t: l.startSec + k.tSec,
-        w: b.w * sx,
-        h: b.h * sy,
-        cx: k.x * sx,
-        cy: k.y * sy
+        w: b.w * s,
+        h: b.h * s,
+        cx: m.x(k.x),
+        cy: m.y(k.y)
       }
     })
 
   // Walk the stack back→front, resolving each visible layer to a composite step.
-  // Geometry is mapped from the logical 1080x1920 space into output pixels.
+  // Geometry is mapped from the canonical logical space into output pixels.
   const visuals: ExportVisual[] = []
   const audio: ExportAudio[] = []
   let textN = 0
@@ -316,8 +331,8 @@ async function renderComposition(
       const v = asset.probe.video
       const aspect = c.crop ? c.crop.w / c.crop.h : v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : FRAME.width / FRAME.height
       const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
-      const boxW = box.w * sx
-      const boxH = box.h * sy
+      const boxW = box.w * s
+      const boxH = box.h * s
       const trimLen = Math.max(0.01, c.outSec - c.inSec)
       // Stabilization (clip override, else project default) pre-renders a
       // trimmed, SDR, stabilized intermediate; the composite then reads it from
@@ -349,8 +364,8 @@ async function renderComposition(
           colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
           boxW,
           boxH,
-          x: r(l.x * sx - boxW / 2),
-          y: r(l.y * sy - boxH / 2),
+          x: r(m.x(l.x) - boxW / 2),
+          y: r(m.y(l.y) - boxH / 2),
           startSec: l.startSec,
           endSec: l.endSec,
           freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
@@ -397,16 +412,16 @@ async function renderComposition(
       const aspect = effectiveImageAspect(base, c.crop, c.rotateQuarters)
       const q = (((c.rotateQuarters ?? 0) % 4) + 4) % 4
       const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
-      const boxW = box.w * sx
-      const boxH = box.h * sy
+      const boxW = box.w * s
+      const boxH = box.h * s
       visuals.push({
         kind: 'image',
         image: {
           path: imgPath,
           boxW,
           boxH,
-          x: r(l.x * sx - boxW / 2),
-          y: r(l.y * sy - boxH / 2),
+          x: r(m.x(l.x) - boxW / 2),
+          y: r(m.y(l.y) - boxH / 2),
           startSec: l.startSec,
           endSec: l.endSec,
           opacity: c.opacity,
@@ -433,7 +448,7 @@ async function renderComposition(
         if (cell.comp) {
           const pre = await prerenderComp(cell.comp)
           if (!pre) continue
-          const rect = layoutCellRect(l, cell.rect)
+          const rect = layoutCellRect(l, cell.rect, frame)
           if (rect.w <= 0 || rect.h <= 0) continue
           const effSpan = Math.min(pre.len, window)
           if (effSpan <= 0.01) continue
@@ -446,14 +461,14 @@ async function renderComposition(
               hdrChain: '',
               hasAlpha: true,
               inputDecoder: 'libvpx-vp9',
-              // The comp renders at the full logical frame, so cover-crop it to
+              // The comp renders at the full output frame, so cover-crop it to
               // the cell the same way a source clip is cropped.
               crop: coverCrop(target.width, target.height, rect.w / rect.h),
               colorEq: '',
-              boxW: rect.w * sx,
-              boxH: rect.h * sy,
-              x: r(rect.x * sx),
-              y: r(rect.y * sy),
+              boxW: rect.w * s,
+              boxH: rect.h * s,
+              x: r(m.x(rect.x)),
+              y: r(m.y(rect.y)),
               startSec: l.startSec,
               endSec: l.startSec + effSpan,
               freezes: [],
@@ -481,7 +496,7 @@ async function renderComposition(
         const asset = await getAsset(cell.mediaId)
         if (!asset?.probe.video) continue
         const v = asset.probe.video
-        const rect = layoutCellRect(l, cell.rect)
+        const rect = layoutCellRect(l, cell.rect, frame)
         if (rect.w <= 0 || rect.h <= 0) continue
         visuals.push({
           kind: 'video',
@@ -494,10 +509,10 @@ async function renderComposition(
             inputDecoder: alphaInputDecoder(v),
             crop: coverCrop(v.displayWidth, v.displayHeight, rect.w / rect.h),
             colorEq: '',
-            boxW: rect.w * sx,
-            boxH: rect.h * sy,
-            x: r(rect.x * sx),
-            y: r(rect.y * sy),
+            boxW: rect.w * s,
+            boxH: rect.h * s,
+            x: r(m.x(rect.x)),
+            y: r(m.y(rect.y)),
             startSec: l.startSec,
             endSec: l.startSec + effSpan,
             freezes: [],
@@ -525,7 +540,7 @@ async function renderComposition(
       // the whole comp frame), matching the preview's CompFill.
       const pre = await prerenderComp(c.comp)
       if (!pre) continue
-      const rect = layoutCellRect(l, { x: 0, y: 0, w: FRAME.width, h: FRAME.height })
+      const rect = layoutCellRect(l, FULL_CELL, frame)
       if (rect.w <= 0 || rect.h <= 0) continue
       const window = Math.max(0, l.endSec - l.startSec)
       const effSpan = Math.min(pre.len, window)
@@ -542,10 +557,10 @@ async function renderComposition(
           inputDecoder: 'libvpx-vp9',
           crop: null,
           colorEq: '',
-          boxW: rect.w * sx,
-          boxH: rect.h * sy,
-          x: r(rect.x * sx),
-          y: r(rect.y * sy),
+          boxW: rect.w * s,
+          boxH: rect.h * s,
+          x: r(m.x(rect.x)),
+          y: r(m.y(rect.y)),
           startSec: l.startSec,
           endSec: l.startSec + effSpan,
           freezes: [],
@@ -567,14 +582,14 @@ async function renderComposition(
       }
     } else if (c.kind === 'text') {
       if (c.text.trim().length === 0) continue
-      const fontSizePx = c.fontSizePx * l.scale * sy
+      const fontSizePx = c.fontSizePx * l.scale * s
       // Decoration scale. The preview scales the WHOLE overlay
       // (`transform: scale(layer.scale)`), so a resized text layer grows its
       // pill padding, stroke and shadow along with the glyphs. Scaling those by
-      // `sy` alone — as this did — left a 1.43x-resized overlay wearing a pill
-      // sized for the unscaled text. `l.scale` belongs in here exactly as it
-      // already does in `fontSizePx` above.
-      const decoScale = decorationScale(l.scale, sy)
+      // the output scale alone — as this once did — left a 1.43x-resized overlay
+      // wearing a pill sized for the unscaled text. `l.scale` belongs in here
+      // exactly as it already does in `fontSizePx` above.
+      const decoScale = decorationScale(l.scale, s)
       // Sparkles are computed from the SAME shared helper the preview uses, at
       // the output-scaled font size — every offset it returns is a multiple of
       // that size, so the layout matches the preview at any preset. Positions
@@ -590,13 +605,13 @@ async function renderComposition(
             durSec: layerDur,
             typewriterSec:
               textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
-          }).map((s) => ({
-            startSec: l.startSec + s.tSec,
-            endSec: Math.min(l.endSec, l.startSec + s.tSec + s.lifeSec),
-            x: r(l.x * sx + s.x),
-            y: r(l.y * sy + s.y),
-            sizePx: s.sizePx,
-            rotDeg: s.rotDeg
+          }).map((sp) => ({
+            startSec: l.startSec + sp.tSec,
+            endSec: Math.min(l.endSec, l.startSec + sp.tSec + sp.lifeSec),
+            x: r(m.x(l.x) + sp.x),
+            y: r(m.y(l.y) + sp.y),
+            sizePx: sp.sizePx,
+            rotDeg: sp.rotDeg
           }))
         : []
       // A gradient (libass can't do it) OR an explicit wrap width (libass can't
@@ -607,13 +622,13 @@ async function renderComposition(
           const image = await renderTextImage(
             {
               text: c.text,
-              xCenter: l.x * sx,
-              yCenter: l.y * sy,
+              xCenter: m.x(l.x),
+              yCenter: m.y(l.y),
               fontFamily: c.fontFamily,
               fontSizePx,
               color: c.color,
               gradient: c.gradient ?? undefined,
-              widthPx: c.widthPx != null ? c.widthPx * l.scale * sx : undefined,
+              widthPx: c.widthPx != null ? c.widthPx * l.scale * s : undefined,
               pill: scaledPill(c.pill, decoScale),
               stroke: scaledStroke(c.stroke, decoScale) ?? null,
               shadow: scaledShadow(c.shadow, decoScale) ?? null
@@ -630,8 +645,10 @@ async function renderComposition(
             await fsp.writeFile(
               join(tmp, sparkleAss),
               buildAss(
-                [{ ...sparkleOnlyOverlay(c, l, sx, sy), sparkles, sparkleColor: sparkleEffect!.color }],
-                target
+                [{ ...sparkleOnlyOverlay(c, l, m), sparkles, sparkleColor: sparkleEffect!.color }],
+                target,
+                null,
+                s
               ),
               'utf8'
             )
@@ -648,8 +665,8 @@ async function renderComposition(
         text: c.text,
         startSec: l.startSec,
         endSec: l.endSec,
-        x: r(l.x * sx),
-        y: r(l.y * sy),
+        x: r(m.x(l.x)),
+        y: r(m.y(l.y)),
         anchor: 'center',
         fontFamily: c.fontFamily,
         fontSizePx,
@@ -667,7 +684,7 @@ async function renderComposition(
         sparkles,
         sparkleColor: sparkleEffect?.color
       }
-      await fsp.writeFile(join(tmp, assName), buildAss([overlay], target), 'utf8')
+      await fsp.writeFile(join(tmp, assName), buildAss([overlay], target, null, s), 'utf8')
       visuals.push({ kind: 'text', assFile: assName })
     }
   }
@@ -706,12 +723,12 @@ async function renderComposition(
     captionsAss = 'captions.ass'
     const scaleStyle = (st: CaptionStyle): CaptionStyle => ({
       ...st,
-      x: st.x * sx,
-      y: st.y * sy,
-      fontSizePx: st.fontSizePx * sy,
-      pill: scaledPill(st.pill, sy),
-      stroke: scaledStroke(st.stroke, sy),
-      shadow: scaledShadow(st.shadow, sy)
+      x: m.x(st.x),
+      y: m.y(st.y),
+      fontSizePx: st.fontSizePx * s,
+      pill: scaledPill(st.pill, s),
+      stroke: scaledStroke(st.stroke, s),
+      shadow: scaledShadow(st.shadow, s)
     })
     // Gradient-styled captions can't burn via libass — rasterise each to a PNG
     // composited ON TOP of the caption track. Track which rendered so the ASS

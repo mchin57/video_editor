@@ -5,8 +5,9 @@
  */
 
 import type { Layer, Project, TextContent } from '@shared/project'
-import { hookCovered } from '@shared/layers'
-import { LOGICAL, intrudesSafeZone, type Rect } from './coords'
+import { hookCovered, type FrameRect } from '@shared/layers'
+import { isNineSixteen, type ExportPreset } from '@shared/formats'
+import { intrudesSafeZone, type Rect } from './coords'
 
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
@@ -27,8 +28,8 @@ export interface ChecklistInput {
   /** Overall timeline duration (max of video + audio). */
   durationSec: number
   keywordBank: string[]
-  /** Whether the export preset is 9:16. */
-  is916: boolean
+  /** The project's output format: its aspect, frame and platform safe zones. */
+  format: ExportPreset
 }
 
 /** Non-empty text layers (the "on-screen text" the checklist scores). */
@@ -38,11 +39,12 @@ function textLayers(project: Project): { layer: Layer; text: TextContent }[] {
     .map((l) => ({ layer: l, text: l.content }))
 }
 
-/** Rough bounding box for a (center-anchored) text layer in logical space. */
-function textBox(layer: Layer, text: TextContent): Rect {
-  const w = Math.min(LOGICAL.width, Math.max(text.fontSizePx * 3, text.text.trim().length * text.fontSizePx * 0.55))
+/** Rough bounding box for a (center-anchored) text layer, FRAME-relative (the
+ *  space safe zones are defined in). */
+function textBox(layer: Layer, text: TextContent, frame: FrameRect): Rect {
+  const w = Math.min(frame.w, Math.max(text.fontSizePx * 3, text.text.trim().length * text.fontSizePx * 0.55))
   const h = text.fontSizePx * 1.3
-  return { x: layer.x - w / 2, y: layer.y - h / 2, w, h }
+  return { x: layer.x - frame.x - w / 2, y: layer.y - frame.y - h / 2, w, h }
 }
 
 const PASS = (id: string, label: string, detail: string): CheckItem => ({ id, label, status: 'pass', detail })
@@ -106,19 +108,23 @@ export function buildChecklist(project: Project, input: ChecklistInput): Checkli
     )
   }
 
-  // 6. Text clear of UI safe zones
-  const intruding = overlays.filter((o) => intrudesSafeZone(textBox(o.layer, o.text)))
+  // 6. Text clear of UI safe zones (only formats that carry platform UI have any)
+  const { format } = input
+  const zones = format.safeZones ?? []
+  const intruding = overlays.filter((o) => intrudesSafeZone(textBox(o.layer, o.text, format.frame), zones))
   items.push(
-    intruding.length === 0
-      ? PASS('safezones', 'Text clear of UI safe zones', 'No text under the caption bar or action rail.')
-      : WARN('safezones', 'Text clear of UI safe zones', `${intruding.length} overlay(s) may sit behind Instagram UI.`)
+    zones.length === 0
+      ? PASS('safezones', 'Text clear of UI safe zones', `No platform UI overlays the ${format.name} frame.`)
+      : intruding.length === 0
+        ? PASS('safezones', 'Text clear of UI safe zones', 'No text under the caption bar or action rail.')
+        : WARN('safezones', 'Text clear of UI safe zones', `${intruding.length} overlay(s) may sit behind Instagram UI.`)
   )
 
   // 7. Vertical 9:16
   items.push(
-    input.is916
-      ? PASS('aspect', 'Vertical 9:16', '1080×1920 full-screen vertical.')
-      : WARN('aspect', 'Vertical 9:16', 'Not 9:16 — Reels/Stories favor full vertical.')
+    isNineSixteen(format)
+      ? PASS('aspect', 'Vertical 9:16', `${format.width}×${format.height} full-screen vertical.`)
+      : WARN('aspect', 'Vertical 9:16', `${format.name} — Reels/Stories favor full vertical 9:16.`)
   )
 
   const credit = items.reduce((s, it) => s + (it.status === 'pass' ? 1 : it.status === 'warn' ? 0.5 : 0), 0)

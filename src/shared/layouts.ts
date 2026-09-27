@@ -2,7 +2,9 @@
  * Multi-clip layouts (split screen / panels): the built-in cell arrangements
  * and the pure geometry shared by the preview and the exporter.
  *
- * A layout preset is N cell rects in the LOGICAL 1080×1920 space. A cell shows
+ * A layout preset is N cell rects authored in the LOGICAL 1080×1920 space and
+ * stretched onto whatever output frame the project uses (`layoutCellRect`), so
+ * every arrangement fills every aspect ratio. A cell shows
  * its clip aspect-FILL (center cover-crop): the preview uses
  * `object-fit: cover`, the export crops the source with `coverCrop` — the two
  * must stay in agreement, so both resolve their geometry here. The layout
@@ -10,7 +12,7 @@
  * (identity at the default center/scale-1 transform).
  */
 
-import { FRAME } from './layers'
+import { FRAME, FULL_FRAME, type FrameRect } from './frame'
 import type { CellRect, Layer, LayoutCell, LayoutContent } from './project'
 
 export interface LayoutPreset {
@@ -94,22 +96,33 @@ export function layoutPreset(id: string): LayoutPreset {
 }
 
 /**
- * A cell's on-screen rect after the layout layer's move/zoom: the stored rect
- * scaled about the FRAME center by `layer.scale`, then translated so the frame
- * center lands on the layer's (x, y). Identity for the default transform.
+ * A cell's on-screen rect (canonical logical px) after the layout layer's
+ * move/zoom. Cell rects are AUTHORED in the 1080×1920 space but mean "this
+ * fraction of the output frame": the rect is first mapped onto `frame` (so a
+ * layout always fills the project's aspect — Split L|R is two 960×1080 halves
+ * in 16:9), then scaled about the frame center by `layer.scale` and translated
+ * so that center lands on the layer's (x, y). Identity for the default
+ * transform in the 9:16 frame. A compound clip's full-frame box resolves here
+ * too (`FULL_CELL`).
  */
 export function layoutCellRect(
   layer: Pick<Layer, 'x' | 'y' | 'scale'>,
-  rect: CellRect
+  rect: CellRect,
+  frame: FrameRect = FULL_FRAME
 ): CellRect {
   const s = layer.scale
+  const fx = frame.w / W
+  const fy = frame.h / H
   return {
-    x: (rect.x - W / 2) * s + layer.x,
-    y: (rect.y - H / 2) * s + layer.y,
-    w: rect.w * s,
-    h: rect.h * s
+    x: (frame.x + rect.x * fx - (frame.x + frame.w / 2)) * s + layer.x,
+    y: (frame.y + rect.y * fy - (frame.y + frame.h / 2)) * s + layer.y,
+    w: rect.w * fx * s,
+    h: rect.h * fy * s
   }
 }
+
+/** The whole-frame cell: a compound clip's box / a layout's wrapper. */
+export const FULL_CELL: CellRect = { x: 0, y: 0, w: W, h: H }
 
 /**
  * Center cover-crop of a `srcW`×`srcH` source to `aspect` (w/h), in source

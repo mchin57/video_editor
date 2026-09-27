@@ -1,37 +1,57 @@
 import { useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { CropRect } from '@shared/project'
+import type { CropRect, Layer, VideoContent } from '@shared/project'
+import type { MediaAsset, VideoStreamInfo } from '@shared/media'
 import { useLibrary } from '@/hooks/useMedia'
-import { activeComp, useProject } from '@/state/projectStore'
+import { activeComp, projectFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { clampCrop, defaultCrop, isFullFrame, resizeCrop } from '@/lib/crop'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { thumbUrl } from '@/ipc/client'
 
 /**
- * Modal to set a video layer's 9:16 crop. Shows the source frame (thumbnail) at
- * its native aspect with a draggable / corner-resizable crop box locked to 9:16.
+ * Modal to crop a video layer to the PROJECT'S aspect ratio (9:16 for a Reel,
+ * 16:9 for Landscape, …). Shows the source frame (thumbnail) at its native
+ * aspect with a draggable / corner-resizable crop box locked to that ratio.
  * Edits are local until Save.
  */
 export function CropEditor(): JSX.Element | null {
   const cropEditing = useUi((s) => s.cropEditing)
-  const setCropEditing = useUi((s) => s.setCropEditing)
   const selectedLayerId = useUi((s) => s.selectedLayerId)
   const layer = useProject((s) => activeComp(s)?.layers.find((l) => l.id === selectedLayerId) ?? null)
-  const updateLayerContent = useProject((s) => s.updateLayerContent)
   const content = layer && layer.content.kind === 'video' ? layer.content : null
   const { data: assets = [] } = useLibrary()
   const asset = content ? assets.find((a) => a.id === content.mediaId) : undefined
   const v = asset?.probe.video
 
-  const srcW = v?.displayWidth ?? 1080
-  const srcH = v?.displayHeight ?? 1920
-  const [box, setBox] = useState<CropRect>(() => content?.crop ?? defaultCrop(srcW, srcH))
+  if (!cropEditing || !layer || !content || !asset || !v) return null
+  // Keyed per layer so the box is seeded fresh (from the layer's crop, or a
+  // centred crop at the project aspect) every time the editor opens.
+  return <CropModal key={layer.id} layer={layer} content={content} asset={asset} v={v} />
+}
+
+function CropModal({
+  layer,
+  content,
+  asset,
+  v
+}: {
+  layer: Layer
+  content: VideoContent
+  asset: MediaAsset
+  v: VideoStreamInfo
+}): JSX.Element {
+  const setCropEditing = useUi((s) => s.setCropEditing)
+  const setVideoCrop = useProject((s) => s.setVideoCrop)
+  const format = useProject(projectFormat)
+  const aspect = format.width / format.height
+
+  const srcW = v.displayWidth
+  const srcH = v.displayHeight
+  const [box, setBox] = useState<CropRect>(() => content.crop ?? defaultCrop(srcW, srcH, aspect))
   const [rendered, setRendered] = useState({ w: 0, h: 0 })
   const frameRef = useRef<HTMLDivElement>(null)
 
   const scale = useMemo(() => (rendered.w > 0 ? rendered.w / srcW : 0), [rendered.w, srcW])
-
-  if (!cropEditing || !layer || !content || !v) return null
 
   const move = (e: ReactPointerEvent): void => {
     e.preventDefault()
@@ -52,19 +72,19 @@ export function CropEditor(): JSX.Element | null {
       const rect = frameRef.current?.getBoundingClientRect()
       if (!rect) return
       const newW = (ev.clientX - rect.left) / scale - box.x
-      setBox(resizeCrop(box, newW, srcW, srcH))
+      setBox(resizeCrop(box, newW, srcW, srcH, aspect))
     })
   }
 
   const save = (): void => {
-    updateLayerContent(layer.id, { crop: isFullFrame(box, srcW, srcH) ? null : box })
+    setVideoCrop(layer.id, isFullFrame(box, srcW, srcH) ? null : box, srcW / srcH)
     setCropEditing(false)
   }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-8">
       <div className="text-sm text-zinc-300">
-        Crop to 9:16 — drag to move, drag the corner to resize
+        Crop to {format.ratioLabel} — drag to move, drag the corner to resize
       </div>
 
       <div
@@ -73,7 +93,7 @@ export function CropEditor(): JSX.Element | null {
         style={{ width: rendered.w || 'auto', height: rendered.h || 'auto' }}
       >
         <img
-          src={thumbUrl(asset!.id)}
+          src={thumbUrl(asset.id)}
           alt=""
           onLoad={(e) => setRendered({ w: e.currentTarget.clientWidth, h: e.currentTarget.clientHeight })}
           className="block max-h-[70vh] max-w-[80vw] select-none rounded"
@@ -110,14 +130,14 @@ export function CropEditor(): JSX.Element | null {
 
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setBox(defaultCrop(srcW, srcH))}
+          onClick={() => setBox(defaultCrop(srcW, srcH, aspect))}
           className="rounded bg-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
         >
           Reset
         </button>
         <button
           onClick={() => {
-            updateLayerContent(layer.id, { crop: null })
+            setVideoCrop(layer.id, null, srcW / srcH)
             setCropEditing(false)
           }}
           className="rounded bg-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
