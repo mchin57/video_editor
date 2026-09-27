@@ -7,19 +7,23 @@
  * .bin model alongside).
  *
  * The whole ORIGINAL is transcribed, never a per-clip slice; clip trims are
- * applied afterwards in the renderer (renderer/lib/captions.ts).
+ * applied afterwards in the renderer (renderer/lib/captions.ts). One
+ * silencedetect pass over the wav serves two fixes: decoding starts just before
+ * the first speech (whisper drops a file's opening sentence after leading
+ * junk), and each word ends where its sound stops.
  */
 
 import { spawn } from 'node:child_process'
 import { existsSync, promises as fsp, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import type { Transcript } from '@shared/transcript'
+import { isCurrentTranscript, TRANSCRIPT_VERSION, type Transcript } from '@shared/transcript'
 import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { getAsset } from './mediaStore'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
-import { buildWhisperArgs, dtwPreset } from './whisperArgs'
+import { buildWhisperArgs, decodeStartSec, dtwPreset } from './whisperArgs'
+import { detectSilence } from './silence'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 
 const transcriptPath = (id: string): string => join(getSubdir('media'), id, 'transcript.json')
@@ -80,28 +84,29 @@ async function runTranscription(
   cli: string,
   model: string,
   wav: string,
-  outPrefix: string
+  outPrefix: string,
+  offsetSec: number
 ): Promise<void> {
   const preset = dtwPreset(model)
   if (preset) {
     try {
-      await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, preset))
+      await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, preset, offsetSec))
       return
     } catch {
       // An older binary without -dtw/-nfa still transcribes; the parser will
       // fall back to segment offsets and stamp the transcript accordingly.
     }
   }
-  await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, null))
+  await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, null, offsetSec))
 }
 
 export async function getTranscript(mediaId: string): Promise<Transcript | null> {
   try {
     const cached = JSON.parse(await fsp.readFile(transcriptPath(mediaId), 'utf8')) as Transcript
-    // Transcripts cached before word-accurate timing existed carry smeared word
-    // times that drop words at the head of a trimmed clip. Treat them as stale
-    // so the next caption run redoes them instead of serving them forever.
-    return cached.timing ? cached : null
+    // A transcript from an older pipeline can be missing words or mistime them
+    // (see TRANSCRIPT_VERSION). Treat it as stale so the next caption run redoes
+    // it instead of serving it forever.
+    return isCurrentTranscript(cached) ? cached : null
   } catch {
     return null
   }
@@ -129,19 +134,28 @@ export async function transcribeMedia(mediaId: string): Promise<Transcript> {
       '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
       wav
     ], 0)
+    setProgress(job.id, 0.25)
+
+    // Skip whatever precedes the first speech: whisper drops the opening
+    // sentence after a leading click or a long lead-in. A failed detection just
+    // decodes the whole file, as before.
+    const silences = await detectSilence(wav, asset.probe.durationSec).catch(() => [])
+    const startSec = decodeStartSec(silences, asset.probe.durationSec)
     setProgress(job.id, 0.3)
 
-    await runTranscription(whisper.cli, whisper.model, wav, rawPrefix)
+    await runTranscription(whisper.cli, whisper.model, wav, rawPrefix, startSec)
     setProgress(job.id, 0.9)
 
     const json = JSON.parse(await fsp.readFile(`${rawPrefix}.json`, 'utf8')) as WhisperJson
-    const { words, timing } = parseWhisperTranscript(json)
+    const { words, timing } = parseWhisperTranscript(json, silences)
     const transcript: Transcript = {
       mediaId,
       words,
       model: basename(whisper.model),
       createdAt: new Date().toISOString(),
-      timing
+      timing,
+      version: TRANSCRIPT_VERSION,
+      decodeStartSec: startSec
     }
     await fsp.writeFile(transcriptPath(mediaId), JSON.stringify(transcript, null, 2))
 

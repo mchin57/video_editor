@@ -449,18 +449,41 @@ looking for an `-ss` in the transcription path.
   large.v2, large.v3, large.v3.turbo.
 - **`t_dtw` is `-1` on whisper's own control tokens** (`[_BEG_]`, `[_TT_nnn]`);
   read past them to the first real text token.
-- **Word windows still tile even with DTW** (a word ends where the next begins),
-  so they are capped (`MAX_WORD_SEC`) — uncapped, the word before a pause spans
-  a cut made during it and captions itself on BOTH sides. Real speech measured
-  p50 0.24s / p90 0.86s / max 0.94s, so the cap never truncates a real word.
+- **DTW times a word's START only.** Its end is inferred from the next word's
+  start, so the word before a pause is stretched across the pause. The cap
+  (`MAX_WORD_SEC`, 1.2s) stops it spanning a long pause, but even capped, the
+  stretch moves the word's midpoint — which decides which side of a cut owns it
+  — past a cut the word really sits before. Measured: "months." spoken
+  10.49–10.59s, stretched to 11.69s, dropped from a clip ending at 11.03s. So
+  each word's end is pulled back to the start of the next silence silencedetect
+  reports (`endAtSilence`, never later). Across a real 8-clip project the
+  median caption on-screen time moved only 0.88s → 0.84s.
+- **whisper DROPS a file's opening sentence when junk precedes the speech.**
+  Verified on a teleprompter recording: a 0.1s click at 0s, 5s of room tone,
+  then "Ramp up gradually." — gone under every flag combination, including the
+  pre-DTW args, and the DTW alignment then stretched the next sentence ("We
+  all know this") back over the missing one's audio, 1.5s early. Muting only
+  the click brought it back; separately, a clean 12s lead dropped it where 8s
+  kept it. Mid-file gaps are harmless — the same 5s gap after 12s of prior
+  speech kept the sentence — so only the head is skipped: `-ot` starts
+  decoding `LEAD_IN_SEC` (0.5s) before the first sound run of at least
+  `MIN_SOUND_SEC` (0.15s), found with the same silencedetect pass.
+- **`-ot` keeps every reported time in whole-file time** — entry offsets AND
+  `t_dtw` — so nothing downstream shifts (verified: with `-ot 3733` and
+  `-ot 4550`, identical DTW times for every word).
+- 20s of DIGITAL silence mid-file made whisper hallucinate a sentence that was
+  never spoken. Real recordings carry room tone and this has not been seen in
+  one; whisper's own `--vad` (needs a silero model we do not ship) is the
+  general answer if it ever is.
 - **Bracketed annotations leak through `-ml 1`.** `(birds chirping)` arrives as
   two entries, `(birds` and `chirping)`, so a whole-string noise regex matches
   neither. Real transcripts in the library carry these as caption words. `-sns`
   (`--suppress-nst`) exists and is untried. STILL OPEN.
 - Transcripts are cached at `media/<id>/transcript.json` with no re-run flag.
-  The `timing` field doubles as the cache version: a transcript missing it is
-  treated as stale and re-transcribed. Change the whisper flags and you must
-  bump that, or every existing transcript keeps its old timings forever.
+  `TRANSCRIPT_VERSION` (`shared/transcript.ts`) is the cache version: any other
+  version is treated as stale and re-transcribed. Change the whisper flags or
+  the parse and you must bump it, or every existing transcript keeps its old
+  words forever.
 
 ## Known constraints (product decisions, not bugs)
 

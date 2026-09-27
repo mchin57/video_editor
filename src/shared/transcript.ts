@@ -11,6 +11,16 @@ import type { CaptionWord } from './project'
  */
 export type TimingSource = 'dtw' | 'segment'
 
+/**
+ * Bump whenever a change to the whisper invocation or the parse would change
+ * what `words` holds for the same media. Cached transcripts from any other
+ * version are re-transcribed on next use — there is no other way to redo one.
+ *  1 — DTW word timings (no `version` field was written).
+ *  2 — decoding starts just before the first sustained sound, so the opening
+ *      sentence is no longer dropped after a click or a long lead-in.
+ */
+export const TRANSCRIPT_VERSION = 2
+
 /** A media file's transcription, cached as media/<id>/transcript.json. */
 export interface Transcript {
   mediaId: string
@@ -19,11 +29,15 @@ export interface Transcript {
   /** Model used, for display/debugging. */
   model: string
   createdAt: string
-  /**
-   * Which timing source produced `words`. ABSENT on transcripts cached before
-   * word-accurate timing existed — those hold the smeared times that dropped
-   * words at the head of a trimmed clip, so `getTranscript` treats a missing
-   * value as stale and re-transcribes rather than serving them forever.
-   */
+  /** Which timing source produced `words`. */
   timing?: TimingSource
+  /** `TRANSCRIPT_VERSION` at the time of writing; absent before version 2. */
+  version?: number
+  /** Source second whisper started decoding from (0 = the whole file). */
+  decodeStartSec?: number
+}
+
+/** Whether a cached transcript was made by the current pipeline. */
+export function isCurrentTranscript(t: Transcript): boolean {
+  return t.version === TRANSCRIPT_VERSION
 }
