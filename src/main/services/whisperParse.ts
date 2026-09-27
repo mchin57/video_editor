@@ -36,6 +36,12 @@ export interface WhisperJson {
   transcription?: WhisperEntry[]
 }
 
+/** A silent interval (source seconds), as silencedetect reports it. */
+export interface Silence {
+  start: number
+  end: number
+}
+
 export interface ParsedTranscript {
   words: CaptionWord[]
   timing: TimingSource
@@ -76,6 +82,26 @@ function dtwStart(entry: WhisperEntry): number | null {
     if (typeof token.t_dtw === 'number' && token.t_dtw >= 0) return token.t_dtw / 100
   }
   return null
+}
+
+/**
+ * End each word where its sound stops. DTW gives a word's START only; its end
+ * is inferred from the next word's start, so the word before a pause is
+ * stretched across the pause. That stretch moves the word's midpoint — which
+ * decides which side of a cut owns it (renderer/lib/captions.ts) — past a cut
+ * the word really sits before, and the clip loses its last word (measured:
+ * "months." spoken 10.49–10.59s, stretched to 11.69s, dropped from a clip
+ * ending at 11.03s). Only ever pulls an end EARLIER, never later.
+ *
+ * `silences` is ffmpeg silencedetect output in source seconds.
+ */
+function endAtSilence(words: CaptionWord[], silences: Silence[]): CaptionWord[] {
+  if (silences.length === 0) return words
+  const quietFrom = silences.map((s) => s.start).sort((a, b) => a - b)
+  return words.map((w) => {
+    const stop = quietFrom.find((t) => t > w.startSec)
+    return stop !== undefined && stop < w.endSec ? { ...w, endSec: stop } : w
+  })
 }
 
 /** Clamp every word window into [MIN_WORD_SEC, MAX_WORD_SEC]. */
@@ -146,9 +172,14 @@ export function parseWhisperJson(json: WhisperJson): CaptionWord[] {
   return words
 }
 
-/** Parse a transcript, preferring DTW times and reporting which source won. */
-export function parseWhisperTranscript(json: WhisperJson): ParsedTranscript {
+/**
+ * Parse a transcript, preferring DTW times and reporting which source won.
+ * `silences` (optional) trims each DTW word's end to where its sound stops. The
+ * segment fallback ignores them: its starts are smeared, so there is no true
+ * start to measure an end from.
+ */
+export function parseWhisperTranscript(json: WhisperJson, silences: Silence[] = []): ParsedTranscript {
   const dtw = parseDtwWords(json.transcription ?? [])
-  if (dtw && dtw.length > 0) return { words: capWords(dtw), timing: 'dtw' }
+  if (dtw && dtw.length > 0) return { words: capWords(endAtSilence(dtw, silences)), timing: 'dtw' }
   return { words: capWords(parseWhisperJson(json)), timing: 'segment' }
 }

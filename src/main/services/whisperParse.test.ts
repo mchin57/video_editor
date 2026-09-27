@@ -173,4 +173,38 @@ describe('parseWhisperTranscript', () => {
   it('handles missing transcription', () => {
     expect(parseWhisperTranscript({})).toEqual({ words: [], timing: 'segment' })
   })
+
+  // --- word ends from silence: DTW times a word's start only ---
+
+  it('ends a word where its sound stops, not at the next word', () => {
+    // Real clip: "months." is spoken 10.49-10.59s and the next word is 16.35s
+    // away. Stretched to its cap, its midpoint crossed a cut at 11.03s and the
+    // clip lost its last word.
+    const silences = [{ start: 10.590375, end: 16.1025 }]
+    const { words } = parseWhisperTranscript(
+      { transcription: [dtw(' of', 1021, 10200, 10500), dtw(' months.', 1049, 10500, 11700), dtw(' Not', 1635, 16340, 16660)] },
+      silences
+    )
+    expect(words[1].text).toBe('months.')
+    expect(words[1].endSec).toBeCloseTo(10.590375, 6)
+    // A word running straight into the next keeps the next word's start.
+    expect(words[0].endSec).toBeCloseTo(10.49, 6)
+  })
+
+  it('never moves a word end later', () => {
+    const { words } = parseWhisperTranscript(
+      { transcription: [dtw(' a', 100, 1000, 1200), dtw(' b', 130, 1200, 1400)] },
+      [{ start: 5, end: 6 }]
+    )
+    expect(words[0].endSec).toBeCloseTo(1.3, 6)
+  })
+
+  it('ignores silences on the segment fallback, whose starts are smeared', () => {
+    const { words, timing } = parseWhisperTranscript(
+      { transcription: [{ offsets: { from: 0, to: 900 }, text: ' Hello' }] },
+      [{ start: 0.1, end: 4 }]
+    )
+    expect(timing).toBe('segment')
+    expect(words[0].endSec).toBeCloseTo(0.9, 6)
+  })
 })
