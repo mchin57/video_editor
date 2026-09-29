@@ -32,7 +32,9 @@ import {
   layerTransformAt,
   makeVideoLayer,
   playedVideoDuration,
+  rebaseVideoContent,
   rescaleForAspect,
+  windowCoversVideo,
   upsertKeyframe,
   videoSourceTime
 } from '@shared/layers'
@@ -234,6 +236,24 @@ interface ProjectState {
   splitItemsAt: (refs: TimelineItemRef[], atSec: number, srcDur: links.SourceDuration) => void
   /** Pull a video layer's audio onto the audio track and mute the layer. */
   extractLayerAudio: (id: string) => void
+  /**
+   * Swap a finished background-removal matte in for the video layer it was made
+   * from (`rebaseVideoContent`): same placement and timing, one undo step. The
+   * job ran for minutes, so the layer is re-found by `path` + id and only
+   * swapped while it still plays footage the matte covers (same source, trim
+   * inside the matted window). Returns false — and changes nothing — otherwise.
+   */
+  applyBackgroundRemoval: (
+    path: CompPath,
+    layerId: string,
+    matte: {
+      sourceMediaId: string
+      window: { startSec: number; durationSec: number }
+      mediaId: string
+      pixelScale: { x: number; y: number }
+      size: { w: number; h: number }
+    }
+  ) => boolean
   /** Set a video layer's constant playback speed, recomputing its timeline end
    *  from the shared duration invariant (source span / speed + holds). */
   setVideoSpeed: (id: string, speed: number) => void
@@ -738,6 +758,27 @@ export const useProject = create<ProjectState>((set, get) => {
 
     clearLayerKeyframes: (id) =>
       commitComp((p) => mapLayer(p, id, (l) => ({ ...l, keyframes: undefined }))),
+
+    applyBackgroundRemoval: (path, layerId, matte) => {
+      const { window } = matte
+      let applied = false
+      commit((p) => {
+        const c = resolveCompAtPath(p, path)?.layers.find((l) => l.id === layerId)?.content
+        if (c?.kind !== 'video' || !windowCoversVideo(c, matte.sourceMediaId, window)) return p
+        applied = true
+        return updateCompAtPath(p, path, (comp) =>
+          mapLayer(comp, layerId, (l) =>
+            l.content.kind === 'video'
+              ? {
+                  ...l,
+                  content: rebaseVideoContent(l.content, matte.mediaId, window.startSec, matte.pixelScale, matte.size)
+                }
+              : l
+          )
+        )
+      })
+      return applied
+    },
 
     extractLayerAudio: (id) =>
       commitComp((p) => {

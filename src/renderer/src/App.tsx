@@ -9,6 +9,7 @@ import { FileMenu } from '@/components/FileMenu'
 import { ViewMenu } from '@/components/ViewMenu'
 import { FormatMenu } from '@/components/FormatMenu'
 import { ProjectSettingsMenu } from '@/components/ProjectSettingsMenu'
+import { JobsIndicator } from '@/components/JobsIndicator'
 import { CaptionAudioButton } from '@/components/CaptionAudioButton'
 import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
@@ -167,6 +168,7 @@ export default function App(): JSX.Element {
         <ViewMenu />
         <FormatMenu />
         <ProjectSettingsMenu />
+        <JobsIndicator />
         <div className="flex-1" />
         <button
           onClick={() => importMedia.mutate(undefined)}

@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react'
 import { presetFor } from '@shared/formats'
 import { useProject } from '@/state/projectStore'
-import { useEditor } from '@/state/store'
+import { latestJob, useEditor } from '@/state/store'
 import { exportProject, revealFile } from '@/ipc/client'
 
 /**
@@ -12,7 +12,7 @@ export function ExportButton(): JSX.Element {
   const project = useProject((s) => s.project)
   const clipCount = project?.layers.filter((l) => l.content.kind === 'video').length ?? 0
   const preset = project?.preset ?? 'reel'
-  const exportJob = useEditor((s) => s.exportJob)
+  const exportJob = useEditor((s) => latestJob(s.jobs, 'export'))
   const [busy, setBusy] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

@@ -22,13 +22,16 @@ import {
   moveLayer,
   opacityKeyframePoints,
   playedVideoDuration,
+  rebaseVideoContent,
   rescaleForAspect,
   resizeBox,
   stretchedBox,
   upsertKeyframe,
   videoSourceTime,
+  videoSourceWindow,
   videoTimelineTime,
-  visualDuration
+  visualDuration,
+  windowCoversVideo
 } from './layers'
 import type { VideoContent } from './project'
 
@@ -486,3 +489,89 @@ describe('output frame', () => {
   })
 })
 
+
+describe('videoSourceWindow', () => {
+  it('is the trim — all the footage a layer can show, whatever its holds or speed', () => {
+    const l = makeVideoLayer('a', 'm', 20, 8)
+    const c = { ...(l.content as VideoContent), inSec: 12.5, outSec: 20.5, freezes: [{ atSec: 14, holdSec: 3 }], speed: 0.5 }
+    expect(videoSourceWindow(c)).toEqual({ startSec: 12.5, durationSec: 8 })
+    expect(videoSourceWindow({ inSec: 4, outSec: 3 })).toEqual({ startSec: 4, durationSec: 0 })
+  })
+})
+
+describe('rebaseVideoContent', () => {
+  // A cut piece of a long source: trimmed to 12.5–20.5, with a freeze hold and
+  // a speed ramp (a keyframe BEFORE the in-point still shapes the speed there).
+  const layer = (): Layer => {
+    const l = makeVideoLayer('a', 'src', 30, 8)
+    const c: VideoContent = {
+      ...(l.content as VideoContent),
+      inSec: 12.5,
+      outSec: 20.5,
+      freezes: [{ atSec: 15, holdSec: 1.5 }],
+      speedRamp: [
+        { atSec: 10, speed: 2 },
+        { atSec: 17, speed: 0.5 },
+        { atSec: 20, speed: 1 }
+      ],
+      crop: { x: 40, y: 40, w: 1000, h: 1500 },
+      stabilize: undefined
+    }
+    return { ...l, content: c, endSec: l.startSec + playedVideoDuration(c) }
+  }
+
+  it('shows the same footage at every timeline instant — minus the window start', () => {
+    const l = layer()
+    const c = l.content as VideoContent
+    const r = rebaseVideoContent(c, 'matte', 12.5, { x: 1, y: 1 }, { w: 1080, h: 1920 })
+    expect(r.mediaId).toBe('matte')
+    expect(r.inSec).toBe(0)
+    expect(r.outSec).toBe(8)
+    expect(playedVideoDuration(r)).toBeCloseTo(playedVideoDuration(c), 9) // endSec needs no change
+    for (let t = l.startSec - 1; t <= l.endSec + 1; t += 0.137) {
+      expect(videoSourceTime(r, l, t)).toBeCloseTo(videoSourceTime(c, l, t) - 12.5, 9)
+      expect(isFrozenAt(r, l, t)).toBe(isFrozenAt(c, l, t))
+    }
+  })
+
+  it('rescales a source-pixel crop to the matte size and clamps it inside', () => {
+    const c = layer().content as VideoContent
+    // A 4K source mattes at half size (the matte caps its long edge at 1920).
+    const half = rebaseVideoContent({ ...c, crop: { x: 1001, y: 40, w: 1215, h: 2160 } }, 'm2', 12.5, { x: 0.5, y: 0.5 }, { w: 1920, h: 1080 })
+    expect(half.crop).toEqual({ x: 501, y: 0, w: 608, h: 1080 }) // rounded, then clamped to fit
+    const same = rebaseVideoContent(c, 'm2', 12.5, { x: 1, y: 1 }, { w: 1080, h: 1920 })
+    expect(same.crop).toEqual(c.crop)
+    const none = rebaseVideoContent({ ...c, crop: null }, 'm2', 12.5, { x: 1, y: 1 }, { w: 1080, h: 1920 })
+    expect(none.crop).toBeNull()
+  })
+
+  it('forces stabilization off (the export stabilizes through an opaque intermediate)', () => {
+    const c = layer().content as VideoContent
+    expect(rebaseVideoContent({ ...c, stabilize: undefined }, 'm2', 12.5, { x: 1, y: 1 }, { w: 1, h: 1 }).stabilize).toBeNull()
+    expect(
+      rebaseVideoContent({ ...c, stabilize: { smoothing: 10, shakiness: 5 } as never }, 'm2', 12.5, { x: 1, y: 1 }, { w: 1, h: 1 })
+        .stabilize
+    ).toBeNull()
+  })
+
+  it('keeps everything that is not source-anchored', () => {
+    const c = { ...(layer().content as VideoContent), mute: true, gainDb: -6, color: { brightness: 0.1, contrast: 1.2, saturation: 0.9 } }
+    const r = rebaseVideoContent(c, 'm2', 12.5, { x: 1, y: 1 }, { w: 1080, h: 1920 })
+    expect(r.mute).toBe(true)
+    expect(r.gainDb).toBe(-6)
+    expect(r.color).toEqual(c.color)
+  })
+})
+
+describe('windowCoversVideo', () => {
+  const win = { startSec: 12.5, durationSec: 8 }
+  it('covers the trim it was made from, and any trim or split piece inside it', () => {
+    expect(windowCoversVideo({ mediaId: 'src', inSec: 12.5, outSec: 20.5 }, 'src', win)).toBe(true)
+    expect(windowCoversVideo({ mediaId: 'src', inSec: 14, outSec: 16 }, 'src', win)).toBe(true)
+  })
+  it('does not cover a trim extended past the window, or a clip re-pointed meanwhile', () => {
+    expect(windowCoversVideo({ mediaId: 'src', inSec: 12, outSec: 20.5 }, 'src', win)).toBe(false)
+    expect(windowCoversVideo({ mediaId: 'src', inSec: 12.5, outSec: 21 }, 'src', win)).toBe(false)
+    expect(windowCoversVideo({ mediaId: 'other', inSec: 12.5, outSec: 20.5 }, 'src', win)).toBe(false)
+  })
+})

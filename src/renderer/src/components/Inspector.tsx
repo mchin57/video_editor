@@ -26,10 +26,13 @@ import {
   kfOpacity,
   layerFitScale,
   videoSourceTime,
+  videoSourceWindow,
   videoTimelineTime,
   type FrameRect
 } from '@shared/layers'
+import type { MediaAsset } from '@shared/media'
 import { assetAspect } from '@shared/media'
+import { isJobActive } from '@shared/jobs'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import {
   DEFAULT_IN_SEC,
@@ -43,7 +46,10 @@ import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, DEFAULT_ENSEMBLE, ECHO_RANG
 import type { SparkleEffect } from '@shared/sparkle'
 import { DEFAULT_SPARKLE, SPARKLE_DENSITY_RANGE } from '@shared/sparkle'
 import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
-import { detectSilence, onJobProgress, removeBackground, segmentAvailable } from '@/ipc/client'
+import { detectSilence, segmentAvailable } from '@/ipc/client'
+import { removeLayerBackground } from '@/lib/backgroundRemoval'
+import { latestJob, useEditor } from '@/state/store'
+import { CancelJobButton, jobProgressText, useNow } from './JobsIndicator'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
 import { activeComp, projectFormat, useProject } from '@/state/projectStore'
@@ -176,63 +182,93 @@ export function StabilizeSliders({
 }
 
 /**
- * "Remove background" for a video layer: runs the segmentation model over the
- * source clip (a background job) and adds the resulting transparent clip to the
- * project library, ready to drop on a lane above a new background. Export-time /
- * job effect — like stabilize, the preview only updates once the new clip exists.
- * Renders nothing when the model isn't installed, or for an already-alpha clip.
+ * "Remove background" for a video layer: mattes ONLY the footage this layer
+ * plays (its source window) as a background job, then swaps the transparent
+ * result in place — same lane, position and timing; Undo restores the original
+ * (`lib/backgroundRemoval.ts`). Job state comes from the shared jobs map, so
+ * the progress / ETA / Cancel row survives selecting another layer and coming
+ * back, and the header's job indicator shows the same job meanwhile.
+ * Renders nothing when the model isn't installed.
  */
-function RemoveBackground({ mediaId }: { mediaId: string }): JSX.Element | null {
-  const addMedia = useProject((s) => s.addMedia)
+function RemoveBackground({
+  layerId,
+  content,
+  asset
+}: {
+  layerId: string
+  content: VideoContent
+  asset: MediaAsset | undefined
+}): JSX.Element | null {
   const [available, setAvailable] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [pct, setPct] = useState(0)
-  const [err, setErr] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
+  const [note, setNote] = useState<{ text: string; error?: boolean } | null>(null)
+  const job = useEditor((s) => latestJob(s.jobs, 'matte', layerId))
+  const running = !!job && isJobActive(job.status)
+  const now = useNow(running)
 
   useEffect(() => {
     void segmentAvailable().then(setAvailable)
   }, [])
 
-  useEffect(() => {
-    if (!busy) return undefined
-    return onJobProgress((ev) => {
-      if (ev.type === 'matte' && ev.subjectId === mediaId && ev.status === 'running') {
-        setPct(Math.round(ev.progress * 100))
-      }
-    })
-  }, [busy, mediaId])
-
   if (!available) return null
 
+  if (asset?.probe.video?.hasAlpha) {
+    return (
+      <CollapsibleSection id="removebg" title="Background">
+        <p className="text-[10px] leading-snug text-zinc-500">
+          Background removed — this clip is transparent, so whatever sits on the lanes below shows through (a
+          color, an image, another clip).
+        </p>
+      </CollapsibleSection>
+    )
+  }
+
+  const { startSec, durationSec } = videoSourceWindow(content)
   const run = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    setErr(null)
-    setPct(0)
+    if (running || starting || !asset) return
+    setStarting(true)
+    setNote(null)
     try {
-      const asset = await removeBackground(mediaId)
-      addMedia([asset.id]) // surface the new "(no bg)" clip in the library
+      const outcome = await removeLayerBackground(layerId, asset)
+      if (outcome === 'canceled') setNote({ text: 'Canceled — the clip is unchanged.' })
+      if (outcome === 'kept-in-library') {
+        setNote({
+          text: 'This clip changed while the background was being removed, so the transparent copy was added to your library instead.'
+        })
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setNote({ text: e instanceof Error ? e.message : String(e), error: true })
     } finally {
-      setBusy(false)
+      setStarting(false)
     }
   }
+  const failed = !running && !note && job?.status === 'error' ? job.error : undefined
 
   return (
     <CollapsibleSection id="removebg" title="Background">
       <button
         onClick={() => void run()}
-        disabled={busy}
-        title="Detect the subject and save a background-free copy of this clip to the library"
+        disabled={running || starting || !asset || durationSec <= 0}
+        title="Detect the subject and replace this clip with a background-free version of it"
         className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
       >
-        {busy ? `Removing background… ${pct}%` : '✂ Remove background'}
+        {running ? `Removing background… ${Math.round(job.progress * 100)}%` : starting ? 'Starting…' : '✂ Remove background'}
       </button>
-      {err && <p className="mt-1 text-[10px] leading-snug text-rose-300">{err}</p>}
+      {running && (
+        <div className="mt-1.5 flex items-center gap-2" data-testid="matte-progress">
+          <div className="h-1 flex-1 overflow-hidden rounded bg-white/10">
+            <div className="h-full bg-sky-400" style={{ width: `${Math.round(job.progress * 100)}%` }} />
+          </div>
+          <span className="shrink-0 text-[10px] text-zinc-400">{jobProgressText(job, now)}</span>
+          <CancelJobButton job={job} />
+        </div>
+      )}
+      {note && <p className={`mt-1 text-[10px] leading-snug ${note.error ? 'text-rose-300' : 'text-zinc-400'}`}>{note.text}</p>}
+      {failed && <p className="mt-1 text-[10px] leading-snug text-rose-300">{failed}</p>}
       <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-        Runs a segmentation model over the clip (a background job) and adds a transparent copy to your
-        library. Drop it on a lane above a new background (color, image, or another clip).
+        Removes the background from just this clip&apos;s {formatDuration(durationSec)} of footage (source{' '}
+        {formatDuration(startSec)}–{formatDuration(startSec + durationSec)}) and swaps it in place — same spot, same
+        timing. Undo brings the original back. Put a new background (color, image, another clip) on a lane below.
       </p>
     </CollapsibleSection>
   )
@@ -705,9 +741,9 @@ function LayerEditor(): JSX.Element | null {
             })()}
           </CollapsibleSection>
 
-          {/* Background removal → a new transparent library clip. Hidden for a
-              clip that already has alpha (a previously removed-background copy). */}
-          {!asset?.probe.video?.hasAlpha && <RemoveBackground mediaId={c.mediaId} />}
+          {/* Background removal → this clip's segment, matted and swapped in
+              place. An already-transparent clip just says so. */}
+          <RemoveBackground key={id} layerId={id} content={c} asset={asset} />
         </>
       )}
 
