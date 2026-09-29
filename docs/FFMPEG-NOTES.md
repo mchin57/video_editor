@@ -554,6 +554,42 @@ count, pill boxes identical. `e2e/textParity.spec.ts` pins it on real exports.
   exports (every canvas is ≥1080) — synthesize test canvases at ≥256 px, or
   use libx264.
 
+## Matte decode — windowed seek, frame rate & audio (verified ffmpeg 8.1.1, 2026-09)
+
+Background removal mattes ONE source window (`-ss`/`-t` before `-i`) as raw
+frames piped through the model, then re-encodes them with the window's audio
+(`removeBackgroundArgs.ts`).
+
+- **Output `-r` after an input `-ss` mis-cadences a rate change.** A 60 fps
+  source whose frame N has gray level N, decoded with `-ss 3.5 -t 2 -i src
+  -r 30 -f rawvideo`, gave **62** frames starting `210 211 212 213 215 217…`
+  (the first few at the source rate) and ending ~3 source frames (50 ms) late.
+  The **`fps=30` filter** gives exactly 60 frames, `210 212 214…` — frame k is
+  source `W + k/30` — and is equally exact from 29.97 and 30 fps sources, and
+  at `fps=60`. So the matte sets its rate with the filter, placed FIRST so an
+  HDR tonemap / scale only runs on kept frames (HDR chain verified: 60 frames
+  for a 2 s window). End to end on a real 59.92 fps rotated iPhone clip, a
+  matte of source 12–16 s matches the source at offset 0 (mean |ΔRGB| over
+  foreground 4.1) vs ≈22 at ±1 frame.
+- **Two inputs, one of them a slow pipe, mux fine.** Encoding `-f rawvideo -i
+  pipe:0` (the model's frames) with `-ss W -t D -i source -map 0:v:0 -map
+  1:a:0 -c:a libopus` does not choke on the audio arriving far ahead of the
+  video — verified with a 150 s window fed at a fraction of the demux speed.
+  The audio is sample-accurate to the window: beeps on every whole second of
+  the source, window start 2.5 → onsets at 0.500 / 1.500 / 2.500 in the matte.
+  Opus resamples 44.1 kHz → 48 kHz on its own; the Opus stream reads ~8 ms
+  longer than the video (4.008 vs 4.000) — harmless, the layer's `outSec`
+  stays the window length.
+- The WebM keeps `alpha_mode=1` and the exact alpha with an audio stream
+  alongside. DirectML and CPU inference give the same matte (alpha-plane PSNR
+  55 dB between the two).
+- **ffmpeg creates its output file when it STARTS.** `existsSync(out)` is not
+  "done": a half-written faststart mp4 has no `moov` yet, and Chromium's
+  `<video>` fails it permanently with `DEMUXER_ERROR_COULD_NOT_OPEN`. This is
+  why the matte job awaits the alpha proxy before handing the clip back. (The
+  library's own `proxyReady = existsSync(proxy)` still has this race for
+  ordinary imports — tracked as a bug.)
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

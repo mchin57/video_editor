@@ -3,6 +3,7 @@ import type { VideoContent } from './project'
 import {
   hasSpeedRamp,
   playedBetween,
+  slowestSpeedBetween,
   sortedRamp,
   sourceAfterPlayed,
   speedSegments,
@@ -160,5 +161,24 @@ describe('sourceAfterPlayed', () => {
   it('reduces to linear motion at constant speed', () => {
     expect(sourceAfterPlayed(base({ speed: 2 }), 1, 3)).toBeCloseTo(7, 12)
     expect(sourceAfterPlayed(base({ speed: 2 }), 7, -3)).toBeCloseTo(1, 12)
+  })
+})
+
+describe('slowestSpeedBetween', () => {
+  it('is the constant speed without a ramp', () => {
+    expect(slowestSpeedBetween(base(), 0, 10)).toBe(1)
+    expect(slowestSpeedBetween(base({ speed: 0.5 }), 0, 10)).toBe(0.5)
+  })
+  it('finds the minimum at a keyframe inside the window, or at a window edge', () => {
+    const c = base({
+      speedRamp: [
+        { atSec: 2, speed: 2 },
+        { atSec: 5, speed: 0.5 },
+        { atSec: 8, speed: 2 }
+      ]
+    })
+    expect(slowestSpeedBetween(c, 0, 10)).toBe(0.5)
+    expect(slowestSpeedBetween(c, 6.5, 10)).toBeCloseTo(1.25, 9) // edge: halfway 0.5→2
+    expect(slowestSpeedBetween(c, 8, 10)).toBe(2) // keyframes outside don't count
   })
 })

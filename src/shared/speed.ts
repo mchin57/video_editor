@@ -44,6 +44,17 @@ export function sortedRamp(c: Pick<VideoContent, 'speedRamp'>): SpeedKeyframe[] 
 }
 
 /**
+ * The slowest speed the profile plays anywhere in source window [a, b]. The
+ * profile is piecewise-linear, so the minimum sits at a window edge or at a
+ * keyframe inside it — keyframes outside the window don't count.
+ */
+export function slowestSpeedBetween(c: Pick<VideoContent, 'speed' | 'speedRamp'>, a: number, b: number): number {
+  let min = Math.min(videoSpeedAtSource(c, a), videoSpeedAtSource(c, b))
+  for (const k of sortedRamp(c)) if (k.atSec > a && k.atSec < b) min = Math.min(min, k.speed)
+  return min
+}
+
+/**
  * Instantaneous speed at SOURCE second `s`: linear between ramp keyframes,
  * held flat outside them; the constant `videoSpeed` when no ramp.
  */

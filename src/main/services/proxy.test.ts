@@ -78,14 +78,23 @@ describe('buildProxyArgs', () => {
 })
 
 describe('buildAlphaProxyArgs', () => {
-  it('encodes a silent VP9 yuva420p WebM at the proxy scale', () => {
+  it('encodes a VP9 yuva420p WebM at the proxy scale, keeping the audio as Opus', () => {
     const args = buildAlphaProxyArgs('in.webm', 'out.webm', probe({ displayWidth: 1080, displayHeight: 1920 }))
     const s = args.join(' ')
     expect(s).toContain('libvpx-vp9')
     expect(s).toContain('yuva420p')
     expect(s).toContain('scale=720:1280')
-    expect(args).toContain('-an') // background-removed clips are silent
+    expect(s).toContain('-map 0:a:0? -c:a libopus -b:a 128k') // a matte carries its segment's audio
+    expect(args).not.toContain('-an')
     expect(args[args.length - 1]).toBe('out.webm')
+  })
+  it('stays silent for a source without audio, and mono-folds a one-sided one', () => {
+    const silent = buildAlphaProxyArgs('in.webm', 'out.webm', { ...probe({}), audio: null })
+    expect(silent).toContain('-an')
+    expect(silent).not.toContain('libopus')
+    const oneSided = probe({})
+    oneSided.audio = { ...oneSided.audio!, monoFoldChannel: 0 }
+    expect(buildAlphaProxyArgs('in.webm', 'out.webm', oneSided).join(' ')).toContain('-map 0:a:0? -af pan=')
   })
   it('forces the libvpx decoder for a VP9-alpha input (native decode drops the alpha)', () => {
     const s = buildAlphaProxyArgs('in.webm', 'out.webm', probe({ codec: 'vp9', hasAlpha: true })).join(' ')

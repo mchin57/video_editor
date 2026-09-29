@@ -2,7 +2,7 @@ import { type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect, isImageAsset } from '@shared/media'
 import { useLibrary, useImportMedia } from '@/hooks/useMedia'
-import { useEditor } from '@/state/store'
+import { latestJob, useEditor } from '@/state/store'
 import { activeComp, getFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
@@ -18,7 +18,7 @@ import { ClipCard } from '@/components/ClipCard'
 function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const selectedId = useEditor((s) => s.selectedId)
   const select = useEditor((s) => s.select)
-  const job = useEditor((s) => (asset.id in s.proxyJobs ? s.proxyJobs[asset.id] : undefined))
+  const job = useEditor((s) => latestJob(s.jobs, 'proxy', asset.id))
   const addVideoLayer = useProject((s) => s.addVideoLayer)
   const addAudioClip = useProject((s) => s.addAudioClip)
   const addLayer = useProject((s) => s.addLayer)
