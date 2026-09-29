@@ -113,6 +113,31 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     steps with the free angle (the popout's steps change the image's aspect, so both
     can coexist for now).
 
+- [ ] **Simple straight-line motion (start point → end point over a duration).** Decided
+  with the owner 2026-09-28; same branch, after rotation.
+  - **Model:** reuse `Layer.keyframes`. A simple move is exactly two keyframes that
+    differ in x/y; there is no second motion model. Linear interpolation, holding
+    before the start and after the end, is already what `layerTransformAt` does.
+  - **Defaults:** "Add motion" starts the move AT THE PLAYHEAD, from where the layer
+    currently sits, for a default duration (clamped to the clip's end). The layer
+    holds at the end point afterwards. Start time and duration are editable.
+  - **UI:** the path is drawn on the canvas as a line with a dot at each end; dragging
+    a dot edits that point. The Inspector gets a "Motion" section (start X/Y, end X/Y,
+    start time, duration). Dragging the layer itself on the canvas shifts the whole
+    path (both ends). The existing Keyframes list stays as the advanced editor; the
+    simple section shows when a layer has zero or two keyframes.
+  - **Video/image:** preview and export already honour position keyframes (verified,
+    FFMPEG-NOTES "Keyframed layer motion"); this part is UI only.
+  - **Text (new):** the preview applies `layerTransformAt` to text. The export gives
+    every ASS event a text layer emits (each line, typewriter steps, slide
+    entrance/exit, sparkles) its own `\move` slice of the motion through ONE helper,
+    summed with any slide offset. On rotated text the `\move` endpoints are
+    inverse-rotated about the fixed `\org` (still a straight line). The raster (PNG)
+    path uses overlay x/y expressions, as media does.
+  - **Captions later:** not in this pass, but the motion helpers take a generic
+    position + keyframes rather than a `Layer`, so captions can adopt them later
+    without a rewrite.
+
 ### Text updates (continued)
 
 - [ ] **Font size slider** — font size is only a numeric field today. Add a slider
