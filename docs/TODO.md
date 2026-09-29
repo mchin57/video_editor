@@ -129,9 +129,9 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     move never grows a third keyframe. The dots sit above the layer, so at the playhead
     where the layer sits on a dot, the dot wins; grab the layer elsewhere.
   - **Export, text:** the block is laid out where the move starts. Every event gets one
-    windowed `move` (no split); only a slide that overlaps the move splits, continuing
-    its fade with `ade`. A rotated block's travel is counter-rotated for the fixed
-    `org`. Sparkles ride it in screen space. Moving rasterised text renders at the frame
+    windowed `\move` (no split); only a slide that overlaps the move splits, continuing
+    its fade with `\fade`. A rotated block's travel is counter-rotated for the fixed
+    `\org`. Sparkles ride it in screen space. Moving rasterised text renders at the frame
     centre and travels on the image keyframe path. See FFMPEG-NOTES "Straight-line motion".
   - **Tests:** `src/shared/motion.test.ts`, the motion block in `assBuilder.test.ts`,
     `e2e/motion.spec.ts` (add at the playhead, text follows, end-dot drag + one undo,
@@ -141,7 +141,7 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
   - _Unverified: not yet tried by the owner in `npm run dev` with real media. Video and
     image motion is the pre-existing keyframe export (verified when it shipped); this pass
     added only its UI. A slide overlapping a move is covered by the ASS string tests and
-    the ade verification, not by a real export._
+    the \fade verification, not by a real export._
   - **Captions later:** the helpers take keyframe lists and points, not a `Layer`.
 
 ### Text updates (continued)

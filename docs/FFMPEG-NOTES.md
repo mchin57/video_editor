@@ -647,7 +647,7 @@ through the real exporter (`e2e/rotationExport.spec.ts`). Drives
 - **`rotate=a=<rad>` with a POSITIVE angle turns CLOCKWISE** on screen: a
   400×200 box at +30° puts its +x end at (+cos, +sin) with y down. That matches
   CSS `rotate()`, so `Layer.rotationDeg` goes to ffmpeg with no sign flip
-  (libass is the opposite: `rz` is counter-clockwise, hence `rz-deg`).
+  (libass is the opposite: `\frz` is counter-clockwise, hence `\frz-deg`).
 - **`ow='ceil(rotw(a)/2)*2':oh='ceil(roth(a)/2)*2':c=none`** grows the frame to
   the rotated bounds and leaves the corners TRANSPARENT, but only if the input
   already has alpha (`format=yuva420p` / `rgba` first). Odd rotated sizes also
@@ -662,40 +662,40 @@ through the real exporter (`e2e/rotationExport.spec.ts`). Drives
   1s stays centred and covers exactly 200×400 → 400×800.
 - **Position**: the rotated output is the rotated bounds, so a rotated layer is
   overlaid by its CENTRE (`x='cx-overlay_w/2'`), static or keyframed.
-- **Text**: libass rotates each line about the block centre (`org`), and a
-  `move` inside that event is turned about the fixed `org` as well. So a
+- **Text**: libass rotates each line about the block centre (`\org`), and a
+  `\move` inside that event is turned about the fixed `\org` as well. So a
   rotated `slideUp` travels along the text's OWN axis (measured: mid-slide ink
   offset = rotateVec(0, 45px, 30°) within 1px), and the preview matches that by
   rotating its slide offset. The libass burn and the Chromium raster of the
   same rotated block agree to within 1.5px at the ink centroid; the extreme
   glyph tips differ by 3–6px (anti-aliasing).
 - Sparkles on rotated text are placed by rotating their offsets in the
-  exporter (`rotateVec`), not with `org`. Checked by eye: preview
+  exporter (`rotateVec`), not with `\org`. Checked by eye: preview
   screenshot vs export frame at 60°, same scatter along the letters.
 
 ## Straight-line motion — text in libass (verified ffmpeg 8.1.1 / bundled libass, 2026-09)
 
-Verified with `p1` box drawings (font-independent) burned over lavfi, then
+Verified with `\p1` box drawings (font-independent) burned over lavfi, then
 through the real exporter (`e2e/motionExport.spec.ts`). Drives `placeTag` /
 `slideEvents` in `assBuilder.ts` and `moveSlice` in `shared/motion.ts`:
 
-- **`move(x1,y1,x2,y2,t1,t2)` holds** at (x1,y1) before `t1` and at (x2,y2)
+- **`\move(x1,y1,x2,y2,t1,t2)` holds** at (x1,y1) before `t1` and at (x2,y2)
   after `t2` (ms from the event start). A box moving 200→600 over 500–1500ms
   of a 2s event read 200 / 400 / 600 at 0.25 / 1.0 / 1.75s. So a straight move
-  with holds either side is ONE windowed `move` on each event; no split.
-- **A `move` under a fixed `org` + `rz` travels along the ROTATED axis**:
-  +100px in x at `rz-90` (90° clockwise) rendered as +97.5px down at 97.5% of
+  with holds either side is ONE windowed `\move` on each event; no split.
+- **A `\move` under a fixed `\org` + `\frz` travels along the ROTATED axis**:
+  +100px in x at `\frz-90` (90° clockwise) rendered as +97.5px down at 97.5% of
   the move. So a rotated block's screen-space travel `d` is written as `R⁻¹·d`
   (`local` in `assBuilder`), and libass turns it back. Checked end to end: a
   30°-rotated text layer moving 480px right burns a straight horizontal path.
-- **The complex `ade(a1,a2,a3,t1,t2,t3,t4)` continues a partial fade
-  exactly**, multiplying with a colour's own alpha like `ad` does: one event
-  with `ad(2000,0)` vs the same split at 1s into two events with
-  `ade(255,128,128,0,1000,…)` / `ade(128,0,0,0,1000,…)` agreed within 1
+- **The complex `\fade(a1,a2,a3,t1,t2,t3,t4)` continues a partial fade
+  exactly**, multiplying with a colour's own alpha like `\fad` does: one event
+  with `\fad(2000,0)` vs the same split at 1s into two events with
+  `\fade(255,128,128,0,1000,…)` / `\fade(128,0,0,0,1000,…)` agreed within 1
   level at six sample times over a 50%-alpha colour. That is what lets a slide
   that overlaps a move split into straight pieces without a fade glitch.
-- `p1` drawings are placed from their own bounds, not the origin: a box drawn
-  from −20..20 lands 20px up-left of its `pos`. Irrelevant to relative checks,
+- `\p1` drawings are placed from their own bounds, not the origin: a box drawn
+  from −20..20 lands 20px up-left of its `\pos`. Irrelevant to relative checks,
   but sample inside the box when you pixel-test a drawing.
 - Rasterised (PNG) text that moves is rendered at the frame CENTRE and travels
   on the image keyframe path (`overlay` x/y expressions), so a move that
