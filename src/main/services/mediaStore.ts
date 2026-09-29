@@ -17,6 +17,7 @@ import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
+import { singleFlight } from './atomicWrite'
 import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
@@ -59,35 +60,58 @@ const playableProxyPath = (a: MediaAsset): string =>
         ? alphaProxyPath(a.id)
         : proxyPath(a.id)
 
+/*
+ * Every generated file here is gated on EXISTENCE (a present proxy.mp4 means
+ * "ready"; a present thumb.jpg means "don't regenerate"), so two rules hold:
+ * the generators write atomically (`writeAtomically` — the final name never
+ * refers to a half-written file), and each file has at most one generator in
+ * flight. The second matters because `hydrate` runs on EVERY library refetch
+ * and would otherwise race the import's own generation onto the same partial.
+ */
+const proxyFlight = singleFlight<void>() // keyed by asset id
+const artifactFlight = singleFlight<void>() // keyed by output path
+
+/** Best-effort derived file: skipped if present, generated once however many
+ *  callers race for it, and never throws (a missing thumb must not fail an import). */
+async function makeArtifact(
+  out: string,
+  what: string,
+  id: string,
+  generate: (out: string) => Promise<void>
+): Promise<void> {
+  if (existsSync(out)) return
+  await artifactFlight(out, async () => {
+    try {
+      await generate(out)
+    } catch (error) {
+      console.error(`${what} failed for`, id, error)
+    }
+  })
+}
+
 /** Best-effort first-frame thumbnail; never fails the import if it errors. */
 async function makeThumb(asset: MediaAsset): Promise<void> {
-  if (!asset.probe.video || existsSync(thumbPath(asset.id))) return
-  try {
-    await generateThumbnail(asset.originalPath, thumbPath(asset.id), asset.probe)
-  } catch (error) {
-    console.error('thumbnail failed for', asset.id, error)
-  }
+  if (!asset.probe.video) return
+  await makeArtifact(thumbPath(asset.id), 'thumbnail', asset.id, (out) =>
+    generateThumbnail(asset.originalPath, out, asset.probe)
+  )
 }
 
 /** Best-effort waveform for any asset with audio (video included, for the
  *  audio lane when its audio is extracted onto the track). */
 async function makeWaveform(asset: MediaAsset): Promise<void> {
-  if (!asset.probe.audio || existsSync(waveformPath(asset.id))) return
-  try {
-    await generateWaveform(asset.originalPath, waveformPath(asset.id), asset.probe.durationSec)
-  } catch (error) {
-    console.error('waveform failed for', asset.id, error)
-  }
+  if (!asset.probe.audio) return
+  await makeArtifact(waveformPath(asset.id), 'waveform', asset.id, (out) =>
+    generateWaveform(asset.originalPath, out, asset.probe.durationSec)
+  )
 }
 
 /** Best-effort display PNG (alpha-preserving) for an imported image. */
 async function makeImage(asset: MediaAsset): Promise<void> {
-  if (!isImageAsset(asset) || existsSync(imagePath(asset.id))) return
-  try {
-    await generateDisplayImage(asset.originalPath, imagePath(asset.id))
-  } catch (error) {
-    console.error('display image failed for', asset.id, error)
-  }
+  if (!isImageAsset(asset)) return
+  await makeArtifact(imagePath(asset.id), 'display image', asset.id, (out) =>
+    generateDisplayImage(asset.originalPath, out)
+  )
 }
 
 async function readAsset(id: string): Promise<MediaAsset | null> {
@@ -149,8 +173,17 @@ export async function importFile(srcPath: string, displayName?: string): Promise
   return asset
 }
 
-/** Generate the proxy if missing, reporting progress via the jobs channel. */
-export async function ensureProxy(id: string): Promise<void> {
+/**
+ * Generate the proxy if missing, reporting progress via the jobs channel.
+ * Concurrent calls for one asset share a single build (import, re-import and
+ * the renderer can all ask), and every caller's promise settles only once the
+ * proxy is on disk in full — or the build failed.
+ */
+export function ensureProxy(id: string): Promise<void> {
+  return proxyFlight(id, () => buildProxy(id))
+}
+
+async function buildProxy(id: string): Promise<void> {
   const asset = await readAsset(id)
   if (!asset) throw new Error(`unknown media ${id}`)
   if (existsSync(playableProxyPath(asset))) return

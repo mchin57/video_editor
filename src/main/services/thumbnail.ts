@@ -6,6 +6,7 @@
 
 import type { ProbeInfo } from '@shared/media'
 import { alphaInputDecoder } from '@shared/media'
+import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { hdrToSdrChain } from './proxy'
@@ -55,5 +56,5 @@ export async function generateThumbnail(
   probe: ProbeInfo
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await runFfmpeg(ffmpeg, buildThumbnailArgs(input, output, probe), 0)
+  await writeAtomically(output, (part) => runFfmpeg(ffmpeg, buildThumbnailArgs(input, part, probe), 0))
 }

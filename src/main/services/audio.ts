@@ -3,6 +3,7 @@
  * PNG for the timeline music lane. Arg builders are pure (unit-tested).
  */
 
+import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 
@@ -226,13 +227,14 @@ function run(ffmpeg: string, args: string[]): Promise<void> {
   return runFfmpeg(ffmpeg, args, 0)
 }
 
+/** The audio asset's playable proxy — atomic, since its existence means "ready". */
 export async function generateAudioProxy(
   input: string,
   output: string,
   foldChannel: number | null = null
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await run(ffmpeg, buildAudioProxyArgs(input, output, foldChannel))
+  await writeAtomically(output, (part) => run(ffmpeg, buildAudioProxyArgs(input, part, foldChannel)))
 }
 
 /**
@@ -260,7 +262,7 @@ export async function detectMonoFoldChannel(input: string): Promise<number | nul
 
 export async function generateWaveform(input: string, output: string, durationSec = 0): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await run(ffmpeg, buildWaveformArgs(input, output, durationSec))
+  await writeAtomically(output, (part) => run(ffmpeg, buildWaveformArgs(input, part, durationSec)))
 }
 
 export async function extractAudio(input: string, output: string): Promise<void> {

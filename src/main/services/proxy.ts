@@ -4,12 +4,14 @@
  * export will use, so preview color matches output. VFR sources are forced to
  * CFR so the timeline scrubs predictably.
  *
- * buildProxyArgs is pure (unit-tested); generateProxy runs ffmpeg with progress.
+ * buildProxyArgs is pure (unit-tested); generateProxy runs ffmpeg with progress,
+ * writing through `writeAtomically` so the proxy never exists half-written.
  */
 
 import type { ProbeInfo, VideoStreamInfo } from '@shared/media'
 import { alphaInputDecoder } from '@shared/media'
 import { monoFoldPan } from './audio'
+import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { setProgress } from './jobs'
@@ -133,7 +135,8 @@ export function buildProxyArgs(input: string, output: string, probe: ProbeInfo):
   return args
 }
 
-/** Run the proxy transcode, reporting progress (0..1) to the given job. */
+/** Run the proxy transcode, reporting progress (0..1) to the given job. `output`
+ *  appears only once complete — its existence is what "proxy ready" means. */
 export async function generateProxy(
   input: string,
   output: string,
@@ -141,12 +144,15 @@ export async function generateProxy(
   jobId: string
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await runFfmpeg(ffmpeg, buildProxyArgs(input, output, probe), probe.durationSec || 0, (p) =>
-    setProgress(jobId, p)
+  await writeAtomically(output, (part) =>
+    runFfmpeg(ffmpeg, buildProxyArgs(input, part, probe), probe.durationSec || 0, (p) =>
+      setProgress(jobId, p)
+    )
   )
 }
 
-/** Run the alpha-preserving (VP9 WebM) proxy transcode for a background-removed clip. */
+/** Run the alpha-preserving (VP9 WebM) proxy transcode for a background-removed
+ *  clip. Atomic like `generateProxy` (a partial WebM even OPENS — truncated). */
 export async function generateAlphaProxy(
   input: string,
   output: string,
@@ -154,7 +160,9 @@ export async function generateAlphaProxy(
   jobId: string
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await runFfmpeg(ffmpeg, buildAlphaProxyArgs(input, output, probe), probe.durationSec || 0, (p) =>
-    setProgress(jobId, p)
+  await writeAtomically(output, (part) =>
+    runFfmpeg(ffmpeg, buildAlphaProxyArgs(input, part, probe), probe.durationSec || 0, (p) =>
+      setProgress(jobId, p)
+    )
   )
 }
