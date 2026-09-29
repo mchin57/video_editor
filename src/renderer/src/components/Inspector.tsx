@@ -25,6 +25,7 @@ import {
   hookCovered,
   kfOpacity,
   layerFitScale,
+  layerTransformAt,
   videoSourceTime,
   videoSourceWindow,
   videoTimelineTime,
@@ -59,7 +60,28 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { AngleField, Check, Field, NumberInput, Row, colorCls, dangerBtnCls, disabledCls, inputCls, toggleCls } from './ui'
+import {
+  AngleField,
+  Check,
+  Field,
+  NumberInput,
+  Row,
+  btnCls,
+  colorCls,
+  dangerBtnCls,
+  disabledCls,
+  inputCls,
+  subtleBtnCls,
+  toggleCls
+} from './ui'
+import {
+  DEFAULT_MOTION_SEC,
+  MIN_MOTION_SEC,
+  editSimpleMotion,
+  isSimpleMotion,
+  newMotionKeyframes,
+  simpleMotion
+} from '@shared/motion'
 
 type TriMode = 'default' | 'on' | 'off'
 
@@ -426,7 +448,11 @@ function LayerEditor(): JSX.Element | null {
           ? 'Layout layer'
           : 'Text layer'
   // Keyframes override the base transform for media layers; grey those fields.
-  const keyframed = c.kind !== 'text' && c.kind !== 'layout' && (layer.keyframes?.length ?? 0) > 0
+  // A text layer's keyframes are its straight-line motion: they own its
+  // POSITION only (its size is never keyframed).
+  const hasKfs = (layer.keyframes?.length ?? 0) > 0
+  const keyframed = c.kind !== 'text' && c.kind !== 'layout' && hasKfs
+  const posKeyframed = keyframed || (c.kind === 'text' && hasKfs)
 
   return (
     <div>
@@ -467,9 +493,11 @@ function LayerEditor(): JSX.Element | null {
         </Field>
       </div>
 
-      {keyframed && (
+      {posKeyframed && (
         <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
-          Position &amp; zoom are animated by keyframes (below) — these base values are ignored.
+          {keyframed
+            ? 'Position & zoom are animated by keyframes (below) — these base values are ignored.'
+            : 'Position follows the motion (below) — drag the text to move its whole path.'}
         </p>
       )}
       <div className="flex gap-2">
@@ -478,7 +506,7 @@ function LayerEditor(): JSX.Element | null {
             type="number"
             step="5"
             value={Math.round(layer.x - frame.x)}
-            disabled={keyframed}
+            disabled={posKeyframed}
             onChange={(e) => update(id, { x: Number(e.target.value) + frame.x })}
             className={inputCls}
           />
@@ -488,7 +516,7 @@ function LayerEditor(): JSX.Element | null {
             type="number"
             step="5"
             value={Math.round(layer.y - frame.y)}
-            disabled={keyframed}
+            disabled={posKeyframed}
             onChange={(e) => update(id, { y: Number(e.target.value) + frame.y })}
             className={inputCls}
           />
@@ -559,6 +587,15 @@ function LayerEditor(): JSX.Element | null {
         </button>
       )}
       </CollapsibleSection>
+
+      {/* Straight-line motion: start point → end point over a duration. Two
+          keyframes under the hood (shared/motion.ts), so for media the
+          Keyframes list below is the advanced view of the same data. */}
+      {(c.kind === 'video' || c.kind === 'image' || c.kind === 'text') && (
+        <CollapsibleSection id="motion" title="Motion">
+          <MotionFields layer={layer} frame={frame} />
+        </CollapsibleSection>
+      )}
 
       {/* Keyframed motion (video/image; text animates via its own presets;
           layouts and compounds have no export keyframe path) */}
@@ -828,6 +865,108 @@ function LayerEditor(): JSX.Element | null {
  * Motion previews and exports through the same shared interpolation
  * (`layerTransformAt`).
  */
+/**
+ * The simple Motion editor: "Add motion" starts a straight-line move AT THE
+ * PLAYHEAD from where the layer is now; then the start/end points, start time
+ * and duration are editable here (and the two points by dragging their dots on
+ * the canvas). Points read frame-relative like Position X/Y. A layer whose
+ * keyframes are not a simple move says so instead of guessing.
+ */
+function MotionFields({ layer, frame }: { layer: Layer; frame: FrameRect }): JSX.Element {
+  const update = useProject((s) => s.updateLayer)
+  const [durSec, setDurSec] = useState(DEFAULT_MOTION_SEC)
+  const kfs = layer.keyframes
+  const len = Math.max(0, layer.endSec - layer.startSec)
+  const isText = layer.content.kind === 'text'
+
+  if (!kfs || kfs.length === 0) {
+    const add = (): void => {
+      const t = usePlayback.getState().time
+      const tr = layerTransformAt(layer, t)
+      update(layer.id, { keyframes: newMotionKeyframes(tr, t - layer.startSec, durSec, len, frame) })
+    }
+    return (
+      <>
+        <p className="mb-2 text-[10px] leading-snug text-zinc-500">
+          Moves in a straight line from where it is now, starting at the playhead. Then drag the dots on the
+          preview to set where it starts and ends.
+        </p>
+        <div className="flex items-end gap-2">
+          <Field label="Duration (s)">
+            <NumberInput step="0.1" min={MIN_MOTION_SEC} value={durSec} format={(v) => v.toFixed(1)} onCommit={setDurSec} />
+          </Field>
+          <button type="button" onClick={add} className={`${btnCls} mb-2 shrink-0`}>
+            ➜ Add motion
+          </button>
+        </div>
+      </>
+    )
+  }
+
+  const remove = (
+    <button
+      type="button"
+      className={`${subtleBtnCls} w-full`}
+      // Leave the layer where its move starts, rather than jumping back to a
+      // base position nobody has seen since the move was added.
+      onClick={() => {
+        const first = [...kfs].sort((a, b) => a.tSec - b.tSec)[0]
+        update(layer.id, { keyframes: undefined, x: first.x, y: first.y })
+      }}
+    >
+      Remove motion
+    </button>
+  )
+
+  if (!isSimpleMotion(kfs)) {
+    return (
+      <>
+        <p className="mb-2 text-[10px] leading-snug text-zinc-500">
+          {kfs.length} keyframes — more than a simple start → end move.
+          {isText ? ' The text follows the first stretch that moves.' : ' Edit them under Keyframes.'}
+        </p>
+        {isText && remove}
+      </>
+    )
+  }
+
+  const mo = simpleMotion(kfs)
+  const edit = (patch: Parameters<typeof editSimpleMotion>[1]): void =>
+    update(layer.id, { keyframes: editSimpleMotion(kfs, patch, len) })
+  const coord = (label: string, v: number, origin: number, key: 'x0' | 'y0' | 'x1' | 'y1'): JSX.Element => (
+    <Field label={label}>
+      <NumberInput step="5" value={Math.round(v - origin)} onCommit={(n) => edit({ [key]: n + origin })} />
+    </Field>
+  )
+  return (
+    <>
+      <div className="flex gap-2">
+        {coord('Start X', mo.x0, frame.x, 'x0')}
+        {coord('Start Y', mo.y0, frame.y, 'y0')}
+      </div>
+      <div className="flex gap-2">
+        {coord('End X', mo.x1, frame.x, 'x1')}
+        {coord('End Y', mo.y1, frame.y, 'y1')}
+      </div>
+      <div className="flex gap-2">
+        <Field label="Starts at (s)">
+          <NumberInput step="0.1" min={0} value={mo.t0} format={(v) => v.toFixed(1)} onCommit={(t0) => edit({ t0 })} />
+        </Field>
+        <Field label="Duration (s)">
+          <NumberInput
+            step="0.1"
+            min={MIN_MOTION_SEC}
+            value={mo.t1 - mo.t0}
+            format={(v) => v.toFixed(1)}
+            onCommit={(d) => edit({ durSec: d })}
+          />
+        </Field>
+      </div>
+      {remove}
+    </>
+  )
+}
+
 function KeyframesSection({
   layer,
   frame,

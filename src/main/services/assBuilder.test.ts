@@ -375,3 +375,81 @@ describe('sparkles', () => {
     expect(ass.split('\n').filter((l) => l.startsWith('Dialogue:'))).toHaveLength(0)
   })
 })
+
+// Straight-line motion (text-layer keyframes → `AssOverlay.motion`). Each tag
+// used here was verified against the real libass: a windowed \move holds before
+// and after its window, a \move under a fixed \org travels along the ROTATED
+// axis, and \fade continues a partial \fad across split events exactly. See
+// docs/FFMPEG-NOTES.md "Straight-line motion".
+describe('straight-line motion', () => {
+  // The block (laid out at 540,600) travels +200px right between t 2 and 3.
+  const travel = { t0: 2, t1: 3, x0: 0, y0: 0, x1: 200, y1: 0 }
+
+  it('a static block becomes ONE windowed \\move (no split)', () => {
+    const ev = events(buildAss([overlay({ motion: travel })], target))
+    expect(ev).toHaveLength(1)
+    // Event 1..4s: sits at the start until 1000ms, arrives at 2000ms, holds.
+    expect(ev[0]).toContain('\\move(540,600,740,600,1000,2000)')
+    expect(ev[0]).not.toContain('\\pos(')
+  })
+
+  it('an event wholly before or after the travel is a plain \\pos at that end', () => {
+    const before = events(buildAss([overlay({ startSec: 0, endSec: 1.5, motion: travel })], target))
+    expect(before[0]).toContain('\\pos(540,600)')
+    const after = events(buildAss([overlay({ startSec: 3.5, endSec: 4, motion: travel })], target))
+    expect(after[0]).toContain('\\pos(740,600)')
+  })
+
+  it('turns the travel into the block axes when the block is rotated (fixed \\org)', () => {
+    // At 90° clockwise, +200 on SCREEN x is written as -200 on the block's y
+    // (R⁻¹·d), which libass then turns back onto the screen about \org.
+    const ev = events(buildAss([overlay({ motion: travel, rotationDeg: 90 })], target))
+    expect(ev[0]).toContain('\\move(540,600,540,400,1000,2000)')
+    expect(ev[0]).toContain('\\org(540,600)')
+  })
+
+  it('keeps the other animations on their single event (bounce, fade)', () => {
+    const anim = { in: 'bounce' as const, inSec: 0.45, out: 'fadeOut' as const, outSec: 0.3 }
+    const ev = events(buildAss([overlay({ motion: travel, animation: anim })], target))
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toContain('\\move(540,600,740,600,1000,2000)')
+    expect(ev[0]).toContain('\\t(0,')
+  })
+
+  it('a slide that overlaps the travel splits at every breakpoint, continuing the fade with \\fade', () => {
+    // A 2s slide-in over a 1..4s block, travelling 1.5..2.5.
+    const early = { t0: 1.5, t1: 2.5, x0: 0, y0: 0, x1: 100, y1: 0 }
+    const anim = { in: 'slideUp' as const, inSec: 2, out: 'none' as const, outSec: 0.3 }
+    const ev = events(buildAss([overlay({ motion: early, animation: anim })], target))
+    // Cuts: 1, 1.5 (travel start), 2.5 (travel end), 3 (slide + fade end), 4.
+    expect(ev).toHaveLength(4)
+    // First piece: no travel yet, the slide from +90 toward its 1.5s value, fading in.
+    expect(ev[0]).toContain('0:00:01.00,0:00:01.50')
+    expect(ev[0]).toContain('\\move(540,690,540,668,0,500)')
+    expect(ev[0]).toContain('\\fade(255,191,191,0,500,500,500)')
+    // Second: travel 0→100 while the slide continues.
+    expect(ev[1]).toContain('\\move(540,668,640,623,0,1000)')
+    // Last: slide done, travel done, fully faded in — no \fade.
+    expect(ev[3]).toContain('\\move(640,600,640,600,0,1000)')
+    expect(ev[3]).not.toContain('\\fade')
+  })
+
+  it('slide events the travel does not cross keep their exact form (offset to where the travel is)', () => {
+    // Slide in (1..1.3) and out (3.7..4); travel 2..3 falls in the static middle.
+    const anim = { in: 'slideUp' as const, inSec: 0.3, out: 'slideDown' as const, outSec: 0.3 }
+    const ev = events(buildAss([overlay({ motion: travel, animation: anim })], target))
+    expect(ev).toHaveLength(3)
+    expect(ev[0]).toContain('\\move(540,690,540,600,0,300)')
+    expect(ev[0]).toContain('\\fad(300,0)')
+    expect(ev[1]).toContain('\\move(540,600,740,600,700,1700)')
+    expect(ev[2]).toContain('\\move(740,600,740,690,0,300)')
+    expect(ev[2]).toContain('\\fad(0,300)')
+  })
+
+  it('sparkles ride the travel in SCREEN space (they are not rotated about \\org)', () => {
+    const sparkle = { startSec: 2, endSec: 3, x: 300, y: 400, sizePx: 8, rotDeg: 0 }
+    const ev = events(buildAss([overlay({ motion: travel, rotationDeg: 90, sparkles: [sparkle] })], target))
+    const sp = ev.find((l) => l.includes('Sparkle'))!
+    expect(sp).toContain('\\move(300,400,500,400,0,1000)')
+  })
+})

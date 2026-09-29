@@ -673,6 +673,34 @@ through the real exporter (`e2e/rotationExport.spec.ts`). Drives
   exporter (`rotateVec`), not with `org`. Checked by eye: preview
   screenshot vs export frame at 60°, same scatter along the letters.
 
+## Straight-line motion — text in libass (verified ffmpeg 8.1.1 / bundled libass, 2026-09)
+
+Verified with `p1` box drawings (font-independent) burned over lavfi, then
+through the real exporter (`e2e/motionExport.spec.ts`). Drives `placeTag` /
+`slideEvents` in `assBuilder.ts` and `moveSlice` in `shared/motion.ts`:
+
+- **`move(x1,y1,x2,y2,t1,t2)` holds** at (x1,y1) before `t1` and at (x2,y2)
+  after `t2` (ms from the event start). A box moving 200→600 over 500–1500ms
+  of a 2s event read 200 / 400 / 600 at 0.25 / 1.0 / 1.75s. So a straight move
+  with holds either side is ONE windowed `move` on each event; no split.
+- **A `move` under a fixed `org` + `rz` travels along the ROTATED axis**:
+  +100px in x at `rz-90` (90° clockwise) rendered as +97.5px down at 97.5% of
+  the move. So a rotated block's screen-space travel `d` is written as `R⁻¹·d`
+  (`local` in `assBuilder`), and libass turns it back. Checked end to end: a
+  30°-rotated text layer moving 480px right burns a straight horizontal path.
+- **The complex `ade(a1,a2,a3,t1,t2,t3,t4)` continues a partial fade
+  exactly**, multiplying with a colour's own alpha like `ad` does: one event
+  with `ad(2000,0)` vs the same split at 1s into two events with
+  `ade(255,128,128,0,1000,…)` / `ade(128,0,0,0,1000,…)` agreed within 1
+  level at six sample times over a 50%-alpha colour. That is what lets a slide
+  that overlaps a move split into straight pieces without a fade glitch.
+- `p1` drawings are placed from their own bounds, not the origin: a box drawn
+  from −20..20 lands 20px up-left of its `pos`. Irrelevant to relative checks,
+  but sample inside the box when you pixel-test a drawing.
+- Rasterised (PNG) text that moves is rendered at the frame CENTRE and travels
+  on the image keyframe path (`overlay` x/y expressions), so a move that
+  starts off-frame isn't clipped out of the PNG.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

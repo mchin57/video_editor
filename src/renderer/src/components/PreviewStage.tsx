@@ -47,6 +47,7 @@ import {
   type ResizeHandle
 } from '@shared/layers'
 import { clampAnimWindows, effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
+import { isSimpleMotion, motionPosAt, shiftKeyframes, simpleMotion, textMotion } from '@shared/motion'
 import {
   handleOffset,
   normalizeDeg,
@@ -258,6 +259,21 @@ function mediaBox(layer: Layer, aspect: number): CSSProperties {
 const canRotate = (layer: Layer): boolean =>
   layer.content.kind === 'video' || layer.content.kind === 'image' || layer.content.kind === 'text'
 
+/** A layer that moves as a PATH on the canvas: a simple two-keyframe move, or
+ *  a text layer with any keyframes (text only ever follows its motion). Drags
+ *  and resizes shift the whole path instead of writing a keyframe. */
+const onPath = (l: Layer): boolean =>
+  !!l.keyframes?.length && (isSimpleMotion(l.keyframes) || l.content.kind === 'text')
+
+/** `l` with its whole path — base position and every keyframe — moved by
+ *  (dx, dy) from the drag-start snapshot `raw`. */
+const movePath = (l: Layer, raw: Layer, dx: number, dy: number): Layer => ({
+  ...l,
+  x: raw.x + dx,
+  y: raw.y + dy,
+  keyframes: raw.keyframes ? shiftKeyframes(raw.keyframes, dx, dy) : raw.keyframes
+})
+
 /** A layer's rotation, normalised (0 = upright). @see shared/rotation.ts */
 const layerRotation = (layer: Pick<Layer, 'rotationDeg'>): number =>
   layer.rotationDeg ? normalizeDeg(layer.rotationDeg) : 0
@@ -441,6 +457,65 @@ function RotateHandle({
     >
       ⟳
     </span>
+  )
+}
+
+/**
+ * The selected layer's straight-line move, drawn on the canvas: a dashed line
+ * from the start point (hollow dot) to the end point (filled dot). Dragging a
+ * dot moves that end only. Positions are canonical logical px, drawn over the
+ * frame like the resize handles (and pinned to its edge the same way when an
+ * end lies outside it).
+ */
+function MotionPath({
+  motion,
+  frame,
+  onStart
+}: {
+  motion: { x0: number; y0: number; x1: number; y1: number }
+  frame: FrameRect
+  onStart: (e: ReactPointerEvent, end: 0 | 1) => void
+}): JSX.Element {
+  const dot = (end: 0 | 1): JSX.Element => {
+    const x = end === 0 ? motion.x0 : motion.x1
+    const y = end === 0 ? motion.y0 : motion.y1
+    const px = clamp(x, frame.x, frame.x + frame.w)
+    const py = clamp(y, frame.y, frame.y + frame.h)
+    return (
+      <span
+        key={end}
+        data-motion={end === 0 ? 'start' : 'end'}
+        data-pinned={px !== x || py !== y ? '' : undefined}
+        title={end === 0 ? 'Motion start — drag to move' : 'Motion end — drag to move'}
+        onPointerDown={(e) => onStart(e, end)}
+        style={{ left: pct(px - frame.x, frame.w), top: pct(py - frame.y, frame.h), cursor: 'move' }}
+        className={`pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400 shadow ${
+          end === 0 ? 'bg-black/40' : 'bg-amber-400'
+        }`}
+      />
+    )
+  }
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[440]" data-testid="motion-path">
+      <svg
+        className="absolute inset-0 h-full w-full overflow-visible"
+        viewBox={`${frame.x} ${frame.y} ${frame.w} ${frame.h}`}
+        preserveAspectRatio="none"
+      >
+        <line
+          x1={motion.x0}
+          y1={motion.y0}
+          x2={motion.x1}
+          y2={motion.y1}
+          stroke="#fbbf24"
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      {dot(0)}
+      {dot(1)}
+    </div>
   )
 }
 
@@ -1008,12 +1083,16 @@ function StackLayer({
         // \move runs about a fixed \org, which turns it the same way.
         const rot = layerRotation(layer)
         const slide = rotateVec(0, anim.dy, rot)
+        // Straight-line motion: text follows its keyframes for POSITION only,
+        // through the same `textMotion` the export burns from.
+        const mo = textMotion(layer.keyframes)
+        const pos = mo ? motionPosAt(mo, time - layer.startSec) : { x: layer.x, y: layer.y }
         return (
           <TextBlock
             key={layer.id}
             s={content}
-            x={layer.x + slide.x}
-            y={layer.y + slide.y}
+            x={pos.x + slide.x}
+            y={pos.y + slide.y}
             wrap={{ widthPx: content.widthPx, wrapWidthPx: textWrapWidth(frame.w) }}
             rotationDeg={rot}
             scale={layer.scale * anim.scale}
@@ -1255,10 +1334,14 @@ export function PreviewStage(): JSX.Element {
     const scale = LOGICAL.width / stage.getBoundingClientRect().width
     const startX = e.clientX
     const startY = e.clientY
-    // On a keyframed layer, dragging writes/updates a keyframe at the playhead
-    // (standard editor behavior) instead of the base transform, which keyframes
-    // override. `layer.x/y` are already the effective values at `time`.
-    const kfd = !!layer.keyframes?.length && layer.content.kind !== 'text'
+    // A layer on a PATH (a simple two-keyframe move, or any text keyframes)
+    // moves as a whole: the drag shifts both ends. Otherwise, on a keyframed
+    // layer, dragging writes/updates a keyframe at the playhead (standard editor
+    // behavior) instead of the base transform, which keyframes override.
+    // `layer.x/y` are already the effective values at `time`.
+    const raw = getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
+    const path = onPath(raw)
+    const kfd = !path && !!layer.keyframes?.length && layer.content.kind !== 'text'
     const t0 = usePlayback.getState().time
     const kfT = clamp(t0 - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
     const tr0 = layerTransformAt(layer, t0)
@@ -1272,6 +1355,7 @@ export function PreviewStage(): JSX.Element {
         ...p,
         layers: p.layers.map((l) => {
           if (l.id !== layer.id) return l
+          if (path) return movePath(l, raw, nx - layer.x, ny - layer.y)
           if (kfd) {
             return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale, ...kfExtra }) }
           }
@@ -1298,8 +1382,12 @@ export function PreviewStage(): JSX.Element {
     const isCorner = handle.length === 2
     const isText = layer.content.kind === 'text'
     // Corner-resizing a keyframed layer writes a keyframe at the playhead
-    // (like a canvas move). `layer.scale` is already the effective value.
-    const kfd = !!layer.keyframes?.length && !isText
+    // (like a canvas move) — unless it is on a PATH, which shifts (and, from a
+    // corner, scales) as a whole so a simple move stays two keyframes.
+    // `layer.scale` is already the effective value.
+    const raw = getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
+    const path = onPath(raw)
+    const kfd = !path && !!layer.keyframes?.length && !isText
     const kfT = clamp(
       usePlayback.getState().time - layer.startSec,
       0,
@@ -1318,25 +1406,33 @@ export function PreviewStage(): JSX.Element {
       // can't leak into the position.
       const x = layer.x + (nb.cx - startBox.cx)
       const y = layer.y + (nb.cy - startBox.cy)
+      const pathed = (l: Layer): Layer => {
+        if (!path) return l
+        const f = isCorner ? nb.w / startBox.w : 1
+        const moved = movePath(l, raw, x - layer.x, y - layer.y)
+        return f === 1 ? moved : { ...moved, keyframes: moved.keyframes?.map((k) => ({ ...k, scale: clamp(k.scale * f, 0.05, 8) })) }
+      }
       useProject.getState().liveUpdate((p) => ({
         ...p,
-        layers: p.layers.map((l) => {
-          if (l.id !== layer.id) return l
+        layers: p.layers.map((l0) => {
+          if (l0.id !== layer.id) return l0
+          const l = pathed(l0)
           if (isCorner) {
             const ns = clamp(layer.scale * (nb.w / startBox.w), 0.05, 8)
             if (kfd) {
               return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x, y, scale: ns, ...kfExtra }) }
             }
-            return { ...l, x, y, scale: ns }
+            return { ...l, ...(path ? {} : { x, y }), scale: path && !isText ? raw.scale : ns }
           }
+          const xy = path ? {} : { x, y }
           if (isText && l.content.kind === 'text') {
             // widthPx is the pre-scale wrap width; the measured box is post-scale.
-            return { ...l, x, y, content: { ...l.content, widthPx: nb.w / layer.scale } }
+            return { ...l, ...xy, content: { ...l.content, widthPx: nb.w / layer.scale } }
           }
           if (handle === 'e' || handle === 'w') {
-            return { ...l, x, y, stretchX: (layer.stretchX ?? 1) * (nb.w / startBox.w) }
+            return { ...l, ...xy, stretchX: (layer.stretchX ?? 1) * (nb.w / startBox.w) }
           }
-          return { ...l, x, y, stretchY: (layer.stretchY ?? 1) * (nb.h / startBox.h) }
+          return { ...l, ...xy, stretchY: (layer.stretchY ?? 1) * (nb.h / startBox.h) }
         })
       }))
     })
@@ -1403,6 +1499,29 @@ export function PreviewStage(): JSX.Element {
         layers: p.layers.map((l) => (l.id === layer.id ? { ...l, rotationDeg: deg || undefined } : l))
       }))
     )
+
+  // Drag one end of a simple move (`MotionPath` dot): that keyframe's position
+  // follows the pointer; the other end, and both times, stay put.
+  const startMotionEndDrag = (e: ReactPointerEvent, layer: Layer, end: 0 | 1): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    const stage = stageRef.current
+    const kfs = layer.keyframes
+    if (!stage || !isSimpleMotion(kfs)) return
+    const s = LOGICAL.width / stage.getBoundingClientRect().width
+    const sortedKfs = [...kfs].sort((a, b) => a.tSec - b.tSec)
+    const k0 = sortedKfs[end]
+    const startX = e.clientX
+    const startY = e.clientY
+    startDragWithUndo((ev) => {
+      const moved = { ...k0, x: k0.x + (ev.clientX - startX) * s, y: k0.y + (ev.clientY - startY) * s }
+      const next = end === 0 ? [moved, sortedKfs[1]] : [sortedKfs[0], moved]
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, keyframes: next } : l))
+      }))
+    })
+  }
 
   // Same rule as a caption drag: lane-wide mode turns the global style,
   // otherwise this caption gets (or updates) its own override.
@@ -1564,6 +1683,13 @@ export function PreviewStage(): JSX.Element {
         {/* Edge/corner resize handles on the selected layer (corners scale
             uniformly, edges stretch media / re-wrap text) — OUTSIDE the frame's
             clip so a handle on the frame edge stays whole and grabbable. */}
+        {selectedLayer && canRotate(selectedLayer) && isSimpleMotion(selectedLayer.keyframes) && (
+          <MotionPath
+            motion={simpleMotion(selectedLayer.keyframes)}
+            frame={frame}
+            onStart={(e, end) => startMotionEndDrag(e, selectedLayer, end)}
+          />
+        )}
         {selectedLayer && handleBox && (
           <ResizeHandles
             box={handleBox}

@@ -113,30 +113,36 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
     reconciling the image popout's 90° `rotateQuarters` steps with the free angle
     (the popout's steps change the image's aspect, so both coexist for now).
 
-- [ ] **Simple straight-line motion (start point → end point over a duration).** Decided
-  with the owner 2026-09-28; same branch, after rotation.
-  - **Model:** reuse `Layer.keyframes`. A simple move is exactly two keyframes that
-    differ in x/y; there is no second motion model. Linear interpolation, holding
-    before the start and after the end, is already what `layerTransformAt` does.
-  - **Defaults:** "Add motion" starts the move AT THE PLAYHEAD, from where the layer
-    currently sits, for a default duration (clamped to the clip's end). The layer
-    holds at the end point afterwards. Start time and duration are editable.
-  - **UI:** the path is drawn on the canvas as a line with a dot at each end; dragging
-    a dot edits that point. The Inspector gets a "Motion" section (start X/Y, end X/Y,
-    start time, duration). Dragging the layer itself on the canvas shifts the whole
-    path (both ends). The existing Keyframes list stays as the advanced editor; the
-    simple section shows when a layer has zero or two keyframes.
-  - **Video/image:** preview and export already honour position keyframes (verified,
-    FFMPEG-NOTES "Keyframed layer motion"); this part is UI only.
-  - **Text (new):** the preview applies `layerTransformAt` to text. The export gives
-    every ASS event a text layer emits (each line, typewriter steps, slide
-    entrance/exit, sparkles) its own `\move` slice of the motion through ONE helper,
-    summed with any slide offset. On rotated text the `\move` endpoints are
-    inverse-rotated about the fixed `\org` (still a straight line). The raster (PNG)
-    path uses overlay x/y expressions, as media does.
-  - **Captions later:** not in this pass, but the motion helpers take a generic
-    position + keyframes rather than a `Layer`, so captions can adopt them later
-    without a rewrite.
+- [~] **Simple straight-line motion (start point → end point over a duration).**
+  - **Model:** no second model. A simple move is two `Layer.keyframes` (`shared/motion.ts`,
+    unit-tested). Media already honoured keyframes. Text now follows them for POSITION
+    only, via `textMotion` (first moving stretch; its size is never keyframed), in the
+    preview and the burn alike.
+  - **UI:** Inspector ▸ Motion (video, image, text). "Add motion" starts the move AT THE
+    PLAYHEAD from where the layer is, for a set duration (default 1s, clamped to the
+    clip), ending a quarter frame-width to the side (left if right would leave the frame)
+    so both dots are visible. Then Start X/Y, End X/Y, Starts at, Duration and "Remove
+    motion" (which leaves the layer where the move started). A layer with more than two
+    keyframes says so (media: edit under Keyframes). The canvas draws the path (dashed,
+    hollow start dot, filled end dot); dragging a dot moves that end. Dragging the layer
+    itself, or resizing it, shifts (and from a corner, scales) the WHOLE path, so a simple
+    move never grows a third keyframe. The dots sit above the layer, so at the playhead
+    where the layer sits on a dot, the dot wins; grab the layer elsewhere.
+  - **Export, text:** the block is laid out where the move starts. Every event gets one
+    windowed `move` (no split); only a slide that overlaps the move splits, continuing
+    its fade with `ade`. A rotated block's travel is counter-rotated for the fixed
+    `org`. Sparkles ride it in screen space. Moving rasterised text renders at the frame
+    centre and travels on the image keyframe path. See FFMPEG-NOTES "Straight-line motion".
+  - **Tests:** `src/shared/motion.test.ts`, the motion block in `assBuilder.test.ts`,
+    `e2e/motion.spec.ts` (add at the playhead, text follows, end-dot drag + one undo,
+    whole-path drag for text and media, remove) and `e2e/motionExport.spec.ts` (real
+    export: rotated libass text and raster text both travel straight, halfway at the
+    midpoint).
+  - _Unverified: not yet tried by the owner in `npm run dev` with real media. Video and
+    image motion is the pre-existing keyframe export (verified when it shipped); this pass
+    added only its UI. A slide overlapping a move is covered by the ASS string tests and
+    the ade verification, not by a real export._
+  - **Captions later:** the helpers take keyframe lists and points, not a `Layer`.
 
 ### Text updates (continued)
 
