@@ -26,6 +26,7 @@ import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { cellSpan, coverCrop, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { clampAnimWindows, effectiveTextAnimation } from '@shared/textAnim'
 import { activeSparkle, sparklesFor } from '@shared/sparkle'
+import { normalizeDeg, rotateVec } from '@shared/rotation'
 import { textWrapWidth } from '@shared/textStyle'
 import { presetFor, type PresetId } from '@shared/formats'
 import { alphaInputDecoder } from '@shared/media'
@@ -404,6 +405,9 @@ async function renderComposition(
           hasAlpha,
           inputDecoder,
           crop: c.crop ?? null,
+          flipH: c.flipH,
+          flipV: c.flipV,
+          rotationDeg: l.rotationDeg,
           colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
           boxW,
           boxH,
@@ -472,6 +476,7 @@ async function renderComposition(
           rotateQuarters: q,
           flipH: c.flipH,
           flipV: c.flipV,
+          rotationDeg: l.rotationDeg,
           keyframes: exportKeyframes(l, aspect),
           opacityAnim: await opacityAnimFor(l, c.opacity)
         }
@@ -630,7 +635,8 @@ async function renderComposition(
       // stroke and shadow together — `textBlockSpec` applies `l.scale` to all
       // of them (scaling decorations by the output scale alone once left a
       // 1.43x-resized overlay wearing a pill sized for the unscaled text).
-      const spec = textBlockSpec(c.text, c, l, l.scale, m, frame.w, { widthPx: c.widthPx })
+      const rotationDeg = l.rotationDeg ? normalizeDeg(l.rotationDeg) : 0
+      const spec = textBlockSpec(c.text, c, l, l.scale, m, frame.w, { widthPx: c.widthPx, rotationDeg })
       const fontSizePx = spec.fontSizePx
       // Sparkles are computed from the SAME shared helper the preview uses, at
       // the output-scaled font size — every offset it returns is a multiple of
@@ -647,14 +653,20 @@ async function renderComposition(
             durSec: layerDur,
             typewriterSec:
               textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
-          }).map((sp) => ({
-            startSec: l.startSec + sp.tSec,
-            endSec: Math.min(l.endSec, l.startSec + sp.tSec + sp.lifeSec),
-            x: r(m.x(l.x) + sp.x),
-            y: r(m.y(l.y) + sp.y),
-            sizePx: sp.sizePx,
-            rotDeg: sp.rotDeg
-          }))
+          }).map((sp) => {
+            // Sparkle offsets are in the text block's own axes; a rotated block
+            // carries them round its centre (the preview draws them inside the
+            // rotated box, so they turn with it for free).
+            const off = rotateVec(sp.x, sp.y, rotationDeg)
+            return {
+              startSec: l.startSec + sp.tSec,
+              endSec: Math.min(l.endSec, l.startSec + sp.tSec + sp.lifeSec),
+              x: r(m.x(l.x) + off.x),
+              y: r(m.y(l.y) + off.y),
+              sizePx: sp.sizePx,
+              rotDeg: sp.rotDeg + rotationDeg
+            }
+          })
         : []
       // A gradient (libass can't do it) OR an explicit wrap width burns as a
       // full-frame PNG overlay, rasterised with the same CSS the preview uses.

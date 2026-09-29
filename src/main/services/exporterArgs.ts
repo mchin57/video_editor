@@ -14,7 +14,8 @@
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { presetFor } from '@shared/formats'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
-import { cropFilter, f3, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
+import { cropFilter, f3, piecewiseLinearExpr, r, rotateFilter, speedRampPlayedExpr } from './ffmpegFilters'
+import { normalizeDeg, rotatedBounds } from '@shared/rotation'
 
 /**
  * Per-frame opacity animation for a visual: `sendcmd` (reading `cmdFile`,
@@ -41,6 +42,26 @@ export interface ExportKeyframe {
   cx: number
   cy: number
 }
+
+/**
+ * A rotated keyframed layer is turned ONCE at a fixed size and then scaled per
+ * frame: `rotate` sizes its output at configure time, so it can't follow a
+ * per-frame resize. The pre-rotate size is the largest keyframe box (keyframes
+ * scale uniformly, so every box shares one aspect — rotating at the biggest
+ * keeps full detail), and the per-frame targets become each keyframe's ROTATED
+ * bounds, which interpolate exactly like the boxes they bound. Verified — see
+ * FFMPEG-NOTES "Layer rotation".
+ */
+const maxKfBox = (kfs: ExportKeyframe[]): { w: number; h: number } =>
+  kfs.reduce((m, k) => (k.w * k.h > m.w * m.h ? { w: k.w, h: k.h } : m), { w: 0, h: 0 })
+const rotatedKfs = (kfs: ExportKeyframe[], deg: number): ExportKeyframe[] =>
+  kfs.map((k) => ({ ...k, ...rotatedBounds(k.w, k.h, deg) }))
+/** A layer's rotation as the chains use it: normalised, 0 = none. */
+const layerRot = (deg: number | undefined): number => (deg ? normalizeDeg(deg) : 0)
+/** Centre-anchored static overlay position for a rotated layer (its output is
+ *  the rotated bounds, so the top-left moves with the angle). */
+const centredPos = (x: number, y: number, boxW: number, boxH: number): string =>
+  `x='${f3(x + boxW / 2)}-overlay_w/2':y='${f3(y + boxH / 2)}-overlay_h/2'`
 
 /** Even-rounded (yuv420-safe) per-frame dimension expression. */
 const kfDimExpr = (kfs: ExportKeyframe[], dim: 'w' | 'h'): string =>
@@ -100,6 +121,12 @@ export interface ExportVideo {
   inputDecoder?: string | null
   /** Source-pixel crop, or null. */
   crop: { x: number; y: number; w: number; h: number } | null
+  /** Mirror the (cropped) picture. */
+  flipH?: boolean
+  flipV?: boolean
+  /** Layer rotation, clockwise degrees about the box centre (absent/0 = none).
+   *  Forces an alpha pipeline so the rotated corners are transparent. */
+  rotationDeg?: number
   /** Precomputed eq filter (color correction), or '' (neutral). */
   colorEq: string
   /** Display box in output px. */
@@ -145,6 +172,9 @@ export interface ExportImage {
   rotateQuarters?: number
   flipH?: boolean
   flipV?: boolean
+  /** Free layer rotation, clockwise degrees about the box centre, applied
+   *  AFTER the box is sized (absent/0 = none). */
+  rotationDeg?: number
   /** Position/scale keyframes (empty/absent = static). A keyframed image input
    *  becomes `-loop 1` + `fps=30` so it is a real frame stream `t` can drive. */
   keyframes?: ExportKeyframe[]
@@ -364,10 +394,18 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       const pre: string[] = []
       if (v.hdrChain) pre.push(v.hdrChain)
       if (v.crop) pre.push(cropFilter(v.crop))
+      if (v.flipH) pre.push('hflip')
+      if (v.flipV) pre.push('vflip')
+      const rot = layerRot(v.rotationDeg)
       // Keyframed layers scale per-frame AFTER the setpts shift (so the scale
       // expressions see output-timeline t); static layers keep the one-shot
-      // scale here (exact strings pinned by tests).
+      // scale here (exact strings pinned by tests). A rotated keyframed layer
+      // is pre-scaled to its largest keyframe box instead (see `maxKfBox`).
       if (!kfs) pre.push(`scale=${r(v.boxW)}:${r(v.boxH)}:flags=bicubic`)
+      else if (rot) {
+        const mb = maxKfBox(kfs)
+        pre.push(`scale=${r(mb.w)}:${r(mb.h)}:flags=bicubic`)
+      }
       if (v.colorEq) pre.push(v.colorEq)
       // Freeze holds stretch PTS: each pushes all frames at/after its source point
       // forward by holdSec, so the held frame repeats (under -fps_mode cfr) instead
@@ -401,9 +439,11 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
           ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
           : `setpts=${elapsed}+${f3(v.startSec)}/TB`
       }
-      pre.push('setsar=1', v.hasAlpha ? 'format=yuva420p' : 'format=yuv420p', setpts)
+      pre.push('setsar=1', v.hasAlpha || rot ? 'format=yuva420p' : 'format=yuv420p', setpts)
+      if (rot) pre.push(rotateFilter(rot))
       if (kfs) {
-        pre.push(`scale=w='${kfDimExpr(kfs, 'w')}':h='${kfDimExpr(kfs, 'h')}':eval=frame:flags=bicubic`)
+        const sk = rot ? rotatedKfs(kfs, rot) : kfs
+        pre.push(`scale=w='${kfDimExpr(sk, 'w')}':h='${kfDimExpr(sk, 'h')}':eval=frame:flags=bicubic`)
       }
       if (v.opacity) {
         // Keyframed opacity: sendcmd sits AFTER the setpts shift so its
@@ -422,10 +462,13 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       // only the repeat keeps the held frame on screen — `eof_action=pass` punched
       // the base canvas (black) through instead. It also matches the preview,
       // whose `videoSourceTime` clamps to `outSec` past the end of the footage.
+      const vxy = pos
+        ? `x='${pos.x}':y='${pos.y}'`
+        : rot
+          ? centredPos(v.x, v.y, v.boxW, v.boxH)
+          : `${r(v.x)}:${r(v.y)}`
       chains.push(
-        pos
-          ? `[${prev}][pv${i}]overlay=x='${pos.x}':y='${pos.y}':enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
-          : `[${prev}][pv${i}]overlay=${r(v.x)}:${r(v.y)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
+        `[${prev}][pv${i}]overlay=${vxy}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
       )
     } else if (vis.kind === 'image') {
       const im = vis.image
@@ -445,15 +488,24 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       if (im.flipV) steps.push('vflip')
       const ikfs = im.keyframes && im.keyframes.length > 0 ? im.keyframes : null
       const oanim = im.opacityAnim
+      const irot = layerRot(im.rotationDeg)
       if (ikfs) {
         // The -loop 1 input already runs on the output clock from 0, so the
         // per-frame scale expressions read absolute timeline t directly.
+        if (irot) {
+          const mb = maxKfBox(ikfs)
+          steps.push(`scale=${r(mb.w)}:${r(mb.h)}`)
+        }
         steps.push('format=rgba')
         if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
-        steps.push('fps=30', `scale=w='${kfDimExpr(ikfs, 'w')}':h='${kfDimExpr(ikfs, 'h')}':eval=frame`)
+        steps.push('fps=30')
+        if (irot) steps.push(rotateFilter(irot))
+        const sk = irot ? rotatedKfs(ikfs, irot) : ikfs
+        steps.push(`scale=w='${kfDimExpr(sk, 'w')}':h='${kfDimExpr(sk, 'h')}':eval=frame`)
       } else {
         steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
         if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
+        if (irot) steps.push(rotateFilter(irot))
         if (oanim) steps.push('fps=30') // real frame stream for the commands
       }
       if (oanim) {
@@ -465,11 +517,12 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       }
       chains.push(`[${i}:v]${steps.join(',')}[pi${i}]`)
       const ipos = ikfs ? kfPosExprs(ikfs) : null
-      chains.push(
-        ipos
-          ? `[${prev}][pi${i}]overlay=x='${ipos.x}':y='${ipos.y}':enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
-          : `[${prev}][pi${i}]overlay=${r(im.x)}:${r(im.y)}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`
-      )
+      const ixy = ipos
+        ? `x='${ipos.x}':y='${ipos.y}'`
+        : irot
+          ? centredPos(im.x, im.y, im.boxW, im.boxH)
+          : `${r(im.x)}:${r(im.y)}`
+      chains.push(`[${prev}][pi${i}]overlay=${ixy}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`)
     } else {
       chains.push(`[${prev}]ass=${vis.assFile}${assOpts}[${out}]`)
     }

@@ -59,7 +59,7 @@ import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { TextStyleControls } from './TextStyleControls'
 import { LayoutCells } from './LayoutCells'
-import { Check, Field, NumberInput, Row, colorCls, dangerBtnCls, disabledCls, inputCls } from './ui'
+import { AngleField, Check, Field, NumberInput, Row, colorCls, dangerBtnCls, disabledCls, inputCls, toggleCls } from './ui'
 
 type TriMode = 'default' | 'on' | 'off'
 
@@ -506,6 +506,32 @@ function LayerEditor(): JSX.Element | null {
           />
         </div>
       </Field>
+
+      {/* Rotation: the same control captions use, paired with the canvas
+          handle. Layouts and compound clips don't rotate (yet). */}
+      {(c.kind === 'video' || c.kind === 'image' || c.kind === 'text') && (
+        <AngleField value={layer.rotationDeg ?? 0} onChange={(deg) => update(id, { rotationDeg: deg || undefined })} />
+      )}
+      {c.kind === 'video' && (
+        <div className="mb-2 flex gap-1">
+          <button
+            type="button"
+            className={toggleCls(!!c.flipH)}
+            onClick={() => updateContent(id, { flipH: !c.flipH })}
+            title="Mirror left–right"
+          >
+            ⇋ Flip H
+          </button>
+          <button
+            type="button"
+            className={toggleCls(!!c.flipV)}
+            onClick={() => updateContent(id, { flipV: !c.flipV })}
+            title="Mirror top–bottom"
+          >
+            ⇵ Flip V
+          </button>
+        </div>
+      )}
 
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
         <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
@@ -1171,17 +1197,7 @@ function CaptionStyleFields({
           />
         </Field>
       </div>
-      <Field label={`Rotation · ${Math.round(style.rotationDeg)}°`}>
-        <input
-          type="range"
-          min={-180}
-          max={180}
-          step={1}
-          value={style.rotationDeg}
-          onChange={(e) => onPatch({ rotationDeg: Number(e.target.value) })}
-          className="w-full accent-sky-400"
-        />
-      </Field>
+      <AngleField value={style.rotationDeg} onChange={(rotationDeg) => onPatch({ rotationDeg })} />
     </>
   )
 }

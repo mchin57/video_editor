@@ -638,6 +638,41 @@ frames piped through the model, then re-encodes them with the window's audio
   library's own `proxyReady = existsSync(proxy)` still has this race for
   ordinary imports — tracked as a bug.)
 
+## Layer rotation — free angle (verified ffmpeg 8.1.1, 2026-09)
+
+Verified with lavfi solid boxes over a red base and pixel samples, then again
+through the real exporter (`e2e/rotationExport.spec.ts`). Drives
+`rotateFilter` (`ffmpegFilters.ts`) and the rotated chains in `exporterArgs.ts`:
+
+- **`rotate=a=<rad>` with a POSITIVE angle turns CLOCKWISE** on screen: a
+  400×200 box at +30° puts its +x end at (+cos, +sin) with y down. That matches
+  CSS `rotate()`, so `Layer.rotationDeg` goes to ffmpeg with no sign flip
+  (libass is the opposite: `rz` is counter-clockwise, hence `rz-deg`).
+- **`ow='ceil(rotw(a)/2)*2':oh='ceil(roth(a)/2)*2':c=none`** grows the frame to
+  the rotated bounds and leaves the corners TRANSPARENT, but only if the input
+  already has alpha (`format=yuva420p` / `rgba` first). Odd rotated sizes also
+  rendered fine with yuva420p; the chain rounds up to even anyway.
+- **Alpha survives `rotate`**: a source whose left half is alpha 0, turned 90°,
+  shows the base through the (now top) transparent half. So bg-removed clips
+  keep their matte.
+- **`rotate` sizes its output ONCE, at configure time**, so it can't follow a
+  per-frame `scale=…:eval=frame` upstream of it. Keyframed layers therefore
+  rotate at a fixed size (the largest keyframe box) and THEN scale per frame to
+  each keyframe's rotated bounds. Checked: a 90°-rotated box scaled 1→2× over
+  1s stays centred and covers exactly 200×400 → 400×800.
+- **Position**: the rotated output is the rotated bounds, so a rotated layer is
+  overlaid by its CENTRE (`x='cx-overlay_w/2'`), static or keyframed.
+- **Text**: libass rotates each line about the block centre (`org`), and a
+  `move` inside that event is turned about the fixed `org` as well. So a
+  rotated `slideUp` travels along the text's OWN axis (measured: mid-slide ink
+  offset = rotateVec(0, 45px, 30°) within 1px), and the preview matches that by
+  rotating its slide offset. The libass burn and the Chromium raster of the
+  same rotated block agree to within 1.5px at the ink centroid; the extreme
+  glyph tips differ by 3–6px (anti-aliasing).
+- Sparkles on rotated text are placed by rotating their offsets in the
+  exporter (`rotateVec`), not with `org`. Checked by eye: preview
+  screenshot vs export frame at 60°, same scatter along the letters.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

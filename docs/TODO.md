@@ -72,46 +72,46 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 > Decided with the owner 2026-09-28. Work in progress on branch
 > `claude/worktree-branch-creation-e8f5b8`.
 
-- [ ] **One free-angle rotation for every visual, done on the canvas.** Supersedes the
+- [~] **One free-angle rotation for every visual, done on the canvas.** Supersedes the
   separate "rotate video clips" and "free rotation for text overlays" items.
   - **Model:** `Layer.rotationDeg` (clockwise degrees about the box centre; absent = 0;
-    schema bump + `migrateProject` step). Captions keep `CaptionStyle.rotationDeg`.
-    A caption rotation follows the same rule as a caption drag: lane-wide mode edits
-    the global style, otherwise it creates or edits that caption's override.
-  - **One implementation, used by all of them:** the pure angle math (pointer → angle,
-    snapping, rotating a drag delta into the box's own axes) lives in `shared/`, with
-    unit tests. One `RotateHandle` in `PreviewStage` drives it. A small adapter reads
-    and writes the angle for a layer or a caption. No per-kind copies.
-  - **Handle:** sits above the top-middle resize handle. It turns with the box, so on a
-    clip rotated 90° clockwise it sits to the clip's right. It is on the canvas itself
-    (no popout). It snaps near 0/90/180/270; Shift gives 15° steps. It must stay
-    grabbable when the box's top edge sits on or past the frame edge (the resize
-    handles' pinning rule). A whole drag is one undo step (`liveUpdate` + `commitLive`).
-    Plus a numeric angle field in the Inspector.
-  - **Resize on a rotated box:** handles and the selection outline follow the rotated
-    box, and drags are rotated into its local axes before `resizeBox`, so edges stretch
-    and re-wrap along the box's own sides. Applies to media and text alike.
-    `measureSelectedBox` must read the unrotated size, because `getBoundingClientRect`
-    returns the screen-aligned bounds.
-  - **Text animations:** slides travel along the text's rotated axis. libass cannot move
-    `\org` during a `\move`, and the owner prefers this anyway, so the preview matches
-    it. Sparkles must rotate with the block (verify on a real export).
-  - **Export, media:** ffmpeg `rotate` with a transparent fill (`c=none`,
-    `ow=rotw(a)`/`oh=roth(a)`) on an rgba/yuva stream, overlaid about the box centre.
-    With keyframed scale the plan is to rotate at a fixed size BEFORE the per-frame
-    scale (the rotated bounds scale by the same factor). Verify the whole chain against
-    the real binary first (alpha kept on bg-removed clips, edge quality, keyframed scale
-    + position), and record the result in FFMPEG-NOTES.
-  - **Crop:** the per-clip crop (Crop tool) is a property of the picture, so it applies
-    first and the cropped picture is rotated as a whole. The crop tool keeps showing
-    the unrotated source.
-  - **Flips:** `flipH`/`flipV` on `VideoContent`, mirroring `ImageContent` (Inspector
-    buttons; `hflip`/`vflip` in export).
-  - **Also update:** still capture (`still.ts`) and `layerFitScale` for rotated media.
-  - **Out of scope for now:** keyframed rotation; rotating layout and compound layers
-    (no handle shown on them); reconciling the image popout's 90° `rotateQuarters`
-    steps with the free angle (the popout's steps change the image's aspect, so both
-    can coexist for now).
+    schema v23, additive). Captions keep `CaptionStyle.rotationDeg`. Video gets
+    `flipH`/`flipV` (Inspector toggles; export `hflip`/`vflip` after the crop;
+    still capture includes them). Rotation is a layer transform like position, so it
+    never changes the box's fit (`layerFitScale` is unchanged) and a still of a clip
+    does not bake it in.
+  - **One implementation:** the math is `shared/rotation.ts` (unit-tested). The
+    canvas `RotateHandle` and one `startRotate` drag serve video, image, text and
+    captions; only the `apply` differs (a caption follows the drag rule: lane-wide
+    mode turns the global style, otherwise that caption's override). The Inspector
+    uses one `AngleField` (`ui.tsx`) for layers and captions.
+  - **Handle:** above the top-middle, turning with the box (at 90° it sits to the
+    right). Flips to just inside when that spot is off the frame. Snaps within 5° of
+    0/90/180/270; Shift gives 15° steps; one undo step per drag. Layouts and compound
+    clips get no handle.
+  - **Resize on a rotated box:** handles sit on the rotated box with rotated cursors;
+    drags go through `resizeRotatedBox`, so edges stretch or re-wrap along the box's
+    own sides and the opposite edge stays put. The measured box now reports the
+    UNROTATED size + the angle (from the element's transform) instead of the
+    screen-aligned hull. Side resizes now write both x and y of the centre, as a
+    delta (on a rotated box a side handle moves the centre diagonally).
+  - **Export:** static media scale → `rotate` (transparent fill, alpha pipeline) and
+    overlay by centre; keyframed media rotate once at the largest keyframe box, then
+    scale per frame to the rotated bounds. Text passes the angle to the burn and the
+    rasteriser; rotated slides travel along the text's axis in both; sparkles are
+    rotated with the block. See FFMPEG-NOTES "Layer rotation".
+  - **Tests:** `src/shared/rotation.test.ts`, rotation cases in
+    `exporterArgs.test.ts`, `e2e/rotation.spec.ts` (handle position, snap, Shift,
+    one undo step, rotated text + media resize, caption handle and override), and
+    `e2e/rotationExport.spec.ts` (real export: rotated text burn vs raster, a
+    clockwise red clip with transparent corners, a rotated slide along its axis).
+  - _Unverified: not yet tried by the owner in `npm run dev` with real media. Image
+    layers are exercised only through the shared box/handle path and the arg-string
+    tests, not a real image export. Rotated sparkles were checked by eye only.
+    Keyframed rotated media were verified with lavfi in ffmpeg, not through the app._
+  - **Out of scope for now:** keyframed rotation; rotating layout and compound layers;
+    reconciling the image popout's 90° `rotateQuarters` steps with the free angle
+    (the popout's steps change the image's aspect, so both coexist for now).
 
 - [ ] **Simple straight-line motion (start point → end point over a duration).** Decided
   with the owner 2026-09-28; same branch, after rotation.

@@ -365,6 +365,73 @@ describe('buildExportArgs', () => {
     expect(s).toContain('[2:v]crop=iw*0.500:ih*0.500:iw*0.100:ih*0.200,transpose=1,hflip,scale=300:200,format=rgba[pi2]')
   })
 
+  describe('layer rotation (free angle) + video flips', () => {
+    const ROT30 = "rotate=a=0.523599:ow='ceil(rotw(0.523599)/2)*2':oh='ceil(roth(0.523599)/2)*2':c=none"
+
+    it('rotates a static video AFTER its box scale, in an alpha pipeline, centred on the box', () => {
+      const s = buildExportArgs(
+        plan({ visuals: [{ kind: 'video', video: { ...vid, boxW: 400, boxH: 200, x: 340, y: 860, rotationDeg: 30 } }] }),
+        'o'
+      ).join(' ')
+      expect(s).toContain(
+        `[1:v]scale=400:200:flags=bicubic,setsar=1,format=yuva420p,setpts=PTS-STARTPTS+1.000/TB,${ROT30}[pv1]`
+      )
+      // The rotated output is the rotated bounds, so it is placed by its centre.
+      expect(s).toContain("overlay=x='540.000-overlay_w/2':y='960.000-overlay_h/2':enable='between(t,1.000,6.000)'")
+    })
+
+    it('flips the cropped picture before scaling', () => {
+      const s = buildExportArgs(
+        plan({ visuals: [{ kind: 'video', video: { ...vid, crop: { x: 0, y: 0, w: 600, h: 1000 }, flipH: true, flipV: true } }] }),
+        'o'
+      ).join(' ')
+      expect(s).toContain('[1:v]crop=600:1000:0:0,hflip,vflip,scale=1080:1920:flags=bicubic,')
+    })
+
+    it('rotates a keyframed video once at its largest box, then scales the ROTATED bounds per frame', () => {
+      const kfs = [
+        { t: 1, w: 400, h: 200, cx: 540, cy: 960 },
+        { t: 3, w: 800, h: 400, cx: 300, cy: 500 }
+      ]
+      const s = buildExportArgs(
+        plan({ visuals: [{ kind: 'video', video: { ...vid, keyframes: kfs, rotationDeg: 90 } }] }),
+        'o'
+      ).join(' ')
+      expect(s).toContain('[1:v]scale=800:400:flags=bicubic,setsar=1,format=yuva420p,setpts=PTS-STARTPTS+1.000/TB,rotate=a=1.570796:')
+      // 90°: bounds swap, so the per-frame width follows the boxes' HEIGHTS (200 → 400).
+      expect(s).toContain(
+        "c=none,scale=w='trunc((if(lt(t,1.000),200.000,if(lt(t,3.000),200.000+200.000*(t-1.000)/2.000,400.000)))/2)*2'"
+      )
+      expect(s).toContain("overlay=x='(if(lt(t,1.000),540.000,")
+    })
+
+    it('rotates a static image after its box scale, centred', () => {
+      const img = { path: 'C:/i/p.png', boxW: 300, boxH: 200, x: 100, y: 100, startSec: 0, endSec: 3, opacity: 1, rotationDeg: 30 }
+      const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: img }] }), 'o').join(' ')
+      expect(s).toContain(`[1:v]scale=300:200,format=rgba,${ROT30}[pi1]`)
+      expect(s).toContain("overlay=x='250.000-overlay_w/2':y='200.000-overlay_h/2'")
+    })
+
+    it('rotates a keyframed image on its frame stream before the per-frame scale', () => {
+      const img = {
+        path: 'C:/i/p.png', boxW: 300, boxH: 200, x: 100, y: 100, startSec: 0, endSec: 4, opacity: 1, rotationDeg: 30,
+        keyframes: [
+          { t: 0, w: 300, h: 200, cx: 250, cy: 200 },
+          { t: 4, w: 600, h: 400, cx: 540, cy: 960 }
+        ]
+      }
+      const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: img }] }), 'o').join(' ')
+      expect(s).toContain(`[1:v]scale=600:400,format=rgba,fps=30,${ROT30},scale=w='trunc((`)
+    })
+
+    it('treats 0° and 360° as no rotation (strings unchanged)', () => {
+      const base = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
+      for (const rotationDeg of [0, 360]) {
+        expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, rotationDeg } }] }), 'o').join(' ')).toBe(base)
+      }
+    })
+  })
+
   it('composites an image after the videos: scale, rgba, opacity, gated overlay', () => {
     const img = { path: 'C:/i/logo.png', boxW: 300, boxH: 200, x: 100, y: 50, startSec: 0, endSec: 3, opacity: 0.5 }
     const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')

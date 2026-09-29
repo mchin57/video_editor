@@ -38,7 +38,6 @@ import {
   layersAtTime,
   layerTransformAt,
   makeVideoLayer,
-  resizeBox,
   stretchedBox,
   upsertKeyframe,
   videoSourceTime,
@@ -48,6 +47,14 @@ import {
   type ResizeHandle
 } from '@shared/layers'
 import { clampAnimWindows, effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
+import {
+  handleOffset,
+  normalizeDeg,
+  pointerAngleDeg,
+  resizeRotatedBox,
+  rotateDragDeg,
+  rotateVec
+} from '@shared/rotation'
 import { activeSparkle, sparkleStateAt, sparklesFor, type Sparkle } from '@shared/sparkle'
 import { LOGICAL } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
@@ -55,7 +62,7 @@ import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
-import { activeComp, projectFormat, useProject } from '@/state/projectStore'
+import { activeComp, getActiveComp, projectFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 
@@ -233,14 +240,31 @@ function TextBlock({
  *  occlude the layers behind it; anything past the frame is cropped by the stage. */
 function mediaBox(layer: Layer, aspect: number): CSSProperties {
   const { w, h } = stretchedBox(aspect, layer.scale, layer.stretchX ?? 1, layer.stretchY ?? 1, LOGICAL)
+  const rot = layerRotation(layer)
   return {
     position: 'absolute',
     left: pct(layer.x - w / 2, LOGICAL.width),
     top: pct(layer.y - h / 2, LOGICAL.height),
     width: pct(w, LOGICAL.width),
-    height: pct(h, LOGICAL.height)
+    height: pct(h, LOGICAL.height),
+    // About the box centre (the default origin) — the export's `rotate` turns
+    // the same sized box about the same point.
+    ...(rot ? { transform: `rotate(${rot}deg)` } : {})
   }
 }
+
+/** Layers the rotate handle is offered on. Layouts and compound clips render
+ *  as frame-shaped comps and ignore `rotationDeg` (backlogged). */
+const canRotate = (layer: Layer): boolean =>
+  layer.content.kind === 'video' || layer.content.kind === 'image' || layer.content.kind === 'text'
+
+/** A layer's rotation, normalised (0 = upright). @see shared/rotation.ts */
+const layerRotation = (layer: Pick<Layer, 'rotationDeg'>): number =>
+  layer.rotationDeg ? normalizeDeg(layer.rotationDeg) : 0
+
+/** Mirror transform for flipped media, or undefined. */
+const flipTransform = (c: { flipH?: boolean; flipV?: boolean }): string | undefined =>
+  c.flipH || c.flipV ? `scaleX(${c.flipH ? -1 : 1}) scaleY(${c.flipV ? -1 : 1})` : undefined
 
 /** CSS for the <video>/<img> filling its layer box (crop/color aware). */
 function videoFillStyle(content: VideoContent, asset: MediaAsset | undefined): CSSProperties {
@@ -271,21 +295,39 @@ const mediaAspect = (asset: MediaAsset | undefined, content: VideoContent | { cr
   return v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
 }
 
-/** Measure the selected layer's on-screen box (tagged `data-resizebox`) in logical
- *  px, via the stage. Text height is intrinsic so it must be read from the DOM;
- *  measuring media the same way keeps one path and tracks any live transform. */
-function measureSelectedBox(stage: HTMLElement): ResizeBox | null {
+/** The selected element's box as the handles need it: centre + UNROTATED size
+ *  in logical px, its rotation, and the stage's screen px per logical px (for
+ *  handle gaps that stay a constant on-screen size). */
+interface MeasuredBox extends ResizeBox {
+  rotationDeg: number
+  pxPerLogical: number
+}
+
+/** Measure the selected element's box (tagged `data-resizebox`) via the stage.
+ *  Text height is intrinsic so it must be read from the DOM; measuring media the
+ *  same way keeps one path and tracks any live transform. The bounding rect of a
+ *  ROTATED box is its screen-aligned hull, so only its centre is used (rotation
+ *  is about the centre); size and angle come from the layout box and the
+ *  element's own transform. */
+function measureSelectedBox(stage: HTMLElement): MeasuredBox | null {
   const el = stage.querySelector('[data-resizebox]') as HTMLElement | null
   if (!el) return null
   const er = el.getBoundingClientRect()
   const sr = stage.getBoundingClientRect()
-  if (sr.width === 0) return null
+  if (sr.width === 0 || stage.offsetWidth === 0) return null
   const s = LOGICAL.width / sr.width
+  // Stage-local CSS px → screen px (the canvas may itself be scaled).
+  const local = sr.width / stage.offsetWidth
+  const t = getComputedStyle(el).transform
+  const m = t && t !== 'none' ? new DOMMatrixReadOnly(t) : new DOMMatrixReadOnly()
+  const own = Math.hypot(m.a, m.b) || 1
   return {
     cx: (er.left + er.width / 2 - sr.left) * s,
     cy: (er.top + er.height / 2 - sr.top) * s,
-    w: er.width * s,
-    h: er.height * s
+    w: el.offsetWidth * own * local * s,
+    h: el.offsetHeight * own * local * s,
+    rotationDeg: normalizeDeg((Math.atan2(m.b, m.a) * 180) / Math.PI),
+    pxPerLogical: 1 / s
   }
 }
 
@@ -296,8 +338,15 @@ function measureSelectedBox(stage: HTMLElement): ResizeBox | null {
 const MEDIA_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 const TEXT_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw', 'e', 'w']
 const CORNER_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw']
-const handleCursor = (h: ResizeHandle): string =>
-  h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize'
+/** Resize cursor for a handle on a box rotated by `deg`: the handle's outward
+ *  direction, turned with the box, picks the nearest of the four cursors. */
+const HANDLE_DIR_DEG: Record<ResizeHandle, number> = { n: 0, ne: 45, e: 90, se: 135, s: 180, sw: 225, w: 270, nw: 315 }
+const RESIZE_CURSORS = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize']
+const handleCursor = (h: ResizeHandle, deg = 0): string =>
+  RESIZE_CURSORS[((Math.round((HANDLE_DIR_DEG[h] + deg) / 45) % 4) + 4) % 4]
+
+/** On-screen gap between the box's top edge and the rotate handle. */
+const ROTATE_HANDLE_GAP_PX = 22
 
 /** The edge/corner resize handles drawn on the selected layer's box. Positioned
  *  in a non-scaled overlay over the FRAME (so they stay a constant size and are
@@ -313,32 +362,85 @@ function ResizeHandles({
   box,
   frame,
   handles,
-  onStart
+  onStart,
+  onRotateStart
 }: {
-  box: ResizeBox
+  box: MeasuredBox
   frame: FrameRect
   handles: ResizeHandle[]
-  onStart: (e: ReactPointerEvent, handle: ResizeHandle) => void
+  onStart?: (e: ReactPointerEvent, handle: ResizeHandle) => void
+  /** Present = the box can rotate: draws the rotate handle. */
+  onRotateStart?: (e: ReactPointerEvent) => void
 }): JSX.Element {
+  const deg = box.rotationDeg
   return (
     <div className="pointer-events-none absolute inset-0 z-[450]">
-      {handles.map((h) => {
-        const x = box.cx + (h.includes('e') ? box.w / 2 : h.includes('w') ? -box.w / 2 : 0)
-        const y = box.cy + (h.includes('s') ? box.h / 2 : h.includes('n') ? -box.h / 2 : 0)
-        const px = clamp(x, frame.x, frame.x + frame.w)
-        const py = clamp(y, frame.y, frame.y + frame.h)
-        return (
-          <span
-            key={h}
-            data-handle={h}
-            data-pinned={px !== x || py !== y ? '' : undefined}
-            onPointerDown={(e) => onStart(e, h)}
-            style={{ left: pct(px - frame.x, frame.w), top: pct(py - frame.y, frame.h), cursor: handleCursor(h) }}
-            className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-sky-500 bg-white shadow"
-          />
-        )
-      })}
+      {onStart &&
+        handles.map((h) => {
+          // Handles sit on the ROTATED box, so they turn with it.
+          const off = handleOffset(box.w, box.h, h, deg)
+          const x = box.cx + off.x
+          const y = box.cy + off.y
+          const px = clamp(x, frame.x, frame.x + frame.w)
+          const py = clamp(y, frame.y, frame.y + frame.h)
+          return (
+            <span
+              key={h}
+              data-handle={h}
+              data-pinned={px !== x || py !== y ? '' : undefined}
+              onPointerDown={(e) => onStart(e, h)}
+              style={{ left: pct(px - frame.x, frame.w), top: pct(py - frame.y, frame.h), cursor: handleCursor(h, deg) }}
+              className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-sky-500 bg-white shadow"
+            />
+          )
+        })}
+      {onRotateStart && <RotateHandle box={box} frame={frame} onStart={onRotateStart} />}
     </div>
+  )
+}
+
+/**
+ * THE rotate handle — one implementation for video, image, text and captions.
+ * It hangs off the middle of the box's top edge, a constant on-screen gap
+ * outward, and turns with the box (at 90° clockwise it sits to the box's right).
+ * When that spot would fall outside the frame (a clip that fills a 9:16 frame
+ * has its top edge ON the frame edge) it flips to just inside the edge instead,
+ * so it is always grabbable — the rotate twin of the resize handles' pinning.
+ */
+function RotateHandle({
+  box,
+  frame,
+  onStart
+}: {
+  box: MeasuredBox
+  frame: FrameRect
+  onStart: (e: ReactPointerEvent) => void
+}): JSX.Element {
+  const anchor = handleOffset(box.w, box.h, 'rot', box.rotationDeg)
+  const gap = ROTATE_HANDLE_GAP_PX / box.pxPerLogical
+  const up = rotateVec(0, -gap, box.rotationDeg)
+  const inFrame = (x: number, y: number): boolean =>
+    x >= frame.x && x <= frame.x + frame.w && y >= frame.y && y <= frame.y + frame.h
+  let x = box.cx + anchor.x + up.x
+  let y = box.cy + anchor.y + up.y
+  const inward = !inFrame(x, y)
+  if (inward) {
+    x = box.cx + anchor.x - up.x
+    y = box.cy + anchor.y - up.y
+  }
+  x = clamp(x, frame.x, frame.x + frame.w)
+  y = clamp(y, frame.y, frame.y + frame.h)
+  return (
+    <span
+      data-handle="rotate"
+      data-inward={inward ? '' : undefined}
+      title="Drag to rotate (Shift: 15° steps)"
+      onPointerDown={onStart}
+      style={{ left: pct(x - frame.x, frame.w), top: pct(y - frame.y, frame.h), cursor: 'grab' }}
+      className="pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-sky-500 bg-white text-[10px] leading-none text-sky-600 shadow"
+    >
+      ⟳
+    </span>
   )
 }
 
@@ -500,23 +602,28 @@ function VideoLayerView({
       data-resizebox={selected ? '' : undefined}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
-      <video
-        ref={ref}
-        // Before `src` — see the AudioFollower note; a layer clip can be
-        // boosted too, and a tainted element cannot be un-tainted.
-        crossOrigin="anonymous"
-        src={videoProxyUrl(asset)}
-        muted={silenced}
-        playsInline
-        style={fill}
-        onLoadedMetadata={() => {
-          const v = ref.current
-          if (v) {
-            v.currentTime = target
-            v.muted = silenced
-          }
-        }}
-      />
+      {/* Flips mirror the CROPPED picture, so they act on this box-filling
+          wrapper — flipping the (larger, offset) <video> itself would mirror
+          the whole source and show the wrong region. */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', transform: flipTransform(content) }}>
+        <video
+          ref={ref}
+          // Before `src` — see the AudioFollower note; a layer clip can be
+          // boosted too, and a tainted element cannot be un-tainted.
+          crossOrigin="anonymous"
+          src={videoProxyUrl(asset)}
+          muted={silenced}
+          playsInline
+          style={fill}
+          onLoadedMetadata={() => {
+            const v = ref.current
+            if (v) {
+              v.currentTime = target
+              v.muted = silenced
+            }
+          }}
+        />
+      </div>
     </div>
   )
 }
@@ -897,13 +1004,18 @@ function StackLayer({
                 textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
             })
           : []
+        // A slide travels along the text's OWN (rotated) axis — the export's
+        // \move runs about a fixed \org, which turns it the same way.
+        const rot = layerRotation(layer)
+        const slide = rotateVec(0, anim.dy, rot)
         return (
           <TextBlock
             key={layer.id}
             s={content}
-            x={layer.x}
-            y={layer.y + anim.dy}
+            x={layer.x + slide.x}
+            y={layer.y + slide.y}
             wrap={{ widthPx: content.widthPx, wrapWidthPx: textWrapWidth(frame.w) }}
+            rotationDeg={rot}
             scale={layer.scale * anim.scale}
             opacity={anim.opacity}
             zIndex={z}
@@ -1198,7 +1310,14 @@ export function PreviewStage(): JSX.Element {
     startDragWithUndo((ev) => {
       const dx = (ev.clientX - startX) * s
       const dy = (ev.clientY - startY) * s
-      const nb = resizeBox(startBox, handle, dx, dy, isCorner)
+      // Turned into the box's own axes, so a rotated edge stretches along its side.
+      const nb = resizeRotatedBox(startBox, handle, dx, dy, isCorner, startBox.rotationDeg)
+      // The centre moves by the box's shift — BOTH axes, since on a rotated box
+      // even a side handle moves the centre diagonally. Applied as a delta, so a
+      // measured centre that sits off the layer's own (a text slide mid-way)
+      // can't leak into the position.
+      const x = layer.x + (nb.cx - startBox.cx)
+      const y = layer.y + (nb.cy - startBox.cy)
       useProject.getState().liveUpdate((p) => ({
         ...p,
         layers: p.layers.map((l) => {
@@ -1206,18 +1325,18 @@ export function PreviewStage(): JSX.Element {
           if (isCorner) {
             const ns = clamp(layer.scale * (nb.w / startBox.w), 0.05, 8)
             if (kfd) {
-              return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nb.cx, y: nb.cy, scale: ns, ...kfExtra }) }
+              return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x, y, scale: ns, ...kfExtra }) }
             }
-            return { ...l, x: nb.cx, y: nb.cy, scale: ns }
+            return { ...l, x, y, scale: ns }
           }
           if (isText && l.content.kind === 'text') {
             // widthPx is the pre-scale wrap width; the measured box is post-scale.
-            return { ...l, x: nb.cx, content: { ...l.content, widthPx: nb.w / layer.scale } }
+            return { ...l, x, y, content: { ...l.content, widthPx: nb.w / layer.scale } }
           }
           if (handle === 'e' || handle === 'w') {
-            return { ...l, x: nb.cx, stretchX: (layer.stretchX ?? 1) * (nb.w / startBox.w) }
+            return { ...l, x, y, stretchX: (layer.stretchX ?? 1) * (nb.w / startBox.w) }
           }
-          return { ...l, y: nb.cy, stretchY: (layer.stretchY ?? 1) * (nb.h / startBox.h) }
+          return { ...l, x, y, stretchY: (layer.stretchY ?? 1) * (nb.h / startBox.h) }
         })
       }))
     })
@@ -1255,16 +1374,82 @@ export function PreviewStage(): JSX.Element {
     })
   }
 
+  // Rotate-handle drag — THE one rotate interaction; `apply` is the only part
+  // that differs between a layer and a caption. Relative to where the drag
+  // began (no jump on grab), snapping near right angles; Shift steps by 15°.
+  const startRotate = (
+    e: ReactPointerEvent,
+    startDeg: number,
+    apply: (deg: number) => void
+  ): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    const stage = stageRef.current
+    if (!stage) return
+    const box = measureSelectedBox(stage)
+    if (!box) return
+    const sr = stage.getBoundingClientRect()
+    const s = LOGICAL.width / sr.width
+    const angleAt = (ev: { clientX: number; clientY: number }): number =>
+      pointerAngleDeg(box.cx, box.cy, (ev.clientX - sr.left) * s, (ev.clientY - sr.top) * s)
+    const startPointer = angleAt(e)
+    startDragWithUndo((ev) => apply(rotateDragDeg(startDeg, startPointer, angleAt(ev), ev.shiftKey)))
+  }
+
+  const startLayerRotate = (e: ReactPointerEvent, layer: Layer): void =>
+    startRotate(e, layerRotation(layer), (deg) =>
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, rotationDeg: deg || undefined } : l))
+      }))
+    )
+
+  // Same rule as a caption drag: lane-wide mode turns the global style,
+  // otherwise this caption gets (or updates) its own override.
+  const startCaptionRotate = (e: ReactPointerEvent, seg: CaptionSegment): void => {
+    const global = useUi.getState().captionsGlobalSelected
+    const comp = getActiveComp()
+    if (!comp) return
+    startRotate(e, effectiveCaptionStyle(comp.captions, seg).rotationDeg, (deg) =>
+      useProject.getState().liveUpdate((p) => {
+        if (global) return { ...p, captions: { ...p.captions, style: { ...p.captions.style, rotationDeg: deg } } }
+        return {
+          ...p,
+          captions: {
+            ...p.captions,
+            segments: p.captions.segments.map((x) =>
+              x.id === seg.id ? { ...x, style: { ...(x.style ?? p.captions.style), rotationDeg: deg } } : x
+            )
+          }
+        }
+      })
+    )
+  }
+
   const activeLayers = layersAtTime(previewLayers, time).filter((l) => !l.hidden)
   const selectedLayer = activeLayers.find((l) => l.id === selectedLayerId) ?? null
 
   // Measure the selected layer's box for the resize handles. Re-runs whenever the
   // layer object changes (incl. each live drag frame) and on stage resize, so the
   // handles track the box. `useLayoutEffect` reads the freshly committed DOM.
-  const [handleBox, setHandleBox] = useState<ResizeBox | null>(null)
+  // All captions on screen now (audio clips are captioned independently, so two
+  // overlapping clips can show two captions at once — stack them).
+  const activeCaptions = captions?.enabled
+    ? captions.segments.filter((s) => s.enabled && time >= s.startSec && time < s.endSec)
+    : []
+  // The caption the rotate handle acts on: the selected one, or — in lane-wide
+  // mode — the first on screen that follows the lane style. Only when no layer
+  // is selected, so a single element carries the `data-resizebox` tag.
+  const captionsGlobal = useUi((s) => s.captionsGlobalSelected)
+  const handleCaption = selectedLayer
+    ? null
+    : (activeCaptions.find((c) => (captionsGlobal ? !c.style : c.id === selectedCaptionId)) ?? null)
+  const handleCaptionStyle = handleCaption && captions ? effectiveCaptionStyle(captions, handleCaption) : null
+
+  const [handleBox, setHandleBox] = useState<MeasuredBox | null>(null)
   useLayoutEffect(() => {
     const stage = stageRef.current
-    if (!stage || !selectedLayer) {
+    if (!stage || (!selectedLayer && !handleCaption)) {
       setHandleBox(null)
       return undefined
     }
@@ -1275,13 +1460,8 @@ export function PreviewStage(): JSX.Element {
     // A keyframed layer's box moves with the playhead — re-measure per tick.
     // A format change resizes the canvas (and reshapes layouts/text wraps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLayer, selectedLayer?.keyframes?.length ? time : 0, frame])
+  }, [selectedLayer, selectedLayer?.keyframes?.length ? time : 0, frame, handleCaption?.id, handleCaptionStyle])
 
-  // All captions on screen now (audio clips are captioned independently, so two
-  // overlapping clips can show two captions at once — stack them).
-  const activeCaptions = captions?.enabled
-    ? captions.segments.filter((s) => s.enabled && time >= s.startSec && time < s.endSec)
-    : []
   const hasContent = previewLayers.length > 0
 
   // A press on empty stage (the frame outside the canvas, or the canvas itself)
@@ -1336,6 +1516,7 @@ export function PreviewStage(): JSX.Element {
                     wrap={{ wrapWidthPx: textWrapWidth(frame.w) }}
                     rotationDeg={st.rotationDeg}
                     zIndex={300}
+                    handleTarget={seg.id === handleCaption?.id}
                     onPointerDown={(e) => startCaptionMove(e, seg)}
                     className={`cursor-move ${selected ? 'outline-dashed outline-2 outline-emerald-400' : ''}`}
                   >
@@ -1395,7 +1576,13 @@ export function PreviewStage(): JSX.Element {
                   : MEDIA_HANDLES
             }
             onStart={(e, handle) => startLayerResize(e, withKeyframedTransform(selectedLayer, time), handle)}
+            onRotateStart={canRotate(selectedLayer) ? (e) => startLayerRotate(e, selectedLayer) : undefined}
           />
+        )}
+        {/* Captions are text: they get the same rotate handle (no resize —
+            their size is the style's font size). */}
+        {handleCaption && handleBox && (
+          <ResizeHandles box={handleBox} frame={frame} handles={[]} onRotateStart={(e) => startCaptionRotate(e, handleCaption)} />
         )}
       </div>
     </FrameCtx.Provider>

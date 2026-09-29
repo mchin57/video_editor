@@ -62,6 +62,8 @@ function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
   const v = asset.probe.video
   if (v?.isHdr) chain.push(hdrToSdrChain(v))
   if (req.crop) chain.push(cropFilter(req.crop))
+  if (req.flipH) chain.push('hflip')
+  if (req.flipV) chain.push('vflip')
   if (req.color && !isNeutralColor(req.color)) chain.push(eqFilter(req.color))
   return chain
 }

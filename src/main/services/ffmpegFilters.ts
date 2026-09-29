@@ -23,6 +23,18 @@ export function cropFilter(c: { x: number; y: number; w: number; h: number }): s
   return `crop=${r(c.w)}:${r(c.h)}:${r(c.x)}:${r(c.y)}`
 }
 
+/**
+ * Free-angle layer rotation: `rotate` by `deg` CLOCKWISE (ffmpeg's positive
+ * direction), grown to the rotated bounds (`rotw`/`roth`, rounded up to even)
+ * with a TRANSPARENT fill (`c=none`). The input must carry alpha (yuva/rgba)
+ * or the corners come out black. Verified against ffmpeg 8.1.1 — see
+ * FFMPEG-NOTES "Layer rotation".
+ */
+export function rotateFilter(deg: number): string {
+  const a = f6((deg * Math.PI) / 180)
+  return `rotate=a=${a}:ow='ceil(rotw(${a})/2)*2':oh='ceil(roth(${a})/2)*2':c=none`
+}
+
 /** `eq=brightness=…:contrast=…:saturation=…` color-correction filter. */
 export function eqFilter(c: { brightness: number; contrast: number; saturation: number }): string {
   return `eq=brightness=${c.brightness}:contrast=${c.contrast}:saturation=${c.saturation}`
