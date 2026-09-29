@@ -67,15 +67,63 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Beat sync** — detect transients/beats in the music track and expose them as snap points on the timeline ruler, so cuts and text entrance animations can be snapped to the beat automatically.
 - [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls. _The natural unit to save/apply is `TextStyleBase` (`shared/project.ts`) — the shape `TextContent` and `CaptionStyle` already share via `TextStyleControls`._
 
-### Layer rotation
+### Layer rotation (video, image, text, captions)
 
-- [ ] **Rotate video clips (like images)** — image layers have `rotateQuarters` (90° steps) and flips, but video layers have neither. Add rotation to `VideoContent`: 90° steps and flips first (mirrors `ImageContent`, so the existing `crop→transpose→flip→scale` export chain in `exporterArgs.ts` and the preview transform in `PreviewStage` can be reused), then free-angle rotation shared with the text-rotation item above. Rotation must interact correctly with the existing per-clip `crop` (crop is in source pixels — decide whether it applies before or after rotate and pin it in a test), keyframed transforms, freezes/speed, and the alpha (background-removed) VP9 path. Any rotate-aspect math belongs with `containBox`/`effectiveImageAspect` in `shared/layers.ts` (see `docs/SHARED.md`) so images and video share it. Consider one shared rotation model across video, image and text layers instead of three separate ones. Verify the ffmpeg chain (transpose/rotate with alpha, non-square fill colour) against the real binary per `docs/FFMPEG-NOTES.md` before wiring.
+> Decided with the owner 2026-09-28. Work in progress on branch
+> `claude/worktree-branch-creation-e8f5b8`.
+
+- [ ] **One free-angle rotation for every visual, done on the canvas.** Supersedes the
+  separate "rotate video clips" and "free rotation for text overlays" items.
+  - **Model:** `Layer.rotationDeg` (clockwise degrees about the box centre; absent = 0;
+    schema bump + `migrateProject` step). Captions keep `CaptionStyle.rotationDeg`.
+    A caption rotation follows the same rule as a caption drag: lane-wide mode edits
+    the global style, otherwise it creates or edits that caption's override.
+  - **One implementation, used by all of them:** the pure angle math (pointer → angle,
+    snapping, rotating a drag delta into the box's own axes) lives in `shared/`, with
+    unit tests. One `RotateHandle` in `PreviewStage` drives it. A small adapter reads
+    and writes the angle for a layer or a caption. No per-kind copies.
+  - **Handle:** sits above the top-middle resize handle. It turns with the box, so on a
+    clip rotated 90° clockwise it sits to the clip's right. It is on the canvas itself
+    (no popout). It snaps near 0/90/180/270; Shift gives 15° steps. It must stay
+    grabbable when the box's top edge sits on or past the frame edge (the resize
+    handles' pinning rule). A whole drag is one undo step (`liveUpdate` + `commitLive`).
+    Plus a numeric angle field in the Inspector.
+  - **Resize on a rotated box:** handles and the selection outline follow the rotated
+    box, and drags are rotated into its local axes before `resizeBox`, so edges stretch
+    and re-wrap along the box's own sides. Applies to media and text alike.
+    `measureSelectedBox` must read the unrotated size, because `getBoundingClientRect`
+    returns the screen-aligned bounds.
+  - **Text animations:** slides travel along the text's rotated axis. libass cannot move
+    `\org` during a `\move`, and the owner prefers this anyway, so the preview matches
+    it. Sparkles must rotate with the block (verify on a real export).
+  - **Export, media:** ffmpeg `rotate` with a transparent fill (`c=none`,
+    `ow=rotw(a)`/`oh=roth(a)`) on an rgba/yuva stream, overlaid about the box centre.
+    With keyframed scale the plan is to rotate at a fixed size BEFORE the per-frame
+    scale (the rotated bounds scale by the same factor). Verify the whole chain against
+    the real binary first (alpha kept on bg-removed clips, edge quality, keyframed scale
+    + position), and record the result in FFMPEG-NOTES.
+  - **Crop:** the per-clip crop (Crop tool) is a property of the picture, so it applies
+    first and the cropped picture is rotated as a whole. The crop tool keeps showing
+    the unrotated source.
+  - **Flips:** `flipH`/`flipV` on `VideoContent`, mirroring `ImageContent` (Inspector
+    buttons; `hflip`/`vflip` in export).
+  - **Also update:** still capture (`still.ts`) and `layerFitScale` for rotated media.
+  - **Out of scope for now:** keyframed rotation; rotating layout and compound layers
+    (no handle shown on them); reconciling the image popout's 90° `rotateQuarters`
+    steps with the free angle (the popout's steps change the image's aspect, so both
+    can coexist for now).
 
 ### Text updates (continued)
 
-- [ ] **Font size slider** — font size is only a numeric field today. Add a slider alongside it (numeric field stays for precise entry, the two stay in sync) for both text overlays and captions. Belongs in the shared `TextStyleControls` component so both get it, using the existing shared numeric-field/slider primitives in `components/ui.tsx` (check `docs/SHARED.md` first). Preview and export already read the same `fontSize`, so this is UI-only: pick a sensible range (e.g. 24–400 logical px), and keep dragging live via `liveUpdate` + `commitLive` so a whole drag is one undo step.
-
-- [ ] **Free rotation for text overlays** — `CaptionStyle` already has a rotation field, but text overlay layers (`TextContent`) have no rotation control, unlike image layers (which support 90° `rotateQuarters` steps). Add a free-angle rotation field to `TextContent`, matching what captions already have — not just 90° steps. Since text layers and captions now share one path (2026-09-23), most of the plumbing exists: the preview `TextBlock` already takes `rotationDeg`, the export laid-out block (`textBlockSpec` → `AssOverlay.rotationDeg`) already rotates every line and pill about the block centre via `\org` + `\frz`, and the raster path rotates too — this is mostly the `TextContent` field (+ migration), passing it through in `StackLayer`/`exporter`, and the UI. UI: a rotation handle on the preview canvas (drag to rotate) plus a numeric angle field in the Inspector, consistent with how captions already expose rotation.
+- [ ] **Font size slider** — font size is only a numeric field today. Add a slider
+  alongside it (the numeric field stays for precise entry and the two stay in sync)
+  for both text overlays and captions, in the shared `TextStyleControls`. There is no
+  shared slider primitive yet: the existing sliders are hand-rolled
+  `<input type="range">`s. Add one to `components/ui.tsx` (and `docs/SHARED.md`).
+  Range 12–400 logical px on the slider; the number field is not capped above. A whole
+  drag must be one undo step (`liveUpdate` + `commitLive`), which the style controls'
+  per-change `onPatch` does not do today. Preview and export already read the same
+  `fontSizePx`, so this is UI-only.
 
 ### Insert menu & shapes
 
