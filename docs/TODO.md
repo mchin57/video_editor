@@ -140,15 +140,16 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 
 ### Text updates (continued)
 
-- [ ] **Font size slider** — font size is only a numeric field today. Add a slider
-  alongside it (the numeric field stays for precise entry and the two stay in sync)
-  for both text overlays and captions, in the shared `TextStyleControls`. There is no
-  shared slider primitive yet: the existing sliders are hand-rolled
-  `<input type="range">`s. Add one to `components/ui.tsx` (and `docs/SHARED.md`).
-  Range 12–400 logical px on the slider; the number field is not capped above. A whole
-  drag must be one undo step (`liveUpdate` + `commitLive`), which the style controls'
-  per-change `onPatch` does not do today. Preview and export already read the same
-  `fontSizePx`, so this is UI-only.
+- [~] **Font size slider** — a slider beside the font size number field, for text layers
+  and captions alike (shared `TextStyleControls`). Slider range 12–400 logical px; the
+  number field is not capped above (the thumb parks at the end). New shared `Slider`
+  primitive in `components/ui.tsx`: a whole drag is ONE undo step through a new store
+  gesture (`beginGesture`/`endGesture`), and the style controls' other five sliders
+  (gradient angle, pill opacity, outline width, shadow distance/softness) moved onto it,
+  so they no longer record an undo step per tick either. `e2e/fontSizeSlider.spec.ts`
+  pins the drag + single undo; `numberInput.spec.ts` now finds the field by role, since
+  the slider shares its label. _Unverified: not yet tried by the owner in
+  `npm run dev`. It is UI only: preview and export already read `fontSizePx`._
 
 ### Insert menu & shapes
 

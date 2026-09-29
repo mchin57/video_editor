@@ -8,6 +8,7 @@
 
 import { useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
+import { useProject } from '@/state/projectStore'
 
 /** Stock text/number input. */
 export const inputCls =
@@ -93,7 +94,8 @@ export function NumberInput({
   format,
   disabled,
   className = inputCls,
-  title
+  title,
+  ariaLabel
 }: {
   value: number
   onCommit: (v: number) => void
@@ -104,6 +106,9 @@ export function NumberInput({
   disabled?: boolean
   className?: string
   title?: string
+  /** Accessible name, for a field that shares its `Field` label with another
+   *  control (a label only names its FIRST control). */
+  ariaLabel?: string
 }): JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
   // The draft is mirrored in a ref because `commit` runs from `onBlur`, which
@@ -135,6 +140,7 @@ export function NumberInput({
       max={max}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel}
       className={className}
       value={draft ?? (format ? format(value) : String(value))}
       onChange={(e) => {
@@ -152,6 +158,61 @@ export function NumberInput({
           e.currentTarget.blur()
         }
       }}
+    />
+  )
+}
+
+/**
+ * Stock range slider whose whole DRAG is one undo step. `onChange` edits through
+ * ordinary store actions (e.g. an Inspector `onPatch`); the pointer drag is
+ * wrapped in a store gesture (`beginGesture`/`endGesture`), so the preview
+ * follows every tick but history records the drag once. Keyboard steps (no
+ * drag open) record one step each, like any other edit. The gesture closes on
+ * a window-level pointerup, so releasing off the thumb still records it.
+ */
+export function Slider({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  disabled,
+  title,
+  ariaLabel,
+  className = 'w-full'
+}: {
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  step?: number
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  /** Sizing only (default full width); the accent is fixed. */
+  className?: string
+}): JSX.Element {
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      // Clamp only the thumb: a value typed past the range (e.g. a 600px font
+      // in the paired number field) parks the thumb at the end, unchanged.
+      value={Math.min(max, Math.max(min, value))}
+      onPointerDown={() => {
+        const store = useProject.getState()
+        store.beginGesture()
+        const end = (): void => useProject.getState().endGesture()
+        window.addEventListener('pointerup', end, { once: true })
+        window.addEventListener('pointercancel', end, { once: true })
+      }}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className={`${className} accent-sky-400`}
     />
   )
 }

@@ -159,6 +159,12 @@ interface ProjectState {
   liveUpdateRoot: (transform: (p: Project) => Project) => void
   /** Close a live interaction: push the pre-drag snapshot as one undo step. */
   commitLive: (before: Project) => void
+  /** Open a GESTURE (a slider drag): until `endGesture`, ordinary actions still
+   *  apply and autosave but record no history, and closing the gesture records
+   *  the whole thing as ONE undo step. Unlike `liveUpdate` it needs no special
+   *  transform, so any control that edits through normal actions can use it. */
+  beginGesture: () => void
+  endGesture: () => void
   /** Step the editor INTO a nested composition (a compound layer, or a layout
    *  cell that carries a comp). No-ops if the step doesn't resolve or the
    *  depth cap is hit. Clears selection and rewinds the playhead. */
@@ -317,6 +323,9 @@ interface ProjectState {
 }
 
 export const useProject = create<ProjectState>((set, get) => {
+  /** The pre-gesture snapshot while a gesture is open (`beginGesture`). */
+  let gestureBefore: Project | null = null
+
   function markDirty(): void {
     if (!get().dirty) set({ dirty: true })
     saveSession(get().filePath, true)
@@ -333,7 +342,8 @@ export const useProject = create<ProjectState>((set, get) => {
     // A no-op sync returns the same object, so this can't churn history.
     const next = syncCompoundWindows(transform(current)) as Project
     if (next === current) return
-    set({ project: next, past: [...get().past, current].slice(-HISTORY_LIMIT), future: [] })
+    if (gestureBefore) set({ project: next })
+    else set({ project: next, past: [...get().past, current].slice(-HISTORY_LIMIT), future: [] })
     scheduleSave(next)
     markDirty()
   }
@@ -349,6 +359,7 @@ export const useProject = create<ProjectState>((set, get) => {
   /** Switch to a different project document, resetting history and selection. */
   function adopt(project: Project, filePath: string | null): void {
     useUi.getState().clearSelection()
+    gestureBefore = null // a gesture can't span documents
     set({ project, past: [], future: [], filePath, dirty: false, editPath: [] })
     saveSession(filePath, false)
     scheduleSave(project)
@@ -469,6 +480,16 @@ export const useProject = create<ProjectState>((set, get) => {
       set({ past: [...get().past, before].slice(-HISTORY_LIMIT), future: [] })
       scheduleSave(current)
       markDirty()
+    },
+
+    beginGesture: () => {
+      if (!gestureBefore) gestureBefore = get().project
+    },
+
+    endGesture: () => {
+      const before = gestureBefore
+      gestureBefore = null
+      if (before) get().commitLive(before)
     },
 
     flushSave: () => {
@@ -911,6 +932,7 @@ export const useProject = create<ProjectState>((set, get) => {
       get().splitItemsAt([{ kind: 'audio', id: audioId }], atSec, () => sourceDurationSec),
 
     undo: () => {
+      get().endGesture() // an open gesture is closed (recorded) before stepping back
       const { past, project, future } = get()
       if (!project || past.length === 0) return
       const prev = past[past.length - 1]
@@ -921,6 +943,7 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     redo: () => {
+      get().endGesture()
       const { future, project, past } = get()
       if (!project || future.length === 0) return
       const next = future[0]

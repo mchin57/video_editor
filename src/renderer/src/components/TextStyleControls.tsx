@@ -3,12 +3,17 @@ import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
 import { useBrandColors } from '@/state/brandColors'
 import { FontPicker } from './FontPicker'
-import { Check, Field, NumberInput, colorCls } from './ui'
+import { Check, Field, NumberInput, Slider, colorCls, inputCls } from './ui'
 
 /** The styling knobs shared by a text overlay and a caption — the shared
  *  `TextStyleBase` that both `TextContent` and `CaptionStyle` extend. */
 export type TextStyleLike = TextStyleBase
 export type TextStylePatch = Partial<TextStyleLike>
+
+/** Font size range in logical px. The number field has no upper cap; past the
+ *  slider's end the thumb just parks there. */
+const FONT_SIZE_MIN = 12
+const FONT_SIZE_SLIDER_MAX = 400
 
 const GRADIENT_PRESETS: { name: string; from: string; to: string; angle: number }[] = [
   { name: 'Sunset', from: '#FF512F', to: '#DD2476', angle: 90 },
@@ -90,24 +95,35 @@ export function TextStyleControls({
         <FontPicker value={style.fontFamily} onChange={(id) => onPatch({ fontFamily: id })} />
       </Field>
 
-      <div className="flex items-end gap-2">
-        <Field label="Font size">
+      <Field label="Font size">
+        <div className="flex items-center gap-2">
+          <Slider
+            ariaLabel="Font size"
+            className="min-w-0 flex-1"
+            min={FONT_SIZE_MIN}
+            max={FONT_SIZE_SLIDER_MAX}
+            step={1}
+            value={style.fontSizePx}
+            onChange={(v) => onPatch({ fontSizePx: v })}
+          />
           <NumberInput
+            ariaLabel="Font size"
             step="2"
-            min={12}
+            min={FONT_SIZE_MIN}
             value={style.fontSizePx}
             onCommit={(v) => onPatch({ fontSizePx: v })}
+            className={inputCls.replace('w-full', 'w-16 shrink-0')}
           />
-        </Field>
-        <Field label="Color">
-          <input
-            type="color"
-            value={hex6(style.color)}
-            onChange={(e) => onPatch({ color: e.target.value })}
-            className={colorCls}
-          />
-        </Field>
-      </div>
+        </div>
+      </Field>
+      <Field label="Color">
+        <input
+          type="color"
+          value={hex6(style.color)}
+          onChange={(e) => onPatch({ color: e.target.value })}
+          className={colorCls}
+        />
+      </Field>
 
       <BrandSwatches current={style.color} onPick={(hex) => onPatch({ color: hex })} />
 
@@ -140,14 +156,12 @@ export function TextStyleControls({
               </Field>
             </div>
             <Field label={`Angle · ${Math.round(gradient.angle)}°`}>
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={360}
                 step={5}
                 value={gradient.angle}
-                onChange={(e) => onPatch({ gradient: { ...gradient, angle: Number(e.target.value) } })}
-                className="w-full accent-sky-400"
+                onChange={(v) => onPatch({ gradient: { ...gradient, angle: v } })}
               />
             </Field>
             <div className="flex flex-wrap gap-1">
@@ -193,14 +207,12 @@ export function TextStyleControls({
               </Field>
             </div>
             <Field label={`Opacity · ${Math.round((getAlpha(pill.color) / 255) * 100)}%`}>
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={100}
                 step={1}
                 value={Math.round((getAlpha(pill.color) / 255) * 100)}
-                onChange={(e) => onPatch({ pill: { ...pill, color: withAlpha(pill.color, (Number(e.target.value) / 100) * 255) } })}
-                className="w-full accent-sky-400"
+                onChange={(v) => onPatch({ pill: { ...pill, color: withAlpha(pill.color, (v / 100) * 255) } })}
               />
             </Field>
           </>
@@ -215,14 +227,12 @@ export function TextStyleControls({
         {stroke && (
           <div className="flex items-end gap-2">
             <Field label={`Width · ${Math.round(stroke.widthPx)}px`}>
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={24}
                 step={1}
                 value={stroke.widthPx}
-                onChange={(e) => onPatch({ stroke: { ...stroke, widthPx: Number(e.target.value) } })}
-                className="w-full accent-sky-400"
+                onChange={(v) => onPatch({ stroke: { ...stroke, widthPx: v } })}
               />
             </Field>
             <Field label="Color">
@@ -246,14 +256,12 @@ export function TextStyleControls({
           <>
             <div className="flex items-end gap-2">
               <Field label={`Distance · ${shadow.distancePx}px`}>
-                <input
-                  type="range"
+                <Slider
                   min={0}
                   max={10}
                   step={1}
                   value={shadow.distancePx}
-                  onChange={(e) => onPatch({ shadow: { ...shadow, distancePx: Number(e.target.value) } })}
-                  className="w-full accent-sky-400"
+                  onChange={(v) => onPatch({ shadow: { ...shadow, distancePx: v } })}
                 />
               </Field>
               <Field label="Color">
@@ -266,14 +274,12 @@ export function TextStyleControls({
               </Field>
             </div>
             <Field label={`Softness · ${shadow.blur}`}>
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={10}
                 step={1}
                 value={shadow.blur}
-                onChange={(e) => onPatch({ shadow: { ...shadow, blur: Number(e.target.value) } })}
-                className="w-full accent-sky-400"
+                onChange={(v) => onPatch({ shadow: { ...shadow, blur: v } })}
               />
             </Field>
           </>
