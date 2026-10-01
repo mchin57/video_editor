@@ -41,8 +41,9 @@ const fontSizeInDoc = (page: Page): Promise<number> =>
     return (l.content as { fontSizePx: number }).fontSizePx
   })
 
-const fontSizeField = (page: Page): ReturnType<Page['getByLabel']> =>
-  page.getByLabel('Font size')
+// The number field, not its paired slider (both are named "Font size").
+const fontSizeField = (page: Page): ReturnType<Page['getByRole']> =>
+  page.getByRole('spinbutton', { name: 'Font size' })
 
 test('the field can be cleared while typing without snapping to the minimum', async ({
   appPage: page

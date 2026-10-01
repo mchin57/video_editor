@@ -33,7 +33,14 @@ export function StillsPopout(): JSX.Element | null {
   const request = (): StillRequest | null => {
     if (!layer || !content) return null
     const sourceSec = videoSourceTime(content, layer, usePlayback.getState().time)
-    return { mediaId: content.mediaId, sourceSec, crop: content.crop ?? null, color: content.color ?? null }
+    return {
+      mediaId: content.mediaId,
+      sourceSec,
+      crop: content.crop ?? null,
+      color: content.color ?? null,
+      flipH: content.flipH,
+      flipV: content.flipV
+    }
   }
 
   const capture = async (): Promise<void> => {

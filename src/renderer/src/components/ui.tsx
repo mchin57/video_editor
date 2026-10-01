@@ -8,6 +8,8 @@
 
 import { useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
+import { useProject } from '@/state/projectStore'
+import { normalizeDeg } from '@shared/rotation'
 
 /** Stock text/number input. */
 export const inputCls =
@@ -93,7 +95,8 @@ export function NumberInput({
   format,
   disabled,
   className = inputCls,
-  title
+  title,
+  ariaLabel
 }: {
   value: number
   onCommit: (v: number) => void
@@ -104,6 +107,9 @@ export function NumberInput({
   disabled?: boolean
   className?: string
   title?: string
+  /** Accessible name, for a field that shares its `Field` label with another
+   *  control (a label only names its FIRST control). */
+  ariaLabel?: string
 }): JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
   // The draft is mirrored in a ref because `commit` runs from `onBlur`, which
@@ -135,6 +141,7 @@ export function NumberInput({
       max={max}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel}
       className={className}
       value={draft ?? (format ? format(value) : String(value))}
       onChange={(e) => {
@@ -153,5 +160,94 @@ export function NumberInput({
         }
       }}
     />
+  )
+}
+
+/**
+ * Stock range slider whose whole DRAG is one undo step. `onChange` edits through
+ * ordinary store actions (e.g. an Inspector `onPatch`); the pointer drag is
+ * wrapped in a store gesture (`beginGesture`/`endGesture`), so the preview
+ * follows every tick but history records the drag once. Keyboard steps (no
+ * drag open) record one step each, like any other edit. The gesture closes on
+ * a window-level pointerup, so releasing off the thumb still records it.
+ */
+export function Slider({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  disabled,
+  title,
+  ariaLabel,
+  className = 'w-full'
+}: {
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  step?: number
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  /** Sizing only (default full width); the accent is fixed. */
+  className?: string
+}): JSX.Element {
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      // Clamp only the thumb: a value typed past the range (e.g. a 600px font
+      // in the paired number field) parks the thumb at the end, unchanged.
+      value={Math.min(max, Math.max(min, value))}
+      onPointerDown={() => {
+        const store = useProject.getState()
+        store.beginGesture()
+        const end = (): void => useProject.getState().endGesture()
+        window.addEventListener('pointerup', end, { once: true })
+        window.addEventListener('pointercancel', end, { once: true })
+      }}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className={`${className} accent-sky-400`}
+    />
+  )
+}
+
+/**
+ * THE rotation control — one for every rotatable thing (video, image and text
+ * layers, captions), paired with the canvas rotate handle. A −180…180 slider
+ * (one undo step per drag, via `Slider`) beside a number field for exact
+ * angles; typed values are folded into (−180, 180] so 270 reads back as −90.
+ * @see shared/rotation.ts
+ */
+export function AngleField({
+  value,
+  onChange,
+  label = 'Rotation'
+}: {
+  value: number
+  onChange: (deg: number) => void
+  label?: string
+}): JSX.Element {
+  const deg = normalizeDeg(value)
+  return (
+    <Field label={`${label} · ${Math.round(deg)}°`}>
+      <div className="flex items-center gap-2">
+        <Slider ariaLabel={label} min={-180} max={180} step={1} value={deg} onChange={onChange} className="min-w-0 flex-1" />
+        <NumberInput
+          ariaLabel={`${label} degrees`}
+          step="1"
+          value={deg}
+          format={(v) => String(Math.round(v * 10) / 10)}
+          onCommit={(v) => onChange(normalizeDeg(v))}
+          className={inputCls.replace('w-full', 'w-16 shrink-0')}
+        />
+      </div>
+    </Field>
   )
 }

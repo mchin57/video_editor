@@ -42,6 +42,8 @@ import {
   type TextAnimation
 } from '@shared/textAnim'
 import type { Target } from './exporterArgs'
+import { moveSlice, motionPosAt, type LinearMotion } from '@shared/motion'
+import { rotateVec } from '@shared/rotation'
 import { fallbackLines, type LaidOutLine } from './textLayout'
 
 /** A text block to burn — a text layer or a caption (geometry in output px). */
@@ -76,6 +78,12 @@ export interface AssOverlay {
    *  \fad/\move/\t/\k and, for typewriter, per-step reveal events; every tag
    *  verified against ffmpeg 8.1.1 (docs/FFMPEG-NOTES.md "ASS animation tags"). */
   animation?: TextAnimation | null
+  /** Straight-line travel of the whole block (text-layer motion), in ABSOLUTE
+   *  seconds and output px, as an OFFSET from where the block is laid out
+   *  (`x0`/`y0` are normally 0). Screen space: on a rotated block the builder
+   *  turns it into the block's own axes, because libass rotates every piece
+   *  about the fixed `\org`. Absent = the block stays put. @see shared/motion.ts */
+  motion?: LinearMotion | null
   /** Decorative sparkles burned ABOVE the glyphs. Unlike `animation`, these are
    *  independent of how the text itself renders, so a gradient/wrapped overlay
    *  (which burns as a PNG) still gets them — the exporter emits a
@@ -256,6 +264,28 @@ export function buildAss(overlays: AssOverlay[], target: Target, pxScale = 1): s
 const SPARKLE_PATH = 'm 0 -10 l 2 -2 l 10 0 l 2 2 l 0 10 l -2 2 l -10 0 l -2 -2'
 const SPARKLE_RADIUS = 10
 
+/** A screen-space travel offset turned into a block's own axes: libass rotates
+ *  a rotated block's pieces about the fixed `\org`, so a piece that must land
+ *  `d` further along the SCREEN is written `R⁻¹·d` further along (verified —
+ *  FFMPEG-NOTES "Straight-line motion"). Identity at 0°. */
+const local = (d: { x: number; y: number }, deg: number): { x: number; y: number } => rotateVec(d.x, d.y, -deg)
+
+/**
+ * The position tag for something anchored at (x, y) over the event [t0, t1]:
+ * `\pos` when `travel` doesn't move during it (offset by where it has got to),
+ * else ONE windowed `\move(…, t1, t2)` — before t1 it sits at the start, after
+ * t2 at the end, which is a straight move exactly. `deg` = the rotation the
+ * anchor is turned by (`local`); 0 for things placed directly on screen.
+ */
+function placeTag(x: number, y: number, travel: LinearMotion | null | undefined, t0: number, t1: number, deg: number): string {
+  if (!travel) return `\\pos(${Math.round(x)},${Math.round(y)})`
+  const s = moveSlice(travel, t0, t1)
+  const a = local(s.from, deg)
+  if (s.static) return `\\pos(${Math.round(x + a.x)},${Math.round(y + a.y)})`
+  const b = local(s.to, deg)
+  return `\\move(${Math.round(x + a.x)},${Math.round(y + a.y)},${Math.round(x + b.x)},${Math.round(y + b.y)},${Math.round(s.t1 * 1000)},${Math.round(s.t2 * 1000)})`
+}
+
 /**
  * One Dialogue event per sparkle, on ASS **Layer 2** so they draw above the
  * glyphs (Layer 1) and pills (Layer 0) in the same burn. Each twinkles in and
@@ -275,7 +305,7 @@ function sparkleEvents(o: AssOverlay): string[] {
     const small = Math.max(1, Math.round(full * 0.4))
     const tags = [
       '\\an5',
-      `\\pos(${Math.round(s.x)},${Math.round(s.y)})`,
+      placeTag(s.x, s.y, o.motion, s.startSec, s.endSec, 0),
       `\\1c${color}&`,
       '\\bord0',
       '\\shad0',
@@ -365,14 +395,84 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
 
   const ev = (p: Piece, t0: number, t1: number, tags: string[], body: string): string =>
     `Dialogue: ${p.layer},${assTime(t0)},${assTime(t1)},${p.style},,0,0,0,,{${tags.join('')}}${body}`
-  const at = (p: Piece, extra: string[] = []): string[] => ['\\an5', `\\pos(${r(p.x)},${r(p.y)})`, ...rot, ...p.tags, ...extra]
-  const moving = (p: Piece, dy0: number, dy1: number, ms: number, extra: string[]): string[] => [
+  const deg = o.rotationDeg ?? 0
+  const travel = o.motion ?? null
+  /** A piece placed for the event [t0, t1]: \pos, or a windowed \move when the
+   *  block travels during it (one \move covers a straight move exactly). */
+  const at = (p: Piece, t0: number, t1: number, extra: string[] = []): string[] => [
     '\\an5',
-    `\\move(${r(p.x)},${r(p.y + dy0)},${r(p.x)},${r(p.y + dy1)},0,${ms})`,
+    placeTag(p.x, p.y, travel, t0, t1, deg),
     ...rot,
     ...p.tags,
     ...extra
   ]
+  /**
+   * A slide event [t0, t1] (the slide's own \move over its first `ms`). With
+   * no travel crossing it, the original single event (plus any constant
+   * travel offset). When the block ALSO travels during it, an event can carry
+   * only one \move, so it splits at every breakpoint — the slide's end, the
+   * travel's start/end, the fade's — and each piece moves in a straight line
+   * from its start to its end position with its share of the fade continued via
+   * \fade (verified to match \fad exactly — FFMPEG-NOTES "Straight-line motion").
+   * `dyAt`/`alphaAt` are the slide offset and fade alpha (0 opaque → 255 clear)
+   * at an absolute time.
+   */
+  const slideEvents = (
+    p: Piece,
+    t0: number,
+    t1: number,
+    dy0: number,
+    dy1: number,
+    ms: number,
+    fad: [number, number],
+    body: string
+  ): string[] => {
+    const slideEnd = t0 + ms / 1000
+    const dyAt = (t: number): number =>
+      t >= slideEnd || ms <= 0 ? dy1 : dy0 + (dy1 - dy0) * Math.max(0, (t - t0) / (ms / 1000))
+    if (!travel || moveSlice(travel, t0, t1).static) {
+      const c = local(travel ? motionPosAt(travel, t0) : { x: 0, y: 0 }, deg)
+      const tags = [
+        '\\an5',
+        `\\move(${r(p.x + c.x)},${r(p.y + dy0 + c.y)},${r(p.x + c.x)},${r(p.y + dy1 + c.y)},0,${ms})`,
+        ...rot,
+        ...p.tags,
+        `\\fad(${fad[0]},${fad[1]})`
+      ]
+      return [ev(p, t0, t1, tags, body)]
+    }
+    const inEnd = t0 + fad[0] / 1000
+    const outStart = t1 - fad[1] / 1000
+    const alphaAt = (t: number): number => {
+      let a = 0
+      if (fad[0] > 0 && t < inEnd) a = Math.max(a, 255 * (1 - (t - t0) / (fad[0] / 1000)))
+      if (fad[1] > 0 && t > outStart) a = Math.max(a, 255 * ((t - outStart) / (fad[1] / 1000)))
+      return Math.round(Math.max(0, Math.min(255, a)))
+    }
+    const cuts = [t0, t1, slideEnd, travel.t0, travel.t1, ...(fad[0] > 0 ? [inEnd] : []), ...(fad[1] > 0 ? [outStart] : [])]
+      .filter((t) => t >= t0 && t <= t1)
+      .sort((a, b) => a - b)
+      .filter((t, i, arr) => i === 0 || t - arr[i - 1] > 0.005)
+    const out: string[] = []
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const a = cuts[i]
+      const b = cuts[i + 1]
+      const da = local(motionPosAt(travel, a), deg)
+      const db = local(motionPosAt(travel, b), deg)
+      const durMs = Math.round((b - a) * 1000)
+      const fa = alphaAt(a)
+      const fb = alphaAt(b)
+      const tags = [
+        '\\an5',
+        `\\move(${r(p.x + da.x)},${r(p.y + dyAt(a) + da.y)},${r(p.x + db.x)},${r(p.y + dyAt(b) + db.y)},0,${durMs})`,
+        ...rot,
+        ...p.tags,
+        ...(fa > 0 || fb > 0 ? [`\\fade(${fa},${fb},${fb},0,${durMs},${durMs},${durMs})`] : [])
+      ]
+      out.push(ev(p, a, b, tags, body))
+    }
+    return out
+  }
   /** Characters of a glyph line visible once `chars` of the block are revealed. */
   const revealed = (p: Piece, chars: number): number =>
     Math.max(0, Math.min(p.line!.end - p.line!.start, chars - p.line!.start))
@@ -385,7 +485,7 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
   }
 
   const anim = o.animation && (o.animation.in !== 'none' || o.animation.out !== 'none') ? o.animation : null
-  if (!anim) return pieces.map((p) => ev(p, o.startSec, o.endSec, at(p), body(p)))
+  if (!anim) return pieces.map((p) => ev(p, o.startSec, o.endSec, at(p, o.startSec, o.endSec), body(p)))
 
   const dur = Math.max(0.01, o.endSec - o.startSec)
   const { inSec, outSec } = clampAnimWindows(anim, dur)
@@ -408,12 +508,12 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
     case 'slideUp': {
       for (const p of pieces) {
         if (splitExit) {
-          events.push(ev(p, o.startSec, o.startSec + inSec, moving(p, slide, 0, inMs, [`\\fad(${inMs},0)`]), body(p)))
+          events.push(...slideEvents(p, o.startSec, o.startSec + inSec, slide, 0, inMs, [inMs, 0], body(p)))
           if (exitStart > o.startSec + inSec + 0.001) {
-            events.push(ev(p, o.startSec + inSec, exitStart, at(p), body(p)))
+            events.push(ev(p, o.startSec + inSec, exitStart, at(p, o.startSec + inSec, exitStart), body(p)))
           }
         } else {
-          events.push(ev(p, o.startSec, o.endSec, moving(p, slide, 0, inMs, [`\\fad(${inMs},${fadeOutMs})`]), body(p)))
+          events.push(...slideEvents(p, o.startSec, o.endSec, slide, 0, inMs, [inMs, fadeOutMs], body(p)))
         }
       }
       break
@@ -422,7 +522,7 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
       const steps = typewriterSteps(o.text.length)
       const stepDur = steps.length > 0 ? inSec / steps.length : 0
       // The pill is there from the start (the preview keeps its box too).
-      for (const p of pills) events.push(ev(p, o.startSec, exitStart, tailFade(at(p)), body(p)))
+      for (const p of pills) events.push(ev(p, o.startSec, exitStart, tailFade(at(p, o.startSec, exitStart)), body(p)))
       for (const p of glyphs) {
         // One event per distinct revealed count of THIS line; a line still
         // waiting its turn emits nothing.
@@ -432,11 +532,12 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
           while (k1 + 1 < steps.length && revealed(p, steps[k1 + 1]) === shown) k1++
           const t0 = o.startSec + k0 * stepDur
           const t1 = k1 === steps.length - 1 ? o.startSec + inSec : o.startSec + (k1 + 1) * stepDur
-          if (shown > 0) events.push(ev(p, t0, Math.min(t1, exitStart), at(p), body(p, steps[k0])))
+          const e1 = Math.min(t1, exitStart)
+          if (shown > 0) events.push(ev(p, t0, e1, at(p, t0, e1), body(p, steps[k0])))
           k0 = k1 + 1
         }
         if (exitStart > o.startSec + inSec + 0.001) {
-          events.push(ev(p, o.startSec + inSec, exitStart, tailFade(at(p)), body(p)))
+          events.push(ev(p, o.startSec + inSec, exitStart, tailFade(at(p, o.startSec + inSec, exitStart)), body(p)))
         }
       }
       break
@@ -461,7 +562,7 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
         if (t.length > 0) toks.push({ s: pos, t, w: /^\s+$/.test(t) ? -1 : wi++ })
         pos += t.length
       }
-      for (const p of pills) events.push(ev(p, o.startSec, winEnd, tailFade(at(p)), body(p)))
+      for (const p of pills) events.push(ev(p, o.startSec, winEnd, tailFade(at(p, o.startSec, winEnd)), body(p)))
       for (const p of glyphs) {
         const mine = toks.filter((tk) => tk.s >= p.line!.start && tk.s < p.line!.end)
         const firstWord = mine.find((tk) => tk.w >= 0)?.w ?? 0
@@ -470,7 +571,7 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
         for (const tk of mine) {
           kara += tk.w < 0 ? escapeText(tk.t) : `{\\k${perWordCs[Math.min(tk.w, perWordCs.length - 1)]}}${escapeText(tk.t)}`
         }
-        const tags = tailFade(at(p, [`\\2c${assRgb(o.color)}&`, '\\2a&H99&']))
+        const tags = tailFade(at(p, o.startSec, winEnd, [`\\2c${assRgb(o.color)}&`, '\\2a&H99&']))
         events.push(ev(p, o.startSec, winEnd, tags, kara))
       }
       break
@@ -486,21 +587,21 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
         `\\t(${peakMs},${inMs},\\fscx100\\fscy100)`,
         `\\fad(${fadeMs},${splitExit ? 0 : fadeOutMs})`
       ]
-      for (const p of pieces) events.push(ev(p, o.startSec, exitStart, at(p, pop), body(p)))
+      for (const p of pieces) events.push(ev(p, o.startSec, exitStart, at(p, o.startSec, exitStart, pop), body(p)))
       break
     }
     case 'fadeIn':
     case 'none': {
       const enterMs = anim.in === 'fadeIn' ? inMs : 0
       const fade = enterMs > 0 || (!splitExit && fadeOutMs > 0) ? [`\\fad(${enterMs},${splitExit ? 0 : fadeOutMs})`] : []
-      for (const p of pieces) events.push(ev(p, o.startSec, exitStart, at(p, fade), body(p)))
+      for (const p of pieces) events.push(ev(p, o.startSec, exitStart, at(p, o.startSec, exitStart, fade), body(p)))
       break
     }
   }
 
   if (splitExit) {
     for (const p of pieces) {
-      events.push(ev(p, exitStart, o.endSec, moving(p, 0, slide, outMs, [`\\fad(0,${outMs})`]), body(p)))
+      events.push(...slideEvents(p, exitStart, o.endSec, 0, slide, outMs, [0, outMs], body(p)))
     }
   }
   return events

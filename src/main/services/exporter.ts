@@ -26,6 +26,8 @@ import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { cellSpan, coverCrop, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { clampAnimWindows, effectiveTextAnimation } from '@shared/textAnim'
 import { activeSparkle, sparklesFor } from '@shared/sparkle'
+import { normalizeDeg, rotateVec } from '@shared/rotation'
+import { textMotion, type LinearMotion } from '@shared/motion'
 import { textWrapWidth } from '@shared/textStyle'
 import { presetFor, type PresetId } from '@shared/formats'
 import { alphaInputDecoder } from '@shared/media'
@@ -404,6 +406,9 @@ async function renderComposition(
           hasAlpha,
           inputDecoder,
           crop: c.crop ?? null,
+          flipH: c.flipH,
+          flipV: c.flipV,
+          rotationDeg: l.rotationDeg,
           colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
           boxW,
           boxH,
@@ -472,6 +477,7 @@ async function renderComposition(
           rotateQuarters: q,
           flipH: c.flipH,
           flipV: c.flipV,
+          rotationDeg: l.rotationDeg,
           keyframes: exportKeyframes(l, aspect),
           opacityAnim: await opacityAnimFor(l, c.opacity)
         }
@@ -630,7 +636,17 @@ async function renderComposition(
       // stroke and shadow together — `textBlockSpec` applies `l.scale` to all
       // of them (scaling decorations by the output scale alone once left a
       // 1.43x-resized overlay wearing a pill sized for the unscaled text).
-      const spec = textBlockSpec(c.text, c, l, l.scale, m, frame.w, { widthPx: c.widthPx })
+      const rotationDeg = l.rotationDeg ? normalizeDeg(l.rotationDeg) : 0
+      // Straight-line motion (text follows its keyframes for POSITION only —
+      // `textMotion`, which the preview resolves through too). The block is laid
+      // out where the move STARTS; the burn carries the travel as an offset.
+      const mo = textMotion(l.keyframes)
+      const at = mo ? { x: mo.x0, y: mo.y0 } : { x: l.x, y: l.y }
+      const travel: LinearMotion | null =
+        mo && (mo.x1 !== mo.x0 || mo.y1 !== mo.y0)
+          ? { t0: l.startSec + mo.t0, t1: l.startSec + mo.t1, x0: 0, y0: 0, x1: (mo.x1 - mo.x0) * m.s, y1: (mo.y1 - mo.y0) * m.s }
+          : null
+      const spec = textBlockSpec(c.text, c, at, l.scale, m, frame.w, { widthPx: c.widthPx, rotationDeg })
       const fontSizePx = spec.fontSizePx
       // Sparkles are computed from the SAME shared helper the preview uses, at
       // the output-scaled font size — every offset it returns is a multiple of
@@ -647,20 +663,37 @@ async function renderComposition(
             durSec: layerDur,
             typewriterSec:
               textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
-          }).map((sp) => ({
-            startSec: l.startSec + sp.tSec,
-            endSec: Math.min(l.endSec, l.startSec + sp.tSec + sp.lifeSec),
-            x: r(m.x(l.x) + sp.x),
-            y: r(m.y(l.y) + sp.y),
-            sizePx: sp.sizePx,
-            rotDeg: sp.rotDeg
-          }))
+          }).map((sp) => {
+            // Sparkle offsets are in the text block's own axes; a rotated block
+            // carries them round its centre (the preview draws them inside the
+            // rotated box, so they turn with it for free).
+            const off = rotateVec(sp.x, sp.y, rotationDeg)
+            return {
+              startSec: l.startSec + sp.tSec,
+              endSec: Math.min(l.endSec, l.startSec + sp.tSec + sp.lifeSec),
+              x: r(m.x(at.x) + off.x),
+              y: r(m.y(at.y) + off.y),
+              sizePx: sp.sizePx,
+              rotDeg: sp.rotDeg + rotationDeg
+            }
+          })
         : []
       // A gradient (libass can't do it) OR an explicit wrap width burns as a
       // full-frame PNG overlay, rasterised with the same CSS the preview uses.
       if (c.gradient || c.widthPx != null) {
         try {
-          const image = await renderTextImage(spec, l.startSec, l.endSec)
+          // A moving block is rasterised at the frame CENTRE (so a move that
+          // starts off-frame isn't clipped out of the PNG) and the full-frame
+          // image travels via the image keyframe path, centre-anchored.
+          const image = travel
+            ? {
+                ...(await renderTextImage({ ...spec, xCenter: target.width / 2, yCenter: target.height / 2 }, l.startSec, l.endSec)),
+                keyframes: [
+                  { t: travel.t0, w: target.width, h: target.height, cx: spec.xCenter, cy: spec.yCenter },
+                  { t: travel.t1, w: target.width, h: target.height, cx: spec.xCenter + travel.x1, cy: spec.yCenter + travel.y1 }
+                ]
+              }
+            : await renderTextImage(spec, l.startSec, l.endSec)
           visuals.push({ kind: 'image', image })
           // The glyphs are an image now, but the sparkles are still vector ASS
           // events — burn them on their own, above the picture, so a gradient
@@ -668,7 +701,13 @@ async function renderComposition(
           // text: `buildAss` emits the sparkles only.)
           if (sparkles.length > 0) {
             const sparkleAss = `text_${textN++}.ass`
-            const sparkleOnly = { ...blockOverlay(spec, l.startSec, l.endSec), text: '', sparkles, sparkleColor: sparkleEffect!.color }
+            const sparkleOnly = {
+              ...blockOverlay(spec, l.startSec, l.endSec),
+              text: '',
+              sparkles,
+              sparkleColor: sparkleEffect!.color,
+              motion: travel
+            }
             await fsp.writeFile(join(tmp, sparkleAss), buildAss([sparkleOnly], target, s), 'utf8')
             visuals.push({ kind: 'text', assFile: sparkleAss })
           }
@@ -692,7 +731,8 @@ async function renderComposition(
           // animates, and the preview resolves through the same helper.
           animation: textAnim,
           sparkles,
-          sparkleColor: sparkleEffect?.color
+          sparkleColor: sparkleEffect?.color,
+          motion: travel
         }
       })
     }

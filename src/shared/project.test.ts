@@ -29,7 +29,7 @@ describe('migrateProject — caption style', () => {
       captions: { enabled: true, stylePreset: 'reels-bold', yBaseline: 1500, segments: [] }
     }
     const p = migrateProject(legacy)
-    expect(p.version).toBe(22)
+    expect(p.version).toBe(23)
     expect(p.captions.style).toBeDefined()
     expect(p.captions.style.y).toBe(1500) // baseline becomes the style's Y
     expect(p.captions.style.x).toBe(DEFAULT_CAPTION_STYLE.x)
@@ -101,7 +101,7 @@ describe('migrateProject — noise filter default (v8)', () => {
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
-    expect(p.version).toBe(22)
+    expect(p.version).toBe(23)
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
@@ -189,7 +189,7 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
     const cells = (p.layers[0].content as { cells: { mute: boolean }[] }).cells
     expect(cells[0].mute).toBe(false) // the comp panel is audible again
     expect(cells[1].mute).toBe(true) // the clip cell is untouched
-    expect(p.version).toBe(22)
+    expect(p.version).toBe(23)
   })
 
   it('reaches comp cells nested inside a compound layer', () => {
@@ -252,7 +252,7 @@ describe('migrateProject — chorus renamed to ensemble (v20)', () => {
       ensemble: { voices: 3, spreadMs: 32, detuneCents: 14 }
     })
     expect('chorus' in fx.settings).toBe(false)
-    expect(p.version).toBe(22)
+    expect(p.version).toBe(23)
   })
 
   it('reaches effect tracks inside a nested composition', () => {
@@ -327,7 +327,7 @@ describe('migrateProject — per-clip audio mute (v21)', () => {
         }
       ]
     })
-    expect(p.version).toBe(22)
+    expect(p.version).toBe(23)
     expect(p.audioClips[0].mute).toBeUndefined()
     expect(audioClipAudible(p.audioClips[0])).toBe(true)
   })
@@ -374,6 +374,23 @@ describe('migrateProject v22 (format registry)', () => {
     const layer = { id: 'v', hidden: false, startSec: 0, endSec: 2, x: 123, y: 456, scale: 0.7, content: { kind: 'text', text: 'hi' } }
     const p = migrateProject({ version: 21, preset: 'square', layers: [layer], audioClips: [] })
     expect(p.layers[0]).toMatchObject({ x: 123, y: 456, scale: 0.7 })
-    expect(p.version).toBe(22)
+    expect(p.version).toBe(23)
+  })
+})
+
+describe('migrateProject v23 (layer rotation + video flips)', () => {
+  it('is additive: an older layer comes back upright and unflipped, untouched', () => {
+    const layer = {
+      id: 'v', hidden: false, startSec: 0, endSec: 2, x: 10, y: 20, scale: 1,
+      content: { kind: 'video', mediaId: 'm', inSec: 0, outSec: 2, mute: false, gainDb: 0 }
+    }
+    const p = migrateProject({ version: 22, preset: 'reel', layers: [layer], audioClips: [] })
+    expect(p.version).toBe(23)
+    expect(p.layers[0].rotationDeg).toBeUndefined()
+    expect(p.layers[0]).toMatchObject({ x: 10, y: 20, scale: 1 })
+  })
+  it('keeps a saved rotation', () => {
+    const layer = { id: 't', hidden: false, startSec: 0, endSec: 2, x: 0, y: 0, scale: 1, rotationDeg: -30, content: { kind: 'text', text: 'hi' } }
+    expect(migrateProject({ version: 23, preset: 'reel', layers: [layer], audioClips: [] }).layers[0].rotationDeg).toBe(-30)
   })
 })

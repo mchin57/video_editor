@@ -67,15 +67,95 @@ Deferred polish and features, newest-first. Not blocking; pick up as time allows
 - [ ] **Beat sync** — detect transients/beats in the music track and expose them as snap points on the timeline ruler, so cuts and text entrance animations can be snapped to the beat automatically.
 - [ ] **Text style templates** — save a full combination of font + size + color + pill + stroke + animation as a named "style" that can be applied to any overlay in one click. Stored in `settings.json`; surfaced in the Inspector as a style picker above the individual controls. _The natural unit to save/apply is `TextStyleBase` (`shared/project.ts`) — the shape `TextContent` and `CaptionStyle` already share via `TextStyleControls`._
 
-### Layer rotation
+### Layer rotation (video, image, text, captions)
 
-- [ ] **Rotate video clips (like images)** — image layers have `rotateQuarters` (90° steps) and flips, but video layers have neither. Add rotation to `VideoContent`: 90° steps and flips first (mirrors `ImageContent`, so the existing `crop→transpose→flip→scale` export chain in `exporterArgs.ts` and the preview transform in `PreviewStage` can be reused), then free-angle rotation shared with the text-rotation item above. Rotation must interact correctly with the existing per-clip `crop` (crop is in source pixels — decide whether it applies before or after rotate and pin it in a test), keyframed transforms, freezes/speed, and the alpha (background-removed) VP9 path. Any rotate-aspect math belongs with `containBox`/`effectiveImageAspect` in `shared/layers.ts` (see `docs/SHARED.md`) so images and video share it. Consider one shared rotation model across video, image and text layers instead of three separate ones. Verify the ffmpeg chain (transpose/rotate with alpha, non-square fill colour) against the real binary per `docs/FFMPEG-NOTES.md` before wiring.
+> Decided with the owner 2026-09-28. Work in progress on branch
+> `claude/worktree-branch-creation-e8f5b8`.
+
+- [~] **One free-angle rotation for every visual, done on the canvas.** Supersedes the
+  separate "rotate video clips" and "free rotation for text overlays" items.
+  - **Model:** `Layer.rotationDeg` (clockwise degrees about the box centre; absent = 0;
+    schema v23, additive). Captions keep `CaptionStyle.rotationDeg`. Video gets
+    `flipH`/`flipV` (Inspector toggles; export `hflip`/`vflip` after the crop;
+    still capture includes them). Rotation is a layer transform like position, so it
+    never changes the box's fit (`layerFitScale` is unchanged) and a still of a clip
+    does not bake it in.
+  - **One implementation:** the math is `shared/rotation.ts` (unit-tested). The
+    canvas `RotateHandle` and one `startRotate` drag serve video, image, text and
+    captions; only the `apply` differs (a caption follows the drag rule: lane-wide
+    mode turns the global style, otherwise that caption's override). The Inspector
+    uses one `AngleField` (`ui.tsx`) for layers and captions.
+  - **Handle:** above the top-middle, turning with the box (at 90° it sits to the
+    right). Flips to just inside when that spot is off the frame. Snaps within 5° of
+    0/90/180/270; Shift gives 15° steps; one undo step per drag. Layouts and compound
+    clips get no handle.
+  - **Resize on a rotated box:** handles sit on the rotated box with rotated cursors;
+    drags go through `resizeRotatedBox`, so edges stretch or re-wrap along the box's
+    own sides and the opposite edge stays put. The measured box now reports the
+    UNROTATED size + the angle (from the element's transform) instead of the
+    screen-aligned hull. Side resizes now write both x and y of the centre, as a
+    delta (on a rotated box a side handle moves the centre diagonally).
+  - **Export:** static media scale → `rotate` (transparent fill, alpha pipeline) and
+    overlay by centre; keyframed media rotate once at the largest keyframe box, then
+    scale per frame to the rotated bounds. Text passes the angle to the burn and the
+    rasteriser; rotated slides travel along the text's axis in both; sparkles are
+    rotated with the block. See FFMPEG-NOTES "Layer rotation".
+  - **Tests:** `src/shared/rotation.test.ts`, rotation cases in
+    `exporterArgs.test.ts`, `e2e/rotation.spec.ts` (handle position, snap, Shift,
+    one undo step, rotated text + media resize, caption handle and override), and
+    `e2e/rotationExport.spec.ts` (real export: rotated text burn vs raster, a
+    clockwise red clip with transparent corners, a rotated slide along its axis).
+  - _Unverified: not yet tried by the owner in `npm run dev` with real media. Image
+    layers are exercised only through the shared box/handle path and the arg-string
+    tests, not a real image export. Rotated sparkles were checked by eye only.
+    Keyframed rotated media were verified with lavfi in ffmpeg, not through the app._
+  - **Out of scope for now:** keyframed rotation; rotating layout and compound layers;
+    reconciling the image popout's 90° `rotateQuarters` steps with the free angle
+    (the popout's steps change the image's aspect, so both coexist for now).
+
+- [~] **Simple straight-line motion (start point → end point over a duration).**
+  - **Model:** no second model. A simple move is two `Layer.keyframes` (`shared/motion.ts`,
+    unit-tested). Media already honoured keyframes. Text now follows them for POSITION
+    only, via `textMotion` (first moving stretch; its size is never keyframed), in the
+    preview and the burn alike.
+  - **UI:** Inspector ▸ Motion (video, image, text). "Add motion" starts the move AT THE
+    PLAYHEAD from where the layer is, for a set duration (default 1s, clamped to the
+    clip), ending a quarter frame-width to the side (left if right would leave the frame)
+    so both dots are visible. Then Start X/Y, End X/Y, Starts at, Duration and "Remove
+    motion" (which leaves the layer where the move started). A layer with more than two
+    keyframes says so (media: edit under Keyframes). The canvas draws the path (dashed,
+    hollow start dot, filled end dot); dragging a dot moves that end. Dragging the layer
+    itself, or resizing it, shifts (and from a corner, scales) the WHOLE path, so a simple
+    move never grows a third keyframe. The dots sit above the layer, so at the playhead
+    where the layer sits on a dot, the dot wins; grab the layer elsewhere.
+  - **Export, text:** the block is laid out where the move starts. Every event gets one
+    windowed `\move` (no split); only a slide that overlaps the move splits, continuing
+    its fade with `\fade`. A rotated block's travel is counter-rotated for the fixed
+    `\org`. Sparkles ride it in screen space. Moving rasterised text renders at the frame
+    centre and travels on the image keyframe path. See FFMPEG-NOTES "Straight-line motion".
+  - **Tests:** `src/shared/motion.test.ts`, the motion block in `assBuilder.test.ts`,
+    `e2e/motion.spec.ts` (add at the playhead, text follows, end-dot drag + one undo,
+    whole-path drag for text and media, remove) and `e2e/motionExport.spec.ts` (real
+    export: rotated libass text and raster text both travel straight, halfway at the
+    midpoint).
+  - _Unverified: not yet tried by the owner in `npm run dev` with real media. Video and
+    image motion is the pre-existing keyframe export (verified when it shipped); this pass
+    added only its UI. A slide overlapping a move is covered by the ASS string tests and
+    the \fade verification, not by a real export._
+  - **Captions later:** the helpers take keyframe lists and points, not a `Layer`.
 
 ### Text updates (continued)
 
-- [ ] **Font size slider** — font size is only a numeric field today. Add a slider alongside it (numeric field stays for precise entry, the two stay in sync) for both text overlays and captions. Belongs in the shared `TextStyleControls` component so both get it, using the existing shared numeric-field/slider primitives in `components/ui.tsx` (check `docs/SHARED.md` first). Preview and export already read the same `fontSize`, so this is UI-only: pick a sensible range (e.g. 24–400 logical px), and keep dragging live via `liveUpdate` + `commitLive` so a whole drag is one undo step.
-
-- [ ] **Free rotation for text overlays** — `CaptionStyle` already has a rotation field, but text overlay layers (`TextContent`) have no rotation control, unlike image layers (which support 90° `rotateQuarters` steps). Add a free-angle rotation field to `TextContent`, matching what captions already have — not just 90° steps. Since text layers and captions now share one path (2026-09-23), most of the plumbing exists: the preview `TextBlock` already takes `rotationDeg`, the export laid-out block (`textBlockSpec` → `AssOverlay.rotationDeg`) already rotates every line and pill about the block centre via `\org` + `\frz`, and the raster path rotates too — this is mostly the `TextContent` field (+ migration), passing it through in `StackLayer`/`exporter`, and the UI. UI: a rotation handle on the preview canvas (drag to rotate) plus a numeric angle field in the Inspector, consistent with how captions already expose rotation.
+- [~] **Font size slider** — a slider beside the font size number field, for text layers
+  and captions alike (shared `TextStyleControls`). Slider range 12–400 logical px; the
+  number field is not capped above (the thumb parks at the end). New shared `Slider`
+  primitive in `components/ui.tsx`: a whole drag is ONE undo step through a new store
+  gesture (`beginGesture`/`endGesture`), and the style controls' other five sliders
+  (gradient angle, pill opacity, outline width, shadow distance/softness) moved onto it,
+  so they no longer record an undo step per tick either. `e2e/fontSizeSlider.spec.ts`
+  pins the drag + single undo; `numberInput.spec.ts` now finds the field by role, since
+  the slider shares its label. _Unverified: not yet tried by the owner in
+  `npm run dev`. It is UI only: preview and export already read `fontSizePx`._
 
 ### Insert menu & shapes
 

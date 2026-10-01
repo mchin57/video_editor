@@ -203,6 +203,10 @@ export interface VideoContent {
   gainDb: number
   /** Optional source-pixel crop (absent/null = full frame). */
   crop?: CropRect | null
+  /** Mirror horizontally / vertically (absent = false), applied to the picture
+   *  after the crop — like `ImageContent`'s flips. */
+  flipH?: boolean
+  flipV?: boolean
   /** Optional color correction (absent = none). */
   color?: ColorAdjust
   /**
@@ -385,6 +389,15 @@ export interface Layer {
    *  for a future text free-distort mode; text ignores them today. */
   stretchX?: number
   stretchY?: number
+  /**
+   * Free-angle rotation, CLOCKWISE degrees about the box centre (absent = 0).
+   * A layer transform like x/y/scale — applied to the whole sized box, after
+   * any crop — so it never changes the box's shape or fit. Honored for video,
+   * image and text layers (preview + export); layout and compound layers ignore
+   * it (no rotate handle is offered on them). One model with
+   * `CaptionStyle.rotationDeg`; all the math lives in `shared/rotation.ts`.
+   */
+  rotationDeg?: number
   /**
    * Position/scale keyframes (absent/empty = static base transform). Honored
    * for video and image layers by preview and export (`layerTransformAt`);
@@ -679,7 +692,7 @@ export function createEmptyProject(id: string, name: string): Project {
   return {
     id,
     name,
-    version: 22,
+    version: 23,
     preset: DEFAULT_PRESET_ID,
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -985,7 +998,10 @@ export function migrateProject(raw: unknown): Project {
   // know — a newer build's format, a hand-edited file — normalises to the
   // default instead of leaving every preset lookup undefined.
   if (!isPresetId(p.preset)) p.preset = DEFAULT_PRESET_ID
-  if (typeof p.version !== 'number' || p.version < 22) p.version = 22
+  // v23 adds free-angle layer rotation (`Layer.rotationDeg`) and video flips
+  // (`VideoContent.flipH`/`flipV`). Purely additive — absent means upright and
+  // unflipped, which is what every older layer is — so nothing is rewritten.
+  if (typeof p.version !== 'number' || p.version < 23) p.version = 23
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.
