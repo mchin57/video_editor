@@ -53,6 +53,10 @@ const logicalPerPx = async (page: Page): Promise<number> => {
   return 1080 / b.width
 }
 
+/** Drag results land within this many LOGICAL px: the pointer moves in whole
+ *  screen px, and one screen px is ~3 logical px at the test window's size. */
+const near = (got: number, want: number): void => expect(Math.abs(got - want)).toBeLessThan(2)
+
 const drag = async (page: Page, from: { x: number; y: number }, dx: number, dy: number): Promise<void> => {
   await page.mouse.move(from.x, from.y)
   await page.mouse.down()
@@ -94,7 +98,7 @@ test('dragging an end dot moves only that end, in one undo step', async ({ appPa
   await drag(page, await centre(page, '[data-motion="end"]'), 0, 100)
   const [a, b] = [...(await layer0(page)).keyframes!].sort((p, q) => p.tSec - q.tSec)
   expect(a).toMatchObject({ x: 540, y: 960 })
-  expect(b.x).toBeCloseTo(810, 0)
+  near(b.x, 810)
   expect(b.y).toBeGreaterThan(960 + 100 * k - 3)
   expect(b.y).toBeLessThan(960 + 100 * k + 3)
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().past.length)).toBe(past + 1)
@@ -112,10 +116,12 @@ test('dragging the layer moves the whole path — it never grows a keyframe', as
   const l = await layer0(page)
   expect(l.keyframes).toHaveLength(2)
   const [a, b] = [...l.keyframes!].sort((p, q) => p.tSec - q.tSec)
-  expect(a.x).toBeCloseTo(540 - 60 * k, 0)
-  expect(b.x).toBeCloseTo(810 - 60 * k, 0)
-  expect(a.y).toBeCloseTo(960 + 40 * k, 0)
-  expect(b.y).toBeCloseTo(960 + 40 * k, 0)
+  near(a.x, 540 - 60 * k)
+  near(b.x, 810 - 60 * k)
+  near(a.y, 960 + 40 * k)
+  near(b.y, 960 + 40 * k)
+  // …and both ends moved by the SAME amount (it is one path).
+  expect(b.x - a.x).toBeCloseTo(270, 6)
 })
 
 test('a media layer on a path moves whole too (not a keyframe at the playhead)', async ({ appPage: page }) => {
@@ -143,7 +149,8 @@ test('a media layer on a path moves whole too (not a keyframe at the playhead)',
   const l = await layer0(page)
   expect(l.keyframes).toHaveLength(2)
   const ys = l.keyframes!.map((f) => f.y)
-  for (const y of ys) expect(y).toBeCloseTo(900 + 50 * k, 0)
+  for (const y of ys) near(y, 900 + 50 * k)
+  expect(ys[0]).toBeCloseTo(ys[1], 6) // one path: both ends moved together
 })
 
 test('Remove motion clears it and leaves the text where the move started', async ({ appPage: page }) => {
