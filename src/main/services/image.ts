@@ -7,6 +7,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 
 /** Longest-edge cap for the display PNG (the output canvas is 1080 wide). */
@@ -34,10 +35,14 @@ export function buildDisplayImageArgs(input: string, output: string): string[] {
   ]
 }
 
+/** Atomic: for an image asset this PNG's existence IS "ready" (its proxy). */
 export async function generateDisplayImage(input: string, output: string): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  const args = buildDisplayImageArgs(input, output)
-  await new Promise<void>((resolve, reject) => {
+  await writeAtomically(output, (part) => runImage(ffmpeg, buildDisplayImageArgs(input, part)))
+}
+
+function runImage(ffmpeg: string, args: string[]): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true })
     let tail = ''
     child.stderr.on('data', (buf: Buffer) => {

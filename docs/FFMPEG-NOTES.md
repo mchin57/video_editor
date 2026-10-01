@@ -329,6 +329,54 @@ black + `signalstats` YAVG readbacks (drives `buildOpacityCmdLines` /
   quirk. Fix lives in `buildAudioGraph` (`services/audio.ts`); the ordering is
   pinned in `audio.test.ts`.
 
+## Partial outputs — the file exists (and lies) before ffmpeg is done (verified ffmpeg 8.1.1, 2026-09)
+
+The media store decides "ready" by EXISTENCE (`existsSync(proxy.mp4)`), so
+anything ffmpeg writes straight to its final name is a trap:
+
+- **ffmpeg creates its output the moment encoding starts.** The exact proxy
+  command (`buildProxyArgs` shape) on a 33s 1080x1920 source: 431ms in,
+  `proxy.mp4` already existed at 786KB, laid out `ftyp free mdat` — the
+  `+faststart` `moov` is written (and moved to the front) only at the very end —
+  and ffprobe failed `moov atom not found`. In the app, a layer added in that
+  window got `MediaError 4: PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN:
+  FFmpegDemuxer: open context failed`, and the `<video>` NEVER retries: still
+  failing well after the encode finished (`e2e/proxyReady.spec.ts`).
+- **A partial WebM is worse — it OPENS.** A snapshot of a VP9-alpha proxy 3s into
+  a 9s encode: ffprobe exit 0, the FULL 20.000s duration reported, but only 113
+  of 600 frames decode. It would play truncated, with no error at all. (A flat
+  test source hid this: its whole output fit the 32KB AVIO buffer, so the file
+  stayed 0 bytes until the end — test with real content.)
+- **A failed run leaves a valid-looking TRUNCATED file.** Exit 183 mid-stream
+  (`-xerror` on a corrupt TS input): ffmpeg still finalized the mp4 — `moov`
+  written, opens fine, 4.93s of a 10s source. A killed run (exit 143) leaves a
+  torn, unopenable one. ffmpeg never deletes its output on failure.
+- **Fix: `writeAtomically` (`services/atomicWrite.ts`)** — encode to
+  `partialPath(final)` (`proxy.part.mp4`), rename onto the final name only after
+  exit 0, delete the partial on failure. **Keep the real extension LAST** — the
+  muxer is picked from it. Verified BYTE-IDENTICAL output under the `.part` name
+  for mp4 (still `ftyp moov free mdat`, so faststart still applies), m4a (still
+  the `ipod` muxer, `M4A ` brand), jpg and png. WebM bytes differ run-to-run even
+  under one name (random segment UID), but the `.part` output decodes to
+  identical frames incl. alpha, keeps `doctype=webm` + `ALPHA_MODE=1`, and with
+  `-fflags +bitexact` both names are byte-identical.
+- **image2 outputs (thumb.jpg, waveform.png, image.png) have a far smaller
+  window**: image2 opens its file per packet, so the file appears only when the
+  finished image is written (a 1.4s waveform run never showed its file while
+  running, polled every 20ms). They go through `writeAtomically` anyway — a
+  killed write would otherwise be kept forever by the `existsSync` skip, and
+  `image.png` IS an image asset's "ready" signal.
+- **Windows: `fs.rename` onto a target that is OPEN fails `EPERM`** — even a
+  plain Node read handle blocks it. Harmless here (the final name never exists
+  when we rename), but it is why `asset.json` is NOT written this way: a
+  concurrent `readAsset` could hold it open.
+- The partial name is fixed per file (a crash's leftover is overwritten by the
+  next attempt's `-y`), so two writers of one file would share it —
+  `mediaStore` coalesces them with `singleFlight` (per asset for
+  `ensureProxy`, per path for thumb/waveform/image). That is per-process: two
+  app instances on one data dir are not coordinated (there is no
+  single-instance lock).
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are
