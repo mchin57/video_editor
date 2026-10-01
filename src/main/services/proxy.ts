@@ -55,9 +55,11 @@ export function hdrToSdrChain(v: VideoStreamInfo): string {
 
 /**
  * Alpha-preserving proxy for a background-removed clip: a downscaled VP9 WebM in
- * `yuva420p` so the renderer's <video> keeps transparency (H.264/mp4 can't). No
- * audio (these clips are silent). Chromium plays VP8/VP9-alpha WebM with a
- * transparent background, so the subject composites over lower layers in preview.
+ * `yuva420p` so the renderer's <video> keeps transparency (H.264/mp4 can't).
+ * Chromium plays VP8/VP9-alpha WebM with a transparent background, so the subject
+ * composites over lower layers in preview. A matte carries its segment's audio
+ * (it stands in for the original layer), so the proxy keeps it — as Opus, WebM's
+ * codec — mono-folded like the H.264 proxy.
  */
 export function buildAlphaProxyArgs(input: string, output: string, probe: ProbeInfo): string[] {
   const { w, h } = proxyDimensions(probe)
@@ -89,12 +91,18 @@ export function buildAlphaProxyArgs(input: string, output: string, probe: ProbeI
     '4',
     '-row-mt',
     '1',
-    '-an',
+    ...alphaProxyAudioArgs(probe),
     '-progress',
     'pipe:1',
     '-nostats',
     output
   ]
+}
+
+function alphaProxyAudioArgs(probe: ProbeInfo): string[] {
+  if (!probe.audio) return ['-an']
+  const fold = probe.audio.monoFoldChannel != null ? ['-af', monoFoldPan(probe.audio.monoFoldChannel)] : []
+  return ['-map', '0:a:0?', ...fold, '-c:a', 'libopus', '-b:a', '128k']
 }
 
 export function buildProxyArgs(input: string, output: string, probe: ProbeInfo): string[] {

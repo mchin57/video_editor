@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT, type AudioFxRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
@@ -56,11 +56,14 @@ const api = {
   detectSilence: (mediaId: string): Promise<{ start: number; end: number }[]> =>
     ipcRenderer.invoke(IPC.detectSilence, mediaId),
 
-  // Background removal (subject-aware crop) — matte a clip into a new transparent
-  // library asset (a VP9 WebM), gated on the segmentation model being present.
+  // Background removal (subject-aware crop) — matte one clip segment into a new
+  // transparent library asset (a VP9 WebM with the segment's audio), gated on the
+  // segmentation model being present. Resolves null when the job was canceled.
   segmentAvailable: (): Promise<boolean> => ipcRenderer.invoke(IPC.segmentAvailable),
-  removeBackground: (mediaId: string): Promise<MediaAsset> =>
-    ipcRenderer.invoke(IPC.removeBackground, mediaId),
+  removeBackground: (req: RemoveBackgroundRequest): Promise<MediaAsset | null> =>
+    ipcRenderer.invoke(IPC.removeBackground, req),
+  /** Ask a cancelable background job to stop (false = nothing to cancel). */
+  cancelJob: (jobId: string): Promise<boolean> => ipcRenderer.invoke(IPC.cancelJob, jobId),
   renderAudioFx: (req: AudioFxRequest): Promise<MediaAsset> =>
     ipcRenderer.invoke(IPC.renderAudioFx, req),
 

@@ -264,6 +264,87 @@ export function videoTimelineTime(content: VideoContent, layer: Layer, s: number
   return layer.startSec + playedBetween(content, content.inSec, clamped) + holdsBefore
 }
 
+// --- Re-rendered segments (background removal) -------------------------------
+
+/**
+ * The source window a video layer plays: `[inSec, outSec]`. Freeze holds only
+ * pause on frames inside it and a speed profile only re-times it, so this is
+ * all the footage the layer can ever show — what a per-segment re-render
+ * (background removal) has to cover, and no more.
+ */
+export function videoSourceWindow(content: Pick<VideoContent, 'inSec' | 'outSec'>): {
+  startSec: number
+  durationSec: number
+} {
+  return { startSec: content.inSec, durationSec: Math.max(0, content.outSec - content.inSec) }
+}
+
+/**
+ * Whether a re-render of `sourceMediaId`'s window still covers everything this
+ * layer plays — the guard before swapping it in after a long job, during which
+ * the layer may have been re-pointed or re-trimmed. Trimming INSIDE the window
+ * (or splitting the layer) keeps it covered; extending past it does not.
+ */
+export function windowCoversVideo(
+  content: Pick<VideoContent, 'mediaId' | 'inSec' | 'outSec'>,
+  sourceMediaId: string,
+  window: { startSec: number; durationSec: number }
+): boolean {
+  const EPS = 1e-6
+  return (
+    content.mediaId === sourceMediaId &&
+    content.inSec >= window.startSec - EPS &&
+    content.outSec <= window.startSec + window.durationSec + EPS
+  )
+}
+
+/**
+ * Point a video layer at a re-rendered copy of its own source window — a
+ * background-removed matte whose t=0 is source second `windowStartSec`. Every
+ * source-anchored time (trim, freeze holds, speed-ramp keyframes) shifts back
+ * by the window start, so the layer keeps its timeline placement and played
+ * duration exactly: `videoSourceTime` on the result is the original's minus
+ * `windowStartSec` at every timeline instant. A source-pixel crop rescales by
+ * `pixelScale` (copy px per original px — a matte is capped at 1920 on its long
+ * edge) and clamps inside `copySize`.
+ *
+ * Stabilization is forced OFF: the export stabilizes through an opaque
+ * intermediate, which would throw the new transparency away.
+ */
+export function rebaseVideoContent(
+  content: VideoContent,
+  mediaId: string,
+  windowStartSec: number,
+  pixelScale: { x: number; y: number },
+  copySize: { w: number; h: number }
+): VideoContent {
+  // A uniform shift — never clamped — so the profile is preserved exactly (a ramp
+  // keyframe before the in-point still shapes the speed across it).
+  const shift = (s: number): number => s - windowStartSec
+  const crop = content.crop
+  const w = crop ? Math.min(copySize.w, Math.round(crop.w * pixelScale.x)) : 0
+  const h = crop ? Math.min(copySize.h, Math.round(crop.h * pixelScale.y)) : 0
+  return {
+    ...content,
+    mediaId,
+    inSec: shift(content.inSec),
+    outSec: shift(content.outSec),
+    ...(crop
+      ? {
+          crop: {
+            x: Math.max(0, Math.min(Math.round(crop.x * pixelScale.x), copySize.w - w)),
+            y: Math.max(0, Math.min(Math.round(crop.y * pixelScale.y), copySize.h - h)),
+            w,
+            h
+          }
+        }
+      : {}),
+    ...(content.freezes ? { freezes: content.freezes.map((f) => ({ ...f, atSec: shift(f.atSec) })) } : {}),
+    ...(content.speedRamp ? { speedRamp: content.speedRamp.map((k) => ({ ...k, atSec: shift(k.atSec) })) } : {}),
+    stabilize: null
+  }
+}
+
 // --- Keyframed transform (shared by preview + export) ------------------------
 
 /** A layer's animatable transform values at one instant. `opacity` is 0..1

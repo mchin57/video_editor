@@ -35,6 +35,7 @@ export const {
   detectSilence,
   segmentAvailable,
   removeBackground,
+  cancelJob,
   renderAudioFx,
   captureStillToLibrary,
   captureStillToDisk,

@@ -37,6 +37,8 @@ export const IPC = {
   // Background removal (subject-aware crop)
   segmentAvailable: 'segment:available',
   removeBackground: 'segment:removeBackground',
+  // Background jobs
+  cancelJob: 'job:cancel',
   // Stills (capture a frame from a clip)
   captureStillToLibrary: 'still:toLibrary',
   captureStillToDisk: 'still:toDisk'
@@ -61,6 +63,24 @@ export interface AudioFxRequest {
   /** Source window to render, in the source's own time. */
   inSec: number
   outSec: number
+}
+
+/**
+ * Matte ONE segment of a source clip — the source window a video layer actually
+ * plays — into a new transparent library asset. The window is in the source's
+ * own time; the result's t=0 is the source's `startSec`.
+ */
+export interface RemoveBackgroundRequest {
+  mediaId: string
+  /** Source window to matte, in the source's own time. */
+  startSec: number
+  durationSec: number
+  /** Slowest playback speed the segment is played at (1 = none). Below 1 the
+   *  matte keeps more of the source's frame rate so slow-mo stays smooth. */
+  minSpeed: number
+  /** Opaque tag echoed as the job's `subjectId` (the renderer passes the layer
+   *  id, so the UI can find "the matte job for this layer"). */
+  subjectId?: string
 }
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

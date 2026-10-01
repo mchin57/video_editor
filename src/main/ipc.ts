@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join, parse } from 'node:path'
-import { IPC, type AudioFxRequest, type StillRequest } from '@shared/ipc'
+import { IPC, type AudioFxRequest, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -33,6 +33,7 @@ import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
+import { cancelJob } from './services/jobs'
 
 /**
  * Import each path (fast hash+probe), then kick proxy generation in the
@@ -213,9 +214,12 @@ export function registerIpcHandlers(): void {
     return detectSilence(asset.originalPath, asset.probe.durationSec)
   })
 
-  // Background removal: matte a clip into a new transparent library asset.
+  // Background removal: matte one clip segment into a new transparent library
+  // asset (null = the job was canceled).
   ipcMain.handle(IPC.segmentAvailable, () => segmentAvailable())
-  ipcMain.handle(IPC.removeBackground, (_event, mediaId: string) => removeBackgroundToLibrary(mediaId))
+  ipcMain.handle(IPC.removeBackground, (_event, req: RemoveBackgroundRequest) => removeBackgroundToLibrary(req))
+  // Ask a cancelable background job to stop (false = nothing to cancel).
+  ipcMain.handle(IPC.cancelJob, (_event, jobId: string) => cancelJob(jobId))
   ipcMain.handle(IPC.renderAudioFx, (_event, req: AudioFxRequest) =>
     renderAudioFxToLibrary(req.settings, req.sourceMediaId, req.inSec, req.outSec)
   )
