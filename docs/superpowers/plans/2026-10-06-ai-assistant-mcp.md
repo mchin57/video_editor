@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let Claude Code (on the owner's subscription) drive the running Reel Editor through a local MCP server: read clips and transcripts, look at frames, lay a rough cut on the timeline in one undo step, export it, and file feature requests into `docs/TODO.md`.
+**Goal:** Let Claude Code (on the owner's subscription) drive the running Reel Editor: read clips and transcripts, look at frames, lay a rough cut on the timeline in one undo step, export it, and file feature requests into `docs/TODO.md`.
 
-**Architecture:** An MCP server (official `@modelcontextprotocol/sdk`, stateless Streamable HTTP) runs inside Electron main on `127.0.0.1`, guarded by a bearer token. Read tools are answered in main from the media store / whisper / ffmpeg; edit tools are forwarded over a request/response IPC bridge to the renderer, which runs the real zustand store actions (so undo, links and nonlinear source time stay correct). Pure logic (sequence building, transcript text, TODO appending, export naming, timeline summary) lives in tested modules.
+**Architecture:** Claude Code launches **reel-mcp** (`node out/main/mcp.js`), a stdio MCP server built from this repo with the official `@modelcontextprotocol/sdk` (stock `StdioServerTransport`). reel-mcp owns the tool definitions and forwards each call as one JSON line over a Windows **named pipe** to the running editor. Electron main answers: read tools from the media store / whisper / ffmpeg, edit tools over an IPC request/response bridge to the renderer, which runs the real zustand store actions (so undo, links and nonlinear source time stay correct). No local HTTP: an MCP-aware filter on the owner's machine corrupts local plain-HTTP MCP traffic (spec, "Why not local HTTP"); stdio and pipes are verified unaffected.
 
-**Tech Stack:** Electron 42 + electron-vite, React 19, zustand, TypeScript, vitest, Playwright (Electron), `@modelcontextprotocol/sdk@1.32.1`, `zod@^4`.
+**Tech Stack:** Electron 42 + electron-vite 5, React 19, zustand, TypeScript, vitest, Playwright (Electron), `@modelcontextprotocol/sdk@1.32.1`, `zod@^4`, Node 24 (on PATH, runs reel-mcp).
 
 **Spec:** `docs/superpowers/specs/2026-10-06-ai-assistant-mcp-design.md` — read it alongside this plan.
 
@@ -15,22 +15,24 @@
 - Never `git push`. Commit locally only (CLAUDE.md house rule).
 - Every commit message ends with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - `npm run typecheck` and `npm test` must be green at every commit; the `exporterArgs` tests must stay untouched and green.
-- Server binds `127.0.0.1` only; default port `47823`; every request needs `Authorization: Bearer <token>`; any `Origin` header other than absent/`null` is refused.
-- Registration command, exactly: `claude mcp add --scope user --transport http reel-editor http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"`
-- Server is ON by default; Settings has a toggle that starts/stops it live.
+- No HTTP server and no SDK transport workarounds: reel-mcp uses the SDK's stock `StdioServerTransport`; editor ⇄ reel-mcp is JSON lines over a named pipe.
+- Pipe path: `\\.\pipe\reel-editor` on Windows (`<tmpdir>/reel-editor.sock` elsewhere, untested); env `REEL_ASSISTANT_PIPE` overrides it on both sides.
+- reel-mcp builds to `out/main/mcp.js` (second entry of the electron-vite main build) and must never import `electron` or write to stdout (stdout is the MCP channel; log with `console.error`).
+- Registration command, exactly: `claude mcp add --scope user reel-editor -- node "<absolute path of out/main/mcp.js>"`
+- Assistant is ON by default; Settings has a toggle that starts/stops the pipe server live.
+- Not-running message, exactly: `Reel Editor isn't running, or its AI assistant is switched off in Settings. Open it and try again.`
 - `request_feature` writes to `join(app.getAppPath(), 'docs', 'TODO.md')`, overridable by env `REEL_TODO_PATH`; section heading `## Assistant requests`, inserted directly above `## Open`.
 - Entry format: `- [ ] **<title>** — <problem> _Proposal:_ <proposal> _Workaround used:_ <workaround> _(requested by assistant, YYYY-MM-DD)_` (workaround clause omitted when absent).
 - Every edit tool is exactly one undo step. Edits target the active composition (`editPath`), like the UI.
-- Do NOT use the SDK's `StreamableHTTPServerTransport` (Node wrapper): verified 2026-10-06 on Node 24 that it sends `transfer-encoding: chunked` with an unframed body, which clients reject. Use `WebStandardStreamableHTTPServerTransport` + the small adapter in Task 10.
-- `docs/TODO.md` feature entry stays `[~]` until the owner's real smoke test (Task 14) passes.
+- `docs/TODO.md` feature entry stays `[~]` until the owner's real smoke test (Task 16) passes — with Norton running normally.
 
 ## Review Focus
 
-1. **A media id the project doesn't have** (stale id, another project's clip) → tool error that lists the valid ids; nothing changes. Pinned in Task 12 (e2e `get_transcript` with a bogus id).
+1. **A media id the project doesn't have** (stale id, another project's clip) → tool error that lists the valid ids; nothing changes. Pinned in Task 14 (e2e `get_transcript` with a bogus id).
 2. **Reversed or out-of-range in/out in `place_sequence`** (`outSec < inSec`, beyond the source) → clamped where possible, otherwise an error naming the item, and the timeline and undo history are untouched. Pinned in Task 6 (`rejects a reversed item…`).
 3. **Two `request_feature` calls at once** (Claude Code issues tool calls in parallel) → both entries land; neither overwrites the other. Pinned in Task 3 (`todoFile.test.ts`).
 4. **`export_video` while an export is already running, or with no clips** → refused with a clear reason, no second ffmpeg started. Pinned in Task 4 (`exportRefusal`).
-5. **Port already taken** (a second editor instance, or another program on 47823) → Settings shows "port in use", the app keeps running. Pinned in Task 10 (`listenLocal` test).
+5. **A second editor instance** (same pipe already served) → Settings shows "Another copy of the editor is already connected to Claude Code", the app keeps running; and **the editor closed** → every tool says so plainly. Pinned in Task 9 (`pipe.test.ts`) and Task 14 (e2e "closed editor").
 
 ---
 
@@ -40,26 +42,30 @@
 |---|---|---|
 | `src/shared/assistant/transcriptText.ts` (+test) | create | Words → compact timed phrase / word lines |
 | `src/shared/assistant/frameTimes.ts` (+test) | create | Which source times `get_frames` samples |
-| `src/shared/assistant/protocol.ts` | create | Bridge op names + arg/result types, sequence types, server state type |
+| `src/shared/assistant/protocol.ts` | create | Renderer-bridge op types, sequence types, `AssistantStatus` |
 | `src/shared/assistant/timelineSummary.ts` (+test) | create | Composition → compact JSON the model reads |
+| `src/shared/assistant/pipeProtocol.ts` (+test) | create | Pipe message types, JSON-lines encode/decode, default pipe path |
+| `src/shared/assistant/toolArgs.ts` | create | Tool name → argument type (links reel-mcp and main at compile time) |
 | `src/shared/settings.ts` (+new test) | modify | `AssistantSettings`, defaults, `mcpAddCommand` |
 | `src/main/assistant/todoAppend.ts` (+test) | create | Pure markdown insertion for feature requests |
 | `src/main/assistant/todoFile.ts` (+test) | create | Read/serialize/write `docs/TODO.md` |
 | `src/main/services/exportTarget.ts` (+test) | create | Safe export file names, unique paths, export refusal reasons |
 | `src/renderer/src/lib/sequence.ts` (+test) | create | `applySequence` + `makeExtractedAudioClip` |
 | `src/renderer/src/state/projectStore.ts` | modify | `addVideoSequence` action; `addVideoLayer` uses `makeExtractedAudioClip` |
-| `src/main/services/settings.ts` | modify | Assistant defaults + token persistence |
-| `src/shared/ipc.ts`, `src/preload/index.ts`, `src/renderer/src/ipc/client.ts` | modify | Bridge channels |
+| `src/main/services/settings.ts` | modify | Assistant defaults |
+| `src/shared/ipc.ts`, `src/preload/index.ts`, `src/renderer/src/ipc/client.ts` | modify | Bridge + status channels |
 | `src/main/assistant/bridge.ts` | create | `callRenderer(op, args)` with timeout |
 | `src/renderer/src/assistant/handlers.ts` | create | Renderer op table over store actions |
 | `src/renderer/src/main.tsx` | modify | Install the bridge |
+| `src/main/assistant/pipe.ts` (+test) | create | `servePipe` / `callPipe` over a real named pipe (no Electron imports) |
 | `src/main/services/importMany.ts` | create (moved) | Import paths + kick proxies (was private in `ipc.ts`) |
-| `src/main/assistant/tools.ts` | create | All MCP tool registrations |
-| `src/main/assistant/http.ts` (+test) | create | Access check, node↔web request adapter, `listenLocal` |
-| `src/main/assistant/server.ts` | create | Start/stop/status of the MCP HTTP server |
+| `src/main/assistant/tools.ts` | create | One handler per tool → `ToolContent[]`; `handleTool` dispatch |
+| `src/mcp/tools.ts`, `src/mcp/index.ts` | create | reel-mcp: zod tool definitions forwarding over the pipe; stdio entry |
+| `electron.vite.config.ts`, `tsconfig.node.json` | modify | Build `out/main/mcp.js`; typecheck `src/mcp` |
+| `src/main/assistant/service.ts` | create | Start/stop/status of the pipe server |
 | `src/main/index.ts`, `src/main/ipc.ts` | modify | Lifecycle, status IPC, restart on settings change |
 | `src/renderer/src/components/SettingsModal.tsx` | modify | Toggle, status, copyable command |
-| `e2e/fixtures.ts`, `e2e/assistant.spec.ts` | modify/create | Hermetic port + TODO path; end-to-end MCP checks |
+| `e2e/fixtures.ts`, `e2e/assistant.spec.ts` | modify/create | Hermetic pipe + TODO path; end-to-end via the real stdio script |
 | `.claude/skills/edit-video/SKILL.md` | create | `/edit-video` playbook |
 | `docs/SHARED.md`, `docs/TODO.md`, `README.md` | modify | Docs |
 
@@ -719,7 +725,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `src/shared/assistant/timelineSummary.ts`, `src/shared/assistant/timelineSummary.test.ts`
 
 **Interfaces:**
-- Produces (protocol): `SequenceItem`, `SequencePlan`, `PlacedClip`, `AssistantOps`, `AssistantOp`, `AssistantRequest`, `AssistantResponse`, `AssistantServerState` (exact shapes below).
+- Produces (protocol): `SequenceItem`, `SequencePlan`, `PlacedClip`, `AssistantOps`, `AssistantOp`, `AssistantRequest`, `AssistantResponse`, `AssistantStatus` (exact shapes below).
 - Produces (summary): `summarizeTimeline(comp: Composition): TimelineSummary`, `LayerSummary`, `AudioSummary`, `TimelineSummary`.
 
 - [ ] **Step 1: Write the protocol types (no test — types only)**
@@ -785,10 +791,14 @@ export interface AssistantRequest<K extends AssistantOp = AssistantOp> {
 
 export type AssistantResponse = { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string }
 
-export type AssistantServerState =
-  | { state: 'off' }
-  | { state: 'running'; port: number }
-  | { state: 'error'; message: string }
+/** What Settings shows about the Claude Code connection. */
+export interface AssistantStatus {
+  state: 'off' | 'listening' | 'error'
+  /** Why, when state is 'error'. */
+  message?: string
+  /** Absolute path of reel-mcp's built entry (out/main/mcp.js) for the registration command. */
+  scriptPath: string
+}
 ```
 
 - [ ] **Step 2: Write the failing summary test**
@@ -1186,7 +1196,7 @@ import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 - [ ] **Step 6: Run the whole suite + typecheck**
 
 Run: `npm test` then `npm run typecheck`
-Expected: all PASS; typecheck clean (the `addVideoLayer` refactor is behavior-preserving; `e2e/link.spec.ts` covers it end-to-end in Task 12's full e2e run).
+Expected: all PASS; typecheck clean (the `addVideoLayer` refactor is behavior-preserving; `e2e/link.spec.ts` covers it end-to-end in Task 14's full e2e run).
 
 - [ ] **Step 7: Commit**
 
@@ -1210,38 +1220,30 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `src/main/services/settings.ts`
 
 **Interfaces:**
-- Produces: `AssistantSettings { enabled: boolean; port: number; token: string }`; `Settings.assistant: AssistantSettings`; `DEFAULT_ASSISTANT_PORT = 47823`; `withAssistantDefaults(loaded: Partial<AssistantSettings> | undefined, makeToken: () => string): AssistantSettings`; `mcpAddCommand(port: number, token: string): string`.
+- Produces: `AssistantSettings { enabled: boolean }`; `Settings.assistant: AssistantSettings`; `withAssistantDefaults(loaded: Partial<AssistantSettings> | undefined): AssistantSettings`; `mcpAddCommand(scriptPath: string): string`.
 
 - [ ] **Step 1: Write the failing test**
 
 `src/shared/settings.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_ASSISTANT_PORT, mcpAddCommand, withAssistantDefaults } from './settings'
-
-const TOKEN = 'a'.repeat(48)
+import { mcpAddCommand, withAssistantDefaults } from './settings'
 
 describe('withAssistantDefaults', () => {
-  it('turns the server on with the default port and a fresh token when nothing is stored', () => {
-    expect(withAssistantDefaults(undefined, () => TOKEN)).toEqual({ enabled: true, port: DEFAULT_ASSISTANT_PORT, token: TOKEN })
+  it('turns the assistant on when nothing is stored', () => {
+    expect(withAssistantDefaults(undefined)).toEqual({ enabled: true })
+    expect(withAssistantDefaults({})).toEqual({ enabled: true })
   })
 
-  it('keeps stored values and does not mint a new token', () => {
-    let minted = 0
-    const stored = { enabled: false, port: 50000, token: 'b'.repeat(48) }
-    expect(withAssistantDefaults(stored, () => (minted++, TOKEN))).toEqual(stored)
-    expect(minted).toBe(0)
-  })
-
-  it('replaces an invalid port or a too-short token', () => {
-    expect(withAssistantDefaults({ port: 70000, token: 'short' }, () => TOKEN)).toEqual({ enabled: true, port: DEFAULT_ASSISTANT_PORT, token: TOKEN })
+  it('keeps a stored choice', () => {
+    expect(withAssistantDefaults({ enabled: false })).toEqual({ enabled: false })
   })
 })
 
 describe('mcpAddCommand', () => {
   it('is the one-time user-scope registration line', () => {
-    expect(mcpAddCommand(47823, 'tok')).toBe(
-      'claude mcp add --scope user --transport http reel-editor http://127.0.0.1:47823/mcp --header "Authorization: Bearer tok"'
+    expect(mcpAddCommand('C:\\code\\video_editor\\out\\main\\mcp.js')).toBe(
+      'claude mcp add --scope user reel-editor -- node "C:\\code\\video_editor\\out\\main\\mcp.js"'
     )
   })
 })
@@ -1256,72 +1258,43 @@ Expected: FAIL — `withAssistantDefaults` is not exported.
 
 In `src/shared/settings.ts`, add to the `Settings` interface (after `brandColors`):
 ```ts
-  /** The local MCP server Claude Code connects to (AI assistant). */
+  /** Claude Code connection (AI assistant). */
   assistant: AssistantSettings
 ```
 and add below the interface:
 ```ts
 export interface AssistantSettings {
-  /** Run the server (on by default; Settings can switch it off). */
+  /** Serve Claude Code over the named pipe (on by default; Settings can switch it off). */
   enabled: boolean
-  port: number
-  /** Bearer token Claude Code must send. Generated once, then kept. */
-  token: string
 }
 
-export const DEFAULT_ASSISTANT_PORT = 47823
-
-/** Fill in assistant defaults. `makeToken` only runs when no usable token is stored. */
-export function withAssistantDefaults(
-  loaded: Partial<AssistantSettings> | undefined,
-  makeToken: () => string
-): AssistantSettings {
-  const port = loaded?.port
-  return {
-    enabled: typeof loaded?.enabled === 'boolean' ? loaded.enabled : true,
-    port: Number.isInteger(port) && port! > 0 && port! < 65536 ? port! : DEFAULT_ASSISTANT_PORT,
-    token: typeof loaded?.token === 'string' && loaded.token.length >= 32 ? loaded.token : makeToken()
-  }
+export function withAssistantDefaults(loaded: Partial<AssistantSettings> | undefined): AssistantSettings {
+  return { enabled: typeof loaded?.enabled === 'boolean' ? loaded.enabled : true }
 }
 
-/** The one-time registration line Settings shows (user scope: every Claude Code session). */
-export function mcpAddCommand(port: number, token: string): string {
-  return `claude mcp add --scope user --transport http reel-editor http://127.0.0.1:${port}/mcp --header "Authorization: Bearer ${token}"`
+/** The one-time registration line Settings shows. `scriptPath` = absolute path of out/main/mcp.js. */
+export function mcpAddCommand(scriptPath: string): string {
+  return `claude mcp add --scope user reel-editor -- node "${scriptPath}"`
 }
 ```
 
 - [ ] **Step 4: Implement the main part**
 
-In `src/main/services/settings.ts`:
-- add imports: `import { randomBytes } from 'node:crypto'` and extend the `@shared/settings` import with `withAssistantDefaults`;
-- replace the `cache = { … }` assignment in `getSettings` and what follows with:
+In `src/main/services/settings.ts`, add `withAssistantDefaults` to the `@shared/settings` import, and add one property to the `cache = { … }` object in `getSettings`:
 ```ts
-  cache = {
-    exportDir: loaded.exportDir || getSubdir('exports'),
-    keywordBank: Array.isArray(loaded.keywordBank) ? loaded.keywordBank : DEFAULT_KEYWORD_BANK,
-    brandColors: Array.isArray(loaded.brandColors) ? loaded.brandColors : DEFAULT_BRAND_COLORS,
-    assistant: withAssistantDefaults(loaded.assistant, () => randomBytes(24).toString('hex'))
-  }
-  // A freshly minted token must survive restarts, or the registered Claude Code
-  // command would stop working: persist it the first time.
-  if (cache.assistant.token !== loaded.assistant?.token) {
-    await fsp.writeFile(settingsPath(), JSON.stringify(cache, null, 2), 'utf8').catch((err) =>
-      console.error('could not persist settings', err)
-    )
-  }
-  return cache
+    assistant: withAssistantDefaults(loaded.assistant)
 ```
 
 - [ ] **Step 5: Run tests + typecheck**
 
 Run: `npx vitest run src/shared/settings.test.ts` then `npm test` then `npm run typecheck`
-Expected: PASS; typecheck clean (SettingsModal still compiles — it only spreads `settings`).
+Expected: PASS; typecheck clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/shared/settings.ts src/shared/settings.test.ts src/main/services/settings.ts
-git commit -m "feat(assistant): assistant server settings with a persisted token
+git commit -m "feat(assistant): assistant on/off setting and registration command
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1331,18 +1304,18 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 8: Renderer bridge (main ⇄ renderer request/response)
 
 **Files:**
-- Modify: `src/shared/ipc.ts`, `src/preload/index.ts`, `src/renderer/src/ipc/client.ts`, `src/renderer/src/main.tsx`
+- Modify: `src/shared/ipc.ts`, `src/preload/index.ts`, `src/renderer/src/ipc/client.ts`, `src/renderer/src/main.tsx`, `src/main/ipc.ts`
 - Create: `src/main/assistant/bridge.ts`, `src/renderer/src/assistant/handlers.ts`
 
 **Interfaces:**
-- Consumes: `AssistantOps`, `AssistantRequest`, `AssistantResponse`, `AssistantServerState` (Task 5); `summarizeTimeline` (Task 5); `addVideoSequence` (Task 6); `expandSelection`, `timelineTiles` (`lib/links.ts`).
-- Produces: `registerAssistantBridge(): void` and `callRenderer<K extends AssistantOp>(op: K, args: AssistantOps[K]['args']): Promise<AssistantOps[K]['result']>` (main); `installAssistantBridge(): () => void` (renderer); preload `onAssistantRequest`, `assistantRespond`, `assistantStatus`; IPC names `IPC.assistantResponse = 'assistant:response'`, `IPC.assistantStatus = 'assistant:status'`, `IPC_EVENT.assistantRequest = 'assistant:request'`.
+- Consumes: `AssistantOps`, `AssistantRequest`, `AssistantResponse`, `AssistantStatus` (Task 5); `summarizeTimeline` (Task 5); `addVideoSequence` (Task 6); `expandSelection`, `timelineTiles` (`lib/links.ts`).
+- Produces: `registerAssistantBridge(): void` and `callRenderer<K extends AssistantOp>(op: K, args: AssistantOps[K]['args']): Promise<AssistantOps[K]['result']>` (main); `installAssistantBridge(): () => void` (renderer); preload `onAssistantRequest`, `assistantRespond`, `assistantStatus`; channel names `IPC.assistantResponse = 'assistant:response'`, `IPC.assistantStatus = 'assistant:status'`, `IPC_EVENT.assistantRequest = 'assistant:request'`.
 
 - [ ] **Step 1: Channel names**
 
-In `src/shared/ipc.ts`, add a comma after the last `IPC` entry (`captureStillToDisk: 'still:toDisk'`) and then these entries:
+In `src/shared/ipc.ts`, add a comma after the last `IPC` entry (`captureStillToDisk: 'still:toDisk'`) and then:
 ```ts
-  // AI assistant bridge (the MCP server runs in main)
+  // AI assistant: main ⇄ renderer bridge + status for Settings
   assistantResponse: 'assistant:response',
   assistantStatus: 'assistant:status'
 ```
@@ -1356,9 +1329,9 @@ export const IPC_EVENT = {
 
 - [ ] **Step 2: Preload surface**
 
-In `src/preload/index.ts` add the import:
+In `src/preload/index.ts` add:
 ```ts
-import type { AssistantRequest, AssistantResponse, AssistantServerState } from '@shared/assistant/protocol'
+import type { AssistantRequest, AssistantResponse, AssistantStatus } from '@shared/assistant/protocol'
 ```
 and add these properties to the `api` object after `onJobProgress` (put a comma after `onJobProgress`'s closing brace):
 ```ts
@@ -1369,7 +1342,7 @@ and add these properties to the `api` object after `onJobProgress` (put a comma 
     return () => ipcRenderer.removeListener(IPC_EVENT.assistantRequest, handler)
   },
   assistantRespond: (res: AssistantResponse): void => ipcRenderer.send(IPC.assistantResponse, res),
-  assistantStatus: (): Promise<AssistantServerState> => ipcRenderer.invoke(IPC.assistantStatus)
+  assistantStatus: (): Promise<AssistantStatus> => ipcRenderer.invoke(IPC.assistantStatus)
 ```
 
 In `src/renderer/src/ipc/client.ts`, add `onAssistantRequest`, `assistantRespond`, `assistantStatus` to the destructure list (after `onJobProgress`).
@@ -1511,10 +1484,12 @@ export function installAssistantBridge(): () => void {
 
 In `src/renderer/src/main.tsx`, add `import { installAssistantBridge } from './assistant/handlers'` with the other imports, and call `installAssistantBridge()` directly after the `window.__reelStores = { … }` assignment.
 
+The `assistantStatus` IPC handler itself is added in Task 12 (its service doesn't exist yet); until then the preload method is simply unused.
+
 - [ ] **Step 5: Typecheck + tests**
 
 Run: `npm run typecheck` then `npm test`
-Expected: clean / PASS. (Behavior is exercised end-to-end in Task 12.)
+Expected: clean / PASS. (Behavior is exercised end-to-end in Task 14.)
 
 - [ ] **Step 6: Commit**
 
@@ -1527,18 +1502,342 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: MCP tools
+### Task 9: Pipe protocol + pipe transport
 
 **Files:**
+- Create: `src/shared/assistant/pipeProtocol.ts`, `src/shared/assistant/pipeProtocol.test.ts`
+- Create: `src/main/assistant/pipe.ts`, `src/main/assistant/pipe.test.ts`
+
+**Interfaces:**
+- Produces (protocol): `ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }`; `PipeRequest { id: string; tool: string; args: unknown }`; `PipeResponse = { id; ok: true; content: ToolContent[] } | { id; ok: false; error: string }`; `PIPE_NAME = 'reel-editor'`; `defaultPipePath(platform: string, tmpDir: string): string`; `encodeLine(msg: unknown): string`; `class LineDecoder { push(chunk: string): unknown[] }`.
+- Produces (transport): `type PipeHandler = (tool: string, args: unknown) => Promise<ToolContent[]>`; `servePipe(path: string, handle: PipeHandler): Promise<{ ok: true; server: net.Server } | { ok: false; message: string }>`; `callPipe(path: string, tool: string, args: unknown): Promise<ToolContent[]>`; constants `NOT_RUNNING`, `IN_USE`.
+
+- [ ] **Step 1: Write the failing protocol test**
+
+`src/shared/assistant/pipeProtocol.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { LineDecoder, defaultPipePath, encodeLine } from './pipeProtocol'
+
+describe('LineDecoder', () => {
+  it('returns whole messages across split chunks', () => {
+    const d = new LineDecoder()
+    expect(d.push('{"a":')).toEqual([])
+    expect(d.push('1}\n{"b"')).toEqual([{ a: 1 }])
+    expect(d.push(':2}\n')).toEqual([{ b: 2 }])
+  })
+
+  it('returns several messages from one chunk and skips blank lines', () => {
+    expect(new LineDecoder().push('{"a":1}\n\n{"a":2}\r\n')).toEqual([{ a: 1 }, { a: 2 }])
+  })
+
+  it('round-trips encodeLine, including newlines inside strings', () => {
+    const msg = { text: 'two\nlines', n: 3 }
+    expect(new LineDecoder().push(encodeLine(msg))).toEqual([msg])
+  })
+})
+
+describe('defaultPipePath', () => {
+  it('is a named pipe on Windows and a socket file elsewhere', () => {
+    expect(defaultPipePath('win32', 'C:\\Temp')).toBe('\\\\.\\pipe\\reel-editor')
+    expect(defaultPipePath('linux', '/tmp/')).toBe('/tmp/reel-editor.sock')
+  })
+})
+```
+
+- [ ] **Step 2: Write the failing transport test**
+
+`src/main/assistant/pipe.test.ts`:
+```ts
+// @vitest-environment node
+import net from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { IN_USE, NOT_RUNNING, callPipe, servePipe } from './pipe'
+
+let n = 0
+const uniquePipe = (): string =>
+  process.platform === 'win32'
+    ? `\\\\.\\pipe\\reel-test-${process.pid}-${++n}`
+    : join(tmpdir(), `reel-test-${process.pid}-${++n}.sock`)
+
+const servers: net.Server[] = []
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))))
+})
+
+async function serve(path: string, handle: Parameters<typeof servePipe>[1]): Promise<void> {
+  const r = await servePipe(path, handle)
+  if (!r.ok) throw new Error(r.message)
+  servers.push(r.server)
+}
+
+describe('servePipe + callPipe', () => {
+  it('round-trips a call with text and image content', async () => {
+    const path = uniquePipe()
+    await serve(path, async (tool, args) => [
+      { type: 'text', text: `${tool}:${JSON.stringify(args)}` },
+      { type: 'image', data: Buffer.alloc(5000, 7).toString('base64'), mimeType: 'image/jpeg' }
+    ])
+    const content = await callPipe(path, 'get_frames', { mediaId: 'm', count: 2 })
+    expect(content[0]).toEqual({ type: 'text', text: 'get_frames:{"mediaId":"m","count":2}' })
+    expect(content[1].type === 'image' && Buffer.from(content[1].data, 'base64').equals(Buffer.alloc(5000, 7))).toBe(true)
+  })
+
+  it("passes a handler's error back as the call's error", async () => {
+    const path = uniquePipe()
+    await serve(path, async () => {
+      throw new Error('No media "x" in this project')
+    })
+    await expect(callPipe(path, 'get_transcript', {})).rejects.toThrow('No media "x" in this project')
+  })
+
+  it('says plainly when nothing is serving the pipe', async () => {
+    await expect(callPipe(uniquePipe(), 'list_media', {})).rejects.toThrow(NOT_RUNNING)
+  })
+
+  it('answers two concurrent calls independently', async () => {
+    const path = uniquePipe()
+    await serve(path, async (tool) => {
+      await new Promise((r) => setTimeout(r, tool === 'slow' ? 200 : 10))
+      return [{ type: 'text', text: tool }]
+    })
+    const [slow, fast] = await Promise.all([callPipe(path, 'slow', {}), callPipe(path, 'fast', {})])
+    expect(slow).toEqual([{ type: 'text', text: 'slow' }])
+    expect(fast).toEqual([{ type: 'text', text: 'fast' }])
+  })
+
+  it('reports a pipe that another editor already serves', async () => {
+    const path = uniquePipe()
+    await serve(path, async () => [])
+    expect(await servePipe(path, async () => [])).toEqual({ ok: false, message: IN_USE })
+  })
+
+  it('reports an editor that hangs up without answering', async () => {
+    const path = uniquePipe()
+    const rude = net.createServer((sock) => sock.destroy())
+    await new Promise<void>((r) => rude.listen(path, r))
+    servers.push(rude)
+    await expect(callPipe(path, 'list_media', {})).rejects.toThrow(/closed the connection before answering/)
+  })
+})
+```
+
+- [ ] **Step 3: Run them to verify they fail**
+
+Run: `npx vitest run src/shared/assistant/pipeProtocol.test.ts src/main/assistant/pipe.test.ts`
+Expected: FAIL — cannot resolve `./pipeProtocol` / `./pipe`.
+
+- [ ] **Step 4: Implement the protocol**
+
+`src/shared/assistant/pipeProtocol.ts`:
+```ts
+/**
+ * Wire format between reel-mcp (the stdio MCP server Claude Code launches) and
+ * the running editor: one JSON object per line over a named pipe. One
+ * connection per tool call. Pure.
+ */
+
+/** MCP content blocks, passed straight through to Claude Code. */
+export type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+
+export interface PipeRequest {
+  id: string
+  tool: string
+  args: unknown
+}
+
+export type PipeResponse = { id: string; ok: true; content: ToolContent[] } | { id: string; ok: false; error: string }
+
+export const PIPE_NAME = 'reel-editor'
+
+/** Where the editor listens: a Windows named pipe; a unix socket elsewhere (untested). */
+export function defaultPipePath(platform: string, tmpDir: string): string {
+  return platform === 'win32' ? `\\\\.\\pipe\\${PIPE_NAME}` : `${tmpDir.replace(/[\\/]+$/, '')}/${PIPE_NAME}.sock`
+}
+
+/** JSON.stringify escapes newlines inside strings, so one message is always one line. */
+export const encodeLine = (msg: unknown): string => `${JSON.stringify(msg)}\n`
+
+/** Incremental JSON-lines decoder: feed chunks, get whole messages back. Throws on a malformed line. */
+export class LineDecoder {
+  private buf = ''
+
+  push(chunk: string): unknown[] {
+    this.buf += chunk
+    const out: unknown[] = []
+    let nl = this.buf.indexOf('\n')
+    while (nl !== -1) {
+      const line = this.buf.slice(0, nl).trim()
+      this.buf = this.buf.slice(nl + 1)
+      if (line) out.push(JSON.parse(line))
+      nl = this.buf.indexOf('\n')
+    }
+    return out
+  }
+}
+```
+
+- [ ] **Step 5: Implement the transport**
+
+`src/main/assistant/pipe.ts`:
+```ts
+/**
+ * The named pipe between reel-mcp and the editor. One connection per tool call:
+ * one request line in, one response line out; a long call (export) just keeps
+ * its connection open. No Electron imports — reel-mcp uses `callPipe`, and this
+ * file is unit-tested against a real pipe.
+ *
+ * Why a pipe rather than local HTTP: an MCP-aware filter on the owner's machine
+ * corrupts local plain-HTTP MCP traffic (design spec, "Why not local HTTP");
+ * pipes and stdio are not network traffic and were verified unaffected.
+ */
+
+import net from 'node:net'
+import { randomUUID } from 'node:crypto'
+import { LineDecoder, encodeLine, type PipeRequest, type PipeResponse, type ToolContent } from '@shared/assistant/pipeProtocol'
+
+export type PipeHandler = (tool: string, args: unknown) => Promise<ToolContent[]>
+
+export const NOT_RUNNING =
+  "Reel Editor isn't running, or its AI assistant is switched off in Settings. Open it and try again."
+export const IN_USE = 'Another copy of the editor is already connected to Claude Code'
+
+export function servePipe(
+  path: string,
+  handle: PipeHandler
+): Promise<{ ok: true; server: net.Server } | { ok: false; message: string }> {
+  const server = net.createServer((sock) => {
+    const decoder = new LineDecoder()
+    sock.setEncoding('utf8')
+    sock.on('data', (chunk: string) => {
+      let msgs: unknown[]
+      try {
+        msgs = decoder.push(chunk)
+      } catch {
+        sock.end(encodeLine({ id: '', ok: false, error: 'Malformed request' } satisfies PipeResponse))
+        return
+      }
+      for (const m of msgs) void answer(sock, m as PipeRequest, handle)
+    })
+    // The caller went away mid-call (e.g. Claude Code cancelled); nobody to tell.
+    sock.on('error', () => {})
+  })
+  return new Promise((resolve) => {
+    server.once('error', (err: NodeJS.ErrnoException) =>
+      resolve({ ok: false, message: err.code === 'EADDRINUSE' ? IN_USE : err.message })
+    )
+    server.listen(path, () => resolve({ ok: true, server }))
+  })
+}
+
+async function answer(sock: net.Socket, req: PipeRequest, handle: PipeHandler): Promise<void> {
+  let res: PipeResponse
+  try {
+    res = { id: req.id, ok: true, content: await handle(req.tool, req.args) }
+  } catch (e) {
+    res = { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!sock.destroyed) sock.end(encodeLine(res))
+}
+
+export function callPipe(path: string, tool: string, args: unknown): Promise<ToolContent[]> {
+  return new Promise((resolve, reject) => {
+    const id = randomUUID()
+    const decoder = new LineDecoder()
+    let settled = false
+    const settle = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      fn()
+    }
+    const sock = net.connect(path)
+    sock.setEncoding('utf8')
+    sock.on('connect', () => sock.write(encodeLine({ id, tool, args } satisfies PipeRequest)))
+    sock.on('data', (chunk: string) => {
+      let msgs: unknown[]
+      try {
+        msgs = decoder.push(chunk)
+      } catch {
+        settle(() => reject(new Error('Reel Editor sent a malformed answer')))
+        sock.destroy()
+        return
+      }
+      const res = msgs.find((m) => (m as PipeResponse).id === id) as PipeResponse | undefined
+      if (!res) return
+      settle(() => (res.ok ? resolve(res.content) : reject(new Error(res.error))))
+      sock.end()
+    })
+    sock.on('error', (err: NodeJS.ErrnoException) =>
+      settle(() => reject(new Error(err.code === 'ENOENT' || err.code === 'ECONNREFUSED' ? NOT_RUNNING : err.message)))
+    )
+    sock.on('close', () => settle(() => reject(new Error('Reel Editor closed the connection before answering'))))
+  })
+}
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `npx vitest run src/shared/assistant/pipeProtocol.test.ts src/main/assistant/pipe.test.ts` then `npm run typecheck`
+Expected: PASS (4 + 6 tests); typecheck clean. If `reports a pipe that another editor already serves` fails because Windows allowed the second `listen`, stop and report it — the IN_USE guarantee then needs a different mechanism (do not weaken the test).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/shared/assistant/pipeProtocol.ts src/shared/assistant/pipeProtocol.test.ts src/main/assistant/pipe.ts src/main/assistant/pipe.test.ts
+git commit -m "feat(assistant): JSON-lines named-pipe transport between reel-mcp and the editor
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: Tool handlers (editor side)
+
+**Files:**
+- Create: `src/shared/assistant/toolArgs.ts`
 - Create: `src/main/services/importMany.ts` (moved from `src/main/ipc.ts`)
-- Modify: `src/main/ipc.ts` (use the moved function)
+- Modify: `src/main/ipc.ts`
 - Create: `src/main/assistant/tools.ts`
 
 **Interfaces:**
-- Consumes: `callRenderer` (Task 8); `transcriptPhraseText`, `transcriptWordText`, `frameTimes` (Task 1); `fileFeatureRequest` (Task 3); `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` (Task 4); `SequenceItem` (Task 5); existing `getAsset`, `getProjectMedia`, `ensureProxy` (`services/mediaStore`), `getTranscript`, `transcribeMedia`, `whisperAvailable` (`services/whisper`), `generateStill` (`services/still`), `hdrToSdrChain` (`services/proxy`), `exportProject`, `suggestedExportName` (`services/exporter`), `listJobs` (`services/jobs`), `getSettings`, `getSubdir`, `alphaInputDecoder`, `assetAspect`, `assetKind` (`@shared/media`).
-- Produces: `importMany(paths: string[]): Promise<MediaAsset[]>`; `registerTools(server: McpServer): void` registering exactly: `list_media`, `import_media`, `get_transcript`, `get_frames`, `get_timeline`, `place_sequence`, `remove_items`, `undo`, `export_video`, `request_feature`.
+- Consumes: `callRenderer` (Task 8); `ToolContent` (Task 9); `transcriptPhraseText`, `transcriptWordText`, `frameTimes` (Task 1); `fileFeatureRequest` (Task 3); `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` (Task 4); `SequenceItem` (Task 5); existing `getProjectMedia`, `ensureProxy` (`services/mediaStore`), `getTranscript`, `transcribeMedia`, `whisperAvailable` (`services/whisper`), `generateStill` (`services/still`), `hdrToSdrChain` (`services/proxy`), `exportProject`, `suggestedExportName` (`services/exporter`), `listJobs` (`services/jobs`), `getSettings`, `getSubdir`, `alphaInputDecoder`, `assetAspect`, `assetKind` (`@shared/media`).
+- Produces: `ToolArgs` (interface: tool name → args), `ToolName = keyof ToolArgs`; `importMany(paths: string[]): Promise<MediaAsset[]>`; `toolHandlers` (one per `ToolName`); `handleTool(tool: string, args: unknown): Promise<ToolContent[]>` (a `PipeHandler`).
 
-- [ ] **Step 1: Move `importMany`**
+- [ ] **Step 1: Tool argument types**
+
+`src/shared/assistant/toolArgs.ts`:
+```ts
+/**
+ * Argument shape of each assistant tool. reel-mcp's zod schemas must produce
+ * these (checked at compile time where it forwards a call) and the editor's
+ * handlers consume them. Types only.
+ */
+
+type NoArgs = Record<string, never>
+
+export interface ToolArgs {
+  list_media: NoArgs
+  import_media: { paths: string[] }
+  get_transcript: { mediaId: string; fromSec?: number; toSec?: number; words?: boolean }
+  get_frames: { mediaId: string; times?: number[]; count?: number }
+  get_timeline: NoArgs
+  place_sequence: {
+    items: { mediaId: string; inSec: number; outSec: number }[]
+    mode?: 'append' | 'replace'
+    atSec?: number
+  }
+  remove_items: { ids: string[] }
+  undo: NoArgs
+  export_video: { fileName?: string }
+  request_feature: { title: string; problem: string; proposal: string; workaround?: string }
+}
+
+export type ToolName = keyof ToolArgs
+```
+
+- [ ] **Step 2: Move `importMany`**
 
 Create `src/main/services/importMany.ts` containing the `importMany` function cut verbatim from `src/main/ipc.ts` (lines ~38–58, including its doc comment), exported, with its imports:
 ```ts
@@ -1546,26 +1845,27 @@ import type { MediaAsset } from '@shared/media'
 import { expandImportPaths } from './importScan'
 import { ensureProxy, importFile } from './mediaStore'
 ```
-In `src/main/ipc.ts`, delete the function and add `import { importMany } from './services/importMany'`; drop `expandImportPaths` from the `./services/importScan` import if nothing else in `ipc.ts` uses it (check with a search). Run `npm run typecheck` — expected clean.
+In `src/main/ipc.ts`, delete the function and add `import { importMany } from './services/importMany'`; drop `expandImportPaths` from the `./services/importScan` import if nothing else in `ipc.ts` uses it (search first). Run `npm run typecheck` — expected clean.
 
-- [ ] **Step 2: Write `tools.ts`**
+- [ ] **Step 3: Write the handlers**
 
 `src/main/assistant/tools.ts`:
 ```ts
 /**
- * The assistant's MCP tools. Read tools answer from main (library, whisper,
- * ffmpeg); edit tools go through `callRenderer` so the real store actions run.
- * A thrown Error becomes an `isError` tool result (verified against the SDK).
+ * The assistant's tools, editor side: one async handler per tool returning MCP
+ * content blocks. reel-mcp (src/mcp) defines and validates the tools and
+ * forwards calls here over the pipe. Read tools answer from main (library,
+ * whisper, ffmpeg); edit tools go through `callRenderer` so the real store
+ * actions run. A thrown Error becomes the tool's error.
  * Times: "source" = seconds into a media file; "timeline" = seconds in the edit.
  */
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { join } from 'node:path'
-import { z } from 'zod'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { alphaInputDecoder, assetAspect, assetKind, type MediaAsset } from '@shared/media'
 import type { SequenceItem } from '@shared/assistant/protocol'
+import type { ToolContent } from '@shared/assistant/pipeProtocol'
+import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { transcriptPhraseText, transcriptWordText } from '@shared/assistant/transcriptText'
 import { frameTimes } from '@shared/assistant/frameTimes'
 import { getSubdir } from '../config'
@@ -1581,8 +1881,8 @@ import { exportRefusal, sanitizeExportName, uniqueExportPath } from '../services
 import { callRenderer } from './bridge'
 import { fileFeatureRequest } from './todoFile'
 
-const text = (t: string): CallToolResult => ({ content: [{ type: 'text', text: t }] })
-const json = (v: unknown): CallToolResult => text(JSON.stringify(v, null, 2))
+const text = (t: string): ToolContent[] => [{ type: 'text', text: t }]
+const json = (v: unknown): ToolContent[] => text(JSON.stringify(v, null, 2))
 const r2 = (n: number): number => Math.round(n * 100) / 100
 
 function describeAsset(a: MediaAsset): Record<string, unknown> {
@@ -1615,14 +1915,154 @@ function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAs
   return asset
 }
 
-export function registerTools(server: McpServer): void {
+export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<ToolContent[]> } = {
+  list_media: async () => json([...(await projectAssets()).values()].map(describeAsset)),
+
+  import_media: async ({ paths }) => {
+    const assets = await importMany(paths)
+    if (!assets.length) throw new Error('Nothing was imported — check the paths exist and are video, audio or image files')
+    await callRenderer('addMedia', { ids: assets.map((a) => a.id) })
+    return json(assets.map(describeAsset))
+  },
+
+  get_transcript: async ({ mediaId, fromSec, toSec, words }) => {
+    const asset = requireAsset(await projectAssets(), mediaId)
+    if (!asset.probe.audio) throw new Error(`${asset.fileName} has no audio track to transcribe`)
+    let transcript = await getTranscript(mediaId)
+    if (!transcript) {
+      if (!whisperAvailable()) throw new Error('whisper.cpp is not installed, so clips cannot be transcribed')
+      transcript = await transcribeMedia(mediaId)
+    }
+    const range =
+      fromSec !== undefined || toSec !== undefined ? { fromSec: fromSec ?? 0, toSec: toSec ?? Infinity } : undefined
+    const body = words ? transcriptWordText(transcript.words, range) : transcriptPhraseText(transcript.words, range)
+    return text(`${asset.fileName} (${mediaId}) — source seconds\n${body}`)
+  },
+
+  get_frames: async ({ mediaId, times, count }) => {
+    const asset = requireAsset(await projectAssets(), mediaId)
+    const v = asset.probe.video
+    if (!v) throw new Error(`${asset.fileName} has no picture`)
+    const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'frames-'))
+    try {
+      const content: ToolContent[] = []
+      for (const t of frameTimes(asset.probe.durationSec, times, count)) {
+        const out = join(dir, `${t.toFixed(3)}.jpg`)
+        const chain = [...(v.isHdr ? [hdrToSdrChain(v)] : []), 'scale=360:-2']
+        await generateStill(asset.originalPath, out, t, chain, alphaInputDecoder(v))
+        content.push({ type: 'text', text: `${asset.fileName} @ ${t.toFixed(2)}s` })
+        content.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(out)).toString('base64') })
+      }
+      return content
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  },
+
+  get_timeline: async () => json(await callRenderer('getTimeline', {})),
+
+  place_sequence: async ({ items, mode, atSec }) => {
+    const assets = await projectAssets()
+    const enriched: SequenceItem[] = items.map((it) => {
+      const asset = requireAsset(assets, it.mediaId)
+      if (assetKind(asset) !== 'video') throw new Error(`${asset.fileName} is not a video clip`)
+      return { ...it, sourceDurationSec: asset.probe.durationSec, hasAudio: !!asset.probe.audio, aspect: assetAspect(asset) }
+    })
+    // The preview plays proxies; wait for any still encoding (coalesced — cheap when ready).
+    await Promise.all([...new Set(items.map((i) => i.mediaId))].map((id) => ensureProxy(id)))
+    const placed = await callRenderer('placeSequence', { items: enriched, mode: mode ?? 'append', atSec })
+    return json({ placed, note: 'One undo step: call undo to revert this whole placement.' })
+  },
+
+  remove_items: async ({ ids }) => json(await callRenderer('removeItems', { ids })),
+
+  undo: async () => json(await callRenderer('undo', {})),
+
+  export_video: async ({ fileName }) => {
+    const project = await callRenderer('getProject', {})
+    const refusal = exportRefusal(project, listJobs())
+    if (refusal) throw new Error(refusal)
+    const requested = fileName !== undefined ? sanitizeExportName(fileName) : null
+    if (fileName !== undefined && !requested) throw new Error(`"${fileName}" is not a usable file name`)
+    const preset = project.preset ?? 'reel'
+    const { exportDir } = await getSettings()
+    await fsp.mkdir(exportDir, { recursive: true })
+    const path = uniqueExportPath(exportDir, requested ?? suggestedExportName(project.name, preset), existsSync)
+    await exportProject(project, { preset, preferNvenc: true }, path)
+    const { size } = await fsp.stat(path)
+    return json({ path, sizeMB: Math.round((size / 1_048_576) * 10) / 10 })
+  },
+
+  request_feature: async (req) => {
+    const r = await fileFeatureRequest(req)
+    return text(r.status === 'duplicate' ? `Already requested: "${req.title}" is in ${r.path}` : `Filed in ${r.path}:\n${r.entry}`)
+  }
+}
+
+/** Pipe entry point: dispatch one call by tool name. */
+export function handleTool(tool: string, args: unknown): Promise<ToolContent[]> {
+  if (!Object.hasOwn(toolHandlers, tool)) return Promise.reject(new Error(`Unknown tool "${tool}"`))
+  const run = toolHandlers[tool as ToolName] as unknown as (a: unknown) => Promise<ToolContent[]>
+  return run(args ?? {})
+}
+```
+
+- [ ] **Step 4: Typecheck + tests**
+
+Run: `npm run typecheck` then `npm test`
+Expected: clean / PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/shared/assistant/toolArgs.ts src/main/services/importMany.ts src/main/ipc.ts src/main/assistant/tools.ts
+git commit -m "feat(assistant): editor-side tool handlers for library, transcripts, frames, timeline, export and feature requests
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: reel-mcp (the stdio server Claude Code launches) + build
+
+**Files:**
+- Create: `src/mcp/tools.ts`, `src/mcp/index.ts`
+- Modify: `electron.vite.config.ts`, `tsconfig.node.json`
+
+**Interfaces:**
+- Consumes: `ToolArgs`, `ToolName` (Task 10); `ToolContent`, `defaultPipePath` (Task 9); `callPipe` (Task 9).
+- Produces: `registerTools(server: McpServer, call: CallEditor): void` with `CallEditor = <K extends ToolName>(tool: K, args: ToolArgs[K]) => Promise<ToolContent[]>`; build output `out/main/mcp.js`, runnable with `node`.
+
+- [ ] **Step 1: Tool definitions**
+
+`src/mcp/tools.ts`:
+```ts
+/**
+ * reel-mcp's tool definitions: names, descriptions and argument schemas the
+ * model sees. Each call is forwarded to the running editor (src/main/assistant/
+ * tools.ts does the work). `CallEditor` ties every schema to `ToolArgs`, so a
+ * schema that drifts from the editor's handler fails to compile.
+ * Times: "source" = seconds into a media file; "timeline" = seconds in the edit.
+ */
+
+import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import type { ToolContent } from '@shared/assistant/pipeProtocol'
+import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
+
+export type CallEditor = <K extends ToolName>(tool: K, args: ToolArgs[K]) => Promise<ToolContent[]>
+
+const result = (content: ToolContent[]): CallToolResult => ({ content })
+
+export function registerTools(server: McpServer, call: CallEditor): void {
   server.registerTool(
     'list_media',
     {
       description:
         "List the clips in the open project's media library: id, file name, path on disk, kind, duration (s), audio, picture size, whether a transcript exists, whether the preview proxy is ready."
     },
-    async () => json([...(await projectAssets()).values()].map(describeAsset))
+    async () => result(await call('list_media', {}))
   )
 
   server.registerTool(
@@ -1632,12 +2072,7 @@ export function registerTools(server: McpServer): void {
         'Import files or folders from this computer into the project library (a folder imports the media inside it). Returns the new library entries. Only use paths the user gave you.',
       inputSchema: { paths: z.array(z.string().min(1)).min(1).describe('Absolute paths of files or folders') }
     },
-    async ({ paths }) => {
-      const assets = await importMany(paths)
-      if (!assets.length) throw new Error('Nothing was imported — check the paths exist and are video, audio or image files')
-      await callRenderer('addMedia', { ids: assets.map((a) => a.id) })
-      return json(assets.map(describeAsset))
-    }
+    async (args) => result(await call('import_media', args))
   )
 
   server.registerTool(
@@ -1652,19 +2087,7 @@ export function registerTools(server: McpServer): void {
         words: z.boolean().optional()
       }
     },
-    async ({ mediaId, fromSec, toSec, words }) => {
-      const asset = requireAsset(await projectAssets(), mediaId)
-      if (!asset.probe.audio) throw new Error(`${asset.fileName} has no audio track to transcribe`)
-      let transcript = await getTranscript(mediaId)
-      if (!transcript) {
-        if (!whisperAvailable()) throw new Error('whisper.cpp is not installed, so clips cannot be transcribed')
-        transcript = await transcribeMedia(mediaId)
-      }
-      const range =
-        fromSec !== undefined || toSec !== undefined ? { fromSec: fromSec ?? 0, toSec: toSec ?? Infinity } : undefined
-      const body = words ? transcriptWordText(transcript.words, range) : transcriptPhraseText(transcript.words, range)
-      return text(`${asset.fileName} (${mediaId}) — source seconds\n${body}`)
-    }
+    async (args) => result(await call('get_transcript', args))
   )
 
   server.registerTool(
@@ -1678,25 +2101,7 @@ export function registerTools(server: McpServer): void {
         count: z.number().int().min(1).max(8).optional()
       }
     },
-    async ({ mediaId, times, count }) => {
-      const asset = requireAsset(await projectAssets(), mediaId)
-      const v = asset.probe.video
-      if (!v) throw new Error(`${asset.fileName} has no picture`)
-      const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'frames-'))
-      try {
-        const content: CallToolResult['content'] = []
-        for (const t of frameTimes(asset.probe.durationSec, times, count)) {
-          const out = join(dir, `${t.toFixed(3)}.jpg`)
-          const chain = [...(v.isHdr ? [hdrToSdrChain(v)] : []), 'scale=360:-2']
-          await generateStill(asset.originalPath, out, t, chain, alphaInputDecoder(v))
-          content.push({ type: 'text', text: `${asset.fileName} @ ${t.toFixed(2)}s` })
-          content.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(out)).toString('base64') })
-        }
-        return { content }
-      } finally {
-        await fsp.rm(dir, { recursive: true, force: true })
-      }
-    }
+    async (args) => result(await call('get_frames', args))
   )
 
   server.registerTool(
@@ -1705,7 +2110,7 @@ export function registerTools(server: McpServer): void {
       description:
         'What is on the timeline now (the composition open in the editor): each layer with TIMELINE start/end and, for video, its SOURCE in/out; audio clips; total duration.'
     },
-    async () => json(await callRenderer('getTimeline', {}))
+    async () => result(await call('get_timeline', {}))
   )
 
   server.registerTool(
@@ -1722,33 +2127,23 @@ export function registerTools(server: McpServer): void {
         atSec: z.number().min(0).optional().describe('TIMELINE second to start at')
       }
     },
-    async ({ items, mode, atSec }) => {
-      const assets = await projectAssets()
-      const enriched: SequenceItem[] = items.map((it) => {
-        const asset = requireAsset(assets, it.mediaId)
-        if (assetKind(asset) !== 'video') throw new Error(`${asset.fileName} is not a video clip`)
-        return { ...it, sourceDurationSec: asset.probe.durationSec, hasAudio: !!asset.probe.audio, aspect: assetAspect(asset) }
-      })
-      // The preview plays proxies; wait for any still encoding (coalesced — cheap when ready).
-      await Promise.all([...new Set(items.map((i) => i.mediaId))].map((id) => ensureProxy(id)))
-      const placed = await callRenderer('placeSequence', { items: enriched, mode: mode ?? 'append', atSec })
-      return json({ placed, note: 'One undo step: call undo to revert this whole placement.' })
-    }
+    async (args) => result(await call('place_sequence', args))
   )
 
   server.registerTool(
     'remove_items',
     {
-      description: 'Delete timeline items by id (from get_timeline). Linked partners (a clip and its audio) go together. One undo step.',
+      description:
+        'Delete timeline items by id (from get_timeline). Linked partners (a clip and its audio) go together. One undo step.',
       inputSchema: { ids: z.array(z.string()).min(1) }
     },
-    async ({ ids }) => json(await callRenderer('removeItems', { ids }))
+    async (args) => result(await call('remove_items', args))
   )
 
   server.registerTool(
     'undo',
-    { description: 'Undo the last edit (yours or the user\'s) — one step. Returns the timeline after undoing.' },
-    async () => json(await callRenderer('undo', {}))
+    { description: "Undo the last edit (yours or the user's) — one step. Returns the timeline after undoing." },
+    async () => result(await call('undo', {}))
   )
 
   server.registerTool(
@@ -1758,20 +2153,7 @@ export function registerTools(server: McpServer): void {
         'Render the whole project to an .mp4 exactly as the Export button does, into the export folder from Settings. Waits until the render finishes (progress shows in the editor). Never overwrites: a taken name gets " (2)". Only export when the user asks.',
       inputSchema: { fileName: z.string().max(120).optional().describe('File name without folder, e.g. "beach reel"') }
     },
-    async ({ fileName }) => {
-      const project = await callRenderer('getProject', {})
-      const refusal = exportRefusal(project, listJobs())
-      if (refusal) throw new Error(refusal)
-      const requested = fileName !== undefined ? sanitizeExportName(fileName) : null
-      if (fileName !== undefined && !requested) throw new Error(`"${fileName}" is not a usable file name`)
-      const preset = project.preset ?? 'reel'
-      const { exportDir } = await getSettings()
-      await fsp.mkdir(exportDir, { recursive: true })
-      const path = uniqueExportPath(exportDir, requested ?? suggestedExportName(project.name, preset), existsSync)
-      await exportProject(project, { preset, preferNvenc: true }, path)
-      const { size } = await fsp.stat(path)
-      return json({ path, sizeMB: Math.round((size / 1_048_576) * 10) / 10 })
-    }
+    async (args) => result(await call('export_video', args))
   )
 
   server.registerTool(
@@ -1786,358 +2168,211 @@ export function registerTools(server: McpServer): void {
         workaround: z.string().optional().describe('What you did instead, if anything')
       }
     },
-    async (req) => {
-      const r = await fileFeatureRequest(req)
-      return text(r.status === 'duplicate' ? `Already requested: "${req.title}" is in ${r.path}` : `Filed in ${r.path}:\n${r.entry}`)
-    }
+    async (args) => result(await call('request_feature', args))
   )
 }
 ```
 
-If typecheck reports `CallToolResult['content']` push type mismatches, annotate the two `content.push` objects `as const` on `type` (`type: 'text' as const`, `type: 'image' as const`).
+- [ ] **Step 2: Entry point**
 
-- [ ] **Step 3: Typecheck + tests**
+`src/mcp/index.ts`:
+```ts
+/**
+ * reel-mcp: the stdio MCP server Claude Code launches with
+ * `node out/main/mcp.js` (registration command in Settings → AI assistant).
+ * Every tool call is forwarded over a named pipe to the running editor.
+ * stdout IS the MCP channel — never print to it; diagnostics go to stderr.
+ * Must not import electron (it runs under plain node).
+ */
 
-Run: `npm run typecheck` then `npm test`
-Expected: clean / PASS.
+import { tmpdir } from 'node:os'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { defaultPipePath } from '@shared/assistant/pipeProtocol'
+import { callPipe } from '../main/assistant/pipe'
+import { registerTools } from './tools'
 
-- [ ] **Step 4: Commit**
+const INSTRUCTIONS =
+  'Tools for the Reel Editor desktop app on this computer. Times are seconds: SOURCE time is a position inside a media file, TIMELINE time is a position in the edit. Workflow: list_media, get_transcript (and get_frames when the picture matters), choose the cut, one place_sequence call, then get_timeline to verify. An order the user gives is authoritative. Export only when asked. If an ability is missing, call request_feature instead of approximating.'
+
+const pipePath = process.env.REEL_ASSISTANT_PIPE || defaultPipePath(process.platform, tmpdir())
+
+const server = new McpServer({ name: 'reel-editor', version: '0.1.0' }, { instructions: INSTRUCTIONS })
+registerTools(server, (tool, args) => callPipe(pipePath, tool, args))
+server.connect(new StdioServerTransport()).catch((err) => {
+  console.error('[reel-mcp] failed to start', err)
+  process.exit(1)
+})
+```
+
+- [ ] **Step 3: Build it as a second main entry, and typecheck it**
+
+In `electron.vite.config.ts`, give `main` a `build` block:
+```ts
+  main: {
+    plugins: [externalizeDepsPlugin()],
+    resolve: { alias: { '@shared': shared } },
+    build: {
+      rollupOptions: {
+        // Two entries: the app's main process, and reel-mcp — the stdio MCP
+        // server Claude Code launches with plain node (src/mcp).
+        input: { index: resolve('src/main/index.ts'), mcp: resolve('src/mcp/index.ts') }
+      }
+    }
+  },
+```
+In `tsconfig.node.json`, add `"src/mcp/**/*.ts"` to `include`.
+
+- [ ] **Step 4: Verify the build and run reel-mcp by hand**
+
+Run: `npm run typecheck` then `npm run build`
+Expected: clean; `out/main/index.js` AND `out/main/mcp.js` exist (`ls out/main`).
+
+Then (bash):
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' | node out/main/mcp.js
+```
+Expected: one JSON line on stdout containing `"serverInfo":{"name":"reel-editor"` and nothing else on stdout. Also confirm the bundle doesn't pull in Electron: `grep -l "require(\"electron\")" out/main/mcp.js out/main/chunks/*.js 2>/dev/null` must not list `mcp.js` or any chunk that `mcp.js` requires (`grep -o 'require("./chunks/[^"]*")' out/main/mcp.js` shows which).
+
+No need to start the app yet — the editor's pipe server arrives in Task 12 (until then every tool call answers "isn't running", which is correct).
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/services/importMany.ts src/main/ipc.ts src/main/assistant/tools.ts
-git commit -m "feat(assistant): MCP tools for library, transcripts, frames, timeline, export and feature requests
+git add src/mcp/tools.ts src/mcp/index.ts electron.vite.config.ts tsconfig.node.json
+git commit -m "feat(assistant): reel-mcp stdio server forwarding tool calls over the pipe
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 10: HTTP adapter + MCP server lifecycle
+### Task 12: Assistant service + app lifecycle
 
 **Files:**
-- Create: `src/main/assistant/http.ts`, `src/main/assistant/http.test.ts`
-- Create: `src/main/assistant/server.ts`
+- Create: `src/main/assistant/service.ts`
 - Modify: `src/main/index.ts`, `src/main/ipc.ts`
 
 **Interfaces:**
-- Consumes: `registerTools` (Task 9); `getSettings` (Task 7); `AssistantServerState` (Task 5).
-- Produces: `checkAccess(headers, token): { ok: true } | { ok: false; status: number; message: string }`; `toWebRequest(req: IncomingMessage): Promise<Request>`; `writeWebResponse(res: ServerResponse, response: Response): Promise<void>`; `listenLocal(server: Server, port: number): Promise<AssistantServerState>`; `startAssistantServer(): Promise<AssistantServerState>` (restarts if running); `stopAssistantServer(): Promise<void>`; `assistantState(): AssistantServerState`. Env `REEL_ASSISTANT_PORT` overrides the port (e2e uses `0`).
+- Consumes: `servePipe` (Task 9); `handleTool` (Task 10); `getSettings` (Task 7); `AssistantStatus` (Task 5).
+- Produces: `startAssistant(): Promise<AssistantStatus>` (restarts if running), `stopAssistant(): Promise<void>`, `assistantStatus(): AssistantStatus`, `mcpScriptPath(): string`, `pipePath(): string`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Implement**
 
-`src/main/assistant/http.test.ts`:
-```ts
-// @vitest-environment node
-import { createServer } from 'node:http'
-import { PassThrough, Readable } from 'node:stream'
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import { describe, expect, it } from 'vitest'
-import { checkAccess, listenLocal, toWebRequest, writeWebResponse } from './http'
-
-const TOKEN = 't'.repeat(48)
-
-describe('checkAccess', () => {
-  it('accepts the right bearer token with no Origin', () => {
-    expect(checkAccess({ authorization: `Bearer ${TOKEN}` }, TOKEN)).toEqual({ ok: true })
-  })
-  it('rejects a missing or wrong token with 401', () => {
-    expect(checkAccess({}, TOKEN)).toMatchObject({ ok: false, status: 401 })
-    expect(checkAccess({ authorization: 'Bearer nope' }, TOKEN)).toMatchObject({ ok: false, status: 401 })
-  })
-  it('rejects any browser Origin with 403, even with the token', () => {
-    expect(checkAccess({ authorization: `Bearer ${TOKEN}`, origin: 'https://evil.example' }, TOKEN)).toMatchObject({ ok: false, status: 403 })
-  })
-  it('allows the literal "null" origin', () => {
-    expect(checkAccess({ authorization: `Bearer ${TOKEN}`, origin: 'null' }, TOKEN)).toEqual({ ok: true })
-  })
-})
-
-describe('toWebRequest / writeWebResponse', () => {
-  it('carries method, url, headers and body across', async () => {
-    const req = Object.assign(Readable.from([Buffer.from('{"a":1}')]), {
-      method: 'POST',
-      url: '/mcp',
-      headers: { host: '127.0.0.1:5', 'content-type': 'application/json' }
-    }) as unknown as IncomingMessage
-    const web = await toWebRequest(req)
-    expect(web.method).toBe('POST')
-    expect(web.url).toBe('http://127.0.0.1:5/mcp')
-    expect(web.headers.get('content-type')).toBe('application/json')
-    expect(await web.json()).toEqual({ a: 1 })
-  })
-
-  it('drops transfer-encoding/content-length so node frames the body itself', async () => {
-    const sink = new PassThrough()
-    let head: { status?: number; headers?: Record<string, string> } = {}
-    const res = Object.assign(sink, {
-      writeHead(status: number, headers: Record<string, string>) {
-        head = { status, headers }
-        return this
-      }
-    }) as unknown as ServerResponse
-    const chunks: Buffer[] = []
-    sink.on('data', (c: Buffer) => chunks.push(c))
-    await writeWebResponse(res, new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' } }))
-    await new Promise((r) => sink.on('end', r))
-    expect(head.status).toBe(200)
-    expect(head.headers).toEqual({ 'content-type': 'application/json' })
-    expect(Buffer.concat(chunks).toString()).toBe('{"ok":true}')
-  })
-})
-
-describe('listenLocal', () => {
-  it('reports the bound port', async () => {
-    const s = createServer()
-    const state = await listenLocal(s, 0)
-    expect(state.state).toBe('running')
-    s.close()
-  })
-
-  it('reports a taken port instead of throwing', async () => {
-    const holder = createServer()
-    const held = await listenLocal(holder, 0)
-    if (held.state !== 'running') throw new Error('setup failed')
-    const state = await listenLocal(createServer(), held.port)
-    expect(state).toMatchObject({ state: 'error' })
-    expect(state.state === 'error' && state.message).toMatch(/already in use/)
-    holder.close()
-  })
-})
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `npx vitest run src/main/assistant/http.test.ts`
-Expected: FAIL — cannot resolve `./http`.
-
-- [ ] **Step 3: Implement `http.ts`**
-
-`src/main/assistant/http.ts`:
+`src/main/assistant/service.ts`:
 ```ts
 /**
- * node:http plumbing for the assistant's MCP server.
- *
- * Why not the SDK's `StreamableHTTPServerTransport`: verified 2026-10-06
- * (SDK 1.32.1, Node 24) that its Node wrapper answers with
- * `transfer-encoding: chunked` but an UNFRAMED body, which every HTTP client
- * rejects ("Invalid character in chunk size"). We use the web-standard
- * transport and convert here, dropping the framing headers so Node sets them.
+ * Serves Claude Code (via reel-mcp) on the named pipe while the assistant is
+ * enabled in Settings. Status feeds the Settings panel.
  */
 
-import { timingSafeEqual } from 'node:crypto'
-import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from 'node:http'
-import { Readable } from 'node:stream'
-import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
-import type { AssistantServerState } from '@shared/assistant/protocol'
-
-function sameSecret(a: string, b: string): boolean {
-  const x = Buffer.from(a)
-  const y = Buffer.from(b)
-  return x.length === y.length && timingSafeEqual(x, y)
-}
-
-/** Token required; a browser Origin is refused (a web page must not drive the editor). */
-export function checkAccess(
-  headers: IncomingHttpHeaders,
-  token: string
-): { ok: true } | { ok: false; status: number; message: string } {
-  const origin = headers.origin
-  if (origin !== undefined && origin !== 'null') return { ok: false, status: 403, message: 'Browser origins are not allowed' }
-  const auth = headers.authorization ?? ''
-  if (!token || !sameSecret(auth, `Bearer ${token}`)) return { ok: false, status: 401, message: 'Missing or wrong bearer token' }
-  return { ok: true }
-}
-
-export async function toWebRequest(req: IncomingMessage): Promise<Request> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req) chunks.push(chunk as Buffer)
-  const headers = new Headers()
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (typeof v === 'string') headers.set(k, v)
-    else if (Array.isArray(v)) headers.set(k, v.join(', '))
-  }
-  const hasBody = req.method !== 'GET' && req.method !== 'HEAD' && chunks.length > 0
-  return new Request(`http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`, {
-    method: req.method,
-    headers,
-    body: hasBody ? new Uint8Array(Buffer.concat(chunks)) : undefined
-  })
-}
-
-export async function writeWebResponse(res: ServerResponse, response: Response): Promise<void> {
-  const headers: Record<string, string> = {}
-  response.headers.forEach((v, k) => {
-    if (k !== 'transfer-encoding' && k !== 'content-length') headers[k] = v
-  })
-  res.writeHead(response.status, headers)
-  if (!response.body) {
-    res.end()
-    return
-  }
-  Readable.fromWeb(response.body as unknown as NodeReadableStream).pipe(res)
-}
-
-/** Listen on 127.0.0.1 only. A taken port is a reported state, not a crash. */
-export function listenLocal(server: Server, port: number): Promise<AssistantServerState> {
-  return new Promise((resolve) => {
-    server.once('error', (err: NodeJS.ErrnoException) => {
-      resolve({
-        state: 'error',
-        message:
-          err.code === 'EADDRINUSE'
-            ? `Port ${port} is already in use (is another copy of the editor open?)`
-            : err.message
-      })
-    })
-    server.listen(port, '127.0.0.1', () => {
-      const addr = server.address()
-      resolve({ state: 'running', port: typeof addr === 'object' && addr ? addr.port : port })
-    })
-  })
-}
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-Run: `npx vitest run src/main/assistant/http.test.ts`
-Expected: PASS (8 tests).
-
-- [ ] **Step 5: Implement `server.ts`**
-
-`src/main/assistant/server.ts`:
-```ts
-/**
- * The assistant's MCP server: stateless Streamable HTTP on 127.0.0.1, one
- * fresh McpServer + transport per request (the SDK's stateless pattern).
- * Claude Code registers it once (Settings shows the command).
- */
-
-import { app } from 'electron'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
-import type { AssistantServerState } from '@shared/assistant/protocol'
+import type { Server } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { defaultPipePath } from '@shared/assistant/pipeProtocol'
+import type { AssistantStatus } from '@shared/assistant/protocol'
 import { getSettings } from '../services/settings'
-import { checkAccess, listenLocal, toWebRequest, writeWebResponse } from './http'
-import { registerTools } from './tools'
+import { servePipe } from './pipe'
+import { handleTool } from './tools'
 
-const INSTRUCTIONS =
-  'Tools for the Reel Editor desktop app, which is open on this computer. Times are seconds: SOURCE time is a position inside a media file, TIMELINE time is a position in the edit. Workflow: list_media, get_transcript (and get_frames when the picture matters), choose the cut, one place_sequence call, then get_timeline to verify. An order the user gives is authoritative. Export only when asked. If an ability is missing, call request_feature instead of approximating.'
+/** reel-mcp's built entry, beside this bundle (out/main/mcp.js). */
+export const mcpScriptPath = (): string => join(__dirname, 'mcp.js')
 
-let http: Server | null = null
-let state: AssistantServerState = { state: 'off' }
+export const pipePath = (): string => process.env.REEL_ASSISTANT_PIPE || defaultPipePath(process.platform, tmpdir())
 
-export const assistantState = (): AssistantServerState => state
+let server: Server | null = null
+let state: Omit<AssistantStatus, 'scriptPath'> = { state: 'off' }
 
-async function handle(req: IncomingMessage, res: ServerResponse, token: string): Promise<void> {
-  const access = checkAccess(req.headers, token)
-  if (!access.ok) {
-    res.writeHead(access.status, { 'content-type': 'text/plain' }).end(access.message)
-    return
-  }
-  if (new URL(req.url ?? '/', 'http://127.0.0.1').pathname !== '/mcp') {
-    res.writeHead(404).end()
-    return
-  }
-  const server = new McpServer({ name: 'reel-editor', version: app.getVersion() }, { instructions: INSTRUCTIONS })
-  registerTools(server)
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
-  res.on('close', () => {
-    void transport.close()
-    void server.close()
-  })
-  try {
-    await server.connect(transport)
-    await writeWebResponse(res, await transport.handleRequest(await toWebRequest(req)))
-  } catch (err) {
-    console.error('[assistant] request failed', err)
-    if (!res.headersSent) {
-      res
-        .writeHead(500, { 'content-type': 'application/json' })
-        .end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }))
+export const assistantStatus = (): AssistantStatus => ({ ...state, scriptPath: mcpScriptPath() })
+
+/** (Re)start from the current settings. */
+export async function startAssistant(): Promise<AssistantStatus> {
+  await stopAssistant()
+  const { assistant } = await getSettings()
+  if (assistant.enabled) {
+    const r = await servePipe(pipePath(), handleTool)
+    if (r.ok) {
+      server = r.server
+      state = { state: 'listening' }
+    } else {
+      state = { state: 'error', message: r.message }
+      console.error('[assistant]', r.message)
     }
   }
+  return assistantStatus()
 }
 
-/** (Re)start from the current settings; returns the new state. */
-export async function startAssistantServer(): Promise<AssistantServerState> {
-  await stopAssistantServer()
-  const { assistant } = await getSettings()
-  if (!assistant.enabled) return (state = { state: 'off' })
-  const envPort = process.env.REEL_ASSISTANT_PORT
-  const port = envPort !== undefined && envPort !== '' ? Number(envPort) : assistant.port
-  const server = createServer((req, res) => void handle(req, res, assistant.token))
-  state = await listenLocal(server, port)
-  if (state.state === 'running') http = server
-  else console.error('[assistant]', state.state === 'error' ? state.message : state)
-  return state
-}
-
-export async function stopAssistantServer(): Promise<void> {
-  const s = http
-  http = null
+/** Stop accepting calls. Waits for calls already in flight (e.g. an export) to finish. */
+export async function stopAssistant(): Promise<void> {
+  const s = server
+  server = null
   state = { state: 'off' }
-  if (!s) return
-  s.closeAllConnections()
-  await new Promise<void>((resolve) => s.close(() => resolve()))
+  if (s) await new Promise<void>((resolve) => s.close(() => resolve()))
 }
 ```
 
-- [ ] **Step 6: Wire lifecycle, status IPC and restart-on-change**
+- [ ] **Step 2: Wire lifecycle, status IPC and restart-on-change**
 
 In `src/main/index.ts`:
-- import: `import { startAssistantServer, stopAssistantServer } from './assistant/server'`
-- inside `app.whenReady().then(() => { … })`, directly after `createWindow()`, add:
+- import: `import { startAssistant, stopAssistant } from './assistant/service'`
+- inside `app.whenReady().then(() => { … })`, directly after `createWindow()`:
 ```ts
-  void startAssistantServer()
+  void startAssistant()
 ```
-- after the `whenReady` block, add:
+- after the `whenReady` block:
 ```ts
 app.on('before-quit', () => {
-  void stopAssistantServer()
+  void stopAssistant()
 })
 ```
 
 In `src/main/ipc.ts`:
-- import: `import { assistantState, startAssistantServer } from './assistant/server'`
+- import: `import { assistantStatus, startAssistant } from './assistant/service'`
 - replace the `IPC.updateSettings` handler with:
 ```ts
   ipcMain.handle(IPC.updateSettings, async (_event, patch: Partial<Settings>) => {
     const next = await updateSettings(patch)
-    // Toggling the assistant (or any change to it) restarts the server live.
-    if (patch.assistant) await startAssistantServer()
+    // Toggling the assistant restarts (or stops) the pipe server live.
+    if (patch.assistant) await startAssistant()
     return next
   })
-  ipcMain.handle(IPC.assistantStatus, () => assistantState())
+  ipcMain.handle(IPC.assistantStatus, () => assistantStatus())
 ```
 
-- [ ] **Step 7: Build and probe the running server by hand**
+- [ ] **Step 3: Typecheck, build, and try it for real**
 
-Run: `npm run typecheck`, `npm test`, then `npm run build` — expected: all succeed. Then start the app (`npm run dev`), and in another terminal:
+Run: `npm run typecheck`, `npm test`, `npm run build` — all succeed.
+Then `npm run dev`, and in a second terminal (bash, repo root) drive reel-mcp exactly as Claude Code would, with the SDK's stdio client:
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:47823/mcp
+node --input-type=module -e "
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+const c = new Client({ name: 't', version: '1' });
+await c.connect(new StdioClientTransport({ command: process.execPath, args: ['out/main/mcp.js'] }));
+console.log((await c.listTools()).tools.length, JSON.stringify(await c.callTool({ name: 'get_timeline', arguments: {} })).slice(0, 200));
+await c.close();"
 ```
-Expected: `401`. (Full protocol checks are automated in Task 12.) Close the app.
+Expected: `10` and a `get_timeline` JSON result (not an error). Close the app and run it again: expected the result is an error containing `isn't running`. (This is with Norton running normally.)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/main/assistant/http.ts src/main/assistant/http.test.ts src/main/assistant/server.ts src/main/index.ts src/main/ipc.ts
-git commit -m "feat(assistant): local MCP HTTP server with token/origin guard and live toggle
+git add src/main/assistant/service.ts src/main/index.ts src/main/ipc.ts
+git commit -m "feat(assistant): serve Claude Code on the named pipe, with live on/off from settings
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 11: Settings UI
+### Task 13: Settings UI
 
 **Files:**
 - Modify: `src/renderer/src/components/SettingsModal.tsx`
 
 **Interfaces:**
-- Consumes: `assistantStatus` (Task 8), `mcpAddCommand`, `Settings.assistant` (Task 7), `Check`, `btnCls` (`components/ui.tsx`).
-- Produces: checkbox labelled exactly `Let Claude Code control the editor`; status line with `data-testid="assistant-status"` reading `Off`, `Running on 127.0.0.1:<port>`, or the error message; a `Copy` button for the command.
+- Consumes: `assistantStatus` (Task 8 preload; handler Task 12), `mcpAddCommand`, `Settings.assistant` (Task 7), `AssistantStatus` (Task 5), `Check`, `btnCls` (`components/ui.tsx`).
+- Produces: checkbox labelled exactly `Let Claude Code control the editor`; status line `data-testid="assistant-status"` reading `Off`, `Listening for Claude Code`, or the error message; command block + `Copy` button.
 
 - [ ] **Step 1: Implement**
 
@@ -2148,15 +2383,15 @@ In `SettingsModal.tsx`:
 import { useEffect, useState, type JSX } from 'react'
 import type { Settings } from '@shared/settings'
 import { mcpAddCommand } from '@shared/settings'
-import type { AssistantServerState } from '@shared/assistant/protocol'
+import type { AssistantStatus } from '@shared/assistant/protocol'
 import { useUi } from '@/state/ui'
 import { assistantStatus, chooseExportDir, getSettings, updateSettings } from '@/ipc/client'
 import { btnCls, Check } from './ui'
 ```
 
-2. Inside the component, after the `settings` state:
+2. Replace the existing `useEffect` with:
 ```tsx
-  const [status, setStatus] = useState<AssistantServerState | null>(null)
+  const [status, setStatus] = useState<AssistantStatus | null>(null)
   const [copied, setCopied] = useState(false)
   const refreshStatus = (): void => void assistantStatus().then(setStatus)
 
@@ -2167,7 +2402,6 @@ import { btnCls, Check } from './ui'
     setCopied(false)
   }, [open])
 ```
-(replace the existing `useEffect` with this one).
 
 3. Replace the paragraph `Each export still opens a Save dialog — this is just where it starts.` with:
 ```tsx
@@ -2194,30 +2428,24 @@ import { btnCls, Check } from './ui'
         <p data-testid="assistant-status" className="text-[11px] text-zinc-500">
           {status === null
             ? '…'
-            : status.state === 'running'
-              ? `Running on 127.0.0.1:${status.port}`
+            : status.state === 'listening'
+              ? 'Listening for Claude Code'
               : status.state === 'off'
                 ? 'Off'
                 : status.message}
         </p>
-        {settings?.assistant.enabled && (
+        {settings?.assistant.enabled && status && (
           <>
             <p className="mt-2 text-[11px] text-zinc-400">
-              Register once — then every Claude Code session can use the editor while it is open:
+              Register once in a terminal — then every Claude Code session can use the editor while it is open:
             </p>
             <div className="mt-1 flex items-start gap-2">
               <code className="min-w-0 flex-1 break-all rounded border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-[10px] text-zinc-300">
-                {mcpAddCommand(status?.state === 'running' ? status.port : settings.assistant.port, settings.assistant.token)}
+                {mcpAddCommand(status.scriptPath)}
               </code>
               <button
                 className={btnCls}
-                onClick={() =>
-                  void navigator.clipboard
-                    .writeText(
-                      mcpAddCommand(status?.state === 'running' ? status.port : settings.assistant.port, settings.assistant.token)
-                    )
-                    .then(() => setCopied(true))
-                }
+                onClick={() => void navigator.clipboard.writeText(mcpAddCommand(status.scriptPath)).then(() => setCopied(true))}
               >
                 {copied ? 'Copied' : 'Copy'}
               </button>
@@ -2231,34 +2459,35 @@ import { btnCls, Check } from './ui'
 
 - [ ] **Step 2: Typecheck + look at it**
 
-Run: `npm run typecheck` — expected clean. Run `npm run dev`, open Settings: the AI assistant section shows the checked box, `Running on 127.0.0.1:47823`, and the command with your token; unchecking shows `Off` and hides the command; re-checking restores it. Close the app.
+Run: `npm run typecheck` — expected clean. Run `npm run dev`, open Settings: the AI assistant section shows the checked box, `Listening for Claude Code`, and the command with this checkout's `out\main\mcp.js` path; unchecking shows `Off` and hides the command; re-checking restores it. Close the app.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add src/renderer/src/components/SettingsModal.tsx
-git commit -m "feat(assistant): Settings toggle, server status and registration command
+git commit -m "feat(assistant): Settings toggle, status and registration command
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 12: End-to-end spec
+### Task 14: End-to-end spec
 
 **Files:**
 - Modify: `e2e/fixtures.ts`
 - Create: `e2e/assistant.spec.ts`
 
 **Interfaces:**
-- Consumes: everything above, through the real MCP protocol (SDK client) and real UI events.
+- Consumes: everything above, through the real reel-mcp script launched by the SDK's stdio client (exactly how Claude Code runs it) and real UI events.
 
 - [ ] **Step 1: Make every launch hermetic for the assistant**
 
-In `e2e/fixtures.ts`, in the `env` passed to `electron.launch`, add:
+In `e2e/fixtures.ts`, add `basename` to the `node:path` import, and in the `env` passed to `electron.launch` add:
 ```ts
-        // Never collide with a dev app on 47823; never touch the repo's TODO.
-        REEL_ASSISTANT_PORT: '0',
+        // Never collide with a dev app's pipe; never touch the repo's TODO.
+        REEL_ASSISTANT_PIPE:
+          process.platform === 'win32' ? `\\\\.\\pipe\\${basename(scratch)}` : join(scratch, 'reel.sock'),
         REEL_TODO_PATH: join(scratch, 'TODO.md'),
 ```
 
@@ -2267,40 +2496,40 @@ In `e2e/fixtures.ts`, in the `env` passed to `electron.launch`, add:
 `e2e/assistant.spec.ts`:
 ```ts
 /**
- * The AI assistant's MCP server, driven through the real protocol (SDK client)
- * against the built app: auth, feature requests, the Settings toggle, and a
- * rough cut → undo → export round trip on synthesized media. ARRANGE via store /
- * files, ACT via MCP calls and real clicks, ASSERT on store + DOM + files.
+ * The AI assistant end to end, driven the way Claude Code drives it: the SDK's
+ * stdio client launches the built reel-mcp (out/main/mcp.js), which talks to
+ * the running app over its named pipe. ARRANGE via store / files, ACT via MCP
+ * calls and real clicks, ASSERT on store + DOM + files.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { Page } from '@playwright/test'
+import type { ElectronApplication } from '@playwright/test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { test, expect } from './fixtures'
 
-const BIN = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg')
+const ROOT = resolve(__dirname, '..')
+const MCP = join(ROOT, 'out', 'main', 'mcp.js')
+const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
 const FFMPEG = join(BIN, 'ffmpeg.exe')
 const FFPROBE = join(BIN, 'ffprobe.exe')
+const TOOLS = ['export_video', 'get_frames', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'request_feature', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
 
-async function serverInfo(page: Page): Promise<{ port: number; token: string }> {
-  const status = await page.evaluate(() => window.api.assistantStatus())
-  if (status.state !== 'running') throw new Error(`assistant server not running: ${JSON.stringify(status)}`)
-  const settings = await page.evaluate(() => window.api.getSettings())
-  return { port: status.port, token: settings.assistant.token }
-}
+const pipeOf = (app: ElectronApplication): Promise<string> => app.evaluate(() => process.env.REEL_ASSISTANT_PIPE as string)
 
-async function connect(page: Page): Promise<Client> {
-  const { port, token } = await serverInfo(page)
+async function connect(pipe: string): Promise<Client> {
   const client = new Client({ name: 'e2e', version: '1' })
   await client.connect(
-    new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-      requestInit: { headers: { Authorization: `Bearer ${token}` } }
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [MCP],
+      env: { ...getDefaultEnvironment(), REEL_ASSISTANT_PIPE: pipe },
+      stderr: 'pipe'
     })
   )
   return client
@@ -2309,59 +2538,57 @@ async function connect(page: Page): Promise<Client> {
 const call = async (c: Client, name: string, args: Record<string, unknown> = {}): Promise<ToolResult> =>
   (await c.callTool({ name, arguments: args })) as ToolResult
 
-test('refuses requests without the token or from a browser origin', async ({ appPage: page }) => {
-  const { port, token } = await serverInfo(page)
-  const url = `http://127.0.0.1:${port}/mcp`
-  const body = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'tools/list' })
-  const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }
-  expect((await fetch(url, { method: 'POST', headers, body })).status).toBe(401)
-  expect((await fetch(url, { method: 'POST', headers: { ...headers, authorization: 'Bearer wrong' }, body })).status).toBe(401)
-  const fromPage = await fetch(url, { method: 'POST', headers: { ...headers, authorization: `Bearer ${token}`, origin: 'https://evil.example' }, body })
-  expect(fromPage.status).toBe(403)
-})
-
-test('lists the tools and names valid ids for an unknown media id', async ({ appPage: page }) => {
-  const c = await connect(page)
-  const names = (await c.listTools()).tools.map((t) => t.name).sort()
-  expect(names).toEqual(
-    ['export_video', 'get_frames', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'request_feature', 'undo'].sort()
-  )
+test('lists the tools and names valid ids for an unknown media id', async ({ electronApp, appPage: _page }) => {
+  const c = await connect(await pipeOf(electronApp))
+  expect((await c.listTools()).tools.map((t) => t.name).sort()).toEqual(TOOLS)
   const r = await call(c, 'get_transcript', { mediaId: 'nope' })
   expect(r.isError).toBe(true)
   expect(textOf(r)).toMatch(/No media "nope".*Valid ids/s)
   await c.close()
 })
 
-test('files a feature request into the TODO list once', async ({ appPage: page, electronApp }) => {
+test('says plainly when the editor is not running', async () => {
+  const pipe = process.platform === 'win32' ? '\\\\.\\pipe\\reel-nobody-home' : join(tmpdir(), 'reel-nobody-home.sock')
+  const c = await connect(pipe)
+  const r = await call(c, 'list_media')
+  expect(r.isError).toBe(true)
+  expect(textOf(r)).toContain("Reel Editor isn't running")
+  await c.close()
+})
+
+test('files a feature request into the TODO list once', async ({ electronApp, appPage: _page }) => {
   const todo = await electronApp.evaluate(() => process.env.REEL_TODO_PATH as string)
   writeFileSync(todo, '# TODO\n\n## Open\n\n- [ ] x\n')
-  const c = await connect(page)
+  const c = await connect(await pipeOf(electronApp))
   const req = { title: 'Beat snap', problem: 'Wanted cuts on the beat of the music.', proposal: 'detect_beats tool' }
   expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Filed in/)
   expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Already requested/)
-  const md = readFileSync(todo, 'utf8')
-  expect(md).toMatch(/## Assistant requests\n\n- \[ \] \*\*Beat snap\*\* — Wanted cuts on the beat of the music\. _Proposal:_ detect_beats tool _\(requested by assistant, \d{4}-\d{2}-\d{2}\)_\n\n## Open/)
+  expect(readFileSync(todo, 'utf8')).toMatch(
+    /## Assistant requests\n\n- \[ \] \*\*Beat snap\*\* — Wanted cuts on the beat of the music\. _Proposal:_ detect_beats tool _\(requested by assistant, \d{4}-\d{2}-\d{2}\)_\n\n## Open/
+  )
   await c.close()
 })
 
-test('the Settings toggle stops and restarts the server', async ({ appPage: page }) => {
-  const before = await serverInfo(page)
+test('the Settings toggle disconnects and reconnects Claude Code', async ({ electronApp, appPage: page }) => {
+  const c = await connect(await pipeOf(electronApp))
   await page.evaluate(() => window.__reelStores.useUi.getState().setSettingsOpen(true))
   const toggle = page.getByLabel('Let Claude Code control the editor')
   await expect(toggle).toBeChecked()
+  await expect(page.getByTestId('assistant-status')).toHaveText('Listening for Claude Code')
 
   await toggle.click()
   await expect(page.getByTestId('assistant-status')).toHaveText('Off')
-  await expect(fetch(`http://127.0.0.1:${before.port}/mcp`, { method: 'POST' })).rejects.toThrow()
+  const off = await call(c, 'get_timeline')
+  expect(off.isError).toBe(true)
+  expect(textOf(off)).toContain("Reel Editor isn't running")
 
   await toggle.click()
-  await expect(page.getByTestId('assistant-status')).toHaveText(/^Running on 127\.0\.0\.1:\d+$/)
-  const c = await connect(page)
-  expect((await c.listTools()).tools.length).toBe(10)
+  await expect(page.getByTestId('assistant-status')).toHaveText('Listening for Claude Code')
+  expect((await call(c, 'get_timeline')).isError).toBeFalsy()
   await c.close()
 })
 
-test('rough cut in the given order, undone in one step, then exported', async ({ appPage: page }) => {
+test('rough cut in the given order, undone in one step, then exported', async ({ electronApp, appPage: page }) => {
   test.skip(!existsSync(FFMPEG) || !existsSync(FFPROBE), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
   test.setTimeout(240_000)
 
@@ -2378,7 +2605,7 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   }
   const a = clip('a.mp4', 'red')
   const b = clip('b.mp4', 'blue')
-  const c = await connect(page)
+  const c = await connect(await pipeOf(electronApp))
 
   const imported = JSON.parse(textOf(await call(c, 'import_media', { paths: [a, b] }))) as { id: string; fileName: string }[]
   const idOf = (f: string): string => imported.find((x) => x.fileName === f)!.id
@@ -2431,6 +2658,8 @@ test('rough cut in the given order, undone in one step, then exported', async ({
 })
 ```
 
+(The `appPage: _page` fixture in tests that don't touch the page still waits for the window, so the app — and its pipe server — is up before connecting.)
+
 - [ ] **Step 3: Run the new spec**
 
 Run: `npm run build` then `npx playwright test e2e/assistant.spec.ts`
@@ -2439,20 +2668,20 @@ Expected: 5 passed (the rough-cut test must PASS, not skip — if it skips, `res
 - [ ] **Step 4: Run the full e2e suite**
 
 Run: `npm run test:e2e`
-Expected: all pass (this also covers `addVideoLayer`'s audio-helper refactor via `link.spec.ts` and friends). Note how many specs SKIP and confirm none of them skip for the ffmpeg reason.
+Expected: all pass (this also covers `addVideoLayer`'s audio-helper refactor via `link.spec.ts` and friends). Note how many specs SKIP and confirm none skip for the ffmpeg reason.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add e2e/fixtures.ts e2e/assistant.spec.ts
-git commit -m "test(assistant): e2e for MCP auth, feature requests, toggle and rough-cut/undo/export
+git commit -m "test(assistant): e2e via the real reel-mcp stdio script: tools, closed editor, requests, toggle, rough cut/undo/export
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 13: `/edit-video` skill + docs
+### Task 15: `/edit-video` skill + docs
 
 **Files:**
 - Create: `.claude/skills/edit-video/SKILL.md`
@@ -2469,17 +2698,18 @@ description: Edit a video in the running Reel Editor through its MCP tools (reel
 
 # Edit a video in Reel Editor
 
-You are driving the Reel Editor desktop app, which is open on this computer. Every
-change you make appears live in the user's timeline and is undoable with Ctrl+Z.
+You are driving the Reel Editor desktop app on this computer. Every change you
+make appears live in the user's timeline and is undoable with Ctrl+Z.
 
 ## 0. Check the connection first
 
 Look for tools named `mcp__reel-editor__*` (e.g. `mcp__reel-editor__list_media`).
-If they are missing, stop and tell the user:
 
-- open the Reel Editor app, and
-- if they have never registered it: open **Settings → AI assistant**, copy the
-  `claude mcp add …` line, run it in a terminal, then start a new Claude Code session.
+- If they are missing: tell the user to open **Settings → AI assistant** in the
+  editor, copy the `claude mcp add …` line, run it in a terminal, then start a new
+  Claude Code session. Stop.
+- If a call answers "Reel Editor isn't running…": ask the user to open the editor
+  (and check the AI assistant switch in Settings), then retry.
 
 ## 1. Understand the footage
 
@@ -2531,19 +2761,22 @@ TIMELINE seconds = position in the edit (`atSec`, `startSec`/`endSec` in `get_ti
 
 - [ ] **Step 2: `docs/SHARED.md`**
 
-Add a section (placed after the "UI (renderer)" table's section, before the next `##`):
+Add a section (after the "UI (renderer)" section, before the next `##`):
 ```markdown
-## AI assistant (MCP) — `src/shared/assistant/`, `src/main/assistant/`, `lib/sequence.ts`
+## AI assistant (Claude Code via MCP) — `src/mcp/`, `src/main/assistant/`, `src/shared/assistant/`, `lib/sequence.ts`
+
+Shape: Claude Code launches **reel-mcp** (`node out/main/mcp.js`, stdio) → JSON lines over the named pipe `\\.\pipe\reel-editor` → editor main → renderer store. Not local HTTP: an MCP-aware network filter on the owner's machine corrupts local plain-HTTP MCP traffic (design spec, "Why not local HTTP").
 
 | Concept | Home | Use instead of |
 | --- | --- | --- |
+| Adding a tool | `shared/assistant/toolArgs.ts` (args type) → `mcp/tools.ts` (schema + description) → `main/assistant/tools.ts` (handler) | anything else — `ToolArgs` makes a schema/handler mismatch a compile error |
+| `servePipe` / `callPipe`, `LineDecoder`/`encodeLine` | `main/assistant/pipe.ts`, `shared/assistant/pipeProtocol.ts` | another channel between reel-mcp and the editor. One connection per call; no Electron imports |
 | `applySequence(comp, plan, ctx)`, `makeExtractedAudioClip(…)` | `lib/sequence.ts` | building trimmed video layers + their linked audio by hand. `applySequence` lays clips end-to-end through `makeVideoLayer` + `trimVideoStart`/`trimVideoEnd` (never inline source↔timeline math); `makeExtractedAudioClip` is THE linked-audio shape, shared with `addVideoLayer`. Store entry point: `addVideoSequence(plan)` (one undo step) |
-| `AssistantOps` + `callRenderer(op, args)` / `installAssistantBridge()` | `shared/assistant/protocol.ts`, `main/assistant/bridge.ts`, `renderer/assistant/handlers.ts` | reaching into renderer state from main any other way. Add an op to the `AssistantOps` table and both halves are type-checked against it |
+| `AssistantOps` + `callRenderer(op, args)` / `installAssistantBridge()` | `shared/assistant/protocol.ts`, `main/assistant/bridge.ts`, `renderer/assistant/handlers.ts` | reaching into renderer state from main any other way. Add an op to `AssistantOps` and both halves are type-checked against it |
 | `summarizeTimeline(comp)` | `shared/assistant/timelineSummary.ts` | hand-serializing the timeline for the model |
 | `transcriptPhraseText` / `transcriptWordText`, `frameTimes` | `shared/assistant/` | formatting transcripts / choosing frame times for the model |
 | `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` | `main/services/exportTarget.ts` | ad-hoc output naming for a dialog-less export (never overwrites; a name can't leave the export folder) |
 | `appendAssistantRequest` / `fileFeatureRequest` | `main/assistant/todoAppend.ts`, `todoFile.ts` | editing docs/TODO.md from code (serialized; `REEL_TODO_PATH` overrides) |
-| `checkAccess`, `toWebRequest`/`writeWebResponse`, `listenLocal` | `main/assistant/http.ts` | the SDK's Node `StreamableHTTPServerTransport`, which sends a broken chunked response on Node 24 (see the module header) |
 ```
 
 - [ ] **Step 3: `docs/TODO.md`**
@@ -2559,7 +2792,7 @@ Add a section (placed after the "UI (renderer)" table's section, before the next
 ```markdown
 ### AI assistant (Claude Code via MCP)
 
-- [~] **Claude Code can drive the editor** — local MCP server in main (`src/main/assistant/`, on by default, toggle + registration command in Settings), `/edit-video` skill (`.claude/skills/edit-video/`). Tools: list/import media, transcripts, source frames, timeline summary, `place_sequence` (one undo step), remove, undo, `export_video` (Settings export folder, never overwrites), `request_feature` (→ this file's "Assistant requests"). Spec: `docs/superpowers/specs/2026-10-06-ai-assistant-mcp-design.md`. `e2e/assistant.spec.ts` covers auth, the toggle, feature requests and a synthesized rough cut → undo → export. _Unverified: not yet smoke-tested with a real Claude Code session on real footage (rough cut in model-chosen and user-given order via `/edit-video`, then export, compared with a button export)._
+- [~] **Claude Code can drive the editor** — reel-mcp (`src/mcp/`, stdio, launched by Claude Code) forwards tool calls over the named pipe `\\.\pipe\reel-editor` to the editor (`src/main/assistant/`; on by default, toggle + registration command in Settings); `/edit-video` skill (`.claude/skills/edit-video/`). Tools: list/import media, transcripts, source frames, timeline summary, `place_sequence` (one undo step), remove, undo, `export_video` (Settings export folder, never overwrites), `request_feature` (→ this file's "Assistant requests"). No local HTTP: an MCP-aware filter on this machine (Norton 360 the only candidate) corrupts local plain-HTTP MCP traffic. Spec: `docs/superpowers/specs/2026-10-06-ai-assistant-mcp-design.md`. `e2e/assistant.spec.ts` drives the real stdio script: tools, closed editor, feature requests, the toggle, and a synthesized rough cut → undo → export. _Unverified: not yet smoke-tested with a real Claude Code session on real footage (rough cut in model-chosen and user-given order via `/edit-video`, then export, compared with a button export)._
 ```
 
 - [ ] **Step 4: `README.md`**
@@ -2568,11 +2801,12 @@ In the `## Development` section, append:
 ```markdown
 ### AI assistant (Claude Code)
 
-The editor runs a local MCP server (127.0.0.1, token-protected; toggle in
-**Settings → AI assistant**). Register it once — Settings shows the exact line
-with your token and a Copy button:
+Claude Code drives the editor through **reel-mcp**, a small stdio MCP server built
+with the app (`out/main/mcp.js`) that talks to the running editor over a named
+pipe (switch: **Settings → AI assistant**). Register it once — Settings shows the
+exact line for your checkout with a Copy button:
 
-    claude mcp add --scope user --transport http reel-editor http://127.0.0.1:47823/mcp --header "Authorization: Bearer <token>"
+    claude mcp add --scope user reel-editor -- node "<repo>\out\main\mcp.js"
 
 Then, with the editor open, run `/edit-video` in a Claude Code session opened in
 this repo. Claude Code asks before each tool call; choose "don't ask again" for
@@ -2590,7 +2824,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 14: Owner smoke test (manual — Definition of done)
+### Task 16: Owner smoke test (manual — Definition of done)
 
 This needs the owner; the executor prepares it and reports.
 
@@ -2599,14 +2833,15 @@ This needs the owner; the executor prepares it and reports.
 Run: `npm run typecheck`, `npm test`, `npm run test:e2e`.
 Expected: all green, assistant spec not skipped.
 
-- [ ] **Step 2: Hand the owner this checklist**
+- [ ] **Step 2: Hand the owner this checklist (Norton running normally throughout)**
 
-1. `npm run dev` in this worktree. Settings → AI assistant shows "Running on 127.0.0.1:47823". Copy the command and run it in a terminal.
+1. `npm run dev` in this worktree. Settings → AI assistant shows "Listening for Claude Code". Copy the command and run it in a terminal.
 2. Start a NEW Claude Code session in this repo (worktree) and ask "list my editor's media" — the `reel-editor` tools should answer (approve the permission prompts).
 3. Import 3–6 real clips (via `/edit-video` giving folder paths, or the app). Run `/edit-video make a ~30s reel` — watch the cut appear; Ctrl+Z once removes all of it.
 4. Run `/edit-video` again with an explicit order ("clip C, then A, then B") — the timeline follows that order.
 5. Ask it to export. The file lands in the Settings export folder; export the same project with the Export button and compare the two (same length, same look).
 6. Ask for something it can't do ("add a beat-synced flash transition") — it files a request; check `docs/TODO.md` → "Assistant requests".
+7. Close the editor and ask Claude Code to list media — it says the editor isn't running.
 
 - [ ] **Step 3: Record the result**
 
