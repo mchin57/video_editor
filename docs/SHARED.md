@@ -127,6 +127,21 @@ fallback used when neither key is present or valid. Startup resolves
 session → user default → built-in; Reset resolves user default → built-in. Both
 paths go through `applyLayout` (`state/dock.ts`) — don't re-roll that fallback.
 
+## AI assistant (Claude Code via MCP) — `src/mcp/`, `src/main/assistant/`, `src/shared/assistant/`, `lib/sequence.ts`
+
+Shape: Claude Code launches **reel-mcp** (`node out/main/mcp.js`, stdio) → JSON lines over the named pipe `\\.\pipe\reel-editor` → editor main → renderer store. Not local HTTP: an MCP-aware network filter on the owner's machine corrupts local plain-HTTP MCP traffic (design spec, "Why not local HTTP").
+
+| Concept | Home | Use instead of |
+| --- | --- | --- |
+| Adding a tool | `shared/assistant/toolArgs.ts` (args type) → `mcp/tools.ts` (schema + description) → `main/assistant/tools.ts` (handler) | anything else — `ToolArgs` makes a schema/handler mismatch a compile error |
+| `servePipe` / `callPipe`, `LineDecoder`/`encodeLine` | `main/assistant/pipe.ts`, `shared/assistant/pipeProtocol.ts` | another channel between reel-mcp and the editor. One connection per call; no Electron imports |
+| `applySequence(comp, plan, ctx)`, `makeExtractedAudioClip(…)` | `lib/sequence.ts` | building trimmed video layers + their linked audio by hand. `applySequence` lays clips end-to-end through `makeVideoLayer` + `trimVideoStart`/`trimVideoEnd` (never inline source↔timeline math); `makeExtractedAudioClip` is THE linked-audio shape, shared with `addVideoLayer`. Store entry point: `addVideoSequence(plan)` (one undo step) |
+| `AssistantOps` + `callRenderer(op, args)` / `installAssistantBridge()` | `shared/assistant/protocol.ts`, `main/assistant/bridge.ts`, `renderer/assistant/handlers.ts` | reaching into renderer state from main any other way. Add an op to `AssistantOps` and both halves are type-checked against it |
+| `summarizeTimeline(comp)` | `shared/assistant/timelineSummary.ts` | hand-serializing the timeline for the model |
+| `transcriptPhraseText` / `transcriptWordText`, `frameTimes` | `shared/assistant/` | formatting transcripts / choosing frame times for the model |
+| `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` | `main/services/exportTarget.ts` | ad-hoc output naming for a dialog-less export (never overwrites; a name can't leave the export folder) |
+| `appendAssistantRequest` / `fileFeatureRequest` | `main/assistant/todoAppend.ts`, `todoFile.ts` | editing docs/TODO.md from code (serialized; `REEL_TODO_PATH` overrides) |
+
 ## Shared model — `src/shared/project.ts`, `src/shared/layers.ts`
 
 | Concept | Home | Use instead of |

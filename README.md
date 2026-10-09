@@ -54,6 +54,19 @@ startup. For captions in dev, whisper.cpp + a `ggml-*.bin` model are discovered
 under `Documents\VideoEditor\bin\whisper` (or staged into `resources/bin`, see
 below).
 
+### AI assistant (Claude Code)
+
+Claude Code drives the editor through **reel-mcp**, a small stdio MCP server built
+with the app (`out/main/mcp.js`) that talks to the running editor over a named
+pipe (switch: **Settings → AI assistant**). Register it once — Settings shows the
+exact line for your checkout with a Copy button:
+
+    claude mcp add --scope user reel-editor -- node "<repo>\out\main\mcp.js"
+
+Then, with the editor open, run `/edit-video` in a Claude Code session opened in
+this repo. Claude Code asks before each tool call; choose "don't ask again" for
+the reel-editor tools if you want it to work uninterrupted.
+
 ## Building the installer (distribution)
 
 ```powershell
