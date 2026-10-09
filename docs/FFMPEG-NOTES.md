@@ -532,6 +532,15 @@ looking for an `-ss` in the transcription path.
   version is treated as stale and re-transcribed. Change the whisper flags or
   the parse and you must bump it, or every existing transcript keeps its old
   words forever.
+- **`-ml 1` + `-dtw` floods stdout quadratically: never leave it an undrained
+  pipe** (verified 2026-10). With both flags, whisper-cli re-prints every
+  earlier word segment each time a new one lands (`-np` does not stop it: it
+  only silences logs). An ~80-word, 40s clip printed 3,240 lines (129 KB) with
+  `-dtw`, against 92 lines without it. `runWhisper` used to pipe stdout and
+  never read it, so past ~60 words the pipe filled and whisper blocked forever
+  at 0% CPU: captioning "hung". The same command ran in 7s with stdout sent to
+  a file. Results come from the `-ojf` file, so stdout is spawned `'ignore'`
+  (regression test: `whisper.test.ts`).
 
 ## libass text metrics — why burned text did not match the preview (verified ffmpeg 8.1.1 / bundled libass, 2026-09)
 

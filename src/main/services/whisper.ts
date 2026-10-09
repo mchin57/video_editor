@@ -65,9 +65,13 @@ export function whisperAvailable(): boolean {
   return discoverWhisper() !== null
 }
 
-function runWhisper(cli: string, args: string[]): Promise<void> {
+export function runWhisper(cli: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cli, args, { windowsHide: true })
+    // Results come from the -ojf file, never stdout. stdout MUST NOT be an
+    // undrained pipe: `-ml 1` + `-dtw` re-prints every earlier segment per new
+    // word (quadratic: ~130 KB for 80 words), the pipe fills, and whisper blocks
+    // forever at 0% CPU.
+    const child = spawn(cli, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
     let tail = ''
     child.stderr.on('data', (b: Buffer) => {
       tail = (tail + b.toString()).slice(-3000)
