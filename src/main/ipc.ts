@@ -9,7 +9,7 @@ import type { PresetId } from '@shared/formats'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir, getSubdir } from './config'
 import { generateStill } from './services/still'
-import { expandImportPaths } from './services/importScan'
+import { importMany } from './services/importMany'
 import { hdrToSdrChain } from './services/proxy'
 import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
@@ -35,27 +35,6 @@ import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 import { cancelJob } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
-
-/**
- * Import each path (fast hash+probe), then kick proxy generation in the
- * background. Any directory in `paths` is expanded to the media files inside it
- * first, so a picked or dropped FOLDER imports its contents.
- */
-async function importMany(paths: string[]): Promise<MediaAsset[]> {
-  const assets: MediaAsset[] = []
-  for (const path of await expandImportPaths(paths)) {
-    try {
-      const asset = await importFile(path)
-      assets.push(asset)
-      if (!asset.proxyReady) {
-        void ensureProxy(asset.id).catch((err) => console.error('proxy generation failed', err))
-      }
-    } catch (err) {
-      console.error('import failed for', path, err)
-    }
-  }
-  return assets
-}
 
 /** ffmpeg -vf chain to make a still match the preview (HDR → SDR, crop, color). */
 function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
