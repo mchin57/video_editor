@@ -11,7 +11,7 @@
 
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import {
   _electron as electron,
   test as base,
@@ -38,7 +38,11 @@ export const test = base.extend<{ electronApp: ElectronApplication; appPage: Pag
       env: {
         ...process.env,
         VIDEO_EDITOR_DATA: join(scratch, 'data'),
-        REEL_USER_DATA_DIR: join(scratch, 'profile')
+        REEL_USER_DATA_DIR: join(scratch, 'profile'),
+        // Never collide with a dev app's pipe; never touch the repo's TODO.
+        REEL_ASSISTANT_PIPE:
+          process.platform === 'win32' ? `\\\\.\\pipe\\${basename(scratch)}` : join(scratch, 'reel.sock'),
+        REEL_TODO_PATH: join(scratch, 'TODO.md')
       }
     })
     await use(app)
