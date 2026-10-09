@@ -22,27 +22,50 @@ let state: Omit<AssistantStatus, 'scriptPath'> = { state: 'off' }
 
 export const assistantStatus = (): AssistantStatus => ({ ...state, scriptPath: mcpScriptPath() })
 
-/** (Re)start from the current settings. */
-export async function startAssistant(): Promise<AssistantStatus> {
-  await stopAssistant()
-  const { assistant } = await getSettings()
-  if (assistant.enabled) {
-    const r = await servePipe(pipePath(), handleTool)
-    if (r.ok) {
-      server = r.server
-      state = { state: 'listening' }
-    } else {
-      state = { state: 'error', message: r.message }
-      console.error('[assistant]', r.message)
-    }
-  }
-  return assistantStatus()
+/**
+ * Every start and stop runs one at a time. Overlapping calls would otherwise
+ * both see `server === null` and both listen, so the loser reports a false
+ * "another copy" error; and on Windows a re-listen fails with EADDRINUSE until
+ * the previous server has finished draining, so a start has to wait for a stop.
+ */
+let chain: Promise<unknown> = Promise.resolve()
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.then(fn)
+  chain = run.catch(() => {})
+  return run
 }
 
-/** Stop accepting calls. Waits for calls already in flight (e.g. an export) to finish. */
-export async function stopAssistant(): Promise<void> {
+/** Stop accepting calls, then wait for calls already in flight (e.g. an export) to finish. */
+async function stop(): Promise<void> {
   const s = server
   server = null
   state = { state: 'off' }
   if (s) await new Promise<void>((resolve) => s.close(() => resolve()))
 }
+
+/** (Re)start from the current settings. Never rejects: a failure becomes the error status. */
+export const startAssistant = (): Promise<AssistantStatus> =>
+  serialized(async () => {
+    await stop()
+    try {
+      const { assistant } = await getSettings()
+      if (assistant.enabled) {
+        const r = await servePipe(pipePath(), handleTool)
+        if (r.ok) {
+          server = r.server
+          state = { state: 'listening' }
+        } else {
+          state = { state: 'error', message: r.message }
+          console.error('[assistant]', r.message)
+        }
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      state = { state: 'error', message }
+      console.error('[assistant]', message)
+    }
+    return assistantStatus()
+  })
+
+/** Stop accepting calls. Waits for calls already in flight (e.g. an export) to finish. */
+export const stopAssistant = (): Promise<void> => serialized(stop)
