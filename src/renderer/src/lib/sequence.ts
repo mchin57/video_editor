@@ -33,6 +33,20 @@ export function makeExtractedAudioClip(
   return { id, mediaId, startSec, inSec, outSec, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, linkGroupId, kind: 'extracted' }
 }
 
+/**
+ * Where in the back→front `base.layers` the new clips go. They take the video's
+ * place in the stack so titles/images above it stay in front: at the slot of
+ * the bottom-most video `replace` removed, else directly above the topmost
+ * remaining video, else behind everything.
+ */
+function sequenceInsertIndex(before: Layer[], base: Layer[]): number {
+  const kept = new Set(base.map((l) => l.id))
+  const firstRemovedVideo = before.findIndex((l) => l.content.kind === 'video' && !kept.has(l.id))
+  if (firstRemovedVideo >= 0) return before.slice(0, firstRemovedVideo).filter((l) => kept.has(l.id)).length
+  for (let i = base.length - 1; i >= 0; i--) if (base[i].content.kind === 'video') return i + 1
+  return 0
+}
+
 export function applySequence(
   comp: Composition,
   plan: SequencePlan,
@@ -79,8 +93,13 @@ export function applySequence(
     cursor = layer.endSec
   })
 
+  const at = sequenceInsertIndex(comp.layers, base.layers)
   return {
-    comp: { ...base, layers: [...base.layers, ...layers], audioClips: [...base.audioClips, ...audioClips] },
+    comp: {
+      ...base,
+      layers: [...base.layers.slice(0, at), ...layers, ...base.layers.slice(at)],
+      audioClips: [...base.audioClips, ...audioClips]
+    },
     placed
   }
 }
