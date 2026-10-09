@@ -5,7 +5,7 @@
  *
  * This is the ONE place that expands directories, so folder import works
  * identically for the File menu, the OS drag-drop onto the window, and any
- * future caller — they all funnel through `importMany` in `ipc.ts`.
+ * future caller — they all funnel through `importMany` in `services/importMany.ts`.
  */
 
 import { readdir, stat } from 'node:fs/promises'

@@ -127,15 +127,19 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
 
   export_video: async ({ fileName }) => {
     const project = await callRenderer('getProject', {})
-    const refusal = exportRefusal(project, listJobs())
-    if (refusal) throw new Error(refusal)
     const requested = fileName !== undefined ? sanitizeExportName(fileName) : null
     if (fileName !== undefined && !requested) throw new Error(`"${fileName}" is not a usable file name`)
     const preset = project.preset ?? 'reel'
     const { exportDir } = await getSettings()
     await fsp.mkdir(exportDir, { recursive: true })
+    // No await from the refusal check to the exportProject call: exportProject registers its
+    // job synchronously, so a second concurrent call sees it running and the picked path is
+    // never claimed twice.
+    const refusal = exportRefusal(project, listJobs())
+    if (refusal) throw new Error(refusal)
     const path = uniqueExportPath(exportDir, requested ?? suggestedExportName(project.name, preset), existsSync)
-    await exportProject(project, { preset, preferNvenc: true }, path)
+    const done = exportProject(project, { preset, preferNvenc: true }, path)
+    await done
     const { size } = await fsp.stat(path)
     return json({ path, sizeMB: Math.round((size / 1_048_576) * 10) / 10 })
   },

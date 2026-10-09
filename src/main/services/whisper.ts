@@ -21,6 +21,7 @@ import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { getAsset } from './mediaStore'
+import { singleFlight } from './atomicWrite'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
 import { buildWhisperArgs, decodeStartSec, dtwPreset } from './whisperArgs'
 import { detectSilence } from './silence'
@@ -112,8 +113,18 @@ export async function getTranscript(mediaId: string): Promise<Transcript | null>
   }
 }
 
-/** Transcribe a media file (cached). Reports progress on the jobs channel. */
-export async function transcribeMedia(mediaId: string): Promise<Transcript> {
+const transcribeFlight = singleFlight<Transcript>() // keyed by media id
+
+/**
+ * Transcribe a media file (cached). Reports progress on the jobs channel.
+ * Concurrent calls for one media coalesce onto a single run — they would
+ * otherwise write the same audio16k.wav / transcript_raw files.
+ */
+export function transcribeMedia(mediaId: string): Promise<Transcript> {
+  return transcribeFlight(mediaId, () => transcribeOnce(mediaId))
+}
+
+async function transcribeOnce(mediaId: string): Promise<Transcript> {
   const cached = await getTranscript(mediaId)
   if (cached) return cached
 
