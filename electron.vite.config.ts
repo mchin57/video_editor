@@ -8,7 +8,14 @@ const shared = resolve('src/shared')
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
-    resolve: { alias: { '@shared': shared } }
+    resolve: { alias: { '@shared': shared } },
+    build: {
+      rollupOptions: {
+        // Two entries: the app's main process, and reel-mcp — the stdio MCP
+        // server Claude Code launches with plain node (src/mcp).
+        input: { index: resolve('src/main/index.ts'), mcp: resolve('src/mcp/index.ts') }
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
