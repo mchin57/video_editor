@@ -71,3 +71,38 @@ describe('servePipe + callPipe', () => {
     await expect(callPipe(path, 'list_media', {})).rejects.toThrow(/closed the connection before answering/)
   })
 })
+
+describe('malformed traffic', () => {
+  it('answers a line that is not a request with an error, hangs up, and keeps serving', async () => {
+    const path = uniquePipe()
+    await serve(path, async () => [{ type: 'text', text: 'still here' }])
+    const raw = await new Promise<string>((resolve, reject) => {
+      const sock = net.connect(path)
+      let got = ''
+      sock.setEncoding('utf8')
+      sock.on('connect', () => sock.write('null\n'))
+      sock.on('data', (chunk: string) => (got += chunk))
+      sock.on('error', reject)
+      sock.on('close', () => resolve(got))
+    })
+    const lines = raw.split('\n').filter(Boolean)
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0])).toMatchObject({ ok: false })
+    expect(await callPipe(path, 'list_media', {})).toEqual([{ type: 'text', text: 'still here' }])
+  }, 5000)
+
+  it('fails the call, rather than hanging, when the handler returns content that cannot be encoded', async () => {
+    const path = uniquePipe()
+    // JSON.stringify throws on a BigInt; the cast stands in for a handler bug.
+    await serve(path, async () => [{ type: 'text', text: 'x', big: 1n } as never])
+    await expect(callPipe(path, 'list_media', {})).rejects.toThrow(/could not be sent/)
+  }, 5000)
+
+  it('rejects, rather than throwing, when the editor answers with a non-object line', async () => {
+    const path = uniquePipe()
+    const odd = net.createServer((sock) => sock.once('data', () => sock.end('null\n')))
+    await new Promise<void>((r) => odd.listen(path, r))
+    servers.push(odd)
+    await expect(callPipe(path, 'list_media', {})).rejects.toThrow(/malformed answer/)
+  }, 5000)
+})

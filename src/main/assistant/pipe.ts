@@ -19,6 +19,14 @@ export const NOT_RUNNING =
   "Reel Editor isn't running, or its AI assistant is switched off in Settings. Open it and try again."
 export const IN_USE = 'Another copy of the editor is already connected to Claude Code'
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+
+const isRequest = (v: unknown): v is PipeRequest => isRecord(v) && typeof v.id === 'string' && typeof v.tool === 'string'
+
+const errorLine = (id: string, error: string): string => encodeLine({ id, ok: false, error } satisfies PipeResponse)
+
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
 export function servePipe(
   path: string,
   handle: PipeHandler
@@ -31,10 +39,18 @@ export function servePipe(
       try {
         msgs = decoder.push(chunk)
       } catch {
-        sock.end(encodeLine({ id: '', ok: false, error: 'Malformed request' } satisfies PipeResponse))
+        sock.end(errorLine('', 'Malformed request'))
         return
       }
-      for (const m of msgs) void answer(sock, m as PipeRequest, handle)
+      for (const m of msgs) {
+        if (!isRequest(m)) {
+          // Valid JSON but not a request: say so (echoing an id if it carried one) and hang up.
+          sock.end(errorLine(isRecord(m) && typeof m.id === 'string' ? m.id : '', 'Malformed request'))
+          return
+        }
+        // answer() is total; the catch is a last resort so nothing is ever unhandled.
+        void answer(sock, m, handle).catch(() => sock.destroy())
+      }
     })
     // The caller went away mid-call (e.g. Claude Code cancelled); nobody to tell.
     sock.on('error', () => {})
@@ -48,13 +64,19 @@ export function servePipe(
 }
 
 async function answer(sock: net.Socket, req: PipeRequest, handle: PipeHandler): Promise<void> {
-  let res: PipeResponse
+  let line: string
   try {
-    res = { id: req.id, ok: true, content: await handle(req.tool, req.args) }
+    const content = await handle(req.tool, req.args)
+    try {
+      line = encodeLine({ id: req.id, ok: true, content } satisfies PipeResponse)
+    } catch (e) {
+      // e.g. a BigInt in the content: tell the caller instead of leaving it waiting forever.
+      line = errorLine(req.id, `Tool "${req.tool}" returned content that could not be sent: ${messageOf(e)}`)
+    }
   } catch (e) {
-    res = { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) }
+    line = errorLine(req.id, messageOf(e))
   }
-  if (!sock.destroyed) sock.end(encodeLine(res))
+  if (!sock.destroyed && !sock.writableEnded) sock.end(line)
 }
 
 export function callPipe(path: string, tool: string, args: unknown): Promise<ToolContent[]> {
@@ -79,10 +101,23 @@ export function callPipe(path: string, tool: string, args: unknown): Promise<Too
         sock.destroy()
         return
       }
-      const res = msgs.find((m) => (m as PipeResponse).id === id) as PipeResponse | undefined
-      if (!res) return
-      settle(() => (res.ok ? resolve(res.content) : reject(new Error(res.error))))
-      sock.end()
+      for (const m of msgs) {
+        // Anything that isn't an object is a protocol violation; an object for another id isn't ours.
+        if (isRecord(m) && m.id !== id) continue
+        if (isRecord(m) && m.ok === true && Array.isArray(m.content)) {
+          const content = m.content as ToolContent[]
+          settle(() => resolve(content))
+          sock.end()
+        } else if (isRecord(m) && m.ok === false && typeof m.error === 'string') {
+          const error = m.error
+          settle(() => reject(new Error(error)))
+          sock.end()
+        } else {
+          settle(() => reject(new Error('Reel Editor sent a malformed answer')))
+          sock.destroy()
+        }
+        return
+      }
     })
     sock.on('error', (err: NodeJS.ErrnoException) =>
       settle(() => reject(new Error(err.code === 'ENOENT' || err.code === 'ECONNREFUSED' ? NOT_RUNNING : err.message)))
