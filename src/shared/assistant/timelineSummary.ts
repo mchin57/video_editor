@@ -5,7 +5,7 @@
 
 import type { Composition, Layer } from '../project'
 import { audioClipEnd } from '../project'
-import { visualDuration } from '../layers'
+import { compositionDuration, type SourceDuration } from '../compositions'
 
 export interface LayerSummary {
   id: string
@@ -33,6 +33,7 @@ export interface AudioSummary {
 }
 
 export interface TimelineSummary {
+  /** Total composition duration: open-ended audio clips count toward this only when `srcDur` supplies their source length. */
   durationSec: number
   layers: LayerSummary[]
   audioClips: AudioSummary[]
@@ -50,21 +51,25 @@ function layerSummary(l: Layer): LayerSummary {
   return s
 }
 
-export function summarizeTimeline(comp: Composition): TimelineSummary {
+/**
+ * Summarize a composition for the AI assistant. Open-ended audio clips
+ * (`outSec <= 0`) get an endSec only when `srcDur` supplies their source length.
+ */
+export function summarizeTimeline(comp: Composition, srcDur: SourceDuration = () => 0): TimelineSummary {
   const layers = [...comp.layers].sort((a, b) => a.startSec - b.startSec).map(layerSummary)
   const audioClips: AudioSummary[] = comp.audioClips.map((c) => {
     const bounded = c.outSec > 0
+    const srcLen = bounded ? Infinity : srcDur(c.mediaId)
     const a: AudioSummary = {
       id: c.id,
       mediaId: c.mediaId,
       startSec: r3(c.startSec),
-      endSec: bounded ? r3(audioClipEnd(c, Infinity)) : null,
+      endSec: srcLen > 0 ? r3(audioClipEnd(c, srcLen)) : null,
       inSec: r3(c.inSec),
       outSec: bounded ? r3(c.outSec) : null
     }
     if (c.linkGroupId) a.linkGroupId = c.linkGroupId
     return a
   })
-  const audioEnd = audioClips.reduce((m, a) => Math.max(m, a.endSec ?? 0), 0)
-  return { durationSec: r3(Math.max(visualDuration(comp.layers), audioEnd)), layers, audioClips }
+  return { durationSec: r3(compositionDuration(comp, srcDur)), layers, audioClips }
 }

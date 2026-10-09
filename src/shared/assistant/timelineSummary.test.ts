@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createEmptyComposition, type AudioClip } from '../project'
 import { makeImageLayer, makeVideoLayer } from '../layers'
 import { summarizeTimeline } from './timelineSummary'
+import type { SourceDuration } from '../compositions'
 
 const audio = (over: Partial<AudioClip>): AudioClip => ({
   id: 'a1',
@@ -44,5 +45,38 @@ describe('summarizeTimeline', () => {
 
   it('summarises an empty timeline', () => {
     expect(summarizeTimeline(createEmptyComposition())).toEqual({ durationSec: 0, layers: [], audioClips: [] })
+  })
+
+  it('reports durationSec as the max of bounded audio end and layers', () => {
+    const comp = {
+      ...createEmptyComposition(),
+      layers: [makeVideoLayer('v', 'm1', 0, 2)],
+      audioClips: [audio({ startSec: 0, inSec: 0, outSec: 5 })]
+    }
+    const s = summarizeTimeline(comp)
+    expect(s.layers[0].endSec).toBe(2)
+    expect(s.audioClips[0].endSec).toBe(5)
+    expect(s.durationSec).toBe(5)
+  })
+
+  it('computes open-ended audio endSec when srcDur is provided', () => {
+    const comp = {
+      ...createEmptyComposition(),
+      audioClips: [audio({ outSec: 0, mediaId: 'src1' })]
+    }
+    const srcDur: SourceDuration = (id) => (id === 'src1' ? 10 : 0)
+    const s = summarizeTimeline(comp, srcDur)
+    expect(s.audioClips[0]).toMatchObject({ inSec: 0, outSec: null, endSec: 11 })
+    expect(s.durationSec).toBe(11)
+  })
+
+  it('keeps open-ended audio endSec as null when srcDur is not provided', () => {
+    const comp = {
+      ...createEmptyComposition(),
+      audioClips: [audio({ outSec: 0, mediaId: 'm1' })]
+    }
+    const s = summarizeTimeline(comp)
+    expect(s.audioClips[0]).toMatchObject({ endSec: null, outSec: null })
+    expect(s.durationSec).toBe(1)
   })
 })
