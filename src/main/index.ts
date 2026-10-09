@@ -6,6 +6,7 @@ import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaProtocol'
 import { getSubdir } from './config'
 import { initAutoUpdate } from './services/updater'
+import { startAssistant, stopAssistant } from './assistant/service'
 
 // Test isolation: relocate Electron's profile (localStorage, caches) so e2e
 // runs get a clean slate and can't pollute the real one. Must run pre-'ready'.
@@ -68,6 +69,7 @@ app.whenReady().then(() => {
   registerMediaProtocol()
   registerIpcHandlers()
   createWindow()
+  void startAssistant()
   initAutoUpdate()
 
   // Best-effort scratch sweep: exports clean their per-job tmp dirs, but a
@@ -78,6 +80,10 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  void stopAssistant()
 })
 
 app.on('window-all-closed', () => {

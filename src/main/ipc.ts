@@ -35,6 +35,7 @@ import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 import { cancelJob } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
+import { assistantStatus, startAssistant } from './assistant/service'
 
 /** ffmpeg -vf chain to make a still match the preview (HDR → SDR, crop, color). */
 function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
@@ -240,7 +241,13 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(IPC.getSettings, () => getSettings())
-  ipcMain.handle(IPC.updateSettings, (_event, patch: Partial<Settings>) => updateSettings(patch))
+  ipcMain.handle(IPC.updateSettings, async (_event, patch: Partial<Settings>) => {
+    const next = await updateSettings(patch)
+    // Toggling the assistant restarts (or stops) the pipe server live.
+    if (patch.assistant) await startAssistant()
+    return next
+  })
+  ipcMain.handle(IPC.assistantStatus, () => assistantStatus())
   ipcMain.handle(IPC.chooseExportDir, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
