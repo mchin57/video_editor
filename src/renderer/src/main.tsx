@@ -10,6 +10,7 @@ import { usePlayback } from './state/playback'
 import { playedVideoDuration } from '@shared/layers'
 import { appliedGain, isRouted, previewAudioState } from './lib/mediaGain'
 import { useDock } from './state/dock'
+import { installAssistantBridge } from './assistant/handlers'
 // dockview's stylesheet first so index.css overrides win at equal specificity.
 import 'dockview-react/dist/styles/dockview.css'
 import './index.css'
@@ -49,6 +50,7 @@ window.__reelStores = {
   isRouted,
   previewAudioState
 }
+installAssistantBridge()
 
 // Register the bundled-font @font-face rules before first paint so previews use
 // the same faces the export burns.

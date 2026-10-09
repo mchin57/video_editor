@@ -34,6 +34,7 @@ import { getTranscript, transcribeMedia, whisperAvailable } from './services/whi
 import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 import { cancelJob } from './services/jobs'
+import { registerAssistantBridge } from './assistant/bridge'
 
 /**
  * Import each path (fast hash+probe), then kick proxy generation in the
@@ -69,6 +70,7 @@ function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
 }
 
 export function registerIpcHandlers(): void {
+  registerAssistantBridge()
   ipcMain.handle(IPC.getCapabilities, () => getCapabilities())
   ipcMain.handle(IPC.getDataDir, () => getDataDir())
 
