@@ -25,8 +25,18 @@ const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'te
 
 const pipeOf = (app: ElectronApplication): Promise<string> => app.evaluate(() => process.env.REEL_ASSISTANT_PIPE as string)
 
+// Every client connect() makes is closed in afterEach, so a failed assertion
+// can never leave a `node out/main/mcp.js` child alive for the rest of the run.
+const clients: Client[] = []
+
+test.afterEach(async () => {
+  const open = clients.splice(0)
+  await Promise.all(open.map((c) => c.close().catch(() => undefined)))
+})
+
 async function connect(pipe: string): Promise<Client> {
   const client = new Client({ name: 'e2e', version: '1' })
+  clients.push(client) // before connect, so a failed handshake is cleaned up too
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
@@ -41,13 +51,13 @@ async function connect(pipe: string): Promise<Client> {
 const call = async (c: Client, name: string, args: Record<string, unknown> = {}): Promise<ToolResult> =>
   (await c.callTool({ name, arguments: args })) as ToolResult
 
-test('lists the tools and names valid ids for an unknown media id', async ({ electronApp, appPage: _page }) => {
+test('lists the tools; an unknown media id on an empty library says to import first', async ({ electronApp, appPage: _page }) => {
   const c = await connect(await pipeOf(electronApp))
   expect((await c.listTools()).tools.map((t) => t.name).sort()).toEqual(TOOLS)
   const r = await call(c, 'get_transcript', { mediaId: 'nope' })
   expect(r.isError).toBe(true)
-  expect(textOf(r)).toMatch(/No media "nope".*Valid ids/s)
-  await c.close()
+  expect(textOf(r)).toMatch(/No media "nope".*Valid ids.*the library is empty/s)
+  // (that valid ids are actually NAMED is pinned in the rough-cut test, where the library has media)
 })
 
 test('says plainly when the editor is not running', async () => {
@@ -56,7 +66,6 @@ test('says plainly when the editor is not running', async () => {
   const r = await call(c, 'list_media')
   expect(r.isError).toBe(true)
   expect(textOf(r)).toContain("Reel Editor isn't running")
-  await c.close()
 })
 
 test('files a feature request into the TODO list once', async ({ electronApp, appPage: _page }) => {
@@ -69,7 +78,6 @@ test('files a feature request into the TODO list once', async ({ electronApp, ap
   expect(readFileSync(todo, 'utf8')).toMatch(
     /## Assistant requests\n\n- \[ \] \*\*Beat snap\*\* — Wanted cuts on the beat of the music\. _Proposal:_ detect_beats tool _\(requested by assistant, \d{4}-\d{2}-\d{2}\)_\n\n## Open/
   )
-  await c.close()
 })
 
 test('the Settings toggle disconnects and reconnects Claude Code', async ({ electronApp, appPage: page }) => {
@@ -88,7 +96,6 @@ test('the Settings toggle disconnects and reconnects Claude Code', async ({ elec
   await toggle.click()
   await expect(page.getByTestId('assistant-status')).toHaveText('Listening for Claude Code')
   expect((await call(c, 'get_timeline')).isError).toBeFalsy()
-  await c.close()
 })
 
 test('rough cut in the given order, undone in one step, then exported', async ({ electronApp, appPage: page }) => {
@@ -113,6 +120,13 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   const imported = JSON.parse(textOf(await call(c, 'import_media', { paths: [a, b] }))) as { id: string; fileName: string }[]
   const idOf = (f: string): string => imported.find((x) => x.fileName === f)!.id
   const [A, B] = [idOf('a.mp4'), idOf('b.mp4')]
+
+  // With media in the library, an unknown id's error must NAME the valid ids.
+  const bad = await call(c, 'get_transcript', { mediaId: 'nope' })
+  expect(bad.isError).toBe(true)
+  expect(textOf(bad)).toContain('Valid ids')
+  expect(textOf(bad)).toContain(A)
+  expect(textOf(bad)).toContain(B)
 
   const frames = await call(c, 'get_frames', { mediaId: A, count: 2 })
   expect(frames.isError).toBeFalsy()
@@ -140,6 +154,9 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   expect(layers[1].startSec).toBeCloseTo(2, 6)
   expect(layers[1].endSec).toBeCloseTo(3.5, 6)
   for (const l of layers) await expect(page.getByTestId(`tile-layer-${l.id}`)).toBeVisible()
+  // Timeline DOM in the given order: B was placed first, so its tile sits left of A's.
+  const tileX = async (id: string): Promise<number> => (await page.getByTestId(`tile-layer-${id}`).boundingBox())!.x
+  expect(await tileX(layers[0].id)).toBeLessThan(await tileX(layers[1].id))
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length)).toBe(2)
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().past.length)).toBe(historyBefore + 1)
 
@@ -157,5 +174,4 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   )
   expect(duration).toBeGreaterThan(3.4)
   expect(duration).toBeLessThan(3.7)
-  await c.close()
 })
