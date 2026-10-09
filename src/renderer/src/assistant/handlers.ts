@@ -28,6 +28,8 @@ function comp(): Composition {
 const handlers: Handlers = {
   getMediaIds: () => project().mediaIds,
   addMedia: ({ ids }) => {
+    // The store's commit() silently no-ops without a project; fail loudly instead.
+    project()
     useProject.getState().addMedia(ids)
     return null
   },
