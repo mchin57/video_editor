@@ -1,6 +1,6 @@
 # Project folders — media ownership design
 
-_Status: **proposal, awaiting owner approval.** Nothing here is implemented yet._
+_Status: **design agreed except decision 2** (2026-10-10). Nothing is implemented yet._
 
 ## Goals
 
@@ -108,31 +108,49 @@ A Storage readout in the app should show the real space each project holds alone
 
 ## Migration
 
-- **Legacy `.reel` file (opened):** the app offers to convert it to a folder, by default `<dir>/<Name>/`
-  next to the file. A pure, tested planner goes through `mediaIds`:
-  - If the original at `originalPath` still exists and its hash matches, it is linked or copied in.
-  - Generated media is taken from `nobg/`, `audiofx/` and so on in the same way.
-  - Transcripts are copied. Proxies and thumbnails are linked from the old store, so 107 proxies don't
-    have to be rebuilt.
+Owner decision: convert all the legacy projects, not one at a time.
+
+**What exists today** (read-only survey, 2026-10-10):
+- 19 `.reel` files under `Documents\Reels`, plus the working copy.
+- Every original they reference is still on disk, and all of it is on C:, so conversion links rather
+  than copies and costs no extra space for originals.
+- 15 files already sit in a folder next to their footage. 4 sit loose at the top level.
+- `recovery` uses 36 generated files (background removal and similar).
+- 44 of the 167 entries in the old store aren't referenced by any project.
+
+**The conversion:**
+- **One batch action, "Convert projects in folder…",** pointed at `Documents\Reels`. Each `.reel` file
+  is first run through `migrateProject`, which fills in `mediaIds` for very old files. Then a pure,
+  tested planner goes through those ids:
+  - If the original at `originalPath` exists and its hash matches, it is linked into `media/`.
+  - Generated media comes from `nobg/`, `audiofx/`, `extracted/` and `stills/` the same way.
+  - Transcripts are copied. Proxies and thumbnails are linked from the old store, so they don't have
+    to be rebuilt.
   - Anything that can't be found is marked *missing*.
 
-  The legacy file is left untouched. If the user declines conversion, the project doesn't open. That
-  avoids keeping two storage modes alive.
-- **Legacy working copy:** on the first launch after the update, an unsaved `current.json` is
-  converted into the scratch folder automatically. One bound to a `.reel` file is converted the next
-  time that file is opened.
-- **Old global store:** left untouched, so it still serves any `.reel` files that haven't been
-  converted yet. Settings ▸ Storage shows its size (about 1.3 GB today) with a **Delete…** button. The
-  warning names what would be lost: unconverted projects would need their transcripts redone and
-  would show generated clips as missing. Proxies are always rebuilt.
+  At the end the batch reports, per project, how many files were linked, copied and missing.
+- **A `.reel` already in its own folder:** that folder becomes the project folder.
+  - `media/` and `cache/` are added next to the existing footage.
+  - The document is written as `<Folder>.reel`, so for example `4 fun\save.reel` becomes
+    `4 fun\4 fun.reel`.
+  - The old file is kept as `<old name>.reel-legacy` as a backup.
+  - The folder then holds each clip under two names but stores it once. Explorer shows about double
+    the real size.
+- **A loose `.reel`:** it moves into a new `Reels\<Name>\` folder and gets the same treatment.
+- **The working copy:** it is converted into the scratch folder on the first launch after the update.
+- **Opening a single legacy `.reel`** found later converts it the same way. Conversion is required,
+  so there is no read-only legacy mode.
+- **The old global store** (about 1.3 GB: `media/`, `nobg/`, `audiofx/`, `extracted/`, `stills/`) is
+  deleted once the batch reports nothing missing, after a confirmation that shows its size. Until
+  then it stays as the source for conversion.
 
 ## Phases (the app works after each one)
 
 1. A pure layout module, main-owned open-folder state, the scratch folder, link-or-copy import,
    save, Save As and open of folders, and sweeping unused media on open.
 2. Changed and missing detection, the card badges, Relink, and blocking export.
-3. Migration of legacy `.reel` files and `current.json`.
-4. The Storage panel, deleting the legacy store, and an optional "share without cache" copy.
+3. The batch conversion of legacy `.reel` files and `current.json`, then deleting the old store.
+4. The Storage panel and an optional "share without cache" copy.
 
 **Tests:** unit tests for the layout, the link-or-copy choice (by error code), the change check, the
 migration planner and the sweep planner. A Playwright spec stubs the save dialog, then:
@@ -147,13 +165,14 @@ The schema version goes from 23 to 24, recording that the document lives in a fo
 This replaces the TODO entry "Self-contained project folder (portable save)". A project folder is
 portable as it is, and leaving out `cache/` gives a lighter copy to share.
 
-## Decisions for the owner
+## Decisions
 
-1. **Across volumes, copy** (recommended: correct by default, at the cost of double space) **or
-   reference the source in place** as today (fragile)?
-2. **Overwriting in place:** is detection alone enough, or do you also want a per-project "always copy
-   originals" option for footage you re-export over?
-3. **Required conversion** of legacy `.reel` files (recommended), or keep a read-only legacy mode?
-4. **`<Name>/<Name>.reel`** inside the folder (recommended) or `<Name>/project.json`?
-5. **OneDrive:** linking inside OneDrive folders or to cloud-only placeholders is **unverified**. The
-   copy fallback should cover it, but it should be tested before projects are saved to OneDrive.
+The owner answered on 2026-10-10.
+
+1. **Across volumes:** copy the original. A project never points at a source in place.
+2. **Overwriting a source in place:** _open_. The choice is between detection only and a per-project
+   "always copy originals" option.
+3. **Legacy projects:** convert them all with the batch action, then delete the old store. There is no
+   legacy mode.
+4. **Document name:** `<Name>/<Name>.reel`.
+5. **OneDrive:** out of scope. The owner won't use it, and the copy fallback is the only safety net.
