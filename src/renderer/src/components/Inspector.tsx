@@ -54,6 +54,7 @@ import { CancelJobButton, jobProgressText, useNow } from './JobsIndicator'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
 import { activeComp, projectFormat, useProject } from '@/state/projectStore'
+import { startPointerDrag } from '@/lib/pointerDrag'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
@@ -321,7 +322,18 @@ function LiveRange({
       max={max}
       step={step}
       value={value}
-      onPointerDown={() => (before.current = useProject.getState().project)}
+      onPointerDown={() => {
+        before.current = useProject.getState().project
+        // startPointerDrag: a window-level release (incl. pointercancel, or the
+        // Inspector unmounting mid-drag) + the interaction lock.
+        startPointerDrag(
+          () => {},
+          () => {
+            if (before.current) useProject.getState().commitLive(before.current)
+            before.current = null // so later keyboard changes take the commit path
+          }
+        )
+      }}
       onChange={(e) => {
         const v = Number(e.target.value)
         const store = useProject.getState()
@@ -336,10 +348,6 @@ function LiveRange({
         if (!prev) return
         store.liveUpdate((p) => transform(p, v))
         store.commitLive(prev)
-      }}
-      onPointerUp={() => {
-        if (before.current) useProject.getState().commitLive(before.current)
-        before.current = null // so later keyboard changes take the commit path
       }}
       className="w-full accent-sky-400"
     />

@@ -10,6 +10,7 @@ import { summarizeTimeline } from '@shared/assistant/timelineSummary'
 import { activeComp, useProject } from '@/state/projectStore'
 import { expandSelection, timelineTiles } from '@/lib/links'
 import { assistantRespond, onAssistantRequest } from '@/ipc/client'
+import { interactionOpen, whenIdle } from '@/lib/interaction'
 
 type Handlers = { [K in keyof AssistantOps]: (args: AssistantOps[K]['args']) => AssistantOps[K]['result'] }
 
@@ -52,22 +53,31 @@ const handlers: Handlers = {
   getProject: () => project()
 }
 
+function answer(req: AssistantRequest): void {
+  // Arrived (or came off the wait queue) after main gave up — the renderer was blocked
+  // by a dialog, or the user held a drag past the deadline: running it now would apply
+  // an edit nobody is told about. Main has already answered.
+  if (Date.now() > req.deadline) {
+    console.warn(`[assistant] dropped expired "${req.op}" request`)
+    return
+  }
+  let res: AssistantResponse
+  try {
+    // The table is keyed by op, so this lookup is type-safe; widen it to call generically.
+    const run = handlers[req.op] as unknown as (args: unknown) => unknown
+    res = { id: req.id, ok: true, result: run(req.args) }
+  } catch (e) {
+    res = { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  assistantRespond(res)
+}
+
 export function installAssistantBridge(): () => void {
+  // Every op — reads too, so they see the committed result and keep arrival order —
+  // waits while the user is mid-drag: a drag recomputes from its pointerdown
+  // snapshot, so an edit landing in between would be overwritten (lib/interaction.ts).
   return onAssistantRequest((req: AssistantRequest) => {
-    // Arrived after main gave up (the renderer was blocked, e.g. by a confirm dialog):
-    // running it now would apply an edit nobody is told about. Main has already answered.
-    if (Date.now() > req.deadline) {
-      console.warn(`[assistant] dropped expired "${req.op}" request`)
-      return
-    }
-    let res: AssistantResponse
-    try {
-      // The table is keyed by op, so this lookup is type-safe; widen it to call generically.
-      const run = handlers[req.op] as unknown as (args: unknown) => unknown
-      res = { id: req.id, ok: true, result: run(req.args) }
-    } catch (e) {
-      res = { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
-    assistantRespond(res)
+    if (interactionOpen()) console.info(`[assistant] "${req.op}" waits for the user's drag to end`)
+    whenIdle(() => answer(req))
   })
 }

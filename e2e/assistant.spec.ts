@@ -195,6 +195,66 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   expect(existsSync(there.path)).toBe(true)
 })
 
+test('an edit that arrives mid-drag waits for the release instead of being overwritten', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(90_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const clip = join(dir, 'a.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=540x960:r=30:d=3',
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+  ])
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
+  const item = { mediaId: imported[0].id, inSec: 0, outSec: 1 }
+  expect((await call(c, 'place_sequence', { items: [item] })).isError).toBeFalsy()
+  const state = (): Promise<{ layers: { id: string; startSec: number }[]; past: number }> =>
+    page.evaluate(() => {
+      const s = window.__reelStores.useProject.getState()
+      return { layers: s.project!.layers.map((l) => ({ id: l.id, startSec: l.startSec })), past: s.past.length }
+    })
+  const start = await state()
+  const dragged = start.layers[0].id
+  const box = (await page.getByTestId(`tile-layer-${dragged}`).boundingBox())!
+
+  // 1. A real move drag is held while place_sequence arrives: the cut waits.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 4 })
+  const pending = call(c, 'place_sequence', { items: [item] })
+  await page.waitForTimeout(700)
+  expect((await state()).layers).toHaveLength(1) // not applied mid-drag
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 4 })
+  await page.mouse.up()
+  const placed = await pending
+  expect(placed.isError).toBeFalsy()
+
+  const after = await state()
+  const moved = after.layers.find((l) => l.id === dragged)!
+  expect(moved.startSec).toBeGreaterThan(0) // the drag survived…
+  expect(after.layers).toHaveLength(2) // …and so did the cut, after it
+  expect(after.past).toBe(start.past + 2) // two undo steps, drag first
+  await call(c, 'undo') // undoes only the cut
+  const undone = await state()
+  expect(undone.layers.map((l) => l.id)).toEqual([dragged])
+  expect(undone.layers[0].startSec).toBeCloseTo(moved.startSec, 6)
+
+  // 2. Pressed but not yet moved (inside the click slop): the drag's snapshot is already
+  //    taken, so a removal must still wait for the release.
+  const box2 = (await page.getByTestId(`tile-layer-${dragged}`).boundingBox())!
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2)
+  await page.mouse.down()
+  const removing = call(c, 'remove_items', { ids: [dragged] })
+  await page.waitForTimeout(700)
+  expect((await state()).layers).toHaveLength(1)
+  await page.mouse.up()
+  expect((await removing).isError).toBeFalsy()
+  expect((await state()).layers).toHaveLength(0)
+})
+
 test('an edit that reaches a blocked editor after the timeout is dropped, not applied late', async ({
   electronApp,
   appPage: page

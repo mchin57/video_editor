@@ -51,7 +51,7 @@ export function callRenderer<K extends AssistantOp>(
       pending.delete(id)
       reject(
         new Error(
-          `The editor did not answer "${op}" within ${RENDERER_TIMEOUT_MS / 1000}s (it may be showing a dialog). Nothing was changed; it is safe to retry.`
+          `The editor did not answer "${op}" within ${RENDERER_TIMEOUT_MS / 1000}s (it may be showing a dialog, or the user is holding a drag). Nothing was changed; it is safe to retry.`
         )
       )
     }, RENDERER_TIMEOUT_MS)
