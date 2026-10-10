@@ -1,13 +1,14 @@
 import { type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect, isImageAsset } from '@shared/media'
-import { useLibrary, useImportMedia } from '@/hooks/useMedia'
+import { useLibrary, useImportMedia, useRepairMedia } from '@/hooks/useMedia'
 import { latestJob, useEditor } from '@/state/store'
 import { activeComp, getFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { makeImageLayer, visualDuration } from '@shared/layers'
 import { ClipCard } from '@/components/ClipCard'
+import { btnCls, disabledCls } from '@/components/ui'
 
 /**
  * A library row: the shared `ClipCard` shell (thumbnail + hover preview + meta),
@@ -28,6 +29,12 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const onTrack = useProject((s) => activeComp(s)?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const removeMedia = useProject((s) => s.removeMedia)
 
+  const repair = useRepairMedia()
+  // A missing or changed original can't be added (its proxy, if any, shows
+  // bytes the file no longer has) until it is repaired below.
+  const status = asset.status ?? 'ok'
+  const ready = asset.proxyReady && status === 'ok'
+
   const isImage = isImageAsset(asset)
   const isAudio = !asset.probe.video && !!asset.probe.audio
   const selected = selectedId === asset.id
@@ -37,20 +44,20 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const playhead = (): number => usePlayback.getState().time
   const endOfTimeline = (): number => visualDuration(useProject.getState().project?.layers ?? [])
   const addVideoAt = (startSec: number): void => {
-    if (!asset.proxyReady) return
+    if (!ready) return
     const id = crypto.randomUUID()
     addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio, assetAspect(asset))
     // A clip with audio lands as a LINKED pair — select the whole group.
     selectTile(useProject.getState().project, { kind: 'layer', id })
   }
   const addImageAt = (startSec: number): void => {
-    if (!asset.proxyReady) return
+    if (!ready) return
     const id = crypto.randomUUID()
     addLayer(makeImageLayer(id, asset.id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) }))
     selectLayer(id)
   }
   const addBtn = `rounded bg-sky-500/20 px-1 py-0.5 text-center text-[10px] font-semibold text-sky-300 transition hover:bg-sky-500/40 whitespace-nowrap ${
-    asset.proxyReady ? '' : 'pointer-events-none opacity-30'
+    ready ? '' : 'pointer-events-none opacity-30'
   }`
 
   // The add / remove action column — the Library's variant of the shared card.
@@ -71,7 +78,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           tabIndex={-1}
           onClick={(e) => {
             e.stopPropagation()
-            if (!asset.proxyReady) return
+            if (!ready) return
             const id = crypto.randomUUID()
             addAudioClip({
               id,
@@ -89,7 +96,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           }}
           className={`rounded px-1 py-0.5 text-center text-[10px] font-semibold whitespace-nowrap transition ${
             onTrack ? 'bg-emerald-500/30 text-emerald-200' : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'
-          } ${asset.proxyReady ? '' : 'pointer-events-none opacity-30'}`}
+          } ${ready ? '' : 'pointer-events-none opacity-30'}`}
           title="Add to audio track at the playhead"
         >
           ♪ PH
@@ -113,21 +120,21 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           removeMedia(asset.id)
         }}
         className="rounded px-1 text-zinc-600 opacity-0 transition hover:text-rose-400 group-hover:opacity-100"
-        title="Remove from this project (kept on disk)"
+        title="Remove from this project (its files are cleaned out of the project folder the next time it opens)"
       >
         ×
       </span>
     </>
   )
 
-  return (
+  const card = (
     <ClipCard
       asset={asset}
       selected={selected}
       onClick={() => select(asset.id)}
-      draggable={asset.proxyReady}
+      draggable={ready}
       onDragStart={(e) => {
-        if (!asset.proxyReady) {
+        if (!ready) {
           e.preventDefault()
           return
         }
@@ -139,6 +146,47 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
       proxyError={job?.status === 'error'}
       trailing={actions}
     />
+  )
+  if (status === 'ok') return card
+
+  const busy = repair.accept.isPending || repair.relink.isPending
+  return (
+    <div className="rounded border border-amber-500/40" data-testid={`media-${status}`}>
+      {card}
+      <div className="space-y-1 px-2 pb-1.5 pt-1 text-[10px] text-amber-200">
+        <p>
+          {status === 'missing'
+            ? 'The file is gone from this project’s media folder.'
+            : 'The file changed outside the app (its source was overwritten).'}
+        </p>
+        <div className="flex gap-1">
+          {status === 'changed' && (
+            <button
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation()
+                repair.accept.mutate(asset.id)
+              }}
+              className={`${btnCls} ${disabledCls} py-0.5 text-[10px]`}
+              title="Use the file as it is now: clips keep their in/out points, which now point into the new content"
+            >
+              Use the new file
+            </button>
+          )}
+          <button
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation()
+              repair.relink.mutate(asset.id)
+            }}
+            className={`${btnCls} ${disabledCls} py-0.5 text-[10px]`}
+            title="Pick a file with the original footage (a copy or backup); it must be byte-identical"
+          >
+            Relink…
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

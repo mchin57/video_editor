@@ -7,7 +7,7 @@ import type { Project } from '@shared/project'
 import { isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/formats'
 import { getCapabilities } from './services/ffmpeg'
-import { getDataDir, getSubdir } from './config'
+import { getDataDir } from './config'
 import { generateStill } from './services/still'
 import { importMany } from './services/importMany'
 import { hdrToSdrChain } from './services/proxy'
@@ -15,18 +15,25 @@ import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
   ensureProxy,
   extractAudioToLibrary,
-  getAsset,
+  acceptChangedMedia,
   getProjectMedia,
-  importFile,
-  renderAudioFxToLibrary
+  importGenerated,
+  relinkMedia,
+  renderAudioFxToLibrary,
+  requireUsable,
+  tmpOutput
 } from './services/mediaStore'
 import {
   loadProject,
-  readProjectFile,
+  newProject,
+  openProject,
   REEL_EXT,
   saveProject,
-  writeProjectFile
+  saveProjectAs,
+  saveProjectFile,
+  suggestedSavePath
 } from './services/projectStore'
+import { getProjectRoot } from './services/projectRoot'
 import { exportProject, suggestedExportName } from './services/exporter'
 import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
@@ -116,11 +123,34 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listProjectMedia, (_event, ids: string[]) => getProjectMedia(ids))
   ipcMain.handle(IPC.ensureProxy, (_event, id: string) => ensureProxy(id))
 
+  // A library card's repair actions (docs/PROJECT-FOLDERS.md "Changed-file
+  // detection"): accept a changed original as the clip's content, or point the
+  // clip at a file holding its original bytes (null = dialog canceled).
+  ipcMain.handle(IPC.acceptChangedMedia, (_event, id: string) => acceptChangedMedia(id))
+  ipcMain.handle(IPC.relinkMediaDialog, async (event, id: string): Promise<MediaAsset | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Find the original file',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Media', extensions: [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    return relinkMedia(id, result.filePaths[0])
+  })
+
   ipcMain.handle(IPC.loadProject, () => loadProject())
   ipcMain.handle(IPC.saveProject, (_event, project: Project) => saveProject(project))
 
-  // Open a portable .reel file via a native dialog. The on-disk filename becomes
-  // the project's name (so exports and the title bar stay in sync with the file).
+  ipcMain.handle(IPC.saveProjectFile, (_event, project: Project) => saveProjectFile(project))
+  ipcMain.handle(IPC.newProject, (_event, project: Project) => newProject(project))
+  ipcMain.handle(IPC.getProjectDir, () => getProjectRoot())
+
+  // Open a project folder's .reel via a native dialog. The FOLDER name becomes
+  // the project's name (so exports and the title bar stay in sync with it).
   ipcMain.handle(IPC.openProjectFile, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
@@ -136,34 +166,25 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
-    const path = result.filePaths[0]
-    const project = await readProjectFile(path)
-    return { path, project: { ...project, name: parse(path).name } }
+    return openProject(result.filePaths[0])
   })
 
-  // Save As… — native Save dialog, then write. Returns the chosen path + the
-  // saved doc (its name/updatedAt updated to match the file).
+  // Save As… — native Save dialog for `<Name>.reel`; the project becomes the
+  // folder `<Name>/` there (or the folder the user is already in, if it has
+  // that name). Returns the folder's .reel + the saved doc (renamed to match).
   ipcMain.handle(IPC.saveProjectAs, async (event, project: Project) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const base = (project.name || '').trim() || 'Untitled Reel'
     const options: Electron.SaveDialogOptions = {
       title: 'Save project as',
-      defaultPath: join(app.getPath('documents'), `${base}.${REEL_EXT}`),
+      defaultPath: suggestedSavePath(project, app.getPath('documents')),
       filters: [{ name: 'Reel Project', extensions: [REEL_EXT] }]
     }
     const result = win
       ? await dialog.showSaveDialog(win, options)
       : await dialog.showSaveDialog(options)
     if (result.canceled || !result.filePath) return null
-    const path = result.filePath
-    const saved = await writeProjectFile(path, { ...project, name: parse(path).name })
-    return { path, project: saved }
+    return saveProjectAs(project, result.filePath)
   })
-
-  // Save to an already-bound path (no dialog). Returns the saved doc.
-  ipcMain.handle(IPC.writeProjectFile, (_event, project: Project, path: string) =>
-    writeProjectFile(path, project)
-  )
 
   ipcMain.handle(
     IPC.exportProject,
@@ -193,8 +214,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getTranscript, (_event, mediaId: string) => getTranscript(mediaId))
 
   ipcMain.handle(IPC.detectSilence, async (_event, mediaId: string): Promise<Interval[]> => {
-    const asset = await getAsset(mediaId)
-    if (!asset) return []
+    const asset = await requireUsable(mediaId)
     return detectSilence(asset.originalPath, asset.probe.durationSec)
   })
 
@@ -211,19 +231,17 @@ export function registerIpcHandlers(): void {
   // Stills: capture an exact frame from a clip, matching the preview's HDR
   // tonemap / crop / color, into the library or to a user-chosen file.
   ipcMain.handle(IPC.captureStillToLibrary, async (_event, req: StillRequest): Promise<MediaAsset> => {
-    const asset = await getAsset(req.mediaId)
-    if (!asset) throw new Error('Source media not found for this still.')
+    const asset = await requireUsable(req.mediaId)
     const base = parse(asset.fileName).name
-    const out = join(getSubdir('stills'), `${base}-still-${Date.now().toString(36)}.png`)
+    const out = tmpOutput('still', 'png')
     await generateStill(asset.originalPath, out, req.sourceSec, stillVfChain(asset, req), alphaInputDecoder(asset.probe.video))
-    return importFile(out, `${base} (still).png`)
+    return importGenerated(out, `${base} (still).png`)
   })
 
   ipcMain.handle(
     IPC.captureStillToDisk,
     async (event, req: StillRequest, suggestedName: string): Promise<string | null> => {
-      const asset = await getAsset(req.mediaId)
-      if (!asset) throw new Error('Source media not found for this still.')
+      const asset = await requireUsable(req.mediaId)
       const win = BrowserWindow.fromWebContents(event.sender)
       const options: Electron.SaveDialogOptions = {
         title: 'Save still frame',

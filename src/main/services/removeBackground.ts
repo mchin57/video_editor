@@ -25,7 +25,7 @@ import type { RemoveBackgroundRequest } from '@shared/ipc'
 import { getSubdir, getBundledModelsDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { startFfmpeg } from './ffmpegRun'
-import { getAsset, hashFile, importFile, ensureProxy } from './mediaStore'
+import { importGenerated, ensureProxy, requireUsable } from './mediaStore'
 import { hdrToSdrChain } from './proxy'
 import { createJob, failJob, finishJob, setLabel, setProgress } from './jobs'
 import {
@@ -168,8 +168,7 @@ function clampWindow(req: RemoveBackgroundRequest, sourceSec: number): MatteWind
 export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): Promise<MediaAsset | null> {
   const modelPath = discoverMatteModel()
   if (!modelPath) throw new Error('Background-removal model is not installed (resources/models).')
-  const asset = await getAsset(req.mediaId)
-  if (!asset) throw new Error(`unknown media ${req.mediaId}`)
+  const asset = await requireUsable(req.mediaId)
   const v = asset.probe.video
   if (!v) throw new Error('That clip has no video track.')
   const window = clampWindow(req, asset.probe.durationSec || 0)
@@ -284,12 +283,8 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
     }
 
     // Content-address the result, then register it as a normal library asset.
-    const hash = await hashFile(tmpOut)
-    const finalPath = join(getSubdir('nobg'), `${hash}.webm`)
-    if (existsSync(finalPath)) await fsp.rm(tmpOut, { force: true })
-    else await fsp.rename(tmpOut, finalPath)
     const span = `${clock(window.startSec)}–${clock(window.startSec + window.durationSec)}`
-    const result = await importFile(finalPath, `${parse(asset.fileName).name} (no bg ${span}).webm`)
+    const result = await importGenerated(tmpOut, `${parse(asset.fileName).name} (no bg ${span}).webm`)
     // Build the alpha (WebM) preview proxy before reporting done, so the caller
     // can swap the clip in and it plays at once. Its own job shows its progress.
     setLabel(job.id, `${onDevice(device)} · preparing preview`)

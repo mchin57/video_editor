@@ -1,6 +1,6 @@
 # Project folders — media ownership design
 
-_Status: **design agreed except decision 2** (2026-10-10). Nothing is implemented yet._
+_Status: **design agreed** (2026-10-10). Implementation in progress; see "Phases"._
 
 ## Goals
 
@@ -170,8 +170,8 @@ portable as it is, and leaving out `cache/` gives a lighter copy to share.
 The owner answered on 2026-10-10.
 
 1. **Across volumes:** copy the original. A project never points at a source in place.
-2. **Overwriting a source in place:** _open_. The choice is between detection only and a per-project
-   "always copy originals" option.
+2. **Overwriting a source in place:** detection only. A per-project "always copy originals" option
+   can be added later; the copy path already exists as the cross-volume fallback.
 3. **Legacy projects:** convert them all with the batch action, then delete the old store. There is no
    legacy mode.
 4. **Document name:** `<Name>/<Name>.reel`.

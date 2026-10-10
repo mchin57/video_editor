@@ -2,7 +2,8 @@
  * whisper.cpp transcription. Extracts 16k mono audio from a media's original,
  * runs whisper-cli word-level (-ml 1 -sow -ojf, with DTW token timestamps when
  * the model maps to a `-dtw` preset), parses to a Transcript (source time), and
- * caches it as media/<id>/transcript.json. Discovery looks under
+ * caches it as the project's media/<id>/transcript.json (project-owned: it is
+ * slow to rebuild, so it does not live in the disposable cache). Discovery looks under
  * <dataDir>/bin/whisper (whisper-cli in Release/, bin/ or build/bin/, with a
  * .bin model alongside).
  *
@@ -20,14 +21,13 @@ import { isCurrentTranscript, TRANSCRIPT_VERSION, type Transcript } from '@share
 import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
-import { getAsset } from './mediaStore'
+import { markTranscribed, requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
 import { singleFlight } from './atomicWrite'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
 import { buildWhisperArgs, decodeStartSec, dtwPreset } from './whisperArgs'
 import { detectSilence } from './silence'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 
-const transcriptPath = (id: string): string => join(getSubdir('media'), id, 'transcript.json')
 
 /** Whisper search roots, bundled (installer) first, then the user data dir. */
 function whisperDirs(): string[] {
@@ -107,7 +107,7 @@ async function runTranscription(
 
 export async function getTranscript(mediaId: string): Promise<Transcript | null> {
   try {
-    const cached = JSON.parse(await fsp.readFile(transcriptPath(mediaId), 'utf8')) as Transcript
+    const cached = JSON.parse(await fsp.readFile(transcriptFile(mediaId), 'utf8')) as Transcript
     // A transcript from an older pipeline can be missing words or mistime them
     // (see TRANSCRIPT_VERSION). Treat it as stale so the next caption run redoes
     // it instead of serving it forever.
@@ -134,11 +134,11 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
 
   const whisper = discoverWhisper()
   if (!whisper) throw new Error('whisper.cpp is not installed (bin/whisper).')
-  const asset = await getAsset(mediaId)
-  if (!asset) throw new Error(`unknown media ${mediaId}`)
+  const asset = await requireUsable(mediaId)
 
   const job = createJob('transcribe', `Captions · ${asset.fileName}`, mediaId)
-  const dir = join(getSubdir('media'), mediaId)
+  const transcriptPath = transcriptFile(mediaId) // captured now: the project may switch mid-job
+  const dir = await scratchDirFor(mediaId)
   const wav = join(dir, 'audio16k.wav')
   const rawPrefix = join(dir, 'transcript_raw')
   try {
@@ -172,11 +172,12 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
       version: TRANSCRIPT_VERSION,
       decodeStartSec: startSec
     }
-    await fsp.writeFile(transcriptPath(mediaId), JSON.stringify(transcript, null, 2))
+    // temp + rename: never write in place inside a project folder (linkOrCopy.ts).
+    await fsp.writeFile(`${transcriptPath}.tmp`, JSON.stringify(transcript, null, 2))
+    await fsp.rename(`${transcriptPath}.tmp`, transcriptPath)
 
     // Mark the asset and clean up scratch files.
-    asset.transcribed = true
-    await fsp.writeFile(join(dir, 'asset.json'), JSON.stringify(asset, null, 2)).catch(() => {})
+    await markTranscribed(mediaId).catch(() => {})
     await fsp.rm(wav, { force: true }).catch(() => {})
     await fsp.rm(`${rawPrefix}.json`, { force: true }).catch(() => {})
 

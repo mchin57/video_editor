@@ -2,11 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
 import {
+  acceptChangedMedia,
+  ensureProxy,
   extractAudioDialog,
   importDialog,
   importFolderDialog,
   importPaths,
   listProjectMedia,
+  relinkMediaDialog,
   renderAudioFx
 } from '@/ipc/client'
 import { useEditor } from '@/state/store'
@@ -20,10 +23,17 @@ const LIBRARY_KEY = 'library'
  */
 export function useLibrary(): ReturnType<typeof useQuery<MediaAsset[]>> {
   const mediaIds = useProject((s) => s.project?.mediaIds)
+  // The folder is part of the key: the same ids in another project folder
+  // (Save As, Open) are different files on disk.
+  const filePath = useProject((s) => s.filePath)
   return useQuery({
-    queryKey: [LIBRARY_KEY, mediaIds],
+    queryKey: [LIBRARY_KEY, filePath, mediaIds],
     queryFn: () => listProjectMedia(mediaIds ?? []),
-    enabled: mediaIds != null
+    enabled: mediaIds != null,
+    // Coming back to the app (typically from Explorer) is when a source may
+    // have been overwritten or a media file deleted: re-check then. Each check
+    // is a stat per asset; only a mismatch costs a re-hash (main memoizes it).
+    refetchOnWindowFocus: true
   })
 }
 
@@ -171,4 +181,36 @@ export function useAddAudioFx(): ReturnType<
     },
     onError: (err) => window.alert(err.message)
   })
+}
+
+/**
+ * A library card's repair actions for a `missing` / `changed` original
+ * (docs/PROJECT-FOLDERS.md "Changed-file detection"): accept the changed file
+ * as the clip's content, or relink to a file holding the original bytes. Either
+ * way the proxy is rebuilt if the cache no longer matches.
+ */
+export function useRepairMedia(): {
+  accept: ReturnType<typeof useMutation<MediaAsset, Error, string>>
+  relink: ReturnType<typeof useMutation<MediaAsset | null, Error, string>>
+} {
+  const qc = useQueryClient()
+  const done = (asset: MediaAsset | null): void => {
+    void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
+    if (asset && !asset.proxyReady) {
+      void ensureProxy(asset.id)
+        .catch((err) => console.error('proxy rebuild failed', err))
+        .finally(() => void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] }))
+    }
+  }
+  const accept = useMutation<MediaAsset, Error, string>({
+    mutationFn: (id) => acceptChangedMedia(id),
+    onSuccess: done,
+    onError: (err) => window.alert(err.message)
+  })
+  const relink = useMutation<MediaAsset | null, Error, string>({
+    mutationFn: (id) => relinkMediaDialog(id),
+    onSuccess: done,
+    onError: (err) => window.alert(err.message)
+  })
+  return { accept, relink }
 }

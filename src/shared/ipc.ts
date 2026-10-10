@@ -12,14 +12,19 @@ export const IPC = {
   extractAudioDialog: 'media:extractAudioDialog',
   listProjectMedia: 'media:listForProject',
   ensureProxy: 'media:ensureProxy',
-  // Project (M2)
-  // loadProject/saveProject persist the working copy (crash recovery + restore on
-  // launch). The *File ▸* actions below read/write user-chosen portable .reel files.
+  acceptChangedMedia: 'media:acceptChanged',
+  relinkMediaDialog: 'media:relinkDialog',
+  // Project (M2) — a project is a folder (docs/PROJECT-FOLDERS.md).
+  // loadProject/saveProject read and write the working copy (autosave.json:
+  // crash recovery + restore on launch); the File ▸ actions below open, save
+  // and create the folder's <Name>.reel.
   loadProject: 'project:load',
   saveProject: 'project:save',
   openProjectFile: 'project:openFile',
   saveProjectAs: 'project:saveAs',
-  writeProjectFile: 'project:writeFile',
+  saveProjectFile: 'project:saveFile',
+  newProject: 'project:new',
+  getProjectDir: 'project:getDir',
   // Export (M3)
   exportProject: 'export:run',
   revealFile: 'shell:reveal',
@@ -88,6 +93,14 @@ export interface RemoveBackgroundRequest {
   /** Opaque tag echoed as the job's `subjectId` (the renderer passes the layer
    *  id, so the UI can find "the matte job for this layer"). */
   subjectId?: string
+}
+
+/** A project as opened: the document, its `.reel` path (null = the unsaved
+ *  scratch project) and whether it carries unsaved changes (an autosave). */
+export interface LoadedProject {
+  project: import('./project').Project
+  path: string | null
+  dirty: boolean
 }
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
