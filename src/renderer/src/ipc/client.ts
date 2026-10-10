@@ -40,7 +40,10 @@ export const {
   captureStillToLibrary,
   captureStillToDisk,
   pathForFile,
-  onJobProgress
+  onJobProgress,
+  onAssistantRequest,
+  assistantRespond,
+  assistantStatus
 } = window.api
 
 /** Stream URL for a media asset's proxy via the reelmedia:// scheme. */

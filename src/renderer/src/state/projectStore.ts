@@ -44,6 +44,8 @@ import { presetFor, type ExportPreset, type PresetId } from '@shared/formats'
 import { extractAudioPieces } from '@/lib/timeline'
 // Namespaced: the group ops keep the same names as the actions that expose them.
 import * as links from '@/lib/links'
+import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
+import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
@@ -188,6 +190,10 @@ interface ProjectState {
     hasAudio?: boolean,
     aspect?: number
   ) => void
+  /** Lay `plan.items` end-to-end (the assistant's `place_sequence`) as ONE
+   *  undo step and return what was placed. Throws — changing nothing — when
+   *  there is no project or an item is unusable. */
+  addVideoSequence: (plan: SequencePlan) => PlacedClip[]
   /** Add an empty multi-clip layout layer (front) at `startSec`. */
   addLayoutLayer: (id: string, presetId: string, startSec: number) => void
   /** Re-shape a layout to another preset (cells keep media/trim by index). */
@@ -517,23 +523,21 @@ export const useProject = create<ProjectState>((set, get) => {
         const audioClips = hasAudio
           ? [
               ...p.audioClips,
-              {
-                id: newId(),
-                mediaId,
-                startSec,
-                inSec: 0,
-                outSec: Math.max(0.1, durationSec),
-                gainDb: 0,
-                fadeInSec: 0,
-                fadeOutSec: 0,
-                duck: false,
-                linkGroupId,
-                kind: 'extracted' as const
-              }
+              makeExtractedAudioClip(newId(), mediaId, startSec, 0, Math.max(0.1, durationSec), linkGroupId!)
             ]
           : p.audioClips
         return { ...p, layers: [...p.layers, layer], audioClips }
       }),
+
+    addVideoSequence: (plan) => {
+      const comp = activeComp(get())
+      if (!comp) throw new Error('Editor has no project open')
+      // Build first (throws on a bad item before anything is committed), then
+      // commit the finished composition as a single history entry.
+      const result = applySequence(comp, plan, { frame: projectFormat(get()).frame, newId })
+      commitComp(() => result.comp)
+      return result.placed
+    },
 
     addLayoutLayer: (id, presetId, startSec) =>
       commitComp((p) => ({ ...p, layers: [...p.layers, makeLayoutLayer(id, presetId, startSec)] })),

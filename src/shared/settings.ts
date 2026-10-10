@@ -8,6 +8,8 @@ export interface Settings {
    *  captions. Global for now; moves under the active profile when the
    *  Platform-profiles system lands. */
   brandColors: string[]
+  /** Claude Code connection (AI assistant). */
+  assistant: AssistantSettings
 }
 
 /** Starter brand palette — high-attention colors common in Reels captions.
@@ -42,3 +44,17 @@ export const DEFAULT_KEYWORD_BANK: string[] = [
   'transition tips',
   'masters swimming'
 ]
+
+export interface AssistantSettings {
+  /** Serve Claude Code over the named pipe (on by default; Settings can switch it off). */
+  enabled: boolean
+}
+
+export function withAssistantDefaults(loaded: Partial<AssistantSettings> | undefined): AssistantSettings {
+  return { enabled: typeof loaded?.enabled === 'boolean' ? loaded.enabled : true }
+}
+
+/** The one-time registration line Settings shows. `scriptPath` = absolute path of out/main/mcp.js. */
+export function mcpAddCommand(scriptPath: string): string {
+  return `claude mcp add --scope user reel-editor -- node "${scriptPath}"`
+}

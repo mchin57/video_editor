@@ -8,6 +8,7 @@ import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/formats'
 import type { Settings } from '@shared/settings'
 import type { Transcript } from '@shared/transcript'
+import type { AssistantRequest, AssistantResponse, AssistantStatus } from '@shared/assistant/protocol'
 
 /** Typed surface exposed to the renderer as window.api. */
 const api = {
@@ -81,7 +82,16 @@ const api = {
     const handler = (_e: unknown, ev: JobProgressEvent): void => cb(ev)
     ipcRenderer.on(IPC_EVENT.jobProgress, handler)
     return () => ipcRenderer.removeListener(IPC_EVENT.jobProgress, handler)
-  }
+  },
+
+  // AI assistant: main asks the renderer to run store ops; the renderer answers.
+  onAssistantRequest: (cb: (req: AssistantRequest) => void): (() => void) => {
+    const handler = (_e: unknown, req: AssistantRequest): void => cb(req)
+    ipcRenderer.on(IPC_EVENT.assistantRequest, handler)
+    return () => ipcRenderer.removeListener(IPC_EVENT.assistantRequest, handler)
+  },
+  assistantRespond: (res: AssistantResponse): void => ipcRenderer.send(IPC.assistantResponse, res),
+  assistantStatus: (): Promise<AssistantStatus> => ipcRenderer.invoke(IPC.assistantStatus)
 }
 
 export type RendererApi = typeof api

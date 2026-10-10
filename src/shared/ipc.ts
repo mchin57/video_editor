@@ -41,7 +41,10 @@ export const IPC = {
   cancelJob: 'job:cancel',
   // Stills (capture a frame from a clip)
   captureStillToLibrary: 'still:toLibrary',
-  captureStillToDisk: 'still:toDisk'
+  captureStillToDisk: 'still:toDisk',
+  // AI assistant: main ⇄ renderer bridge + status for Settings
+  assistantResponse: 'assistant:response',
+  assistantStatus: 'assistant:status'
 } as const
 
 /** Payload describing which frame to grab and how to correct it. */
@@ -91,5 +94,6 @@ export type IpcChannel = (typeof IPC)[keyof typeof IPC]
 
 /** Renderer-visible event channels (main → renderer pushes). */
 export const IPC_EVENT = {
-  jobProgress: 'job:progress'
+  jobProgress: 'job:progress',
+  assistantRequest: 'assistant:request'
 } as const

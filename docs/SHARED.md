@@ -127,6 +127,21 @@ fallback used when neither key is present or valid. Startup resolves
 session → user default → built-in; Reset resolves user default → built-in. Both
 paths go through `applyLayout` (`state/dock.ts`) — don't re-roll that fallback.
 
+## AI assistant (Claude Code via MCP) — `src/mcp/`, `src/main/assistant/`, `src/shared/assistant/`, `lib/sequence.ts`
+
+Shape: Claude Code launches **reel-mcp** (`node out/main/mcp.js`, stdio) → JSON lines over the named pipe `\\.\pipe\reel-editor` → editor main → renderer store. Not local HTTP: an MCP-aware network filter on the owner's machine corrupts local plain-HTTP MCP traffic (design spec, "Why not local HTTP").
+
+| Concept | Home | Use instead of |
+| --- | --- | --- |
+| Adding a tool | `shared/assistant/toolArgs.ts` (args type) → `mcp/tools.ts` (schema + description) → `main/assistant/tools.ts` (handler) | anything else — `ToolArgs` makes a schema/handler mismatch a compile error |
+| `servePipe` / `callPipe`, `LineDecoder`/`encodeLine` | `main/assistant/pipe.ts`, `shared/assistant/pipeProtocol.ts` | another channel between reel-mcp and the editor. One connection per call; no Electron imports |
+| `applySequence(comp, plan, ctx)`, `makeExtractedAudioClip(…)` | `lib/sequence.ts` | building trimmed video layers + their linked audio by hand. `applySequence` lays clips end-to-end through `makeVideoLayer` + `trimVideoStart`/`trimVideoEnd` (never inline source↔timeline math); `makeExtractedAudioClip` is THE linked-audio shape, shared with `addVideoLayer`. Store entry point: `addVideoSequence(plan)` (one undo step) |
+| `AssistantOps` + `callRenderer(op, args)` / `installAssistantBridge()` | `shared/assistant/protocol.ts`, `main/assistant/bridge.ts`, `assistant/handlers.ts` | reaching into renderer state from main any other way. Add an op to `AssistantOps` and both halves are type-checked against it |
+| `summarizeTimeline(comp)` | `shared/assistant/timelineSummary.ts` | hand-serializing the timeline for the model |
+| `transcriptPhraseText` / `transcriptWordText`, `frameTimes` | `shared/assistant/` | formatting transcripts / choosing frame times for the model |
+| `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` | `main/services/exportTarget.ts` | ad-hoc output naming for a dialog-less export (never overwrites; a name can't leave the export folder) |
+| `appendAssistantRequest` / `fileFeatureRequest` | `main/assistant/todoAppend.ts`, `todoFile.ts` | editing docs/TODO.md from code (serialized; `REEL_TODO_PATH` overrides) |
+
 ## Shared model — `src/shared/project.ts`, `src/shared/layers.ts`
 
 | Concept | Home | Use instead of |
@@ -186,7 +201,7 @@ missing), so it was deliberately **not** unified to keep behavior identical.
 | `alphaInputDecoder(video)` | `shared/media.ts` | decoding a VP8/VP9-alpha WebM without forcing `-c:v libvpx…` before `-i` (native decode silently drops alpha — see `docs/FFMPEG-NOTES.md`) |
 | `monoFoldPan(channel)` + `detectMonoFoldChannel`/`monoFoldFrom`/`parseChannelPeaks` | `audio.ts` | hand-writing a `pan=stereo\|c0=cN\|c1=cN` fold or re-parsing `astats` peaks to mirror a one-sided (dead-channel) source to both sides (see `AudioStreamInfo.monoFoldChannel`) |
 | `buildAudioFxFilter(settings, in, out)`, `buildAudioFxArgs`, `pitchStages(cents)` | `audioFx.ts` | hand-writing an echo, ensemble or chorus graph. Echo is one `aecho` with `in_gain=0` (wet only) and one explicit tap per repeat — `aecho` has NO feedback. Neither stacking effect may use ffmpeg’s `chorus` filter, which ignores its `delays` entirely (verified): **ensemble** is `asplit` + per-voice `asetrate`/`aresample`/`atempo`/`volume`/`adelay` + `amix` (derive each `atempo` from the ROUNDED shifted rate or the voice drifts), and **chorus** swaps the fixed pitch shift for `vibrato` (an LFO-swept delay, wet-only by nature) with a per-voice rate spread, since `vibrato` has no phase control. The chorus chain is PRIMED with silence that is trimmed off again — `vibrato` bursts at its output start and a fade does not fix it. Changing the echo/ensemble strings invalidates already-rendered assets. See FFMPEG-NOTES “Audio effects” |
-| `expandImportPaths(paths, opts?)`, `isMediaPath` | `importScan.ts` | expanding a dropped/picked FOLDER per caller. `importMany` (`ipc.ts`) runs every import route through it, so the File menu, OS drag-drop and `importPaths` all handle directories identically. The extension filter applies only to files found INSIDE a walked directory — a path the user named explicitly is always attempted, because the picker offers an "All files" filter |
+| `expandImportPaths(paths, opts?)`, `isMediaPath` | `importScan.ts` | expanding a dropped/picked FOLDER per caller. `importMany` (`services/importMany.ts`) runs every import route through it, so the File menu, OS drag-drop and `importPaths` all handle directories identically. The extension filter applies only to files found INSIDE a walked directory — a path the user named explicitly is always attempted, because the picker offers an "All files" filter |
 | `renderAudioFxToLibrary(settings, mediaId, in, out)` | `mediaStore.ts` | rendering an effect ad hoc. Content-addresses the result like every generated asset, so re-rendering identical settings reuses the file on disk instead of re-encoding |
 | `renderGradientImage(spec, start, end)` (closure in `exporter.ts`) | `exporter.ts` | duplicating the rasterise-text-to-PNG → full-frame-overlay block for text vs captions |
 | `buildWhisperArgs(model, wav, outPrefix, preset, offsetSec?)` + `dtwPreset(modelPath)` + `decodeStartSec(silences, duration)` | `whisperArgs.ts` | hand-assembling whisper-cli args. `-dtw` without `-nfa` silently yields NO token timestamps (flash attention wins), and a preset that does not match the model returns garbage at exit 0 — so `dtwPreset` returns null rather than guess. `decodeStartSec` is where decoding starts (`-ot`): whisper drops a file's opening sentence after a leading click or long lead-in. See FFMPEG-NOTES "whisper word timings" |
