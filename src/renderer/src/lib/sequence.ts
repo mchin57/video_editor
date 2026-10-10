@@ -34,17 +34,16 @@ export function makeExtractedAudioClip(
 }
 
 /**
- * Where in the back→front `base.layers` the new clips go. They take the video's
- * place in the stack so titles/images above it stay in front: at the slot of
- * the bottom-most video `replace` removed, else directly above the topmost
- * remaining video, else behind everything.
+ * Where in the back→front `base.layers` the new clips go. Added clips land on
+ * the top layer, like a drag from the library; only a `replace` that removed
+ * video puts them back in its place — the slot of the bottom-most removed
+ * video, so layers that were above it stay above the new clips.
  */
 function sequenceInsertIndex(before: Layer[], base: Layer[]): number {
   const kept = new Set(base.map((l) => l.id))
   const firstRemovedVideo = before.findIndex((l) => l.content.kind === 'video' && !kept.has(l.id))
   if (firstRemovedVideo >= 0) return before.slice(0, firstRemovedVideo).filter((l) => kept.has(l.id)).length
-  for (let i = base.length - 1; i >= 0; i--) if (base[i].content.kind === 'video') return i + 1
-  return 0
+  return base.length
 }
 
 export function applySequence(

@@ -85,15 +85,22 @@ describe('applySequence', () => {
   })
 })
 
-// `layers` is back→front, so where the new clips go decides whether they bury titles.
+// `layers` is back→front. Added clips go on top, like a library drag; only
+// `replace` reuses the slot of the video it removed.
 describe('applySequence stacking', () => {
   const kinds = (c: { layers: { content: { kind: string } }[] }) => c.layers.map((l) => l.content.kind)
 
-  it('puts new clips behind an existing text layer when no video exists', () => {
+  it('append puts new clips on the top layer, over an existing text layer', () => {
     const start = { ...createEmptyComposition(), layers: [makeTextLayer('title', 0, 5)] }
-    const { comp } = applySequence(start, { mode: 'append', atSec: 0, items: [item('a', 0, 2), item('b', 0, 2)] }, ctx())
-    expect(kinds(comp)).toEqual(['video', 'video', 'text'])
-    expect(comp.layers[comp.layers.length - 1].id).toBe('title')
+    const { comp, placed } = applySequence(start, { mode: 'append', atSec: 0, items: [item('a', 0, 2), item('b', 0, 2)] }, ctx())
+    expect(kinds(comp)).toEqual(['text', 'video', 'video'])
+    expect(comp.layers.slice(1).map((l) => l.id)).toEqual(placed.map((p) => p.layerId))
+  })
+
+  it('replace that removes no video puts new clips on the top layer', () => {
+    const start = { ...createEmptyComposition(), layers: [makeImageLayer('img', 'pic', 0, 3)] }
+    const { comp, placed } = applySequence(start, { mode: 'replace', items: [item('b', 0, 2)] }, ctx())
+    expect(comp.layers.map((l) => l.id)).toEqual(['img', placed[0].layerId])
   })
 
   it('replace keeps a title in front and puts the new clips where the old video was', () => {
@@ -114,13 +121,11 @@ describe('applySequence stacking', () => {
     expect(comp.layers.map((l) => l.id)).toEqual(['under', placed[0].layerId, 'over'])
   })
 
-  it('append inserts directly above the topmost video and below an image above it', () => {
-    const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 3)] }, ctx()).comp
+  it('append puts new clips on the top layer, above every existing video and image', () => {
+    const ids = ctx()
+    const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 3)] }, ids).comp
     const withImage = { ...first, layers: [...first.layers, makeImageLayer('img', 'pic', 0, 3)] }
-    const { comp, placed } = applySequence(withImage, { mode: 'append', items: [item('b', 0, 2), item('c', 0, 2)] }, ctx())
-    expect(kinds(comp)).toEqual(['video', 'video', 'video', 'image'])
-    expect(comp.layers[comp.layers.length - 1].id).toBe('img')
-    expect(comp.layers.slice(1, 3).map((l) => l.id)).toEqual(placed.map((p) => p.layerId))
-    expect(comp.layers[0].id).toBe(first.layers[0].id)
+    const { comp, placed } = applySequence(withImage, { mode: 'append', items: [item('b', 0, 2), item('c', 0, 2)] }, ids)
+    expect(comp.layers.map((l) => l.id)).toEqual([first.layers[0].id, 'img', ...placed.map((p) => p.layerId)])
   })
 })
