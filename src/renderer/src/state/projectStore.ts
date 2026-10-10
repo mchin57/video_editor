@@ -51,10 +51,11 @@ import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import {
   loadProject,
+  newProject,
   openProjectFile,
   saveProject,
   saveProjectAs,
-  writeProjectFile
+  saveProjectFile
 } from '@/ipc/client'
 
 const HISTORY_LIMIT = 50
@@ -64,6 +65,14 @@ function scheduleSave(project: Project): void {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => void saveProject(project), 400)
 }
+/** Drop a pending autosave — before a Save, which writes the same content and
+ *  deletes the autosave (a late one would mark the project dirty again). */
+function cancelScheduledSave(): boolean {
+  if (!saveTimer) return false
+  clearTimeout(saveTimer)
+  saveTimer = null
+  return true
+}
 
 const newId = (): string => crypto.randomUUID()
 
@@ -71,32 +80,6 @@ const newId = (): string => crypto.randomUUID()
  *  A union of partials rather than Record<string, unknown> so a typo'd field
  *  name fails typecheck instead of silently landing in the saved document. */
 type ContentPatch = Partial<VideoContent> | Partial<ImageContent> | Partial<TextContent>
-
-/**
- * The file binding (which .reel file, and whether there are unsaved changes)
- * lives outside the project document so it survives a relaunch without polluting
- * the saved JSON. The document itself is autosaved separately as the working copy.
- */
-const SESSION_KEY = 'projectSession'
-interface Session {
-  filePath: string | null
-  dirty: boolean
-}
-function loadSession(): Session {
-  try {
-    const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? '{}')
-    return { filePath: typeof s.filePath === 'string' ? s.filePath : null, dirty: Boolean(s.dirty) }
-  } catch {
-    return { filePath: null, dirty: false }
-  }
-}
-function saveSession(filePath: string | null, dirty: boolean): void {
-  try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ filePath, dirty }))
-  } catch {
-    /* localStorage is a convenience; ignore write failures */
-  }
-}
 
 const DISCARD_PROMPT = 'Discard unsaved changes to the current project?'
 
@@ -144,7 +127,7 @@ interface ProjectState {
   editPath: CompPath
 
   load: () => Promise<void>
-  newProjectFile: () => void
+  newProjectFile: () => Promise<void>
   openFile: () => Promise<void>
   save: () => Promise<void>
   saveAs: () => Promise<void>
@@ -334,7 +317,6 @@ export const useProject = create<ProjectState>((set, get) => {
 
   function markDirty(): void {
     if (!get().dirty) set({ dirty: true })
-    saveSession(get().filePath, true)
   }
 
   /** Apply a pure ROOT-document transform, recording undo history and
@@ -362,13 +344,13 @@ export const useProject = create<ProjectState>((set, get) => {
     commit((p) => updateCompAtPath(p, get().editPath, transform))
   }
 
-  /** Switch to a different project document, resetting history and selection. */
-  function adopt(project: Project, filePath: string | null): void {
+  /** Switch to a different project document, resetting history and selection.
+   *  No autosave: main already holds this document's state (an autosave exists
+   *  only once there are unsaved edits). */
+  function adopt(project: Project, filePath: string | null, dirty = false): void {
     useUi.getState().clearSelection()
     gestureBefore = null // a gesture can't span documents
-    set({ project, past: [], future: [], filePath, dirty: false, editPath: [] })
-    saveSession(filePath, false)
-    scheduleSave(project)
+    set({ project, past: [], future: [], filePath, dirty, editPath: [] })
   }
 
   /** After a history jump or reload, a stored `editPath` may point into a
@@ -397,40 +379,54 @@ export const useProject = create<ProjectState>((set, get) => {
     editPath: [],
 
     load: async () => {
-      const project = migrateProject(await loadProject())
-      const session = loadSession()
-      set({ project, loaded: true, past: [], future: [], ...session })
+      const res = await loadProject()
+      set({
+        project: migrateProject(res.project),
+        loaded: true,
+        past: [],
+        future: [],
+        filePath: res.path,
+        dirty: res.dirty
+      })
     },
 
-    newProjectFile: () => {
+    // New/Open: main discards the open project's unsaved state (the prompt
+    // just confirmed that) and ignores any autosave still in flight for it.
+    newProjectFile: async () => {
       if (get().dirty && !window.confirm(DISCARD_PROMPT)) return
-      adopt(createEmptyProject(newId(), 'Untitled Reel'), null)
+      const project = createEmptyProject(newId(), 'Untitled Reel')
+      await newProject(project)
+      adopt(project, null)
     },
 
     openFile: async () => {
       if (get().dirty && !window.confirm(DISCARD_PROMPT)) return
       const res = await openProjectFile()
       if (!res) return
-      adopt(migrateProject(res.project), res.path)
+      adopt(migrateProject(res.project), res.path, res.dirty)
     },
 
     save: async () => {
       const { project, filePath } = get()
       if (!project) return
       if (!filePath) return get().saveAs()
-      await writeProjectFile(project, filePath)
-      set({ dirty: false })
-      saveSession(filePath, false)
+      cancelScheduledSave()
+      await saveProjectFile(project)
+      // An edit made while the write was in flight is still unsaved (and has
+      // scheduled its own autosave).
+      if (get().project === project) set({ dirty: false })
     },
 
     saveAs: async () => {
       const { project } = get()
       if (!project) return
+      const hadPending = cancelScheduledSave()
       const res = await saveProjectAs(project)
-      if (!res) return
+      if (!res) {
+        if (hadPending) scheduleSave(get().project!) // canceled: the dropped autosave still has to happen
+        return
+      }
       set({ project: res.project, filePath: res.path, dirty: false })
-      saveSession(res.path, false)
-      scheduleSave(res.project)
     },
 
     setPreset: (preset) => commit((p) => ({ ...p, preset })),

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { existsSync, promises as fsp } from 'node:fs'
 import { join, parse } from 'node:path'
 import { IPC, type AudioFxRequest, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
@@ -7,7 +8,7 @@ import type { Project } from '@shared/project'
 import { isNeutralColor } from '@shared/project'
 import type { PresetId } from '@shared/formats'
 import { getCapabilities } from './services/ffmpeg'
-import { getDataDir, getSubdir } from './config'
+import { getDataDir } from './config'
 import { generateStill } from './services/still'
 import { importMany } from './services/importMany'
 import { hdrToSdrChain } from './services/proxy'
@@ -15,25 +16,39 @@ import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
   ensureProxy,
   extractAudioToLibrary,
-  getAsset,
+  acceptChangedMedia,
   getProjectMedia,
-  importFile,
-  renderAudioFxToLibrary
+  importGenerated,
+  relinkMedia,
+  renderAudioFxToLibrary,
+  requireUsable,
+  tmpOutput
 } from './services/mediaStore'
 import {
   loadProject,
-  readProjectFile,
+  newProject,
+  openProject,
   REEL_EXT,
   saveProject,
-  writeProjectFile
+  saveProjectAs,
+  saveProjectFile,
+  suggestedSavePath
 } from './services/projectStore'
+import { getProjectRoot } from './services/projectRoot'
+import {
+  convertLegacyFolder,
+  convertLegacyProject,
+  deleteLegacyStore,
+  legacyStoreBytes
+} from './services/legacyConvert'
+import { isLegacyDoc, reportLine } from './services/legacyPlan'
 import { exportProject, suggestedExportName } from './services/exporter'
 import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
-import { cancelJob } from './services/jobs'
+import { cancelJob, createJob, finishJob, setProgress } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
 import { assistantStatus, startAssistant } from './assistant/service'
 
@@ -116,11 +131,34 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listProjectMedia, (_event, ids: string[]) => getProjectMedia(ids))
   ipcMain.handle(IPC.ensureProxy, (_event, id: string) => ensureProxy(id))
 
+  // A library card's repair actions (docs/PROJECT-FOLDERS.md "Changed-file
+  // detection"): accept a changed original as the clip's content, or point the
+  // clip at a file holding its original bytes (null = dialog canceled).
+  ipcMain.handle(IPC.acceptChangedMedia, (_event, id: string) => acceptChangedMedia(id))
+  ipcMain.handle(IPC.relinkMediaDialog, async (event, id: string): Promise<MediaAsset | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Find the original file',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Media', extensions: [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    return relinkMedia(id, result.filePaths[0])
+  })
+
   ipcMain.handle(IPC.loadProject, () => loadProject())
   ipcMain.handle(IPC.saveProject, (_event, project: Project) => saveProject(project))
 
-  // Open a portable .reel file via a native dialog. The on-disk filename becomes
-  // the project's name (so exports and the title bar stay in sync with the file).
+  ipcMain.handle(IPC.saveProjectFile, (_event, project: Project) => saveProjectFile(project))
+  ipcMain.handle(IPC.newProject, (_event, project: Project) => newProject(project))
+  ipcMain.handle(IPC.getProjectDir, () => getProjectRoot())
+
+  // Open a project folder's .reel via a native dialog. The FOLDER name becomes
+  // the project's name (so exports and the title bar stay in sync with it).
   ipcMain.handle(IPC.openProjectFile, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
@@ -136,34 +174,90 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
-    const path = result.filePaths[0]
-    const project = await readProjectFile(path)
-    return { path, project: { ...project, name: parse(path).name } }
+    let path = result.filePaths[0]
+    // A legacy file (media in the old shared library) becomes a project folder
+    // before it opens: in place if it sits alone in its own folder, else a new
+    // <Name>/ beside it. The original is kept as .reel-legacy.
+    if (isLegacyDoc(JSON.parse(await fsp.readFile(path, 'utf8')))) {
+      const box: Electron.MessageBoxOptions = {
+        type: 'question',
+        buttons: ['Convert', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        message: 'Convert this project to a project folder?',
+        detail:
+          'It uses the old shared media library. Converting gives it its own folder holding its media ' +
+          '(linked, so no extra disk space). The old file is kept as a .reel-legacy backup.'
+      }
+      const answer = win ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box)
+      if (answer.response !== 0) return null
+      const shared = ['home', 'documents', 'desktop', 'downloads'].map((k) => app.getPath(k as 'home'))
+      const report = await convertLegacyProject(path, { sharedDirs: shared })
+      path = report.to!
+    }
+    return openProject(path)
   })
 
-  // Save As… — native Save dialog, then write. Returns the chosen path + the
-  // saved doc (its name/updatedAt updated to match the file).
+  // File ▸ Convert old projects… — convert every legacy .reel in a folder (and
+  // its subfolders one level down), then offer to delete the old shared store
+  // when every original was found. Returns the summary lines (null = canceled).
+  ipcMain.handle(IPC.convertLegacyFolderDialog, async (event): Promise<string[] | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const reels = join(app.getPath('documents'), 'Reels')
+    const options: Electron.OpenDialogOptions = {
+      title: 'Convert old projects in folder',
+      buttonLabel: 'Convert',
+      defaultPath: existsSync(reels) ? reels : app.getPath('documents'),
+      properties: ['openDirectory']
+    }
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths[0]) return null
+    const job = createJob('convert', 'Converting old projects')
+    const reports = await convertLegacyFolder(picked.filePaths[0], (done, total) => setProgress(job.id, done / total))
+    finishJob(job.id)
+    const lines = reports.length ? reports.map(reportLine) : ['No old projects found in that folder.']
+    const clean = reports.every((r) => !r.error && !r.missing.length)
+    const { freed } = await legacyStoreBytes()
+    if (reports.length && clean && freed > 0) {
+      const gb = (freed / 1024 ** 3).toFixed(2)
+      const box: Electron.MessageBoxOptions = {
+        type: 'question',
+        buttons: ['Delete', 'Keep for now'],
+        defaultId: 1,
+        cancelId: 1,
+        message: `Delete the old shared media library? It frees about ${gb} GB.`,
+        detail:
+          'Every converted project found all of its media and holds its own copy now. ' +
+          'Any old .reel file that was NOT converted (somewhere outside this folder) would lose its ' +
+          'transcripts and generated clips (background removal, effects, stills).'
+      }
+      const answer = win ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box)
+      if (answer.response === 0) {
+        await deleteLegacyStore()
+        lines.push('', `Deleted the old shared library (${gb} GB freed).`)
+      }
+    } else if (!clean) {
+      lines.push('', 'The old shared library was kept: some projects have missing files or failed.')
+    }
+    return lines
+  })
+
+  // Save As… — native Save dialog for `<Name>.reel`; the project becomes the
+  // folder `<Name>/` there (or the folder the user is already in, if it has
+  // that name). Returns the folder's .reel + the saved doc (renamed to match).
   ipcMain.handle(IPC.saveProjectAs, async (event, project: Project) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const base = (project.name || '').trim() || 'Untitled Reel'
     const options: Electron.SaveDialogOptions = {
       title: 'Save project as',
-      defaultPath: join(app.getPath('documents'), `${base}.${REEL_EXT}`),
+      defaultPath: suggestedSavePath(project, app.getPath('documents')),
       filters: [{ name: 'Reel Project', extensions: [REEL_EXT] }]
     }
     const result = win
       ? await dialog.showSaveDialog(win, options)
       : await dialog.showSaveDialog(options)
     if (result.canceled || !result.filePath) return null
-    const path = result.filePath
-    const saved = await writeProjectFile(path, { ...project, name: parse(path).name })
-    return { path, project: saved }
+    return saveProjectAs(project, result.filePath)
   })
-
-  // Save to an already-bound path (no dialog). Returns the saved doc.
-  ipcMain.handle(IPC.writeProjectFile, (_event, project: Project, path: string) =>
-    writeProjectFile(path, project)
-  )
 
   ipcMain.handle(
     IPC.exportProject,
@@ -193,8 +287,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getTranscript, (_event, mediaId: string) => getTranscript(mediaId))
 
   ipcMain.handle(IPC.detectSilence, async (_event, mediaId: string): Promise<Interval[]> => {
-    const asset = await getAsset(mediaId)
-    if (!asset) return []
+    const asset = await requireUsable(mediaId)
     return detectSilence(asset.originalPath, asset.probe.durationSec)
   })
 
@@ -211,19 +304,17 @@ export function registerIpcHandlers(): void {
   // Stills: capture an exact frame from a clip, matching the preview's HDR
   // tonemap / crop / color, into the library or to a user-chosen file.
   ipcMain.handle(IPC.captureStillToLibrary, async (_event, req: StillRequest): Promise<MediaAsset> => {
-    const asset = await getAsset(req.mediaId)
-    if (!asset) throw new Error('Source media not found for this still.')
+    const asset = await requireUsable(req.mediaId)
     const base = parse(asset.fileName).name
-    const out = join(getSubdir('stills'), `${base}-still-${Date.now().toString(36)}.png`)
+    const out = tmpOutput('still', 'png')
     await generateStill(asset.originalPath, out, req.sourceSec, stillVfChain(asset, req), alphaInputDecoder(asset.probe.video))
-    return importFile(out, `${base} (still).png`)
+    return importGenerated(out, `${base} (still).png`)
   })
 
   ipcMain.handle(
     IPC.captureStillToDisk,
     async (event, req: StillRequest, suggestedName: string): Promise<string | null> => {
-      const asset = await getAsset(req.mediaId)
-      if (!asset) throw new Error('Source media not found for this still.')
+      const asset = await requireUsable(req.mediaId)
       const win = BrowserWindow.fromWebContents(event.sender)
       const options: Electron.SaveDialogOptions = {
         title: 'Save still frame',
