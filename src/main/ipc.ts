@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { existsSync, promises as fsp } from 'node:fs'
 import { join, parse } from 'node:path'
 import { IPC, type AudioFxRequest, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
@@ -34,13 +35,20 @@ import {
   suggestedSavePath
 } from './services/projectStore'
 import { getProjectRoot } from './services/projectRoot'
+import {
+  convertLegacyFolder,
+  convertLegacyProject,
+  deleteLegacyStore,
+  legacyStoreBytes
+} from './services/legacyConvert'
+import { isLegacyDoc, reportLine } from './services/legacyPlan'
 import { exportProject, suggestedExportName } from './services/exporter'
 import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 import { detectSilence, type Interval } from './services/silence'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
-import { cancelJob } from './services/jobs'
+import { cancelJob, createJob, finishJob, setProgress } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
 import { assistantStatus, startAssistant } from './assistant/service'
 
@@ -166,7 +174,72 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
-    return openProject(result.filePaths[0])
+    let path = result.filePaths[0]
+    // A legacy file (media in the old shared library) becomes a project folder
+    // before it opens: in place if it sits alone in its own folder, else a new
+    // <Name>/ beside it. The original is kept as .reel-legacy.
+    if (isLegacyDoc(JSON.parse(await fsp.readFile(path, 'utf8')))) {
+      const box: Electron.MessageBoxOptions = {
+        type: 'question',
+        buttons: ['Convert', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        message: 'Convert this project to a project folder?',
+        detail:
+          'It uses the old shared media library. Converting gives it its own folder holding its media ' +
+          '(linked, so no extra disk space). The old file is kept as a .reel-legacy backup.'
+      }
+      const answer = win ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box)
+      if (answer.response !== 0) return null
+      const shared = ['home', 'documents', 'desktop', 'downloads'].map((k) => app.getPath(k as 'home'))
+      const report = await convertLegacyProject(path, { sharedDirs: shared })
+      path = report.to!
+    }
+    return openProject(path)
+  })
+
+  // File ▸ Convert old projects… — convert every legacy .reel in a folder (and
+  // its subfolders one level down), then offer to delete the old shared store
+  // when every original was found. Returns the summary lines (null = canceled).
+  ipcMain.handle(IPC.convertLegacyFolderDialog, async (event): Promise<string[] | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const reels = join(app.getPath('documents'), 'Reels')
+    const options: Electron.OpenDialogOptions = {
+      title: 'Convert old projects in folder',
+      buttonLabel: 'Convert',
+      defaultPath: existsSync(reels) ? reels : app.getPath('documents'),
+      properties: ['openDirectory']
+    }
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths[0]) return null
+    const job = createJob('convert', 'Converting old projects')
+    const reports = await convertLegacyFolder(picked.filePaths[0], (done, total) => setProgress(job.id, done / total))
+    finishJob(job.id)
+    const lines = reports.length ? reports.map(reportLine) : ['No old projects found in that folder.']
+    const clean = reports.every((r) => !r.error && !r.missing.length)
+    const { freed } = await legacyStoreBytes()
+    if (reports.length && clean && freed > 0) {
+      const gb = (freed / 1024 ** 3).toFixed(2)
+      const box: Electron.MessageBoxOptions = {
+        type: 'question',
+        buttons: ['Delete', 'Keep for now'],
+        defaultId: 1,
+        cancelId: 1,
+        message: `Delete the old shared media library? It frees about ${gb} GB.`,
+        detail:
+          'Every converted project found all of its media and holds its own copy now. ' +
+          'Any old .reel file that was NOT converted (somewhere outside this folder) would lose its ' +
+          'transcripts and generated clips (background removal, effects, stills).'
+      }
+      const answer = win ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box)
+      if (answer.response === 0) {
+        await deleteLegacyStore()
+        lines.push('', `Deleted the old shared library (${gb} GB freed).`)
+      }
+    } else if (!clean) {
+      lines.push('', 'The old shared library was kept: some projects have missing files or failed.')
+    }
+    return lines
   })
 
   // Save As… — native Save dialog for `<Name>.reel`; the project becomes the

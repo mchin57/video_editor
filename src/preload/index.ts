@@ -40,6 +40,8 @@ const api = {
   newProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.newProject, project),
   /** The open project's folder (the scratch folder while unsaved). */
   getProjectDir: (): Promise<string> => ipcRenderer.invoke(IPC.getProjectDir),
+  /** File ▸ Convert old projects…: summary lines, or null if canceled. */
+  convertLegacyFolderDialog: (): Promise<string[] | null> => ipcRenderer.invoke(IPC.convertLegacyFolderDialog),
 
   // Export (M3) — returns the output path, or null if the Save dialog was canceled.
   exportProject: (

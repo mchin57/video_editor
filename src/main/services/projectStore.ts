@@ -22,6 +22,8 @@ import type { Project } from '@shared/project'
 import { createEmptyProject, migrateProject, PROJECT_VERSION } from '@shared/project'
 import { getSubdir } from '../config'
 import { copyAtomic, linkOrCopy } from './linkOrCopy'
+import { convertWorkingCopy } from './legacyConvert'
+import { isLegacyDoc } from './legacyPlan'
 import { getProjectRoot, setProjectRoot } from './projectRoot'
 import {
   autosavePath,
@@ -51,6 +53,9 @@ const isScratch = (root: string): boolean => root === scratchRoot()
 
 /** Id of the document open in the renderer — autosaves for any other are stale. */
 let openId: string | null = null
+/** No session file yet: the first launch since project folders, when the old
+ *  working copy (projects/current.json) is converted into the scratch project. */
+let firstLaunch = false
 
 // --- Write queue -------------------------------------------------------------
 
@@ -90,6 +95,7 @@ function rememberRoot(root: string): void {
  */
 export function initProjectRoot(): void {
   let root: string | null = null
+  firstLaunch = !existsSync(sessionPath())
   try {
     const s = JSON.parse(readFileSync(sessionPath(), 'utf8')) as { root?: unknown }
     if (typeof s.root === 'string' && existsSync(docPath(s.root))) root = s.root
@@ -163,6 +169,11 @@ async function readFolder(root: string): Promise<LoadedProject> {
 export function loadProject(): Promise<LoadedProject> {
   return serial(async () => {
     const root = getProjectRoot()
+    if (firstLaunch && isScratch(root)) {
+      firstLaunch = false
+      await convertWorkingCopy(root).catch((error) => console.error('could not convert the old working copy', error))
+      rememberRoot(root)
+    }
     await sweep(root)
     return readFolder(root)
   })
@@ -199,8 +210,10 @@ export function openProject(reelPath: string): Promise<LoadedProject> {
     // Keep `<Name>/<Name>.reel` true when the user renamed the folder.
     if (reelPath !== docPath(root) && !existsSync(docPath(root))) await fsp.rename(reelPath, docPath(root))
     // Validate before discarding anything: a bad file must not cost the open
-    // project its unsaved work.
-    migrateProject(await readJson(docPath(root)))
+    // project its unsaved work. A legacy file is converted first (ipc.ts).
+    const raw = await readJson(docPath(root))
+    if (isLegacyDoc(raw)) throw new Error('This project uses the old shared library and has to be converted first.')
+    migrateProject(raw)
     await discardCurrent()
     rememberRoot(root)
     await sweep(root)

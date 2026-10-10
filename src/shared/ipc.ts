@@ -25,6 +25,7 @@ export const IPC = {
   saveProjectFile: 'project:saveFile',
   newProject: 'project:new',
   getProjectDir: 'project:getDir',
+  convertLegacyFolderDialog: 'project:convertLegacyFolder',
   // Export (M3)
   exportProject: 'export:run',
   revealFile: 'shell:reveal',

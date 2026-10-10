@@ -28,6 +28,7 @@ export const {
   saveProjectFile,
   newProject,
   getProjectDir,
+  convertLegacyFolderDialog,
   exportProject,
   revealFile,
   getSettings,
