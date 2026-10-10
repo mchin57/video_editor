@@ -21,6 +21,7 @@ import type { MediaAsset } from '@shared/media'
 import type { Project } from '@shared/project'
 import { createEmptyProject, migrateProject, PROJECT_VERSION } from '@shared/project'
 import { getSubdir } from '../config'
+import { replaceFile } from './atomicWrite'
 import { copyAtomic, linkOrCopy } from './linkOrCopy'
 import { convertWorkingCopy } from './legacyConvert'
 import { isLegacyDoc } from './legacyPlan'
@@ -68,9 +69,7 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
 }
 
 async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
-  const tmp = `${path}.tmp`
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2))
-  await fsp.rename(tmp, path) // atomic on the same volume
+  await replaceFile(path, JSON.stringify(data, null, 2))
 }
 
 async function readJson(path: string): Promise<unknown> {

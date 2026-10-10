@@ -367,9 +367,12 @@ anything ffmpeg writes straight to its final name is a trap:
   killed write would otherwise be kept forever by the `existsSync` skip, and
   `image.png` IS an image asset's "ready" signal.
 - **Windows: `fs.rename` onto a target that is OPEN fails `EPERM`** — even a
-  plain Node read handle blocks it. Harmless here (the final name never exists
-  when we rename), but it is why `asset.json` is NOT written this way: a
-  concurrent `readAsset` could hold it open.
+  plain Node read handle blocks it. Harmless for ffmpeg outputs (the final
+  name never exists when we rename). Records, transcripts and project
+  documents DO replace an existing name (they must: inside a project folder a
+  name may be a hardlink, and an in-place write would go through it), so they
+  use `replaceFile` (`atomicWrite.ts`), which retries a short EPERM/EBUSY —
+  readers only hold these files for a single read.
 - The partial name is fixed per file (a crash's leftover is overwritten by the
   next attempt's `-y`), so two writers of one file would share it —
   `mediaStore` coalesces them with `singleFlight` (per asset for

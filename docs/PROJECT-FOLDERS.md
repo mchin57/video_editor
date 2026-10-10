@@ -1,6 +1,6 @@
 # Project folders — media ownership design
 
-_Status: **design agreed** (2026-10-10). Implementation in progress; see "Phases"._
+_Status: phases 1–3 implemented (2026-10-10), marked `[~]` in docs/TODO.md with what is verified and what is not. Phase 4 (Storage panel, share without cache) is not started._
 
 ## Goals
 

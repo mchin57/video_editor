@@ -15,6 +15,7 @@ import type { MediaAsset } from '@shared/media'
 import { migrateProject } from '@shared/project'
 import { getDataDir } from '../config'
 import { linkOrCopy, copyAtomic } from './linkOrCopy'
+import { replaceFile } from './atomicWrite'
 import { hashFile } from './mediaStore'
 import { assetJsonPath, autosavePath, cacheDir, docPath, mediaDir, originalName } from './projectLayout'
 import {
@@ -58,8 +59,7 @@ async function hashOf(path: string): Promise<string | null> {
 }
 
 async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
-  await fsp.writeFile(`${path}.tmp`, JSON.stringify(data, null, 2))
-  await fsp.rename(`${path}.tmp`, path)
+  await replaceFile(path, JSON.stringify(data, null, 2))
 }
 
 /**

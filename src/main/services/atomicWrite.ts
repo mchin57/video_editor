@@ -62,3 +62,31 @@ export function singleFlight<T>(): (key: string, run: () => Promise<T>) => Promi
     return promise
   }
 }
+
+/**
+ * Replace a small file (a record, a transcript, a project document) via a
+ * sibling temp + rename, so a reader sees the old or the new content, never a
+ * torn one — and so the write never goes THROUGH a hardlink (inside a project
+ * folder any name may share its bytes with another; see linkOrCopy.ts).
+ *
+ * On Windows a rename onto a file someone holds open fails EPERM (verified,
+ * FFMPEG-NOTES "Partial outputs"); readers here hold files only for a single
+ * read, so a few short retries clear it.
+ */
+export async function replaceFile(path: string, data: string): Promise<void> {
+  const tmp = `${path}.tmp`
+  await fsp.writeFile(tmp, data)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fsp.rename(tmp, path)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (attempt >= 8 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
+        await fsp.rm(tmp, { force: true }).catch(() => {})
+        throw error
+      }
+      await new Promise((r) => setTimeout(r, 15 * (attempt + 1)))
+    }
+  }
+}

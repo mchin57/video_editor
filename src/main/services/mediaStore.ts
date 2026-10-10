@@ -23,7 +23,7 @@ import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
-import { singleFlight } from './atomicWrite'
+import { replaceFile, singleFlight } from './atomicWrite'
 import { linkOrCopy, moveFile } from './linkOrCopy'
 import { getProjectRoot } from './projectRoot'
 import { hashVerdict, statVerdict, unusableMessage } from './mediaHealth'
@@ -155,10 +155,7 @@ async function writeAsset(r: string, asset: MediaAsset): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { originalPath, status, ...rest } = asset
   const rec: AssetRecord = { ...rest, file: basename(originalPath) }
-  const path = assetJsonPath(r, asset.id)
-  const tmp = `${path}.tmp`
-  await fsp.writeFile(tmp, JSON.stringify(rec, null, 2))
-  await fsp.rename(tmp, path)
+  await replaceFile(assetJsonPath(r, asset.id), JSON.stringify(rec, null, 2))
 }
 
 /** Record that an asset has a transcript (whisper calls this after caching it). */

@@ -21,6 +21,7 @@ import { isCurrentTranscript, TRANSCRIPT_VERSION, type Transcript } from '@share
 import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
+import { replaceFile } from './atomicWrite'
 import { markTranscribed, requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
 import { singleFlight } from './atomicWrite'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
@@ -173,8 +174,7 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
       decodeStartSec: startSec
     }
     // temp + rename: never write in place inside a project folder (linkOrCopy.ts).
-    await fsp.writeFile(`${transcriptPath}.tmp`, JSON.stringify(transcript, null, 2))
-    await fsp.rename(`${transcriptPath}.tmp`, transcriptPath)
+    await replaceFile(transcriptPath, JSON.stringify(transcript, null, 2))
 
     // Mark the asset and clean up scratch files.
     await markTranscribed(mediaId).catch(() => {})
