@@ -54,6 +54,12 @@ const handlers: Handlers = {
 
 export function installAssistantBridge(): () => void {
   return onAssistantRequest((req: AssistantRequest) => {
+    // Arrived after main gave up (the renderer was blocked, e.g. by a confirm dialog):
+    // running it now would apply an edit nobody is told about. Main has already answered.
+    if (Date.now() > req.deadline) {
+      console.warn(`[assistant] dropped expired "${req.op}" request`)
+      return
+    }
     let res: AssistantResponse
     try {
       // The table is keyed by op, so this lookup is type-safe; widen it to call generically.

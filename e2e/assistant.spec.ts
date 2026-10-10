@@ -117,7 +117,17 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   const b = clip('b.mp4', 'blue')
   const c = await connect(await pipeOf(electronApp))
 
-  const imported = JSON.parse(textOf(await call(c, 'import_media', { paths: [a, b] }))) as { id: string; fileName: string }[]
+  const relative = await call(c, 'import_media', { paths: ['a.mp4'] })
+  expect(relative.isError).toBe(true)
+  expect(textOf(relative)).toContain('Paths must be absolute: a.mp4')
+
+  const missing = join(dir, 'missing.mp4')
+  const { imported, skipped } = JSON.parse(textOf(await call(c, 'import_media', { paths: [a, missing, b] }))) as {
+    imported: { id: string; fileName: string }[]
+    skipped: { path: string; reason: string }[]
+  }
+  expect(imported.map((x) => x.fileName)).toEqual(['a.mp4', 'b.mp4'])
+  expect(skipped.map((s) => s.path)).toEqual([missing])
   const idOf = (f: string): string => imported.find((x) => x.fileName === f)!.id
   const [A, B] = [idOf('a.mp4'), idOf('b.mp4')]
 
@@ -174,4 +184,58 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   )
   expect(duration).toBeGreaterThan(3.4)
   expect(duration).toBeLessThan(3.7)
+
+  // A requested folder: must be absolute and exist; the file lands there, not in Settings' folder.
+  const notThere = await call(c, 'export_video', { fileName: 'cut', folder: join(dir, 'nope') })
+  expect(notThere.isError).toBe(true)
+  expect(textOf(notThere)).toContain('No folder at')
+  expect((await call(c, 'export_video', { fileName: 'cut', folder: 'out' })).isError).toBe(true)
+  const there = JSON.parse(textOf(await call(c, 'export_video', { fileName: 'cut', folder: dir }))) as { path: string }
+  expect(there.path).toBe(join(dir, 'cut.mp4'))
+  expect(existsSync(there.path)).toBe(true)
+})
+
+test('an edit that reaches a blocked editor after the timeout is dropped, not applied late', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(90_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const clip = join(dir, 'a.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=540x960:r=30:d=2',
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+  ])
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
+  expect((await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 1 }] })).isError).toBeFalsy()
+  const before = await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
+  })
+  expect(before.layerIds).toHaveLength(1)
+
+  // Block the renderer's main thread past main's 10 s timeout, like a window.confirm would.
+  // Scheduled from a timer so this evaluate returns before the loop starts.
+  await page.evaluate(() => {
+    setTimeout(() => {
+      const until = Date.now() + 11_500
+      while (Date.now() < until) {
+        /* busy */
+      }
+    }, 0)
+  })
+  // remove_items is a single edit op to the renderer (no read first), so it is the request that waits.
+  const late = await call(c, 'remove_items', { ids: before.layerIds })
+  expect(late.isError).toBe(true)
+  expect(textOf(late)).toContain('did not answer')
+
+  // This evaluate runs only once the loop ends, and the queued removal is delivered first. It must not have run.
+  await page.waitForTimeout(500)
+  const after = await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
+  })
+  expect(after).toEqual(before)
 })

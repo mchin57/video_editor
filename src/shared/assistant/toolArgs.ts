@@ -19,7 +19,7 @@ export interface ToolArgs {
   }
   remove_items: { ids: string[] }
   undo: NoArgs
-  export_video: { fileName?: string }
+  export_video: { fileName?: string; folder?: string }
   request_feature: { title: string; problem: string; proposal: string; workaround?: string }
 }
 

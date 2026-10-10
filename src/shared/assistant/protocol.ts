@@ -53,6 +53,13 @@ export interface AssistantRequest<K extends AssistantOp = AssistantOp> {
   id: string
   op: K
   args: AssistantOps[K]['args']
+  /**
+   * Epoch ms after which the renderer must NOT run this op: main has already
+   * reported a timeout, so a late edit would land unannounced and a retry could
+   * place the cut twice. Set short of main's timeout so an op that runs just in
+   * time also answers in time.
+   */
+  deadline: number
 }
 
 export type AssistantResponse = { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string }

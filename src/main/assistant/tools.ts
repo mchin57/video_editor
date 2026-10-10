@@ -8,7 +8,7 @@
  */
 
 import { existsSync, promises as fsp } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { alphaInputDecoder, assetAspect, assetKind, type MediaAsset } from '@shared/media'
 import type { SequenceItem } from '@shared/assistant/protocol'
 import type { ToolContent } from '@shared/assistant/pipeProtocol'
@@ -17,7 +17,7 @@ import { transcriptPhraseText, transcriptWordText } from '@shared/assistant/tran
 import { frameTimes } from '@shared/assistant/frameTimes'
 import { getSubdir } from '../config'
 import { ensureProxy, getProjectMedia } from '../services/mediaStore'
-import { importMany } from '../services/importMany'
+import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
 import { hdrToSdrChain } from '../services/proxy'
@@ -66,10 +66,16 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
   list_media: async () => json([...(await projectAssets()).values()].map(describeAsset)),
 
   import_media: async ({ paths }) => {
-    const assets = await importMany(paths)
-    if (!assets.length) throw new Error('Nothing was imported — check the paths exist and are video, audio or image files')
+    // A relative or ~ path would resolve against the EDITOR's working directory, not Claude's.
+    const relative = paths.filter((p) => !isAbsolute(p))
+    if (relative.length) throw new Error(`Paths must be absolute: ${relative.join(', ')}`)
+    const { assets, skipped } = await importManyReport(paths)
+    if (!assets.length) {
+      const why = skipped.map((s) => `\n- ${s.path}: ${s.reason}`).join('')
+      throw new Error(`Nothing was imported — check the paths exist and are video, audio or image files${why}`)
+    }
     await callRenderer('addMedia', { ids: assets.map((a) => a.id) })
-    return json(assets.map(describeAsset))
+    return json({ imported: assets.map(describeAsset), skipped })
   },
 
   get_transcript: async ({ mediaId, fromSec, toSec, words }) => {
@@ -125,13 +131,22 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
 
   undo: async () => json(await callRenderer('undo', {})),
 
-  export_video: async ({ fileName }) => {
+  export_video: async ({ fileName, folder }) => {
     const project = await callRenderer('getProject', {})
     const requested = fileName !== undefined ? sanitizeExportName(fileName) : null
     if (fileName !== undefined && !requested) throw new Error(`"${fileName}" is not a usable file name`)
     const preset = project.preset ?? 'reel'
-    const { exportDir } = await getSettings()
-    await fsp.mkdir(exportDir, { recursive: true })
+    let exportDir: string
+    if (folder !== undefined) {
+      // A model-chosen folder must already exist: never create directories it names.
+      if (!isAbsolute(folder)) throw new Error(`folder must be an absolute path, got "${folder}"`)
+      const st = await fsp.stat(folder).catch(() => null)
+      if (!st?.isDirectory()) throw new Error(`No folder at ${folder}`)
+      exportDir = folder
+    } else {
+      exportDir = (await getSettings()).exportDir
+      await fsp.mkdir(exportDir, { recursive: true })
+    }
     // No await from the refusal check to the exportProject call: exportProject registers its
     // job synchronously, so a second concurrent call sees it running and the picked path is
     // never claimed twice.

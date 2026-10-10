@@ -88,7 +88,7 @@ Claude Code ──stdio──► reel-mcp (out/main/mcp.js — Claude Code launc
 | reel-mcp | `src/mcp/index.ts`, `src/mcp/tools.ts` | stdio entry; MCP tool registrations that forward via `callPipe`. Built to `out/main/mcp.js` as a second entry of the main build. |
 | Tool handlers | `src/main/assistant/tools.ts` | One async handler per tool → `ToolContent[]`. Read tools use the media store / whisper / ffmpeg; edit tools use `callRenderer`. |
 | Assistant service | `src/main/assistant/service.ts` | Start/stop the pipe server from settings; status for the UI. |
-| Renderer bridge | `src/main/assistant/bridge.ts`, `src/renderer/src/assistant/handlers.ts` | `callRenderer(op, args)` ⇄ renderer op table over store actions; 10 s timeout. |
+| Renderer bridge | `src/main/assistant/bridge.ts`, `src/renderer/src/assistant/handlers.ts` | `callRenderer(op, args)` ⇄ renderer op table over store actions; 10 s timeout. Each request carries a deadline 1 s short of it; the renderer drops a request that arrives later (blocked by a dialog), so a timed-out edit never lands late. |
 | Sequence builder | `src/renderer/src/lib/sequence.ts` | **Pure.** `applySequence(comp, plan, ctx)` → the layers + linked audio to add, built from `makeVideoLayer` + `trimVideoStart`/`trimVideoEnd`. |
 | Transcript / frames / summary | `src/shared/assistant/` | **Pure.** Transcript text, frame sampling times, timeline summary. |
 | TODO appender | `src/main/assistant/todoAppend.ts`, `todoFile.ts` | **Pure core** + serialized I/O for `docs/TODO.md`. |
@@ -170,14 +170,14 @@ time" = position in the edit. Each tool's description says which it uses.
 | Tool | Side | Input | Output |
 |---|---|---|---|
 | `list_media` | main + renderer | — | The project's library (`project.mediaIds` from the renderer, asset records from main): id, file name, path, kind, duration, has audio, picture size, transcribed, proxy ready. |
-| `import_media` | main + renderer | `paths: string[]` | Imports via the existing import path (folders expand) and adds the ids to the project (`addMedia`). Returns the new library entries. |
+| `import_media` | main + renderer | `paths: string[]` (absolute) | Rejects relative / `~` paths (they would resolve against the editor's working directory). Imports via the existing import path (folders expand) and adds the ids to the project (`addMedia`). Returns `{imported, skipped}`: the new library entries, and each file that failed with its reason. |
 | `get_transcript` | main | `mediaId`, optional `fromSec`/`toSec`, optional `words: boolean` | Runs `transcribeMedia` first when no current transcript exists (the job shows in the app's progress UI). Returns compact timed phrases in source time; word-level lines when `words` is set. Error if whisper is unavailable or the media has no audio. |
 | `get_frames` | main | `mediaId`, and either `times: number[]` or `count` (evenly spaced); max 8 | Small JPEGs (≈360 px wide) from the **source** file via ffmpeg, reusing `generateStill`, returned as image content with their source times. Scratch files in `tmp/` are removed after encoding. |
 | `get_timeline` | renderer | — | The active composition: each layer's id, kind, mediaId, source in/out, timeline start/end; audio clips likewise; total duration. |
 | `place_sequence` | renderer | `items: {mediaId, inSec, outSec}[]`, `mode: 'append' \| 'replace'` (default `append`), optional `atSec` | Lays the items end-to-end in the given order starting at `atSec` (default: end of the current timeline for append, 0 for replace). `replace` removes existing video layers + their linked audio first. Clips with audio get a linked extracted audio clip, exactly as a UI drop does. Stacking: new clips go on the top layer, like a library drag; `replace` puts them on the layer of the removed video (the lowest one, if it removed several), so layers that were above it stay above. In/out clamped to the source; an item that clamps to nothing is an error. Waits for proxies still encoding. **One undo step** for the whole call. Returns the created layer ids and their timeline windows. |
 | `remove_items` | renderer | `ids: string[]` | Removes via `removeItems` (linked partners follow). One undo step. |
 | `undo` | renderer | — | One `undo()`. Returns whether anything was undone and the timeline after it. |
-| `export_video` | main + renderer | optional `fileName` | Snapshot of the **root** project from the renderer, run through the existing `exportProject(project, { preset, preferNvenc: true }, path)`, so output is identical to a button export. Path = `settings.exportDir` + `fileName` (sanitized, `.mp4` enforced) or `suggestedExportName`, made unique so an existing file is never overwritten. Waits until the render finishes (progress shows in the app). Errors: no video clips (same guard as the button), an export already running, or the ffmpeg failure message. Returns the output path and size. |
+| `export_video` | main + renderer | optional `fileName`, optional `folder` | Snapshot of the **root** project from the renderer, run through the existing `exportProject(project, { preset, preferNvenc: true }, path)`, so output is identical to a button export. Path = `folder` (absolute, must already exist; never created) or else `settings.exportDir`, + `fileName` (sanitized, `.mp4` enforced) or `suggestedExportName`, made unique so an existing file is never overwritten. Waits until the render finishes (progress shows in the app). Errors: no video clips (same guard as the button), an export already running, or the ffmpeg failure message. Returns the output path and size. |
 | `request_feature` | main | `title`, `problem`, `proposal`, optional `workaround` | Appends to `docs/TODO.md` (see below). Returns the written entry, or "already requested" when the title exists. |
 
 ### Undo semantics
@@ -213,7 +213,7 @@ Edits apply to the active composition (`editPath`), the same as the UI.
   for every call (pipe connect fails with ENOENT/ECONNREFUSED).
 - Editor closes mid-call → "Reel Editor closed the connection before answering".
 - No project loaded / renderer not ready → "Editor has no project open".
-- Renderer timeout (10 s) → tool error naming the op.
+- Renderer timeout (10 s) → tool error naming the op; the late request is dropped by the renderer, so nothing changed and a retry is safe.
 - Unknown `mediaId` → tool error listing valid ids.
 - Argument validation is reel-mcp's zod schemas; a bad argument is a tool error,
   never a crash. Handler exceptions become tool errors.

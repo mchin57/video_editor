@@ -51,8 +51,10 @@ the total length. Mention anything you were unsure about.
 
 ## 5. Export only when asked
 
-`export_video` (optional `fileName`). It waits for the render and returns the file
-path — give the user that path.
+`export_video` (optional `fileName`; optional `folder`, an absolute path to an
+existing folder, only when the user names where it should go — otherwise it uses the
+Settings export folder). It waits for the render and returns the file path — give the
+user that path.
 
 ## When an ability is missing
 
