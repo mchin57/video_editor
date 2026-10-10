@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { useProject } from '@/state/projectStore'
 import { useExtractAudio, useImportFolder } from '@/hooks/useMedia'
+import { convertLegacyFolderDialog } from '@/ipc/client'
 
 /** Last path segment, handling both Windows and POSIX separators. */
 function basename(path: string): string {
@@ -95,6 +96,17 @@ export function FileMenu(): JSX.Element {
             label="Extract audio from clip…"
             shortcut=""
             onClick={run(() => extractAudio.mutate())}
+          />
+          <div className="my-1 h-px bg-white/10" />
+          <MenuItem
+            label="Convert old projects…"
+            shortcut=""
+            onClick={run(() => {
+              void convertLegacyFolderDialog().then(
+                (lines) => lines && window.alert(lines.join('\n')),
+                (err: Error) => window.alert(err.message)
+              )
+            })}
           />
         </div>
       )}

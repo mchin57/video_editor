@@ -580,10 +580,10 @@ export interface Project extends Composition {
   stabilizeDefault: Stabilize | null
   script: ScriptLine[]
   /**
-   * Ids of the media assets that belong to this project (the library panel).
-   * The asset *records* live globally on disk (so the same clip imported into
-   * two projects isn't duplicated); this list scopes which of them this project
-   * shows. Import order, deduped.
+   * Ids of the media assets that belong to this project (the library panel),
+   * whose records + originals live in the project folder's media/<id>/
+   * (originals hardlinked, so the same clip in two projects isn't duplicated).
+   * Import order, deduped.
    */
   mediaIds: string[]
   createdAt: string
@@ -687,12 +687,15 @@ export function createEmptyComposition(): Composition {
   }
 }
 
+/** Current document schema version (bump + add a `migrateProject` step). */
+export const PROJECT_VERSION = 24
+
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
   return {
     id,
     name,
-    version: 23,
+    version: PROJECT_VERSION,
     preset: DEFAULT_PRESET_ID,
     ...createEmptyComposition(),
     denoiseDefault: false,
@@ -1001,7 +1004,12 @@ export function migrateProject(raw: unknown): Project {
   // v23 adds free-angle layer rotation (`Layer.rotationDeg`) and video flips
   // (`VideoContent.flipH`/`flipV`). Purely additive — absent means upright and
   // unflipped, which is what every older layer is — so nothing is rewritten.
-  if (typeof p.version !== 'number' || p.version < 23) p.version = 23
+  // v24 moves media ownership into the project FOLDER (docs/PROJECT-FOLDERS.md):
+  // a v24 document lives at <Name>/<Name>.reel beside its own media/ + cache/.
+  // Nothing in the document itself changes — a v23-or-older file's media lives
+  // in the old global store, and main converts it (projectMigration.ts) before
+  // it opens; the version only records which side of that line a file is on.
+  if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
   // empty on open.

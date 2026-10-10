@@ -43,7 +43,8 @@ function describeAsset(a: MediaAsset): Record<string, unknown> {
     width: a.probe.video?.displayWidth,
     height: a.probe.video?.displayHeight,
     transcribed: a.transcribed,
-    proxyReady: a.proxyReady
+    proxyReady: a.proxyReady,
+    status: a.status ?? 'ok'
   }
 }
 
@@ -58,6 +59,9 @@ function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAs
   if (!asset) {
     const valid = [...assets.keys()].join(', ') || '(the library is empty — use import_media)'
     throw new Error(`No media "${mediaId}" in this project. Valid ids: ${valid}`)
+  }
+  if (asset.status && asset.status !== 'ok') {
+    throw new Error(`Media "${mediaId}" (${asset.fileName}) is ${asset.status} on disk; the user has to fix it in the Library first.`)
   }
   return asset
 }

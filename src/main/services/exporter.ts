@@ -18,6 +18,7 @@ import {
   effectiveOut,
   effectiveStabilize,
   isNeutralColor,
+  referencedMediaIds,
   videoSpeed
 } from '@shared/project'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
@@ -42,7 +43,7 @@ import type { Layer } from '@shared/project'
 import type { ExportKeyframe, OpacityAnim } from './exporterArgs'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
-import { getAsset, imageAssetPath } from './mediaStore'
+import { assertMediaUsable, audioProxyIfReady, ensureImagePath, getAsset } from './mediaStore'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import {
   buildExportArgs,
@@ -149,6 +150,9 @@ export async function exportProject(
 ): Promise<string> {
   const job = createJob('export', `Export · ${project.name}`, project.id)
   try {
+    // Missing or changed originals block the export, naming every file — never
+    // render a clip from different bytes than the user edited.
+    await assertMediaUsable(referencedMediaIds(project))
     await runExport(project, opts, job.id, outputPath)
     finishJob(job.id, outputPath)
     return outputPath
@@ -452,7 +456,7 @@ async function renderComposition(
         })
       }
     } else if (c.kind === 'image') {
-      const imgPath = imageAssetPath(c.mediaId)
+      const imgPath = await ensureImagePath(c.mediaId)
       if (!existsSync(imgPath)) continue // display PNG missing → skip rather than fail
       const v = (await getAsset(c.mediaId))?.probe.video
       const base = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
@@ -749,9 +753,9 @@ async function renderComposition(
     if (!audioClipAudible(a)) continue
     const asset = await getAsset(a.mediaId)
     if (!asset) continue
-    const proxy = join(getSubdir('media'), a.mediaId, 'audio.m4a')
+    const proxy = audioProxyIfReady(a.mediaId)
     audio.push({
-      path: existsSync(proxy) ? proxy : asset.originalPath,
+      path: proxy ?? asset.originalPath,
       inSec: a.inSec,
       outSec: effectiveOut(a, asset.probe.durationSec),
       startSec: a.startSec,

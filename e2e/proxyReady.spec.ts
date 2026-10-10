@@ -69,9 +69,9 @@ test('a clip is not ready — and cannot be added — until its proxy is fully w
       return asset.id
     }, path)
 
-  const dataDir = await page.evaluate(() => window.api.getDataDir())
+  const projectDir = await page.evaluate(() => window.api.getProjectDir())
   const id = await importOne(clip)
-  const assetDir = join(dataDir, 'media', id)
+  const assetDir = join(projectDir, 'cache', id)
 
   // Wait until ffmpeg is demonstrably mid-encode: it has reported progress.
   await expect

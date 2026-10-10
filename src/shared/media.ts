@@ -55,11 +55,38 @@ export interface ProbeInfo {
 
 export type MediaKind = 'video' | 'audio' | 'image'
 
+/** How a project holds an original: a hardlink to the imported source (no
+ *  extra disk), a real copy (other volume / link failed), or a file the app
+ *  generated itself (background removal, effects, extracted audio, stills). */
+export type MediaStorage = 'link' | 'copy' | 'generated'
+
+/** Whether a project's original is still the file it imported (checked by main
+ *  on every library load): `missing` = the file under media/ is gone;
+ *  `changed` = its bytes differ from import — usually the SOURCE was overwritten
+ *  in place, which rewrites a hardlinked original too. */
+export type MediaStatus = 'ok' | 'missing' | 'changed'
+
 export interface MediaAsset {
-  /** Content hash (first 12 hex of sha1) — also the media folder name. */
+  /** Stable id — the content hash (first 12 hex of sha1) at import; also the
+   *  folder name under the project's media/ and cache/. */
   id: string
   fileName: string
+  /** Absolute path of the file to READ — the project's own original under
+   *  `media/<id>/`. Resolved from the open project folder at load time, never
+   *  stored (the folder can move). */
   originalPath: string
+  /** Content hash of the original's current bytes (equals `id` unless the user
+   *  accepted a changed file). Absent on legacy records. */
+  hash?: string
+  /** Where it was imported from (informational, used to relink); null for
+   *  app-generated media. */
+  sourcePath?: string | null
+  storage?: MediaStorage
+  /** Size + mtime of the original when recorded — the change-detection key. */
+  size?: number
+  mtimeMs?: number
+  /** Runtime only (never stored): the latest health check. */
+  status?: MediaStatus
   importedAt: string
   probe: ProbeInfo
   proxyReady: boolean

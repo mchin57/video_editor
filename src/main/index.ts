@@ -3,6 +3,7 @@ import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
+import { initProjectRoot } from './services/projectStore'
 import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaProtocol'
 import { getSubdir } from './config'
 import { initAutoUpdate } from './services/updater'
@@ -66,6 +67,7 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.reeleditor.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
+  initProjectRoot() // before the window: the media protocol serves from it
   registerMediaProtocol()
   registerIpcHandlers()
   createWindow()

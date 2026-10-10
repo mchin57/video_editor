@@ -203,7 +203,7 @@ missing), so it was deliberately **not** unified to keep behavior identical.
 | `monoFoldPan(channel)` + `detectMonoFoldChannel`/`monoFoldFrom`/`parseChannelPeaks` | `audio.ts` | hand-writing a `pan=stereo\|c0=cN\|c1=cN` fold or re-parsing `astats` peaks to mirror a one-sided (dead-channel) source to both sides (see `AudioStreamInfo.monoFoldChannel`) |
 | `buildAudioFxFilter(settings, in, out)`, `buildAudioFxArgs`, `pitchStages(cents)` | `audioFx.ts` | hand-writing an echo, ensemble or chorus graph. Echo is one `aecho` with `in_gain=0` (wet only) and one explicit tap per repeat — `aecho` has NO feedback. Neither stacking effect may use ffmpeg’s `chorus` filter, which ignores its `delays` entirely (verified): **ensemble** is `asplit` + per-voice `asetrate`/`aresample`/`atempo`/`volume`/`adelay` + `amix` (derive each `atempo` from the ROUNDED shifted rate or the voice drifts), and **chorus** swaps the fixed pitch shift for `vibrato` (an LFO-swept delay, wet-only by nature) with a per-voice rate spread, since `vibrato` has no phase control. The chorus chain is PRIMED with silence that is trimmed off again — `vibrato` bursts at its output start and a fade does not fix it. Changing the echo/ensemble strings invalidates already-rendered assets. See FFMPEG-NOTES “Audio effects” |
 | `expandImportPaths(paths, opts?)`, `isMediaPath` | `importScan.ts` | expanding a dropped/picked FOLDER per caller. `importMany` (`services/importMany.ts`; `importManyReport` also returns the files that failed, with why) runs every import route through it, so the File menu, OS drag-drop and `importPaths` all handle directories identically. The extension filter applies only to files found INSIDE a walked directory — a path the user named explicitly is always attempted, because the picker offers an "All files" filter |
-| `renderAudioFxToLibrary(settings, mediaId, in, out)` | `mediaStore.ts` | rendering an effect ad hoc. Content-addresses the result like every generated asset, so re-rendering identical settings reuses the file on disk instead of re-encoding |
+| `renderAudioFxToLibrary(settings, mediaId, in, out)` | `mediaStore.ts` | rendering an effect ad hoc. Content-addresses the result like every generated asset (`importGenerated`), so re-rendering identical settings reuses the file on disk instead of re-encoding |
 | `renderGradientImage(spec, start, end)` (closure in `exporter.ts`) | `exporter.ts` | duplicating the rasterise-text-to-PNG → full-frame-overlay block for text vs captions |
 | `buildWhisperArgs(model, wav, outPrefix, preset, offsetSec?)` + `dtwPreset(modelPath)` + `decodeStartSec(silences, duration)` | `whisperArgs.ts` | hand-assembling whisper-cli args. `-dtw` without `-nfa` silently yields NO token timestamps (flash attention wins), and a preset that does not match the model returns garbage at exit 0 — so `dtwPreset` returns null rather than guess. `decodeStartSec` is where decoding starts (`-ot`): whisper drops a file's opening sentence after a leading click or long lead-in. See FFMPEG-NOTES "whisper word timings" |
 | `parseWhisperTranscript(json, silences?)` | `whisperParse.ts` | reading whisper's entry `offsets` as word times. Those are SEGMENT bounds and smear the leading words of a segment back over the preceding silence (measured 2.42s early); this prefers DTW `t_dtw`, gates it for sanity, ends each word where silencedetect says its sound stops, caps word windows, and reports which source won |
@@ -213,6 +213,22 @@ missing), so it was deliberately **not** unified to keep behavior identical.
 _Note:_ `assBuilder.ts` and `audio.ts` keep their own local round/format helpers
 (assBuilder's `r` collides with a hex-component name in another scope) — low
 priority; the string-pinning tests guard them either way.
+
+## Project folders & media — `projectLayout.ts`, `linkOrCopy.ts`, `mediaHealth.ts`, `mediaStore.ts`
+
+A project is a folder that owns its media (docs/PROJECT-FOLDERS.md). Main owns
+which one is open.
+
+| Concept | Home | Use instead of |
+| --- | --- | --- |
+| `docPath`/`autosavePath`/`mediaDir`/`cacheDir`/`cachePath`/`assetJsonPath`/`transcriptPath`, `originalName`, `projectFolderFor`, `sweepPlan`, `isMediaId` | `projectLayout.ts` | joining paths into a project folder by hand. Pure; every main-side path into a project goes through it |
+| `getProjectRoot()` / `setProjectRoot()` | `projectRoot.ts` | a global data-dir media path (`getSubdir('media')` is the LEGACY store now). Capture the root once at the start of a long job |
+| `linkOrCopy(src, dest)`, `copyAtomic`, `moveFile` | `linkOrCopy.ts` | `fs.copyFile` for an original (doubles disk) or a bare `fs.link` (no fallback across volumes/FAT/shares). `moveFile` adopts a file the app generated |
+| `replaceFile(path, data)` | `atomicWrite.ts` | `fs.writeFile` onto a record/transcript/document. Temp + rename (never writes THROUGH a hardlink, never torn), with the Windows EPERM retry |
+| `importFile(src)` / `importGenerated(tmp, name)` | `mediaStore.ts` | registering media any other way. External files are linked in; app outputs (stills, effects, extracted audio, background removal) are moved in. Both dedup by content hash (`findByHash`, since an accepted change keeps its old id) |
+| `requireUsable(id)`, `assertMediaUsable(ids)` | `mediaStore.ts` | `getAsset` before a job that READS the original (proxy, transcribe, matte, still, silence, export). They run the changed/missing check and throw a message naming the files |
+| `statVerdict`/`hashVerdict`/`unusableMessage` | `mediaHealth.ts` | re-deriving the change-detection rule (stamp match → ok; mismatch → re-hash; same hash → re-stamp) |
+| `conversionFolder`, `adoptAction`, `legacyIdsIn`, `isLegacyDoc` | `legacyPlan.ts` | ad-hoc legacy `.reel` handling; `legacyConvert.ts` does the I/O |
 
 ## IPC — `src/preload/index.ts`, `src/renderer/src/ipc/client.ts`
 

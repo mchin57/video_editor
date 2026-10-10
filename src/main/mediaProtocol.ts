@@ -1,6 +1,6 @@
 /**
  * Custom `reelmedia://` scheme so the renderer's <video>/<img> can read media
- * from the data dir. Crucially this handles HTTP **range requests** itself:
+ * from the open project's cache/. Crucially this handles HTTP **range requests** itself:
  * net.fetch over file:// does not, which leaves <video> unable to seek to an
  * un-buffered position (scrubbing forward appears to do nothing). Serving 206
  * partial responses makes the proxy fully seekable.
@@ -12,7 +12,9 @@ import { protocol } from 'electron'
 import { createReadStream, promises as fsp } from 'node:fs'
 import { join, normalize, sep, extname } from 'node:path'
 import { Readable } from 'node:stream'
-import { getSubdir, getBundledFontsDir } from './config'
+import { getBundledFontsDir } from './config'
+import { getProjectRoot } from './services/projectRoot'
+import { cacheDir } from './services/projectLayout'
 
 export const MEDIA_SCHEME = 'reelmedia'
 
@@ -86,11 +88,17 @@ export function registerMediaProtocol(): void {
     const url = new URL(request.url)
     const id = url.hostname
     const file = decodeURIComponent(url.pathname).replace(/^\/+/, '')
-    // Bundled fonts live outside the per-media store; serve them from their dir.
-    const assetRoot =
-      id === FONTS_HOST
-        ? normalize(getBundledFontsDir() ?? join(getSubdir('media'), id))
-        : normalize(join(getSubdir('media'), id))
+    // Bundled fonts live outside the project; serve them from their dir. Media
+    // is served from the OPEN project's cache/<id> (its derived files only —
+    // the protocol never hands out originals).
+    let base: string | null
+    try {
+      base = id === FONTS_HOST ? getBundledFontsDir() : cacheDir(getProjectRoot(), id)
+    } catch {
+      base = null // no project open yet
+    }
+    if (!base) return new Response('Not found', { status: 404, headers: { ...CORS_HEADERS } })
+    const assetRoot = normalize(base)
     const target = normalize(join(assetRoot, file))
 
     // Path-traversal guard: target must stay within this asset's folder.

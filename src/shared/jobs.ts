@@ -1,6 +1,6 @@
 /** Long-running background work (proxy generation, transcription, export). */
 
-export type JobType = 'proxy' | 'transcribe' | 'export' | 'matte'
+export type JobType = 'proxy' | 'transcribe' | 'export' | 'matte' | 'convert'
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'canceled'
 
 export interface Job {
