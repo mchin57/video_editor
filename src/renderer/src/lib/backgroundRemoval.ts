@@ -15,6 +15,7 @@ import { videoSourceWindow } from '@shared/layers'
 import { slowestSpeedBetween } from '@shared/speed'
 import { removeBackground } from '@/ipc/client'
 import { getActiveComp, useProject } from '@/state/projectStore'
+import { idle } from './interaction'
 
 /**
  * - `replaced`: the layer now plays the matte.
@@ -41,6 +42,7 @@ export async function removeLayerBackground(layerId: string, source: MediaAsset)
   })
   if (!matte) return 'canceled'
 
+  await idle() // the job can finish mid-drag; the swap waits for the release
   const store = useProject.getState()
   if (store.project?.id !== project.id) return 'project-changed'
   store.addMedia([matte.id]) // the transparent copy is a library clip either way

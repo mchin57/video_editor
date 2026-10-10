@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { beginInteraction, interactionOpen, resetInteractionsForTest, whenIdle } from './interaction'
+import { beginInteraction, idle, interactionOpen, resetInteractionsForTest, whenIdle } from './interaction'
 
 const tick = (): Promise<void> => new Promise((r) => queueMicrotask(r))
 
@@ -55,6 +55,20 @@ describe('interaction lock', () => {
     expect(ran).toEqual([])
     await tick()
     expect(ran).toEqual(['queued', 'late'])
+  })
+
+  it('idle() resolves at once when nothing is open, and only after the release otherwise', async () => {
+    await idle() // would time out if it never resolved
+    const end = beginInteraction()
+    let resolved = false
+    void idle().then(() => (resolved = true))
+    await tick()
+    await tick()
+    expect(resolved).toBe(false)
+    end()
+    await tick()
+    await tick()
+    expect(resolved).toBe(true)
   })
 
   it('a throwing call does not strand the ones behind it', async () => {

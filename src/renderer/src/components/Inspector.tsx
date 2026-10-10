@@ -55,6 +55,7 @@ import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
 import { activeComp, projectFormat, useProject } from '@/state/projectStore'
 import { startPointerDrag } from '@/lib/pointerDrag'
+import { idle } from '@/lib/interaction'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { formatDuration, formatFps } from '@/lib/format'
@@ -1478,6 +1479,7 @@ function AudioClipEditor(): JSX.Element | null {
       const dur = asset?.probe.durationSec ?? clip.outSec
       const silences = await detectSilence(clip.mediaId)
       const ranges = speechSegments(silences, clip.inSec, effectiveOut(clip, dur), 0.4)
+      await idle() // detection can finish mid-drag; the split waits for the release
       if (ranges.length > 1) splitOnSilence(clip.id, ranges)
       else setSplitNote('No silence gaps found to split on.')
     } finally {

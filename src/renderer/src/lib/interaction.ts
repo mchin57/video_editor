@@ -48,6 +48,14 @@ export function whenIdle(fn: () => void): void {
   waiting.push(fn)
 }
 
+/**
+ * `whenIdle` for async flows: a job that commits after a long await (Remove
+ * background, auto-captions, split on silence) awaits this right before it
+ * reads the store and commits, so a result that lands mid-drag waits for the
+ * release instead of being overwritten by the drag's next move.
+ */
+export const idle = (): Promise<void> => new Promise((resolve) => whenIdle(resolve))
+
 function scheduleFlush(): void {
   if (flushQueued || waiting.length === 0) return
   flushQueued = true

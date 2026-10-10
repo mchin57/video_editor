@@ -5,6 +5,7 @@ import { transcribeMedia, whisperAvailable } from '@/ipc/client'
 import { buildTimelineCaptions, type CaptionSource } from '@/lib/captions'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, useProject } from '@/state/projectStore'
+import { idle } from '@/lib/interaction'
 
 /**
  * Caption the whole audio lane: transcribe every audio clip that isn't excluded
@@ -50,7 +51,10 @@ export function CaptionAudioButton(): JSX.Element | null {
         }))
         all.push(...segs)
       }
-      setCaptions({ ...captions, enabled: true, segments: all.sort((a, b) => a.startSec - b.startSec) })
+      await idle() // transcription can finish mid-drag; the commit waits for the release
+      // Re-read the track: a style edit made while whisper ran must not be reverted.
+      const current = activeComp(useProject.getState())?.captions ?? captions
+      setCaptions({ ...current, enabled: true, segments: all.sort((a, b) => a.startSec - b.startSec) })
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {

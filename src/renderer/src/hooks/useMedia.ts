@@ -11,6 +11,7 @@ import {
 } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { activeComp, useProject } from '@/state/projectStore'
+import { idle } from '@/lib/interaction'
 
 const LIBRARY_KEY = 'library'
 
@@ -53,12 +54,15 @@ export function useImportFolder(): ReturnType<typeof useMutation<MediaAsset[], E
 }
 
 /** Shared post-import step for every import route: scope the new assets to the
- *  project, refresh the library, and select the first one. */
-function onImported(
+ *  project, refresh the library, and select the first one. Waits for any open
+ *  drag first: at the root a drag recomputes the WHOLE project from its
+ *  pointerdown snapshot, so ids added mid-drag would vanish (lib/interaction.ts). */
+async function onImported(
   assets: MediaAsset[],
   qc: ReturnType<typeof useQueryClient>,
   select: (id: string) => void
-): void {
+): Promise<void> {
+  await idle()
   useProject.getState().addMedia(assets.map((a) => a.id))
   void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
   if (assets[0]) select(assets[0].id)
@@ -75,8 +79,9 @@ export function useExtractAudio(): ReturnType<
   const qc = useQueryClient()
   return useMutation<MediaAsset | null, Error, void>({
     mutationFn: () => extractAudioDialog(),
-    onSuccess: (asset) => {
+    onSuccess: async (asset) => {
       if (!asset) return // dialog canceled
+      await idle() // see onImported
       useProject.getState().addMedia([asset.id])
       void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
     },
@@ -124,7 +129,8 @@ export function useAddAudioFx(): ReturnType<
         inSec: input.inSec,
         outSec: input.outSec
       }),
-    onSuccess: (asset, input) => {
+    onSuccess: async (asset, input) => {
+      await idle() // the render can finish mid-drag; see onImported
       const store = useProject.getState()
       store.addMedia([asset.id])
       const fx = {
