@@ -1,15 +1,15 @@
 /**
- * Place a file into a project folder WITHOUT doubling disk usage when possible:
- * an NTFS hardlink (`fs.link`) shares the bytes with the source, and the file
- * system's link count becomes the reference count — the space is freed when
- * the last name goes. Across volumes, or on any link failure (FAT/exFAT,
- * network share, permissions), it falls back to a real copy.
+ * Placing APP-OWNED files (never the user's footage — library items point at
+ * originals in place, docs/MEDIA-POINTERS.md): `linkOrCopy` shares a cache file
+ * from the old global store during conversion via an NTFS hardlink (no extra
+ * disk), falling back to a real copy across volumes or on any link failure;
+ * `copyAtomic` copies generated media / transcripts; `moveFile` adopts a
+ * generated output into `generated/`.
  *
- * Verified semantics (docs/PROJECT-FOLDERS.md): moving, renaming or deleting
- * the source leaves the link intact; overwriting the source IN PLACE changes
- * the link too (same bytes) — hence size+mtime change detection on use. And the
- * corollary for us: never write in place to a file that may be a link; write a
- * temp file and rename (the rename replaces the name and breaks the link).
+ * Hardlink semantics verified for the schema-24 model (docs/PROJECT-FOLDERS.md):
+ * a link survives the source being moved, renamed or deleted, but an in-place
+ * overwrite of the source changes it too — fine for cache files, which are
+ * never written in place.
  */
 
 import { promises as fsp } from 'node:fs'

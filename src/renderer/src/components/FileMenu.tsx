@@ -61,7 +61,8 @@ export function FileMenu(): JSX.Element {
     void fn()
   }
 
-  const label = filePath ? basename(filePath) : (project?.name ?? 'Untitled')
+  // Every open project has a folder and a .reel (there is no untitled state).
+  const label = filePath ? basename(filePath) : (project?.name ?? '')
 
   return (
     <div ref={ref} className="relative flex items-center gap-2">
@@ -73,7 +74,7 @@ export function FileMenu(): JSX.Element {
       </button>
       <span
         className="max-w-[220px] truncate text-xs text-zinc-400"
-        title={filePath ?? 'Unsaved project (not yet written to a file)'}
+        title={filePath ?? undefined}
       >
         {label}
         {dirty && (
@@ -85,7 +86,7 @@ export function FileMenu(): JSX.Element {
 
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 w-52 rounded-lg border border-white/10 bg-zinc-900 p-1 shadow-2xl">
-          <MenuItem label="New" shortcut="Ctrl+N" onClick={run(newProjectFile)} />
+          <MenuItem label="New…" shortcut="Ctrl+N" onClick={run(newProjectFile)} />
           <MenuItem label="Open…" shortcut="Ctrl+O" onClick={run(openFile)} />
           <div className="my-1 h-px bg-white/10" />
           <MenuItem label="Save" shortcut="Ctrl+S" onClick={run(save)} />

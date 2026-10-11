@@ -12,18 +12,19 @@ export const IPC = {
   extractAudioDialog: 'media:extractAudioDialog',
   listProjectMedia: 'media:listForProject',
   ensureProxy: 'media:ensureProxy',
-  acceptChangedMedia: 'media:acceptChanged',
   relinkMediaDialog: 'media:relinkDialog',
-  // Project (M2) — a project is a folder (docs/PROJECT-FOLDERS.md).
+  // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read and write the working copy (autosave.json:
-  // crash recovery + restore on launch); the File ▸ actions below open, save
-  // and create the folder's <Name>.reel.
+  // crash recovery + restore on launch); the File ▸ actions below create,
+  // open and save the folder's <Name>.reel.
   loadProject: 'project:load',
   saveProject: 'project:save',
   openProjectFile: 'project:openFile',
   saveProjectAs: 'project:saveAs',
   saveProjectFile: 'project:saveFile',
-  newProject: 'project:new',
+  createProject: 'project:create',
+  chooseProjectLocation: 'project:chooseLocation',
+  defaultProjectLocation: 'project:defaultLocation',
   getProjectDir: 'project:getDir',
   convertLegacyFolderDialog: 'project:convertLegacyFolder',
   // Export (M3)
@@ -96,12 +97,29 @@ export interface RemoveBackgroundRequest {
   subjectId?: string
 }
 
-/** A project as opened: the document, its `.reel` path (null = the unsaved
- *  scratch project) and whether it carries unsaved changes (an autosave). */
+/** A project as opened: the document, its `.reel` path, and whether it
+ *  carries unsaved changes (an autosave, or library paths fixed on open). */
 export interface LoadedProject {
   project: import('./project').Project
-  path: string | null
+  path: string
   dirty: boolean
+}
+
+/** A Relink that went through (docs/MEDIA-POINTERS.md "Relink"). */
+export interface RelinkResult {
+  asset: import('./media').MediaAsset
+  /** The clip was pointed at a file of a different length ("Update path
+   *  anyway"): the renderer resets every placement to the whole new file. */
+  cutsReset: boolean
+  /** Other missing clips found in the same folder and reconnected (file names). */
+  alsoFound: string[]
+}
+
+/** What the app opens to: the last project, or none (the start screen) with
+ *  an optional reason to show there. */
+export interface LaunchState {
+  loaded: LoadedProject | null
+  message: string | null
 }
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
@@ -109,5 +127,8 @@ export type IpcChannel = (typeof IPC)[keyof typeof IPC]
 /** Renderer-visible event channels (main → renderer pushes). */
 export const IPC_EVENT = {
   jobProgress: 'job:progress',
+  /** A library record changed after the project opened (import, relink, a
+   *  path fixed by a re-check): the project now has unsaved changes. */
+  libraryChanged: 'library:changed',
   assistantRequest: 'assistant:request'
 } as const

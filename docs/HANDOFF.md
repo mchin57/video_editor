@@ -87,7 +87,7 @@ Owner preferences (from the strategy vault's "how to behave" note): prefers **co
 
 - **Logical coordinate space = 1080×1920 px** everywhere (preview stage is literally that size, CSS-scaled; ASS uses the same PlayRes). Overlay/caption coords are stored in this space and used verbatim in both preview and export → fidelity is exact by construction.
 - **Repo layout:** `src/shared` (types shared by main+renderer), `src/main/services/*` (ffmpeg, ffprobe, mediaStore, proxy, jobs, transcribe, assBuilder, exporter, projectStore, mediaServer), `src/preload` (typed contextBridge), `src/renderer/src/{state,lib,components}`.
-- **Data dir:** `%USERPROFILE%\Documents\VideoEditor\` → `projects/scratch/` (the unsaved project) + `projects/session.json`, `exports/`, `tmp/{jobId}/`, `bin/whisper/`, `settings.json`. Media lives in each PROJECT FOLDER (`<Name>/media`, `<Name>/cache`), see docs/PROJECT-FOLDERS.md; the old global `media/{hash}/` store is legacy.
+- **Data dir:** `%USERPROFILE%\Documents\VideoEditor\` → `projects/session.json` (the last open project), `exports/`, `tmp/{jobId}/`, `bin/whisper/`, `settings.json`. A project is a folder (`<Name>.reel`, `generated/`, `transcripts/`, `cache/`) whose library POINTS at originals where they are, see docs/MEDIA-POINTERS.md; the old global `media/{hash}/` store is legacy (converted, then optionally deleted).
 - **Key ffmpeg sketches** (proxy, HDR→SDR tonemap, 3-phase export graph, sidechain ducking) are written out in PLAN.md §"Core pipelines" — copy them from there.
 - **Pure, unit-testable modules** (do these test-first): `timelineMath`, `captions`, `checklist`, `coords`, ffprobe-JSON parsing, ffmpeg command builders, assBuilder golden files.
 

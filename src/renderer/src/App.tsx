@@ -1,4 +1,4 @@
-import { useEffect, useRef, type DragEvent, type JSX } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Dock } from '@/components/Dock'
 import { CropEditor } from '@/components/CropEditor'
@@ -15,15 +15,43 @@ import { SettingsModal } from '@/components/SettingsModal'
 import { ChecklistModal } from '@/components/ChecklistModal'
 import { ScriptModal } from '@/components/ScriptModal'
 import { StatusFooter } from '@/components/StatusFooter'
+import { NewProjectDialog } from '@/components/NewProjectDialog'
+import { StartScreen } from '@/components/StartScreen'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
-import { onJobProgress, pathForFile } from '@/ipc/client'
+import { chooseProjectLocation, defaultProjectLocation, onJobProgress, onLibraryChanged, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { makeTextLayer } from '@shared/layers'
+
+/**
+ * File ▸ New's window (docs/MEDIA-POINTERS.md "The project folder"): a name
+ * and a location, starting from the Settings export folder. Creating makes the
+ * project folder and opens it.
+ */
+function NewProjectWindow(): JSX.Element {
+  const open = useUi((s) => s.newProjectOpen)
+  const [location, setLocation] = useState('')
+  useEffect(() => {
+    if (open) void defaultProjectLocation().then(setLocation)
+  }, [open])
+  const close = (): void => useUi.getState().setNewProjectOpen(false)
+  return (
+    <NewProjectDialog
+      open={open}
+      onClose={close}
+      defaultLocation={location}
+      onChooseLocation={(current) => chooseProjectLocation(current)}
+      onCreate={async (name, where) => {
+        await useProject.getState().createProject(name, where)
+        close()
+      }}
+    />
+  )
+}
 
 export default function App(): JSX.Element {
   const queryClient = useQueryClient()
@@ -47,6 +75,17 @@ export default function App(): JSX.Element {
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
   }, [])
+
+  // Main's library changed after open (import, relink, a path fixed by a
+  // re-check): unsaved changes, and the library list is stale.
+  useEffect(
+    () =>
+      onLibraryChanged(() => {
+        useProject.getState().markLibraryChanged()
+        void queryClient.invalidateQueries({ queryKey: ['library'] })
+      }),
+    [queryClient]
+  )
 
   // Subscribe to background job progress; refresh library when a proxy lands.
   useEffect(() => {
@@ -82,7 +121,7 @@ export default function App(): JSX.Element {
       }
       if (mod && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault()
-        useProject.getState().newProjectFile()
+        void useProject.getState().newProjectFile()
         return
       }
 
@@ -144,6 +183,10 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const loaded = useProject((s) => s.loaded)
+  const hasProject = useProject((s) => !!s.project)
+  const launchMessage = useProject((s) => s.launchMessage)
+
   const onDrop = (e: DragEvent): void => {
     e.preventDefault()
     fileDrag.reset()
@@ -151,6 +194,22 @@ export default function App(): JSX.Element {
       .map((f) => pathForFile(f))
       .filter(Boolean)
     if (paths.length) importMedia.mutate(paths)
+  }
+
+  // No project open (first launch, or the last one couldn't be reopened): the
+  // start screen. There is no untitled project to fall back on.
+  if (loaded && !hasProject) {
+    return (
+      <div className="relative h-full select-none bg-[#0b0b0f]">
+        <StartScreen
+          message={launchMessage ?? undefined}
+          onNew={() => void useProject.getState().newProjectFile()}
+          onOpen={() => void useProject.getState().openFile()}
+        />
+        <NewProjectWindow />
+        <SettingsModal />
+      </div>
+    )
   }
 
   return (
@@ -219,6 +278,7 @@ export default function App(): JSX.Element {
       <SettingsModal />
       <ChecklistModal />
       <ScriptModal />
+      <NewProjectWindow />
 
       {fileDrag.active && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">

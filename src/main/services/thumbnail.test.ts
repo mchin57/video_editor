@@ -44,6 +44,14 @@ describe('buildThumbnailArgs', () => {
     expect(a.join(' ')).toContain('scale=202:360')
     expect(a[a.length - 1]).toBe('out.jpg')
   })
+  it('does not seek a still image (a JPEG loses its only frame to -ss 0)', () => {
+    const still = buildThumbnailArgs('in.jpg', 'out.jpg', probe({ codec: 'mjpeg' }), true)
+    expect(still).not.toContain('-ss')
+    expect(still.join(' ')).toContain('-i in.jpg -map 0:v:0 -frames:v 1')
+    // Videos keep their exact command.
+    expect(buildThumbnailArgs('in.mov', 'out.jpg', probe())).toEqual(buildThumbnailArgs('in.mov', 'out.jpg', probe(), false))
+    expect(buildThumbnailArgs('in.mov', 'out.jpg', probe()).join(' ')).toContain('-ss 0 -i in.mov')
+  })
   it('tonemaps HDR sources only', () => {
     const sdr = buildThumbnailArgs('in.mov', 'out.jpg', probe({ isHdr: false })).join(' ')
     const hdr = buildThumbnailArgs('in.mov', 'out.jpg', probe({ isHdr: true })).join(' ')

@@ -15,7 +15,7 @@
 
 import type { Composition, Layer, LayoutCell } from './project'
 import { audioClipEnd, createEmptyComposition } from './project'
-import { FRAME, layerLabel, visualDuration } from './layers'
+import { FRAME, layerLabel, playedVideoDuration, visualDuration } from './layers'
 
 /** Maximum nesting depth (root = 1). Deeper enter/convert actions must refuse. */
 export const MAX_COMP_DEPTH = 4
@@ -148,6 +148,62 @@ export function syncCompoundWindows(comp: Composition, srcDur: SourceDuration = 
     return { ...l, endSec: end, content: { ...l.content, comp: inner } }
   })
   return changed ? { ...comp, layers } : comp
+}
+
+/**
+ * Every placement of `mediaId` in `comp` (recursing into compound layers and
+ * layout-cell comps) reset to the WHOLE source of `durationSec`. Relinking a
+ * clip to a file of a different length discards the old cuts
+ * (docs/MEDIA-POINTERS.md "Relink"; choosing how to keep them is a TODO):
+ * - video: in 0 → out `durationSec`; freeze holds and the speed ramp go (they
+ *   are source-time data about the old file); a constant speed stays; the
+ *   layer's end follows via `playedVideoDuration`.
+ * - audio clips and layout cells: in 0 → out `durationSec`.
+ * Returns the input unchanged when nothing referenced the media. Compound
+ * windows re-sync on commit (`syncCompoundWindows`).
+ */
+export function resetMediaCuts<T extends Composition>(comp: T, mediaId: string, durationSec: number): T {
+  let changed = false
+  const layers = comp.layers.map((l): Layer => {
+    const c = l.content
+    if (c.kind === 'video' && c.mediaId === mediaId) {
+      changed = true
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { freezes, speedRamp, ...rest } = c
+      const content = { ...rest, inSec: 0, outSec: durationSec }
+      return { ...l, endSec: l.startSec + playedVideoDuration(content), content }
+    }
+    if (c.kind === 'compound') {
+      const inner = resetMediaCuts(c.comp, mediaId, durationSec)
+      if (inner === c.comp) return l
+      changed = true
+      return { ...l, content: { ...c, comp: inner } }
+    }
+    if (c.kind === 'layout') {
+      let cellsChanged = false
+      const cells = c.cells.map((cell): LayoutCell => {
+        if (cell.comp) {
+          const inner = resetMediaCuts(cell.comp, mediaId, durationSec)
+          if (inner === cell.comp) return cell
+          cellsChanged = true
+          return { ...cell, comp: inner }
+        }
+        if (cell.mediaId !== mediaId) return cell
+        cellsChanged = true
+        return { ...cell, inSec: 0, outSec: durationSec }
+      })
+      if (!cellsChanged) return l
+      changed = true
+      return { ...l, content: { ...c, cells } }
+    }
+    return l
+  })
+  const audioClips = comp.audioClips.map((a) => {
+    if (a.mediaId !== mediaId) return a
+    changed = true
+    return { ...a, inSec: 0, outSec: durationSec }
+  })
+  return changed ? { ...comp, layers, audioClips } : comp
 }
 
 /**

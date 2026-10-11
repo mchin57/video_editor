@@ -1,10 +1,11 @@
 /**
- * The open project's media library. Each project folder OWNS its media
- * (docs/PROJECT-FOLDERS.md): `media/<id>/` holds the original — a hardlink to
- * the imported source (no extra disk), a copy when linking fails, or a file
- * the app generated — plus its record `asset.json`; `cache/<id>/` holds the
- * derived files (proxy, thumb, waveform, display PNG), rebuilt on demand
- * whenever they are missing. Re-importing identical content reuses the record.
+ * The open project's media library (docs/MEDIA-POINTERS.md). A library item
+ * POINTS at its original where the user keeps it — nothing is copied or
+ * linked. Its record (paths + fingerprint + probe) lives in main's in-memory
+ * library (`library.ts`) and reaches disk only when the project is saved.
+ * `cache/<id>/` holds the derived files (proxy, thumb, waveform, display PNG),
+ * rebuilt on demand whenever they are missing; `generated/` holds media the
+ * editor made; `transcripts/` holds whisper output.
  *
  * Paths come from `projectLayout`; the folder from `projectRoot`. Every public
  * entry point captures the root ONCE, so a job outlives a project switch in the
@@ -13,9 +14,10 @@
 
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, promises as fsp } from 'node:fs'
-import { basename, join, parse } from 'node:path'
-import type { MediaAsset, MediaKind, MediaStatus, MediaStorage } from '@shared/media'
-import { assetKind, deriveKind, isAudioAsset, isImageAsset, kindFromExt } from '@shared/media'
+import { basename, dirname, join, parse } from 'node:path'
+import type { FingerprintField, MediaAsset, MediaKind, MediaRecord } from '@shared/media'
+import type { RelinkResult } from '@shared/ipc'
+import { deriveKind, isAudioAsset, isImageAsset, isUnknownClip, kindFromExt } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
@@ -23,23 +25,30 @@ import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { createJob, failJob, finishJob } from './jobs'
-import { replaceFile, singleFlight } from './atomicWrite'
-import { linkOrCopy, moveFile } from './linkOrCopy'
+import { singleFlight } from './atomicWrite'
+import { moveFile } from './linkOrCopy'
 import { getProjectRoot } from './projectRoot'
-import { hashVerdict, statVerdict, unusableMessage } from './mediaHealth'
+import { unusableMessage } from './mediaHealth'
+import { fingerprintDiff, fingerprintId, isUnknownFingerprint, sameFingerprint } from './fingerprint'
+import { toRelativePath } from './mediaRef'
 import {
-  assetJsonPath,
-  cacheDir,
-  cachePath,
-  mediaDir,
-  originalName,
-  transcriptPath
-} from './projectLayout'
+  allEntries,
+  findByFingerprint,
+  fingerprintOf,
+  freeIdFor,
+  getEntry,
+  markTranscriptStale,
+  putEntry,
+  resolveEntry,
+  type LibraryEntry
+} from './library'
+import { cacheDir, cachePath, generatedRoot, safeFileName, transcriptPath, uniqueFileName } from './projectLayout'
 import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
 
-/** Content hash (first 12 hex of sha1) of a file — the media id. */
+/** Full-content hash (first 12 hex of sha1) — the id scheme before
+ *  fingerprints. Only legacy conversion still needs it. */
 export function hashFile(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha1')
@@ -84,7 +93,18 @@ const playableProxyPath = (r: string, a: MediaAsset): string =>
  */
 const proxyFlight = singleFlight<void>() // keyed by cache path of the proxy
 const artifactFlight = singleFlight<void>() // keyed by output path
-const importFlight = singleFlight<MediaAsset>() // keyed by media dir
+const importFlight = singleFlight<MediaAsset>() // keyed by media id
+
+/** Derived files whose generator failed this session (by output path): the
+ *  library load runs on every refetch and must not retry — and log — a file
+ *  that can't be made over and over. Relaunching retries. */
+const artifactFailed = new Set<string>()
+
+/** Forget the failures remembered for one asset's cache dir (proxy + artifacts). */
+function forgetFailures(dir: string): void {
+  for (const out of [...artifactFailed]) if (out.startsWith(dir)) artifactFailed.delete(out)
+  proxyFailed.delete(dir)
+}
 
 /** Best-effort derived file: skipped if present, generated once however many
  *  callers race for it, and never throws (a missing thumb must not fail an import). */
@@ -94,12 +114,13 @@ async function makeArtifact(
   id: string,
   generate: (out: string) => Promise<void>
 ): Promise<void> {
-  if (existsSync(out)) return
+  if (existsSync(out) || artifactFailed.has(out)) return
   await artifactFlight(out, async () => {
     try {
       await fsp.mkdir(join(out, '..'), { recursive: true })
       await generate(out)
     } catch (error) {
+      artifactFailed.add(out)
       console.error(`${what} failed for`, id, error)
     }
   })
@@ -109,7 +130,7 @@ async function makeArtifact(
 async function makeThumb(r: string, asset: MediaAsset): Promise<void> {
   if (!asset.probe.video) return
   await makeArtifact(thumbPath(r, asset.id), 'thumbnail', asset.id, (out) =>
-    generateThumbnail(asset.originalPath, out, asset.probe)
+    generateThumbnail(asset.originalPath, out, asset.probe, isImageAsset(asset))
   )
 }
 
@@ -130,41 +151,28 @@ async function makeImage(r: string, asset: MediaAsset): Promise<void> {
   )
 }
 
-/** On-disk record: the runtime asset minus the resolved `originalPath`, plus the
- *  original's file name inside its media dir. */
-type AssetRecord = Omit<MediaAsset, 'originalPath'> & { file: string }
-
-async function readAsset(r: string, id: string): Promise<MediaAsset | null> {
-  try {
-    const rec = JSON.parse(await fsp.readFile(assetJsonPath(r, id), 'utf8')) as AssetRecord
-    const { file, ...rest } = rec
-    const asset: MediaAsset = { ...rest, originalPath: join(mediaDir(r, id), file) }
-    if (!asset.kind) asset.kind = assetKind(asset) // backfill records imported pre-kind
-    return asset
-  } catch {
-    return null
+/** A library entry as the app uses it (runtime facts filled in from disk). */
+function toAsset(r: string, entry: LibraryEntry): MediaAsset {
+  const asset: MediaAsset = {
+    ...entry.record,
+    originalPath: entry.path ?? entry.record.absolutePath,
+    status: entry.path ? 'ok' : 'missing',
+    proxyReady: false,
+    // A transcript a forced relink made stale is hidden until Save deletes it.
+    transcribed: !entry.staleTranscript && existsSync(transcriptPath(r, entry.record.id))
   }
+  asset.proxyReady = existsSync(playableProxyPath(r, asset))
+  return asset
 }
 
-/** Public accessor for a single asset record of the open project. */
+/** An asset of the open project, its original located now (null = unknown id). */
+async function readAsset(r: string, id: string): Promise<MediaAsset | null> {
+  const res = await resolveEntry(id)
+  return res ? toAsset(r, res.entry) : null
+}
+
+/** Public accessor for a single asset of the open project. */
 export const getAsset = (id: string): Promise<MediaAsset | null> => readAsset(getProjectRoot(), id)
-
-/** Write a record — temp + rename, never in place: the rule for every file in a
- *  project folder, since a file there may be a hardlink (see linkOrCopy.ts). */
-async function writeAsset(r: string, asset: MediaAsset): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { originalPath, status, ...rest } = asset
-  const rec: AssetRecord = { ...rest, file: basename(originalPath) }
-  await replaceFile(assetJsonPath(r, asset.id), JSON.stringify(rec, null, 2))
-}
-
-/** Record that an asset has a transcript (whisper calls this after caching it). */
-export async function markTranscribed(id: string): Promise<void> {
-  const r = getProjectRoot()
-  const asset = await readAsset(r, id)
-  if (!asset || asset.transcribed) return
-  await writeAsset(r, { ...asset, transcribed: true })
-}
 
 /** Where an asset's transcript lives (project-owned: slow to rebuild). */
 export const transcriptFile = (id: string): string => transcriptPath(getProjectRoot(), id)
@@ -188,251 +196,229 @@ export function audioProxyIfReady(id: string): string | null {
 export async function ensureImagePath(id: string): Promise<string> {
   const r = getProjectRoot()
   const asset = await readAsset(r, id)
-  if (asset) await makeImage(r, asset)
+  if (asset?.status === 'ok') await makeImage(r, asset)
   return imagePath(r, id)
 }
 
-/** Stat the original we hold — the change-detection key. */
-async function statOf(path: string): Promise<{ size: number; mtimeMs: number }> {
-  const s = await fsp.stat(path)
-  return { size: s.size, mtimeMs: s.mtimeMs }
-}
-
-// --- Health: is the original still the file we imported? ---------------------
-
-/** Hash per (path, size, mtime): a changed file is re-hashed once, not on every
- *  library refetch. */
-const hashMemo = new Map<string, string>()
-async function hashOnce(path: string, stamp: { size: number; mtimeMs: number }): Promise<string> {
-  const key = `${path}|${stamp.size}|${stamp.mtimeMs}`
-  let hash = hashMemo.get(key)
-  if (!hash) {
-    hash = await hashFile(path)
-    hashMemo.set(key, hash)
-  }
-  return hash
-}
-
-/**
- * Check an asset's original against its record (docs/PROJECT-FOLDERS.md
- * "Changed-file detection"). A stat that matches costs nothing; a mismatch is
- * re-hashed: identical bytes just get re-stamped (silently), different bytes
- * are `changed`. Sets and returns `asset.status`.
- */
-async function checkOriginal(r: string, asset: MediaAsset): Promise<MediaStatus> {
-  const now = await statOf(asset.originalPath).catch(() => null)
-  const first = statVerdict(asset, now)
-  if (first !== 'rehash') return (asset.status = first)
-  const verdict = hashVerdict(asset.hash ?? asset.id, await hashOnce(asset.originalPath, now!))
-  if (verdict === 'changed') return (asset.status = 'changed')
-  Object.assign(asset, now, { hash: asset.hash ?? asset.id })
-  await writeAsset(r, asset).catch(() => {})
-  return (asset.status = 'ok')
-}
-
-/** The asset, if its original is usable; else a clear error (jobs call this
- *  instead of letting ffmpeg fail on a missing or swapped file). */
+/** The asset, if its original was found; else a clear error (jobs call this
+ *  instead of letting ffmpeg fail on a missing file). */
 export async function requireUsable(id: string): Promise<MediaAsset> {
-  const r = getProjectRoot()
-  const asset = await readAsset(r, id)
+  const asset = await readAsset(getProjectRoot(), id)
   if (!asset) throw new Error('That media is no longer in the library.')
-  if ((await checkOriginal(r, asset)) !== 'ok') {
-    throw new Error(unusableMessage([{ fileName: asset.fileName, status: asset.status! }]))
-  }
+  if (asset.status !== 'ok') throw new Error(unusableMessage([{ fileName: asset.fileName, status: asset.status! }]))
   return asset
 }
 
 /** Throw (naming every file) unless all these assets are usable: export's gate. */
 export async function assertMediaUsable(ids: string[]): Promise<void> {
   const r = getProjectRoot()
-  const items: { fileName: string; status: MediaStatus }[] = []
+  const items: { fileName: string; status: 'ok' | 'missing' }[] = []
   for (const id of new Set(ids)) {
     const asset = await readAsset(r, id)
     if (!asset) continue // the exporter already skips unknown media
-    items.push({ fileName: asset.fileName, status: await checkOriginal(r, asset) })
+    items.push({ fileName: asset.fileName, status: asset.status === 'ok' ? 'ok' : 'missing' })
   }
   if (items.some((i) => i.status !== 'ok')) throw new Error(unusableMessage(items))
 }
 
+/** Point a record at `path` (where its content was just found): both paths
+ *  follow it, and it counts as generated exactly when it lives in the
+ *  project's `generated/` (Save As carries those files along). */
+function pointAt(r: string, record: MediaRecord, path: string): MediaRecord {
+  const relativePath = toRelativePath(r, path)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { generated, ...rest } = record
+  const inGenerated = !!relativePath && relativePath.toLowerCase().startsWith('generated/')
+  return { ...rest, absolutePath: path, relativePath, ...(inGenerated ? { generated: true } : {}) }
+}
+
+/** How a picked file compares with a clip's fingerprint, for the Relink warning. */
+export interface RelinkCheck {
+  fileName: string
+  matches: boolean
+  /** The clip was never fingerprinted (converted after its file was gone). */
+  unknown: boolean
+  /** Nothing records which file the clip was (a placeholder: unknownMedia.ts). */
+  placeholder: boolean
+  /** The fields that differ (empty when it matches). */
+  differs: FingerprintField[]
+  recordedSize: number
+  foundSize: number
+}
+
+export async function relinkCheck(id: string, srcPath: string): Promise<RelinkCheck> {
+  const entry = getEntry(id)
+  if (!entry) throw new Error('That media is no longer in the library.')
+  const recorded = entry.record.fingerprint
+  const found = await fingerprintOf(srcPath)
+  const unknown = isUnknownFingerprint(recorded)
+  const differs = fingerprintDiff(recorded, found)
+  return {
+    fileName: entry.record.fileName,
+    matches: !unknown && differs.length === 0,
+    unknown,
+    placeholder: isUnknownClip(entry.record),
+    differs,
+    recordedSize: recorded.size,
+    foundSize: found.size
+  }
+}
+
 /**
- * "Use the new file": accept a changed original as the asset's content. The id
- * stays (every clip keeps pointing at it); hash, stamp and probe follow the new
- * bytes, and the cache is dropped so it rebuilds from them.
+ * "Relink": point `id` at `srcPath` (docs/MEDIA-POINTERS.md "Relink"). A file
+ * that doesn't match the clip's fingerprint is taken only with `force` — the
+ * user's "Update path anyway" — and then the clip becomes that file: its
+ * fingerprint and probe follow it, and its cache and transcript go (they
+ * describe the old content). A change of length is reported (`cutsReset`) so
+ * the renderer resets the clip's cuts. Afterwards the picked file's folder is
+ * searched for the project's other missing clips (relink one, fix the rest).
  */
-export async function acceptChangedMedia(id: string): Promise<MediaAsset> {
+export async function relinkMedia(id: string, srcPath: string, force = false): Promise<RelinkResult> {
   const r = getProjectRoot()
-  const asset = await readAsset(r, id)
-  if (!asset) throw new Error('That media is no longer in the library.')
-  const stamp = await statOf(asset.originalPath)
-  const hash = await hashFile(asset.originalPath)
-  const probe = await probeFile(asset.originalPath)
-  if (probe.audio?.channels === 2) probe.audio.monoFoldChannel = await detectMonoFoldChannel(asset.originalPath)
-  await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
-  const next: MediaAsset = { ...asset, ...stamp, hash, probe, status: 'ok' }
-  await writeAsset(r, next)
-  return hydrate(r, next)
+  const entry = getEntry(id)
+  if (!entry) throw new Error('That media is no longer in the library.')
+  const fp = await fingerprintOf(srcPath)
+  let cutsReset = false
+  if (sameFingerprint(fp, entry.record.fingerprint)) {
+    putEntry(pointAt(r, entry.record, srcPath), srcPath, r)
+  } else {
+    if (!force) throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
+    const probe = await probeFile(srcPath)
+    if (probe.audio?.channels === 2) probe.audio.monoFoldChannel = await detectMonoFoldChannel(srcPath)
+    // Cuts reset only when the old length was KNOWN and differs: a clip never
+    // fingerprinted has no real length to compare, so its cuts stay.
+    const lengthKnown = !isUnknownFingerprint(entry.record.fingerprint)
+    cutsReset = lengthKnown && Math.abs(probe.durationSec - entry.record.probe.durationSec) > 0.01
+    // A placeholder takes the file's name and kind; a known clip keeps its own.
+    const identity = isUnknownClip(entry.record)
+      ? { fileName: basename(srcPath), kind: kindFromExt(srcPath) ?? deriveKind(probe) }
+      : {}
+    // The cache is disposable — rebuild it from the new file now. The
+    // transcript isn't: hide it, and let Save delete it (not saving brings
+    // the old record back, and with it the transcript that matches).
+    await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
+    forgetFailures(cacheDir(r, id)) // new content: its derived files get a fresh try
+    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe, ...identity }, srcPath, r)
+    markTranscriptStale(id)
+  }
+  const asset = await hydrate(r, toAsset(r, getEntry(id)!))
+  return { asset, cutsReset, alsoFound: await relinkSiblings(r, dirname(srcPath)) }
 }
 
 /**
- * "Relink": point a missing or changed asset at `srcPath`, which must hold the
- * asset's ORIGINAL bytes (same hash): the same footage found elsewhere, a
- * backup. The project's original name is replaced (unlinking it from a source
- * that was overwritten) by a fresh link/copy of `srcPath`.
+ * Relink one, fix the rest: every other missing clip whose file is in `dir`
+ * (matched by size, then fingerprint) is pointed at it. Returns their names.
  */
-export async function relinkMedia(id: string, srcPath: string): Promise<MediaAsset> {
-  const r = getProjectRoot()
-  const asset = await readAsset(r, id)
-  if (!asset) throw new Error('That media is no longer in the library.')
-  if ((await hashFile(srcPath)) !== (asset.hash ?? asset.id)) {
-    throw new Error(`That file isn't the same footage as "${asset.fileName}" (its content differs).`)
+async function relinkSiblings(r: string, dir: string): Promise<string[]> {
+  const missing: LibraryEntry[] = []
+  for (const entry of allEntries()) {
+    if (isUnknownFingerprint(entry.record.fingerprint)) continue
+    const res = await resolveEntry(entry.record.id)
+    if (res && !res.entry.path) missing.push(res.entry)
   }
-  await placeAgain(r, asset, srcPath)
-  return hydrate(r, asset)
-}
-
-/** The id of the asset holding `hash`, if any — the record named by it, else a
- *  scan (only accepted changes make the two differ; projects hold hundreds of
- *  assets at most). */
-async function findByHash(r: string, hash: string): Promise<string | null> {
-  const named = await readAsset(r, hash)
-  if (named && (named.hash ?? named.id) === hash) return hash
-  let ids: string[] = []
-  try {
-    ids = await fsp.readdir(join(r, 'media'))
-  } catch {
-    return null
+  if (!missing.length) return []
+  const bySize = new Map<number, string[]>()
+  for (const name of await fsp.readdir(dir).catch(() => [] as string[])) {
+    const path = join(dir, name)
+    const s = await fsp.stat(path).catch(() => null)
+    if (!s?.isFile()) continue
+    bySize.set(s.size, [...(bySize.get(s.size) ?? []), path])
   }
-  for (const id of ids) {
-    if (id === hash) continue
-    const asset = await readAsset(r, id)
-    if (asset?.hash === hash) return id
+  const found: string[] = []
+  for (const entry of missing) {
+    for (const path of bySize.get(entry.record.fingerprint.size) ?? []) {
+      const fp = await fingerprintOf(path).catch(() => null)
+      if (!fp || !sameFingerprint(fp, entry.record.fingerprint)) continue
+      putEntry(pointAt(r, entry.record, path), path, r)
+      found.push(entry.record.fileName)
+      break
+    }
   }
-  return null
-}
-
-/** A media id for new content `hash`: the hash itself, unless an asset whose
- *  changed file was accepted still holds that name — then a derived hex id. */
-async function freeIdFor(r: string, hash: string): Promise<string> {
-  let id = hash
-  for (let n = 1; existsSync(assetJsonPath(r, id)); n++) {
-    id = createHash('sha1').update(`${hash}:${n}`).digest('hex').slice(0, 12)
-  }
-  return id
-}
-
-/** Replace the project's original with a link/copy of `srcPath` and re-stamp. */
-async function placeAgain(r: string, asset: MediaAsset, srcPath: string): Promise<void> {
-  const tmp = `${asset.originalPath}.relink`
-  await fsp.rm(tmp, { force: true })
-  const storage = await linkOrCopy(srcPath, tmp)
-  await fsp.rm(asset.originalPath, { force: true })
-  await fsp.rename(tmp, asset.originalPath)
-  Object.assign(asset, { storage, sourcePath: srcPath, ...(await statOf(asset.originalPath)) })
-  await writeAsset(r, asset)
+  return found
 }
 
 /**
- * Register the original now at `media/<id>/<file>` as a library asset: probe it,
- * build the instant artifacts (thumb, display PNG) and write the record.
+ * Probe a file and add it to the library as a new item `id` pointing at it,
+ * building the instant artifacts (thumb, display PNG).
  */
 async function register(
   r: string,
   id: string,
-  original: string,
+  path: string,
   fileName: string,
-  storage: MediaStorage,
-  sourcePath: string | null
+  fingerprint: MediaRecord['fingerprint'],
+  generated: boolean
 ): Promise<MediaAsset> {
-  const probe = await probeFile(original)
+  const probe = await probeFile(path)
   // Level-probe stereo sources for a dead channel so the proxy + export can
   // mono-fold "mono mic on one side" footage (best-effort; null on any failure).
   if (probe.audio?.channels === 2) {
-    probe.audio.monoFoldChannel = await detectMonoFoldChannel(original)
+    probe.audio.monoFoldChannel = await detectMonoFoldChannel(path)
   }
-  const kind: MediaKind = kindFromExt(original) ?? deriveKind(probe)
-  const asset: MediaAsset = {
+  const kind: MediaKind = kindFromExt(path) ?? deriveKind(probe)
+  const record: MediaRecord = {
     id,
-    hash: id,
     fileName,
-    originalPath: original,
-    sourcePath,
-    storage,
-    ...(await statOf(original)),
+    relativePath: toRelativePath(r, path),
+    absolutePath: path,
+    fingerprint,
+    ...(generated ? { generated: true } : {}),
     importedAt: new Date().toISOString(),
     probe,
-    proxyReady: false,
-    transcribed: existsSync(transcriptPath(r, id)),
     kind
   }
+  const asset = toAsset(r, putEntry(record, path, r))
   await makeThumb(r, asset)
   await makeImage(r, asset) // images: build the display PNG now (it is their "proxy")
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
-  await writeAsset(r, asset)
   return asset
 }
 
 /**
- * Hash + probe a source file, registering it in the open project's library.
- * Fast (no transcode): the original is HARDLINKED into `media/<id>/` (a copy
- * only when linking fails), so moving, renaming or deleting the source later
- * can't break the clip. Re-importing identical content reuses the record, and
- * relinks it if the project's own original went missing.
+ * Fingerprint + probe a source file, adding it to the open project's library
+ * as a POINTER to where it is. Fast (no transcode, no copy). Importing content
+ * the library already holds reuses that item — and repoints it here if its
+ * original had gone missing.
  */
 export async function importFile(srcPath: string, displayName?: string): Promise<MediaAsset> {
   const r = getProjectRoot()
-  const hash = await hashFile(srcPath)
-  // Dedup by CONTENT: usually the record named by the hash, but an asset whose
-  // changed file was accepted keeps its old id under a new hash.
-  const id = (await findByHash(r, hash)) ?? (await freeIdFor(r, hash))
-  return importFlight(mediaDir(r, id), async () => {
-    await fsp.mkdir(mediaDir(r, id), { recursive: true })
-    const existing = await readAsset(r, id)
-    if (existing && (existing.hash ?? existing.id) === hash) {
-      // Re-importing an asset's bytes from wherever the user found them now
-      // repairs a missing or changed original.
-      if ((await checkOriginal(r, existing)) !== 'ok') await placeAgain(r, existing, srcPath)
-      return hydrate(r, existing)
+  const fp = await fingerprintOf(srcPath)
+  const id = freeIdFor(fingerprintId(fp), fp)
+  return importFlight(id, async () => {
+    const existing = findByFingerprint(fp)
+    if (existing) {
+      const res = await resolveEntry(existing.record.id)
+      if (res && !res.entry.path) putEntry(pointAt(r, res.entry.record, srcPath), srcPath, r)
+      return hydrate(r, toAsset(r, getEntry(existing.record.id)!))
     }
-
-    const original = join(mediaDir(r, id), originalName(srcPath))
-    // An original without a record is a crash between placing and registering:
-    // reuse it (a copy is only ever placed whole) and read its placement back.
-    const storage: MediaStorage = existsSync(original)
-      ? (await fsp.stat(original)).nlink > 1 ? 'link' : 'copy'
-      : await linkOrCopy(srcPath, original)
-    const asset = await register(r, id, original, displayName ?? basename(srcPath), storage, srcPath)
-    if (id !== hash) {
-      asset.hash = hash
-      await writeAsset(r, asset)
-    }
-    return asset
+    return register(r, id, srcPath, displayName ?? basename(srcPath), fp, false)
   })
 }
 
 /**
- * Adopt a file the app GENERATED (in tmp) as a library asset: content-addressed
- * like any import, MOVED into `media/<id>/` (it is ours — no link). Identical
- * output reuses the existing asset, which gives re-rendering a cache for free.
+ * Adopt a file the app GENERATED (in tmp) as a library item: MOVED into the
+ * project's `generated/` under a readable, unique name. Identical output
+ * reuses the existing item, which gives re-rendering a cache for free.
  */
 export async function importGenerated(tmpPath: string, displayName: string): Promise<MediaAsset> {
   const r = getProjectRoot()
-  const id = await hashFile(tmpPath)
-  return importFlight(mediaDir(r, id), async () => {
-    await fsp.mkdir(mediaDir(r, id), { recursive: true })
-    const existing = await readAsset(r, id)
-    if (existing && existsSync(existing.originalPath)) {
+  const fp = await fingerprintOf(tmpPath)
+  const id = freeIdFor(fingerprintId(fp), fp)
+  return importFlight(id, async () => {
+    const existing = findByFingerprint(fp)
+    const found = existing ? await resolveEntry(existing.record.id) : null
+    if (found?.entry.path) {
       await fsp.rm(tmpPath, { force: true })
-      return hydrate(r, existing)
+      return hydrate(r, toAsset(r, found.entry))
     }
-    const original = existing?.originalPath ?? join(mediaDir(r, id), originalName(tmpPath))
-    await fsp.rm(original, { force: true })
-    await moveFile(tmpPath, original)
-    if (existing) {
-      Object.assign(existing, { storage: 'generated', sourcePath: null, ...(await statOf(original)) })
-      await writeAsset(r, existing)
-      return hydrate(r, existing)
-    }
-    return register(r, id, original, displayName, 'generated', null)
+    const dir = generatedRoot(r)
+    await fsp.mkdir(dir, { recursive: true })
+    // The display name (e.g. "clip (no bg 0:03–0:05).webm") may not be a legal
+    // file name; the library keeps showing it, the file gets a safe one.
+    const dest = join(dir, uniqueFileName(safeFileName(displayName), (n) => existsSync(join(dir, n))))
+    await moveFile(tmpPath, dest)
+    if (existing) return hydrate(r, toAsset(r, putEntry(pointAt(r, existing.record, dest), dest, r)))
+    return register(r, id, dest, displayName, fp, true)
   })
 }
 
@@ -447,11 +433,29 @@ export function ensureProxy(id: string): Promise<void> {
   return proxyFlight(cacheDir(r, id), () => buildProxy(r, id))
 }
 
+/** Proxies whose build failed this session (keyed by cache dir): the library
+ *  load doesn't retry them on every refetch. An explicit `ensureProxy` (import,
+ *  re-import, the assistant) still tries again. */
+const proxyFailed = new Set<string>()
+
+/** Start a missing proxy in the background — what makes cache/ disposable for
+ *  proxies too, and what builds them for media that arrived without one
+ *  (an encode interrupted by quitting, a converted project). Progress and the
+ *  library refresh ride on the proxy job, as for an import. */
+function kickProxy(r: string, id: string): void {
+  const key = cacheDir(r, id)
+  if (proxyFailed.has(key)) return
+  void proxyFlight(key, () => buildProxy(r, id)).catch((error) => {
+    proxyFailed.add(key)
+    console.error('proxy generation failed', id, error)
+  })
+}
+
 async function buildProxy(r: string, id: string): Promise<void> {
   const asset = await readAsset(r, id)
   if (!asset) throw new Error(`unknown media ${id}`)
   if (existsSync(playableProxyPath(r, asset))) return
-  if ((await checkOriginal(r, asset)) !== 'ok') {
+  if (asset.status !== 'ok') {
     throw new Error(unusableMessage([{ fileName: asset.fileName, status: asset.status! }]))
   }
   await fsp.mkdir(cacheDir(r, id), { recursive: true })
@@ -494,27 +498,23 @@ async function buildProxy(r: string, id: string): Promise<void> {
   }
 }
 
-/** Backfill derived artifacts (thumb/image/waveform) and refresh proxyReady.
- *  `proxyReady` is never trusted from the record: cache/ may have been deleted. */
+/** Backfill derived artifacts (thumb/image/waveform), refresh proxyReady, and
+ *  start a missing proxy. A missing original gets no new artifacts; whatever
+ *  cache exists still shows. */
 async function hydrate(r: string, asset: MediaAsset): Promise<MediaAsset> {
-  // Unusable originals get no new artifacts (they would describe the wrong
-  // bytes, or fail); whatever cache exists still shows.
-  if ((await checkOriginal(r, asset)) !== 'ok') {
-    asset.proxyReady = existsSync(playableProxyPath(r, asset))
-    asset.transcribed = existsSync(transcriptPath(r, asset.id))
-    return asset
-  }
+  if (asset.status !== 'ok') return asset
   await makeThumb(r, asset)
   await makeImage(r, asset)
   await makeWaveform(r, asset)
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
-  asset.transcribed = existsSync(transcriptPath(r, asset.id))
+  if (!asset.proxyReady) kickProxy(r, asset.id)
   return asset
 }
 
 /**
- * The library for the open project: the asset records for the given ids (the
- * project's `mediaIds`). Unknown ids are skipped. Sorted newest-import first.
+ * The library for the open project: the assets for the given ids (the
+ * project's `mediaIds`), each original located now. Unknown ids are skipped.
+ * Sorted newest-import first.
  */
 export async function getProjectMedia(ids: string[]): Promise<MediaAsset[]> {
   const r = getProjectRoot()
@@ -533,9 +533,9 @@ export const tmpOutput = (prefix: string, ext: string): string =>
 
 /**
  * Pull a source file's audio into the library as a standalone audio asset (no
- * timeline placement needed). The extracted WAV is content-addressed, so
- * re-extracting identical audio reuses the existing record; the normal
- * pipeline then builds the AAC proxy + waveform in the background.
+ * timeline placement needed), saved in `generated/`. Re-extracting identical
+ * audio reuses the existing item; the normal pipeline then builds the AAC
+ * proxy + waveform in the background.
  * Throws if the source has no audio stream.
  */
 export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset> {
@@ -565,7 +565,7 @@ export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset
  * Render an audio effect's WET signal from an existing library asset and import
  * the result as a new asset — the "add sound effect" pipeline.
  *
- * The output is content-addressed like every other generated asset, which gives
+ * The output is fingerprinted like every other generated asset, which gives
  * re-rendering its cache for free: the same source window through the same
  * settings produces identical bytes, so flipping a setting back and forth
  * reuses the file already on disk instead of re-encoding.

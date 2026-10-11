@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
+import type { RelinkResult } from '@shared/ipc'
 import {
-  acceptChangedMedia,
   ensureProxy,
   extractAudioDialog,
   importDialog,
@@ -190,33 +190,31 @@ export function useAddAudioFx(): ReturnType<
 }
 
 /**
- * A library card's repair actions for a `missing` / `changed` original
- * (docs/PROJECT-FOLDERS.md "Changed-file detection"): accept the changed file
- * as the clip's content, or relink to a file holding the original bytes. Either
- * way the proxy is rebuilt if the cache no longer matches.
+ * A library card's repair action for a `missing` original
+ * (docs/MEDIA-POINTERS.md "Relink"): point it at a file (main asks "Update
+ * path anyway?" when it doesn't match). A file of a different length resets
+ * the clip's cuts on the timeline (one undo step). The proxy is rebuilt if the
+ * cache no longer has one.
  */
 export function useRepairMedia(): {
-  accept: ReturnType<typeof useMutation<MediaAsset, Error, string>>
-  relink: ReturnType<typeof useMutation<MediaAsset | null, Error, string>>
+  relink: ReturnType<typeof useMutation<RelinkResult | null, Error, string>>
 } {
   const qc = useQueryClient()
-  const done = (asset: MediaAsset | null): void => {
+  const done = (result: RelinkResult | null): void => {
     void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
-    if (asset && !asset.proxyReady) {
+    if (!result) return
+    const { asset } = result
+    if (result.cutsReset) useProject.getState().resetMediaCuts(asset.id, asset.probe.durationSec)
+    if (!asset.proxyReady) {
       void ensureProxy(asset.id)
         .catch((err) => console.error('proxy rebuild failed', err))
         .finally(() => void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] }))
     }
   }
-  const accept = useMutation<MediaAsset, Error, string>({
-    mutationFn: (id) => acceptChangedMedia(id),
-    onSuccess: done,
-    onError: (err) => window.alert(err.message)
-  })
-  const relink = useMutation<MediaAsset | null, Error, string>({
+  const relink = useMutation<RelinkResult | null, Error, string>({
     mutationFn: (id) => relinkMediaDialog(id),
     onSuccess: done,
     onError: (err) => window.alert(err.message)
   })
-  return { accept, relink }
+  return { relink }
 }

@@ -48,6 +48,9 @@ interface UiState {
   /** Whether the settings modal is open. */
   settingsOpen: boolean
   setSettingsOpen: (v: boolean) => void
+  /** Whether the New project window is open (File ▸ New, Ctrl+N, start screen). */
+  newProjectOpen: boolean
+  setNewProjectOpen: (v: boolean) => void
   /** Whether the checklist modal is open. */
   checklistOpen: boolean
   setChecklistOpen: (v: boolean) => void
@@ -125,6 +128,8 @@ export const useUi = create<UiState>((set) => ({
   setImageEditOpen: (v) => set({ imageEditOpen: v }),
   settingsOpen: false,
   setSettingsOpen: (v) => set({ settingsOpen: v }),
+  newProjectOpen: false,
+  setNewProjectOpen: (v) => set({ newProjectOpen: v }),
   checklistOpen: false,
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,

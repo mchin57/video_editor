@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync, promises as fsp } from 'node:fs'
 import { join, parse } from 'node:path'
-import { IPC, type AudioFxRequest, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -16,17 +16,27 @@ import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
   ensureProxy,
   extractAudioToLibrary,
-  acceptChangedMedia,
   getProjectMedia,
   importGenerated,
+  relinkCheck,
   relinkMedia,
+  type RelinkCheck,
   renderAudioFxToLibrary,
   requireUsable,
   tmpOutput
 } from './services/mediaStore'
 import {
+  convertLegacyFolder,
+  convertLegacyProject,
+  deleteLegacyStore,
+  legacyStoreBytes,
+  remainingLegacyProjects,
+  reportLine
+} from './services/legacyConvert'
+import {
+  createProject,
+  documentFormat,
   loadProject,
-  newProject,
   openProject,
   REEL_EXT,
   saveProject,
@@ -34,14 +44,8 @@ import {
   saveProjectFile,
   suggestedSavePath
 } from './services/projectStore'
-import { getProjectRoot } from './services/projectRoot'
-import {
-  convertLegacyFolder,
-  convertLegacyProject,
-  deleteLegacyStore,
-  legacyStoreBytes
-} from './services/legacyConvert'
-import { isLegacyDoc, reportLine } from './services/legacyPlan'
+import { currentProjectRoot } from './services/projectRoot'
+import { onLibraryChanged } from './services/library'
 import { exportProject, suggestedExportName } from './services/exporter'
 import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
@@ -62,6 +66,38 @@ function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
   if (req.flipV) chain.push('vflip')
   if (req.color && !isNeutralColor(req.color)) chain.push(eqFilter(req.color))
   return chain
+}
+
+/** The user folders an old project may sit in (never converted in place;
+ *  scanned before the old library may be deleted). */
+const userDirs = (): string[] => (['home', 'documents', 'desktop', 'downloads'] as const).map((k) => app.getPath(k))
+
+const mb = (bytes: number): string => `${(bytes / 1024 ** 2).toFixed(1)} MB`
+
+/** The Relink warning's detail: which fingerprint fields differ, in words. */
+function relinkMismatchDetail(c: RelinkCheck): string {
+  if (c.placeholder) {
+    return (
+      "Nothing records which file this clip was (its project was converted without the old media library), " +
+      "so this file can't be checked against it. The clip will use this file; its cuts on the timeline stay as they are."
+    )
+  }
+  if (c.unknown) {
+    return (
+      `"${c.fileName}" was never fingerprinted (its file was already gone when the project was converted), ` +
+      "so this file can't be checked against it. The clip will use this file; its cuts on the timeline stay as they are."
+    )
+  }
+  const lines = c.differs.map((f) =>
+    f === 'size'
+      ? `File size: ${mb(c.recordedSize)} recorded, ${mb(c.foundSize)} in this file`
+      : `Content sample at the ${f} of the file: different`
+  )
+  return (
+    `This file doesn't match "${c.fileName}":\n${lines.join('\n')}\n\n` +
+    'The clip will use this file. If its length differs, every place the clip is used on the timeline ' +
+    'resets to the whole new file.'
+  )
 }
 
 export function registerIpcHandlers(): void {
@@ -131,12 +167,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listProjectMedia, (_event, ids: string[]) => getProjectMedia(ids))
   ipcMain.handle(IPC.ensureProxy, (_event, id: string) => ensureProxy(id))
 
-  // A library card's repair actions (docs/PROJECT-FOLDERS.md "Changed-file
-  // detection"): accept a changed original as the clip's content, or point the
-  // clip at a file holding its original bytes (null = dialog canceled).
-  ipcMain.handle(IPC.acceptChangedMedia, (_event, id: string) => acceptChangedMedia(id))
-  ipcMain.handle(IPC.relinkMediaDialog, async (event, id: string): Promise<MediaAsset | null> => {
+  // A library card's repair action (docs/MEDIA-POINTERS.md "Relink"): pick a
+  // file; one that doesn't match the clip's fingerprint needs "Update path
+  // anyway"; then other missing clips in that folder reconnect too. Null =
+  // canceled at either question.
+  ipcMain.handle(IPC.relinkMediaDialog, async (event, id: string): Promise<RelinkResult | null> => {
     const win = BrowserWindow.fromWebContents(event.sender)
+    const ask = (box: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
+      win ? dialog.showMessageBox(win, box) : dialog.showMessageBox(box)
     const options: Electron.OpenDialogOptions = {
       title: 'Find the original file',
       properties: ['openFile'],
@@ -145,20 +183,66 @@ export function registerIpcHandlers(): void {
         { name: 'All files', extensions: ['*'] }
       ]
     }
-    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
-    if (result.canceled || !result.filePaths[0]) return null
-    return relinkMedia(id, result.filePaths[0])
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths[0]) return null
+    const path = picked.filePaths[0]
+    const check = await relinkCheck(id, path)
+    if (!check.matches) {
+      const answer = await ask({
+        type: 'warning',
+        buttons: ['Update path anyway', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'These fields do not match',
+        message: 'These fields do not match. Update path anyway?',
+        detail: relinkMismatchDetail(check)
+      })
+      if (answer.response !== 0) return null
+    }
+    const result = await relinkMedia(id, path, !check.matches)
+    if (result.alsoFound.length) {
+      const n = result.alsoFound.length
+      await ask({
+        type: 'info',
+        buttons: ['OK'],
+        message: `Also reconnected ${n} other missing clip${n === 1 ? '' : 's'} found in that folder.`,
+        detail: result.alsoFound.join('\n')
+      })
+    }
+    return result
+  })
+
+  // A library record changed after the project opened (import, relink, a path
+  // fixed by a re-check): tell the renderer it now has unsaved changes.
+  onLibraryChanged(() => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC_EVENT.libraryChanged)
   })
 
   ipcMain.handle(IPC.loadProject, () => loadProject())
   ipcMain.handle(IPC.saveProject, (_event, project: Project) => saveProject(project))
 
   ipcMain.handle(IPC.saveProjectFile, (_event, project: Project) => saveProjectFile(project))
-  ipcMain.handle(IPC.newProject, (_event, project: Project) => newProject(project))
-  ipcMain.handle(IPC.getProjectDir, () => getProjectRoot())
+  ipcMain.handle(IPC.getProjectDir, () => currentProjectRoot())
+
+  // File ▸ New: the New project window's Create (name + location), its
+  // "Choose location…" folder picker, and the location it starts from.
+  ipcMain.handle(IPC.createProject, (_event, name: string, location: string) => createProject(name, location))
+  ipcMain.handle(IPC.chooseProjectLocation, async (event, current: string): Promise<string | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Choose where to create the project',
+      buttonLabel: 'Choose',
+      defaultPath: current && existsSync(current) ? current : app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    return result.canceled || !result.filePaths[0] ? null : result.filePaths[0]
+  })
+  ipcMain.handle(IPC.defaultProjectLocation, async () => (await getSettings()).exportDir)
 
   // Open a project folder's .reel via a native dialog. The FOLDER name becomes
   // the project's name (so exports and the title bar stay in sync with it).
+  // An old-format file is refused with a reason (projectStore.assertOpenable).
   ipcMain.handle(IPC.openProjectFile, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
@@ -174,33 +258,41 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
-    let path = result.filePaths[0]
-    // A legacy file (media in the old shared library) becomes a project folder
-    // before it opens: in place if it sits alone in its own folder, else a new
-    // <Name>/ beside it. The original is kept as .reel-legacy.
-    if (isLegacyDoc(JSON.parse(await fsp.readFile(path, 'utf8')))) {
-      const box: Electron.MessageBoxOptions = {
-        type: 'question',
-        buttons: ['Convert', 'Cancel'],
-        defaultId: 0,
-        cancelId: 1,
-        message: 'Convert this project to a project folder?',
-        detail:
-          'It uses the old shared media library. Converting gives it its own folder holding its media ' +
-          '(linked, so no extra disk space). The old file is kept as a .reel-legacy backup.'
-      }
-      const answer = win ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box)
-      if (answer.response !== 0) return null
-      const shared = ['home', 'documents', 'desktop', 'downloads'].map((k) => app.getPath(k as 'home'))
-      const report = await convertLegacyProject(path, { sharedDirs: shared })
-      path = report.to!
+    const path = result.filePaths[0]
+    // An old project (media in the old shared library) becomes a project
+    // folder before it opens: in place if it sits alone in its own folder,
+    // else a new <Name>/ beside it. The old file is kept as .reel-legacy.
+    if (documentFormat(JSON.parse(await fsp.readFile(path, 'utf8'))) !== 'legacy') return openProject(path)
+    const ask = (box: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
+      win ? dialog.showMessageBox(win, box) : dialog.showMessageBox(box)
+    const answer = await ask({
+      type: 'question',
+      buttons: ['Convert', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      message: 'Convert this old project?',
+      detail:
+        'It uses the old shared media library. Converting gives it a project folder whose library points at ' +
+        'your original files where they are (nothing is copied). The old file is kept as a .reel-legacy backup.'
+    })
+    if (answer.response !== 0) return null
+    const report = await convertLegacyProject(path, { sharedDirs: userDirs() })
+    if (report.missing.length) {
+      await ask({
+        type: 'warning',
+        buttons: ['OK'],
+        message: 'Converted, but some media was not found.',
+        detail: `Missing: ${report.missing.join(', ')}.\n\nUse Relink… on each missing clip in the Library to find it.`
+      })
     }
-    return openProject(path)
+    return openProject(report.to!)
   })
 
-  // File ▸ Convert old projects… — convert every legacy .reel in a folder (and
-  // its subfolders one level down), then offer to delete the old shared store
-  // when every original was found. Returns the summary lines (null = canceled).
+  // File ▸ Convert old projects… — convert every old .reel in a folder (and
+  // its subfolders one level down), then offer to delete the old shared
+  // library ONLY when no old project is left anywhere the app looks: the
+  // library is the only record of where an old project's footage lives.
+  // Returns the summary lines (null = canceled).
   ipcMain.handle(IPC.convertLegacyFolderDialog, async (event): Promise<string[] | null> => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const reels = join(app.getPath('documents'), 'Reels')
@@ -217,8 +309,21 @@ export function registerIpcHandlers(): void {
     finishJob(job.id)
     const lines = reports.length ? reports.map(reportLine) : ['No old projects found in that folder.']
     const clean = reports.every((r) => !r.error && !r.missing.length)
+    const leftover = remainingLegacyProjects([picked.filePaths[0], reels, ...userDirs()])
     const { freed } = await legacyStoreBytes()
-    if (reports.length && clean && freed > 0) {
+    if (!reports.length || freed <= 0) return lines
+    if (!clean) {
+      lines.push('', 'The old shared library was kept: some projects have missing files or failed.')
+    } else if (leftover.length) {
+      const shown = leftover.slice(0, 10)
+      lines.push(
+        '',
+        `The old shared library was kept: ${leftover.length} old project${leftover.length === 1 ? '' : 's'} still need it:`,
+        ...shown.map((p) => `  ${p}`),
+        ...(leftover.length > shown.length ? [`  …and ${leftover.length - shown.length} more`] : []),
+        'Convert those too; this offers to delete the library once none are left.'
+      )
+    } else {
       const gb = (freed / 1024 ** 3).toFixed(2)
       const box: Electron.MessageBoxOptions = {
         type: 'question',
@@ -227,17 +332,16 @@ export function registerIpcHandlers(): void {
         cancelId: 1,
         message: `Delete the old shared media library? It frees about ${gb} GB.`,
         detail:
-          'Every converted project found all of its media and holds its own copy now. ' +
-          'Any old .reel file that was NOT converted (somewhere outside this folder) would lose its ' +
-          'transcripts and generated clips (background removal, effects, stills).'
+          'Every converted project found all of its media, and no old projects are left in Documents, ' +
+          'Documents\\Reels, Desktop, Downloads or this folder. An old .reel kept anywhere else could not be ' +
+          'converted afterwards except by relinking each clip, and its transcripts and generated clips ' +
+          '(background removal, effects, stills) would be gone. This cannot be undone.'
       }
       const answer = win ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box)
       if (answer.response === 0) {
         await deleteLegacyStore()
         lines.push('', `Deleted the old shared library (${gb} GB freed).`)
       }
-    } else if (!clean) {
-      lines.push('', 'The old shared library was kept: some projects have missing files or failed.')
     }
     return lines
   })

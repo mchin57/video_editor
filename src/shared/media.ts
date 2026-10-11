@@ -55,46 +55,70 @@ export interface ProbeInfo {
 
 export type MediaKind = 'video' | 'audio' | 'image'
 
-/** How a project holds an original: a hardlink to the imported source (no
- *  extra disk), a real copy (other volume / link failed), or a file the app
- *  generated itself (background removal, effects, extracted audio, stills). */
-export type MediaStorage = 'link' | 'copy' | 'generated'
+/**
+ * What identifies an original without reading all of it (docs/MEDIA-POINTERS.md):
+ * its size plus sha1 hex digests of three fixed-size samples (start, middle,
+ * end). A file small enough that the samples would overlap is hashed whole,
+ * and that one digest fills all three fields.
+ */
+export interface Fingerprint {
+  size: number
+  start: string
+  middle: string
+  end: string
+}
 
-/** Whether a project's original is still the file it imported (checked by main
- *  on every library load): `missing` = the file under media/ is gone;
- *  `changed` = its bytes differ from import — usually the SOURCE was overwritten
- *  in place, which rewrites a hardlinked original too. */
-export type MediaStatus = 'ok' | 'missing' | 'changed'
+/** The fingerprint fields, as named in the relink mismatch warning. */
+export type FingerprintField = keyof Fingerprint
 
-export interface MediaAsset {
-  /** Stable id — the content hash (first 12 hex of sha1) at import; also the
-   *  folder name under the project's media/ and cache/. */
+/**
+ * A library item as SAVED in the `.reel` (docs/MEDIA-POINTERS.md "A library
+ * item"). It points at the original where the user keeps it; nothing is
+ * copied. Main owns these in memory for the open project; only Save writes them.
+ */
+export interface MediaRecord {
+  /** Stable id the timeline references. Fingerprint-derived for new imports;
+   *  pre-pointer clips keep their old content-hash ids. */
   id: string
+  /** Display name (the original's file name at import). */
   fileName: string
-  /** Absolute path of the file to READ — the project's own original under
-   *  `media/<id>/`. Resolved from the open project folder at load time, never
-   *  stored (the folder can move). */
-  originalPath: string
-  /** Content hash of the original's current bytes (equals `id` unless the user
-   *  accepted a changed file). Absent on legacy records. */
-  hash?: string
-  /** Where it was imported from (informational, used to relink); null for
-   *  app-generated media. */
-  sourcePath?: string | null
-  storage?: MediaStorage
-  /** Size + mtime of the original when recorded — the change-detection key. */
-  size?: number
-  mtimeMs?: number
-  /** Runtime only (never stored): the latest health check. */
-  status?: MediaStatus
+  /** From the `.reel`'s folder to the original, '/'-separated. Null when the
+   *  original is on another drive (no relative path exists). Tried FIRST. */
+  relativePath: string | null
+  /** Full path where the original was imported from or last found. Tried second. */
+  absolutePath: string
+  fingerprint: Fingerprint
+  /** Made by the editor (background removal, audio fx, extracted audio,
+   *  stills); its file lives in the project's `generated/`. */
+  generated?: boolean
   importedAt: string
   probe: ProbeInfo
+  kind: MediaKind
+}
+
+/** Whether a library item's original was found this session (checked by main
+ *  on open and on every library load): `missing` = neither its relative nor
+ *  its absolute path holds a file matching its fingerprint. */
+export type MediaStatus = 'ok' | 'missing'
+
+/** Display name of a placeholder for a clip the project uses but nothing
+ *  describes (main/services/unknownMedia.ts). */
+export const UNKNOWN_CLIP_NAME = 'Unknown clip'
+
+/** A placeholder record: the project uses the clip, but no record says which
+ *  file it was (an empty absolute path). Relink fills it in. */
+export const isUnknownClip = (r: Pick<MediaRecord, 'absolutePath'>): boolean => r.absolutePath === ''
+
+/** A library item as the app uses it: the saved record plus runtime facts. */
+export interface MediaAsset extends MediaRecord {
+  /** Absolute path of the original to READ: where it was found this session,
+   *  else (missing) the record's absolute path. Runtime only. */
+  originalPath: string
+  /** Runtime only: the latest check. */
+  status?: MediaStatus
   proxyReady: boolean
-  /** Whether a transcript.json has been generated. */
+  /** Whether a transcript exists in the project's transcripts/. */
   transcribed: boolean
-  /** Coarse media class. Optional for assets imported before this field existed
-   * (derived from the probe via {@link assetKind} as a fallback). */
-  kind?: MediaKind
 }
 
 /** Source extensions we recognise, by class. Drive the import dialog + kind. */

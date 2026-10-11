@@ -13,13 +13,14 @@ import type {
   TimelineItemRef,
   VideoContent
 } from '@shared/project'
-import { createEmptyProject, migrateProject, videoSpeed } from '@shared/project'
+import { migrateProject, videoSpeed } from '@shared/project'
 import type { AudioFx } from '@shared/audioFx'
 import {
   MAX_COMP_DEPTH,
   compDepth,
   makeCompFromCell,
   makeCompFromLayer,
+  resetMediaCuts,
   resolveCompAtPath,
   syncCompoundWindows,
   updateCompAtPath,
@@ -50,8 +51,8 @@ import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import {
+  createProject as createProjectFolder,
   loadProject,
-  newProject,
   openProjectFile,
   saveProject,
   saveProjectAs,
@@ -112,8 +113,10 @@ interface ProjectState {
   past: Project[]
   future: Project[]
   loaded: boolean
-  /** Path of the bound .reel file, or null if this project was never saved to one. */
+  /** The open project's .reel, or null when no project is open (start screen). */
   filePath: string | null
+  /** Why no project opened at launch (shown on the start screen). */
+  launchMessage: string | null
   /** Whether there are edits since the last file Save/Open. */
   dirty: boolean
   /**
@@ -127,11 +130,20 @@ interface ProjectState {
   editPath: CompPath
 
   load: () => Promise<void>
+  /** File ▸ New: after the discard prompt, open the New project window. */
   newProjectFile: () => Promise<void>
+  /** The New project window's Create: make `<location>/<name>/` and open it. */
+  createProject: (name: string, location: string) => Promise<void>
+  /** Main's library changed after open (import, relink, a fixed path): the
+   *  project has unsaved changes, and the autosave must carry them. */
+  markLibraryChanged: () => void
   openFile: () => Promise<void>
   save: () => Promise<void>
   saveAs: () => Promise<void>
   setPreset: (preset: PresetId) => void
+  /** A relink pointed `mediaId` at a file of a different length: every
+   *  placement (nested comps too) resets to the whole new file. One undo step. */
+  resetMediaCuts: (mediaId: string, durationSec: number) => void
   addMedia: (ids: string[]) => void
   removeMedia: (id: string) => void
   /** Update the ACTIVE composition without recording history (live drag
@@ -347,10 +359,10 @@ export const useProject = create<ProjectState>((set, get) => {
   /** Switch to a different project document, resetting history and selection.
    *  No autosave: main already holds this document's state (an autosave exists
    *  only once there are unsaved edits). */
-  function adopt(project: Project, filePath: string | null, dirty = false): void {
+  function adopt(project: Project, filePath: string, dirty = false): void {
     useUi.getState().clearSelection()
     gestureBefore = null // a gesture can't span documents
-    set({ project, past: [], future: [], filePath, dirty, editPath: [] })
+    set({ project: migrateProject(project), past: [], future: [], filePath, dirty, editPath: [], launchMessage: null })
   }
 
   /** After a history jump or reload, a stored `editPath` may point into a
@@ -375,41 +387,47 @@ export const useProject = create<ProjectState>((set, get) => {
     future: [],
     loaded: false,
     filePath: null,
+    launchMessage: null,
     dirty: false,
     editPath: [],
 
     load: async () => {
-      const res = await loadProject()
-      set({
-        project: migrateProject(res.project),
-        loaded: true,
-        past: [],
-        future: [],
-        filePath: res.path,
-        dirty: res.dirty
-      })
+      const { loaded, message } = await loadProject()
+      if (loaded) adopt(loaded.project, loaded.path, loaded.dirty)
+      else set({ project: null, filePath: null, dirty: false, launchMessage: message })
+      set({ loaded: true })
     },
 
     // New/Open: main discards the open project's unsaved state (the prompt
     // just confirmed that) and ignores any autosave still in flight for it.
     newProjectFile: async () => {
       if (get().dirty && !window.confirm(DISCARD_PROMPT)) return
-      const project = createEmptyProject(newId(), 'Untitled Reel')
-      await newProject(project)
-      adopt(project, null)
+      useUi.getState().setNewProjectOpen(true)
+    },
+
+    createProject: async (name, location) => {
+      cancelScheduledSave()
+      const res = await createProjectFolder(name, location)
+      adopt(res.project, res.path, res.dirty)
+    },
+
+    markLibraryChanged: () => {
+      const { project } = get()
+      if (!project) return
+      scheduleSave(project)
+      markDirty()
     },
 
     openFile: async () => {
       if (get().dirty && !window.confirm(DISCARD_PROMPT)) return
       const res = await openProjectFile()
       if (!res) return
-      adopt(migrateProject(res.project), res.path, res.dirty)
+      adopt(res.project, res.path, res.dirty)
     },
 
     save: async () => {
       const { project, filePath } = get()
-      if (!project) return
-      if (!filePath) return get().saveAs()
+      if (!project || !filePath) return
       cancelScheduledSave()
       await saveProjectFile(project)
       // An edit made while the write was in flight is still unsaved (and has
@@ -430,6 +448,8 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     setPreset: (preset) => commit((p) => ({ ...p, preset })),
+
+    resetMediaCuts: (mediaId, durationSec) => commit((p) => resetMediaCuts(p, mediaId, durationSec)),
 
     addMedia: (ids) =>
       commit((p) => {

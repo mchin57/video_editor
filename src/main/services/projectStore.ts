@@ -1,13 +1,16 @@
 /**
- * Project persistence — a project is a FOLDER that owns its media
- * (docs/PROJECT-FOLDERS.md; layout in `projectLayout.ts`):
+ * Project persistence — a project is a FOLDER (docs/MEDIA-POINTERS.md; layout
+ * in `projectLayout.ts`):
  *
- *  - `<Name>.reel` is the saved document (explicit File ▸ Save).
+ *  - `<Name>.reel` is the save file: the document plus its library (the media
+ *    records — paths + fingerprints). Created by New, then written ONLY by
+ *    File ▸ Save / Save As.
  *  - `autosave.json` is the working copy the renderer writes continuously, so a
  *    crash or quit can't lose work; it EXISTS exactly while there are unsaved
- *    changes (Save deletes it), which is how "dirty" survives a relaunch.
- *  - An unsaved project lives in the scratch folder `<data>/projects/scratch`;
- *    its first Save moves the whole folder to the chosen place.
+ *    changes (Save deletes it), which is how "dirty" survives a relaunch. It
+ *    carries the in-memory library too.
+ *  - There is no untitled project: New asks for a name and a location and
+ *    creates the folder. With nothing to reopen, the app shows a start screen.
  *
  * Which folder is open is main's state (`projectRoot`), remembered across
  * launches in `<data>/projects/session.json`. All document writes go through
@@ -15,48 +18,57 @@
  * Save, and an autosave from a document that is no longer open is dropped.
  */
 
-import { existsSync, mkdirSync, promises as fsp, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, promises as fsp, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import type { MediaAsset } from '@shared/media'
+import type { LaunchState, LoadedProject } from '@shared/ipc'
+import type { MediaRecord } from '@shared/media'
 import type { Project } from '@shared/project'
 import { createEmptyProject, migrateProject, PROJECT_VERSION } from '@shared/project'
+import { validateProjectName } from '@shared/projectName'
 import { getSubdir } from '../config'
 import { replaceFile } from './atomicWrite'
-import { copyAtomic, linkOrCopy } from './linkOrCopy'
-import { convertWorkingCopy } from './legacyConvert'
-import { isLegacyDoc } from './legacyPlan'
-import { getProjectRoot, setProjectRoot } from './projectRoot'
+import { copyAtomic } from './linkOrCopy'
+import {
+  addOpeningRecords,
+  clearStaleTranscript,
+  closeLibrary,
+  getEntry,
+  openLibrary,
+  rebaseLibrary,
+  recordsFor,
+  resolveAll,
+  staleTranscriptIds
+} from './library'
+import { fromRelativePath, samePath } from './mediaRef'
+import { unknownRecords } from './unknownMedia'
+import { currentProjectRoot, getProjectRoot, setProjectRoot } from './projectRoot'
 import {
   autosavePath,
   cacheDir,
   cacheRoot,
+  cleanupPlan,
   docPath,
-  isMediaId,
-  mediaDir,
-  mediaRoot,
+  GENERATED_MARKER,
+  generatedRoot,
   projectFolderFor,
-  sweepPlan
+  projectSubdirs,
+  sweepPlan,
+  transcriptPath,
+  transcriptsRoot
 } from './projectLayout'
 
 export { REEL_EXT } from './projectLayout'
+export type { LoadedProject } from '@shared/ipc'
 
-/** What the renderer adopts: the document, its `.reel` (null = unsaved
- *  scratch project) and whether it carries unsaved changes. */
-export interface LoadedProject {
-  project: Project
-  path: string | null
-  dirty: boolean
-}
+/** The `.reel` on disk: the document plus the library records saved with it. */
+type SavedDoc = Project & { library?: MediaRecord[] }
 
-const scratchRoot = (): string => join(getSubdir('projects'), 'scratch')
 const sessionPath = (): string => join(getSubdir('projects'), 'session.json')
-const isScratch = (root: string): boolean => root === scratchRoot()
 
 /** Id of the document open in the renderer — autosaves for any other are stale. */
 let openId: string | null = null
-/** No session file yet: the first launch since project folders, when the old
- *  working copy (projects/current.json) is converted into the scratch project. */
-let firstLaunch = false
+/** Why the last project couldn't be reopened at launch (for the start screen). */
+let launchMessage: string | null = null
 
 // --- Write queue -------------------------------------------------------------
 
@@ -76,34 +88,89 @@ async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await fsp.readFile(path, 'utf8'))
 }
 
+/** The document as written to disk: bumped version, its library attached. */
+function withLibrary(project: Project): SavedDoc {
+  const doc = { ...project, version: PROJECT_VERSION, updatedAt: new Date().toISOString() }
+  return { ...doc, library: recordsFor(JSON.stringify(doc)) }
+}
+
+// --- Formats -------------------------------------------------------------------
+
+/**
+ * Which model a document on disk belongs to: `legacy` (schema < 24, media in
+ * the old shared library — converted, docs/MEDIA-POINTERS.md "Migration"),
+ * `hardlink` (schema 24, a short-lived test format — restored from backup
+ * instead), or `current`.
+ */
+export function documentFormat(raw: unknown): 'legacy' | 'hardlink' | 'current' {
+  const v = (raw as { version?: unknown } | null)?.version
+  if (typeof v !== 'number' || v < 24) return 'legacy'
+  return v === 24 ? 'hardlink' : 'current'
+}
+
+/** Refuse a document this build can't open, before anything is discarded. */
+function assertOpenable(raw: unknown): void {
+  const format = documentFormat(raw)
+  if (format === 'legacy') {
+    // File ▸ Open converts an old file before calling openProject (ipc.ts).
+    throw new Error('This project uses the old shared media library and has to be converted first.')
+  }
+  if (format === 'hardlink') {
+    throw new Error(
+      'This project was saved by a short-lived test build (project format 24) that this version ' +
+        "doesn't open. Restore it from your backup, then convert it as an old project."
+    )
+  }
+}
+
 // --- Session -------------------------------------------------------------------
 
 function rememberRoot(root: string): void {
   setProjectRoot(root)
   try {
-    writeFileSync(sessionPath(), JSON.stringify({ root: isScratch(root) ? null : root }))
+    writeFileSync(sessionPath(), JSON.stringify({ root }))
   } catch (error) {
     console.error('could not record the open project', error)
   }
 }
 
 /**
- * Pick the folder to open at launch (before the window exists, so the media
- * protocol always has a root): the last open project if it is still there,
- * else the scratch folder.
+ * Pick the folder to reopen at launch (before the window exists): the last
+ * open project if its `.reel` is still there, else none — the renderer then
+ * shows the start screen, with a note if the last project went missing.
  */
 export function initProjectRoot(): void {
-  let root: string | null = null
-  firstLaunch = !existsSync(sessionPath())
+  launchMessage = null
   try {
     const s = JSON.parse(readFileSync(sessionPath(), 'utf8')) as { root?: unknown }
-    if (typeof s.root === 'string' && existsSync(docPath(s.root))) root = s.root
+    if (typeof s.root === 'string') {
+      if (existsSync(docPath(s.root))) {
+        setProjectRoot(s.root)
+        return
+      }
+      launchMessage = `Your last project couldn't be found: ${s.root}`
+    }
   } catch {
     /* no session yet */
   }
-  root ??= scratchRoot()
-  mkdirSync(root, { recursive: true })
-  setProjectRoot(root)
+  setProjectRoot(null)
+}
+
+// --- Folders -------------------------------------------------------------------
+
+/**
+ * Create the project's `generated/`, `transcripts/` and `cache/` if missing.
+ * A `generated/` created HERE gets the marker that lets cleanup delete unused
+ * files in it; one that already existed (a user's own folder of that name in
+ * a footage folder taken over as a project) never gets cleaned.
+ */
+export async function ensureProjectFolders(root: string): Promise<void> {
+  const generated = generatedRoot(root)
+  if (!existsSync(generated)) {
+    await fsp.mkdir(generated, { recursive: true })
+    await fsp.writeFile(join(generated, GENERATED_MARKER), 'Files here were made by Reel Editor for this project.\n')
+  }
+  for (const dir of projectSubdirs(root)) await fsp.mkdir(dir, { recursive: true })
 }
 
 // --- Sweep ---------------------------------------------------------------------
@@ -117,11 +184,12 @@ const listDir = (dir: string): string[] => {
 }
 
 /**
- * Delete `media/<id>` + `cache/<id>` that neither the saved document nor the
- * autosave mentions — media removed from the library (kept until now so undo
- * worked) or imported and never used. Undo history doesn't survive closing a
- * project, so on open nothing can bring them back. Skipped entirely if a
- * document that exists can't be read: never delete on a guess.
+ * Cleanup on open (docs/MEDIA-POINTERS.md "Cleanup on open"): delete what
+ * neither the saved document nor the autosave still uses — media removed from
+ * the library (kept until now so undo worked). `cache/<id>` dirs, `generated/`
+ * files and `transcripts/<id>.json`, and NOTHING ELSE: the user's footage
+ * often shares the folder. Skipped entirely if a document that exists can't be
+ * read or parsed: never delete on a guess.
  */
 async function sweep(root: string): Promise<void> {
   const docs: string[] = []
@@ -134,85 +202,132 @@ async function sweep(root: string): Promise<void> {
     }
   }
   if (!docs.length) return
-  const present = [...new Set([...listDir(mediaRoot(root)), ...listDir(cacheRoot(root))])]
-  for (const id of sweepPlan(present, docs)) {
-    await fsp.rm(mediaDir(root, id), { recursive: true, force: true }).catch(() => {})
+  const files = (dir: string): string[] => listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
+  // Only a generated/ the app created (marker) is ever cleaned.
+  const ours = existsSync(join(generatedRoot(root), GENERATED_MARKER))
+  const generated = ours ? files(generatedRoot(root)).filter((n) => n !== GENERATED_MARKER) : []
+  const plan = cleanupPlan({ generated, transcripts: files(transcriptsRoot(root)) }, docs)
+  for (const name of plan.generated) await fsp.rm(join(generatedRoot(root), name), { force: true }).catch(() => {})
+  for (const name of plan.transcripts) await fsp.rm(join(transcriptsRoot(root), name), { force: true }).catch(() => {})
+  for (const id of sweepPlan(listDir(cacheRoot(root)), docs)) {
     await fsp.rm(cacheDir(root, id), { recursive: true, force: true }).catch(() => {})
   }
 }
 
-// --- Load / open / new -----------------------------------------------------------
+// --- Load / open / create ---------------------------------------------------------
 
-/** Read the folder's working state: the autosave if there is one (unsaved
- *  changes), else the saved document, else a fresh project. */
+/**
+ * Open the folder's working state — the autosave if there is one (unsaved
+ * changes), else the saved document — into the renderer's document and main's
+ * library, locating every original. A path fixed while locating makes the
+ * project dirty (it changed in memory; only Save writes it).
+ */
 async function readFolder(root: string): Promise<LoadedProject> {
-  const scratch = isScratch(root)
   const doc = docPath(root)
-  let project: Project | null = null
+  let raw: SavedDoc | null = null
   let dirty = false
   try {
-    project = migrateProject(await readJson(autosavePath(root)))
-    dirty = true
+    const autosave = (await readJson(autosavePath(root))) as SavedDoc
+    // An autosave left by another format (a schema-24 working copy in a folder
+    // converted in place) is not this project's state: the saved document is.
+    if (documentFormat(autosave) === 'current') {
+      raw = autosave
+      dirty = true
+    }
   } catch {
-    if (!scratch && existsSync(doc)) project = migrateProject(await readJson(doc))
+    /* no autosave: no unsaved changes */
   }
-  project ??= createEmptyProject(crypto.randomUUID(), 'Untitled Reel')
+  raw ??= (await readJson(doc)) as SavedDoc
+  const { library, ...rest } = raw
   // A folder project is named by its folder (the folder is what the user sees,
   // renames and moves).
-  if (!scratch) project = { ...project, name: basename(root) }
+  let project = { ...migrateProject(rest), name: basename(root) }
+  await ensureProjectFolders(root)
+  openLibrary(root, Array.isArray(library) ? library : [])
+  // A clip the document uses but nothing describes still gets a library card
+  // (Missing — unknown clip) so it can be relinked; one missing from the
+  // library list joins it (an unsaved change).
+  const unknown = unknownRecords(project, (id) => !!getEntry(id))
+  if (unknown.length) {
+    addOpeningRecords(unknown)
+    const unlisted = unknown.map((r) => r.id).filter((id) => !project.mediaIds.includes(id))
+    if (unlisted.length) {
+      project = { ...project, mediaIds: [...project.mediaIds, ...unlisted] }
+      dirty = true
+    }
+  }
+  if (await resolveAll()) dirty = true
   openId = project.id
-  return { project, path: scratch ? null : doc, dirty }
+  return { project, path: doc, dirty }
 }
 
-/** The project to show at launch (the root `initProjectRoot` chose). */
-export function loadProject(): Promise<LoadedProject> {
+/** The project to show at launch: the last one, or none (start screen). */
+export function loadProject(): Promise<LaunchState> {
   return serial(async () => {
-    const root = getProjectRoot()
-    if (firstLaunch && isScratch(root)) {
-      firstLaunch = false
-      await convertWorkingCopy(root).catch((error) => console.error('could not convert the old working copy', error))
-      rememberRoot(root)
+    const root = currentProjectRoot()
+    if (!root) return { loaded: null, message: launchMessage }
+    try {
+      assertOpenable(await readJson(docPath(root)))
+      await sweep(root)
+      return { loaded: await readFolder(root), message: null }
+    } catch (error) {
+      setProjectRoot(null)
+      closeLibrary()
+      return { loaded: null, message: error instanceof Error ? error.message : String(error) }
     }
-    await sweep(root)
-    return readFolder(root)
   })
 }
 
 /** Throw away the open project's unsaved state — the renderer already asked. */
 async function discardCurrent(): Promise<void> {
-  const root = getProjectRoot()
-  if (isScratch(root)) await fsp.rm(root, { recursive: true, force: true })
-  else await fsp.rm(autosavePath(root), { force: true })
+  const root = currentProjectRoot()
+  if (root) await fsp.rm(autosavePath(root), { force: true })
 }
 
-/** File ▸ New: discard the current project's unsaved state, open an empty
- *  scratch folder for `project` (the renderer's fresh document). */
-export function newProject(project: Project): Promise<void> {
+/**
+ * File ▸ New: create `<location>/<name>/` with its `.reel` (an empty project),
+ * `generated/`, `transcripts/` and `cache/`, then open it. Refuses an invalid
+ * name or a folder that already exists. The current project's unsaved state is
+ * discarded (the renderer confirmed).
+ */
+export function createProject(name: string, location: string): Promise<LoadedProject> {
   return serial(async () => {
+    const problem = validateProjectName(name)
+    if (problem) throw new Error(problem)
+    const clean = name.trim()
+    if (!existsSync(location)) throw new Error(`That location doesn't exist: ${location}`)
+    const root = join(location, clean)
+    if (existsSync(root)) throw new Error(`A folder named "${clean}" already exists there.`)
+    await fsp.mkdir(root)
+    await ensureProjectFolders(root)
+    await writeJsonAtomic(docPath(root), { ...createEmptyProject(crypto.randomUUID(), clean), version: PROJECT_VERSION, library: [] })
     await discardCurrent()
-    const root = scratchRoot()
-    await fsp.rm(root, { recursive: true, force: true })
-    await fsp.mkdir(root, { recursive: true })
     rememberRoot(root)
-    openId = project.id
+    return readFolder(root)
   })
 }
 
 /**
- * File ▸ Open of a `.reel` inside a project folder. The current project's
- * unsaved state is discarded (the renderer confirmed), the folder becomes the
- * open root, and unreferenced media is swept.
+ * File ▸ Open of a project folder's `.reel`. The current project's unsaved
+ * state is discarded (the renderer confirmed), the folder becomes the open
+ * root, and its cache is swept.
  */
 export function openProject(reelPath: string): Promise<LoadedProject> {
   return serial(async () => {
     const root = dirname(reelPath)
-    // Keep `<Name>/<Name>.reel` true when the user renamed the folder.
-    if (reelPath !== docPath(root) && !existsSync(docPath(root))) await fsp.rename(reelPath, docPath(root))
     // Validate before discarding anything: a bad file must not cost the open
-    // project its unsaved work. A legacy file is converted first (ipc.ts).
-    const raw = await readJson(docPath(root))
-    if (isLegacyDoc(raw)) throw new Error('This project uses the old shared library and has to be converted first.')
-    migrateProject(raw)
+    // project its unsaved work.
+    assertOpenable(await readJson(reelPath))
+    if (!samePath(reelPath, docPath(root))) {
+      // A second .reel in a project folder (an Explorer copy) is not that
+      // folder's project: opening it would load and save <Folder>.reel instead.
+      if (existsSync(docPath(root))) {
+        throw new Error(`This folder's project is "${basename(docPath(root))}" — open that file instead.`)
+      }
+      // Keep `<Name>/<Name>.reel` true when the user renamed the folder.
+      await fsp.rename(reelPath, docPath(root))
+    }
+    await ensureProjectFolders(root) // fails here (read-only media) before anything is discarded
     await discardCurrent()
     rememberRoot(root)
     await sweep(root)
@@ -222,36 +337,40 @@ export function openProject(reelPath: string): Promise<LoadedProject> {
 
 // --- Autosave / save -----------------------------------------------------------
 
-/** The renderer's debounced working-copy write. */
+/** The renderer's debounced working-copy write (document + in-memory library). */
 export function saveProject(project: Project): Promise<void> {
   return serial(async () => {
-    if (project.id !== openId) return // a late write from a document no longer open
-    const root = getProjectRoot()
-    await fsp.mkdir(root, { recursive: true })
-    await writeJsonAtomic(autosavePath(root), { ...project, updatedAt: new Date().toISOString() })
+    const root = currentProjectRoot()
+    if (!root || project.id !== openId) return // a late write from a document no longer open
+    await writeJsonAtomic(autosavePath(root), withLibrary(project))
   })
 }
 
-/** Write a document to a path, returning it as saved (bumped time). */
+/** Write a document and the in-memory library records it uses to `path`,
+ *  returning the document as saved (bumped version + time, no library). */
 export async function writeProjectFile(path: string, project: Project): Promise<Project> {
-  const saved = { ...project, version: PROJECT_VERSION, updatedAt: new Date().toISOString() }
+  const saved = withLibrary(project)
   await writeJsonAtomic(path, saved)
-  return saved
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { library, ...doc } = saved
+  return doc
 }
 
-/** Read and migrate a document. Throws on bad input. */
+/** Read and migrate a document (library stripped). Throws on bad input. */
 export async function readProjectFile(path: string): Promise<Project> {
-  return migrateProject(await readJson(path))
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { library, ...rest } = (await readJson(path)) as SavedDoc
+  return migrateProject(rest)
 }
 
-/** File ▸ Save of an already-saved folder project: write the document, and
- *  drop the autosave (there are no unsaved changes any more). */
+/** File ▸ Save: write the document and its library into the `.reel`, and drop
+ *  the autosave (there are no unsaved changes any more). */
 export function saveProjectFile(project: Project): Promise<Project> {
   return serial(async () => {
     const root = getProjectRoot()
-    if (isScratch(root)) throw new Error('This project has no folder yet — use Save As.')
     const saved = await writeProjectFile(docPath(root), { ...project, name: basename(root) })
     await fsp.rm(autosavePath(root), { force: true })
+    await dropStaleTranscripts(root)
     openId = saved.id
     return saved
   })
@@ -259,151 +378,74 @@ export function saveProjectFile(project: Project): Promise<Project> {
 
 // --- Save As -------------------------------------------------------------------
 
-/** Read an asset record without resolving it (we only need its fields). */
-async function readRecord(path: string): Promise<(MediaAsset & { file: string }) | null> {
-  try {
-    return (await readJson(path)) as MediaAsset & { file: string }
-  } catch {
-    return null
-  }
-}
-
-/** Place a file we may share (an original or a cache file) — link, else copy. */
-async function placeShared(src: string, dest: string): Promise<'link' | 'copy'> {
-  if (existsSync(dest)) return 'link'
-  return linkOrCopy(src, dest)
-}
-
-/**
- * Copy one media id's folders into another project: originals and cache files
- * are linked where possible (zero extra disk on one volume — and safe, since
- * nothing in a project is ever written in place), records and transcripts are
- * real copies. Across volumes an original first tries to relink to its SOURCE
- * if that is still on the destination volume unchanged (size + mtime), so a
- * project saved next to its footage never pays for a copy.
- */
-async function copyMediaId(from: string, to: string, id: string): Promise<void> {
-  const fromMedia = mediaDir(from, id)
-  const toMedia = mediaDir(to, id)
-  await fsp.mkdir(toMedia, { recursive: true })
-  const rec = await readRecord(join(fromMedia, 'asset.json'))
-  for (const name of listDir(fromMedia)) {
-    const src = join(fromMedia, name)
-    const dest = join(toMedia, name)
-    if (existsSync(dest)) continue
-    if (rec && name === rec.file) {
-      const placed = await placeOriginal(src, dest, rec)
-      if (rec.storage !== 'generated') rec.storage = placed
-    } else if (name !== 'asset.json' && !name.endsWith('.tmp')) {
-      await copyAtomic(src, dest) // transcript: tiny, written by us — never share it
+/** Copy every file of `from` into `to` (flat or nested), skipping partials. */
+async function copyTree(from: string, to: string): Promise<void> {
+  for (const ent of await fsp.readdir(from, { withFileTypes: true }).catch(() => [])) {
+    const src = join(from, ent.name)
+    const dest = join(to, ent.name)
+    if (ent.isDirectory()) {
+      await fsp.mkdir(dest, { recursive: true })
+      await copyTree(src, dest)
+    } else if (!ent.name.endsWith('.tmp') && !ent.name.includes('.part') && !existsSync(dest)) {
+      await copyAtomic(src, dest)
     }
   }
-  if (rec) await writeJsonAtomic(join(toMedia, 'asset.json'), rec)
-  // Cache: share what exists; anything missing simply rebuilds on demand.
-  const fromCache = cacheDir(from, id)
-  const names = listDir(fromCache).filter((n) => !n.includes('.part') && !n.endsWith('.tmp'))
-  if (names.length) await fsp.mkdir(cacheDir(to, id), { recursive: true })
-  for (const name of names) {
-    await placeShared(join(fromCache, name), join(cacheDir(to, id), name)).catch(() => {})
-  }
-}
-
-/** An original into another project: link to our copy; failing that (another
- *  volume) link to the unchanged source if it lives there; else copy. */
-async function placeOriginal(
-  src: string,
-  dest: string,
-  rec: MediaAsset
-): Promise<'link' | 'copy'> {
-  try {
-    await fsp.link(src, dest)
-    return 'link'
-  } catch {
-    /* fall through */
-  }
-  if (rec.storage !== 'generated' && rec.sourcePath && (await sameStat(rec.sourcePath, rec))) {
-    try {
-      await fsp.link(rec.sourcePath, dest)
-      return 'link'
-    } catch {
-      /* fall through */
-    }
-  }
-  await copyAtomic(src, dest)
-  return 'copy'
-}
-
-async function sameStat(path: string, rec: { size?: number; mtimeMs?: number }): Promise<boolean> {
-  try {
-    const s = await fsp.stat(path)
-    return s.size === rec.size && s.mtimeMs === rec.mtimeMs
-  } catch {
-    return false
-  }
-}
-
-/** Media ids in `from` the document `json` mentions (the sweep's keep rule). */
-function idsToCarry(from: string, json: string): string[] {
-  const present = [...new Set([...listDir(mediaRoot(from)), ...listDir(cacheRoot(from))])].filter(isMediaId)
-  const drop = new Set(sweepPlan(present, [json]))
-  return present.filter((id) => !drop.has(id))
 }
 
 /**
  * File ▸ Save As to `chosenPath` (the `.reel` the Save dialog returned; the
- * folder is `projectFolderFor` it). From the scratch folder the media MOVES
- * (renames on one volume); from a saved folder it is linked/copied and the old
- * folder keeps its last save (its unsaved edits now belong to the new one).
+ * folder is `projectFolderFor` it). The new folder gets the structure, copies
+ * of `generated/` and `transcripts/`, and the document with every relative
+ * path measured from its new place (absolute paths don't change). `cache/`
+ * isn't copied — it rebuilds. The old folder keeps its last save.
  */
 export function saveProjectAs(project: Project, chosenPath: string): Promise<{ path: string; project: Project }> {
   return serial(async () => {
     const from = getProjectRoot()
     const to = projectFolderFor(chosenPath)
-    if (to === from) {
-      const saved = await writeProjectFile(docPath(to), { ...project, name: basename(to) })
-      await fsp.rm(autosavePath(to), { force: true })
-      openId = saved.id
-      return { path: docPath(to), project: saved }
+    const moving = !samePath(to, from)
+    // Never write over another project: its .reel, autosave and generated
+    // files would all be lost or mixed up with this one's.
+    if (moving && existsSync(docPath(to))) {
+      throw new Error(`A project named "${basename(to)}" already exists there. Choose another name.`)
     }
-    await fsp.mkdir(to, { recursive: true })
-    const ids = idsToCarry(from, JSON.stringify(project))
-    const scratch = isScratch(from)
-    for (const id of ids) {
-      if (scratch && (await moveIdDirs(from, to, id))) continue
-      await copyMediaId(from, to, id)
+    if (moving) {
+      await fsp.mkdir(to, { recursive: true })
+      await ensureProjectFolders(to)
+      await copyTree(generatedRoot(from), generatedRoot(to))
+      await copyTree(transcriptsRoot(from), transcriptsRoot(to))
+      rebaseLibrary(to, fromRelativePath)
     }
-    const saved = await writeProjectFile(docPath(to), { ...project, name: basename(to) })
+    let saved: Project
+    try {
+      saved = await writeProjectFile(docPath(to), { ...project, name: basename(to) })
+    } catch (error) {
+      // Nothing switched: the open project is still `from`, untouched.
+      if (moving) rebaseLibrary(from, fromRelativePath)
+      throw error
+    }
     await fsp.rm(autosavePath(to), { force: true })
-    if (scratch) await fsp.rm(from, { recursive: true, force: true }).catch(() => {})
-    else await fsp.rm(autosavePath(from), { force: true })
-    rememberRoot(to)
+    if (moving) {
+      await fsp.rm(autosavePath(from), { force: true }) // its unsaved edits now live in `to`
+      rememberRoot(to)
+    }
+    await dropStaleTranscripts(to)
     openId = saved.id
     return { path: docPath(to), project: saved }
   })
 }
 
-/** Rename an id's media + cache dirs into `to` (same volume, nothing open in
- *  them). False — and nothing half-moved left behind — if either rename fails. */
-async function moveIdDirs(from: string, to: string, id: string): Promise<boolean> {
-  if (existsSync(mediaDir(to, id)) || existsSync(cacheDir(to, id))) return false
-  await fsp.mkdir(mediaRoot(to), { recursive: true })
-  await fsp.mkdir(cacheRoot(to), { recursive: true })
-  try {
-    if (existsSync(mediaDir(from, id))) await fsp.rename(mediaDir(from, id), mediaDir(to, id))
-  } catch {
-    return false
+/** After a save: delete transcripts a forced relink made stale (the saved
+ *  record now describes the new content). */
+async function dropStaleTranscripts(root: string): Promise<void> {
+  for (const id of staleTranscriptIds()) {
+    await fsp.rm(transcriptPath(root, id), { force: true })
+    clearStaleTranscript(id)
   }
-  try {
-    if (existsSync(cacheDir(from, id))) await fsp.rename(cacheDir(from, id), cacheDir(to, id))
-  } catch {
-    // Media moved, cache didn't (a proxy still being written, another volume):
-    // the cache is disposable — it rebuilds in the new folder on demand.
-  }
-  return true
 }
 
 /** The default `.reel` path the Save As dialog suggests. */
 export function suggestedSavePath(project: Project, documentsDir: string): string {
-  const base = (project.name || '').trim() || 'Untitled Reel'
+  const base = (project.name || '').trim() || 'Reel'
   return join(documentsDir, `${base}.reel`)
 }
