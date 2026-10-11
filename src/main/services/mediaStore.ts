@@ -447,6 +447,24 @@ export function ensureProxy(id: string): Promise<void> {
   return proxyFlight(cacheDir(r, id), () => buildProxy(r, id))
 }
 
+/** Proxies whose build failed this session (keyed by cache dir): the library
+ *  load doesn't retry them on every refetch. An explicit `ensureProxy` (import,
+ *  re-import, the assistant) still tries again. */
+const proxyFailed = new Set<string>()
+
+/** Start a missing proxy in the background — what makes cache/ disposable for
+ *  proxies too, and what builds them for media that arrived without one
+ *  (an encode interrupted by quitting, a converted project). Progress and the
+ *  library refresh ride on the proxy job, as for an import. */
+function kickProxy(r: string, id: string): void {
+  const key = cacheDir(r, id)
+  if (proxyFailed.has(key)) return
+  void proxyFlight(key, () => buildProxy(r, id)).catch((error) => {
+    proxyFailed.add(key)
+    console.error('proxy generation failed', id, error)
+  })
+}
+
 async function buildProxy(r: string, id: string): Promise<void> {
   const asset = await readAsset(r, id)
   if (!asset) throw new Error(`unknown media ${id}`)
@@ -494,8 +512,9 @@ async function buildProxy(r: string, id: string): Promise<void> {
   }
 }
 
-/** Backfill derived artifacts (thumb/image/waveform) and refresh proxyReady.
- *  `proxyReady` is never trusted from the record: cache/ may have been deleted. */
+/** Backfill derived artifacts (thumb/image/waveform), refresh proxyReady, and
+ *  start a missing proxy. `proxyReady` is never trusted from the record:
+ *  cache/ may have been deleted. */
 async function hydrate(r: string, asset: MediaAsset): Promise<MediaAsset> {
   // Unusable originals get no new artifacts (they would describe the wrong
   // bytes, or fail); whatever cache exists still shows.
@@ -509,6 +528,7 @@ async function hydrate(r: string, asset: MediaAsset): Promise<MediaAsset> {
   await makeWaveform(r, asset)
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
   asset.transcribed = existsSync(transcriptPath(r, asset.id))
+  if (!asset.proxyReady) kickProxy(r, asset.id)
   return asset
 }
 

@@ -82,10 +82,13 @@ test('a saved project owns its media: the source can move or vanish, and the fol
   expect(asset.originalPath).toBe(original)
   expect(statSync(original).size).toBeGreaterThan(0)
 
-  // --- cache/ is disposable: delete it, it rebuilds on demand ----------------
+  // --- cache/ is disposable: delete it, and loading the library rebuilds it --
+  // No explicit ensureProxy: nothing in the app calls it for media already in a
+  // project, so a proxy that only rebuilt on request stayed at "generating
+  // preview… 0%" forever (2026-10-10, converted projects without proxies).
   rmSync(join(root, 'cache'), { recursive: true, force: true })
   expect((await media(page, [id]))[0].proxyReady).toBe(false)
-  await page.evaluate((id) => window.api.ensureProxy(id), id)
+  await expect.poll(async () => (await media(page, [id]))[0]?.proxyReady, { timeout: 30_000 }).toBe(true)
   expect(existsSync(join(root, 'cache', id, 'proxy.mp4'))).toBe(true)
 
   // --- New, then Open the folder again -------------------------------------
