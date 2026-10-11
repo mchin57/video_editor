@@ -35,7 +35,9 @@ import {
   allEntries,
   findByFingerprint,
   fingerprintOf,
+  freeIdFor,
   getEntry,
+  markTranscriptStale,
   putEntry,
   resolveEntry,
   type LibraryEntry
@@ -144,7 +146,8 @@ function toAsset(r: string, entry: LibraryEntry): MediaAsset {
     originalPath: entry.path ?? entry.record.absolutePath,
     status: entry.path ? 'ok' : 'missing',
     proxyReady: false,
-    transcribed: existsSync(transcriptPath(r, entry.record.id))
+    // A transcript a forced relink made stale is hidden until Save deletes it.
+    transcribed: !entry.staleTranscript && existsSync(transcriptPath(r, entry.record.id))
   }
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
   return asset
@@ -207,9 +210,14 @@ export async function assertMediaUsable(ids: string[]): Promise<void> {
 }
 
 /** Point a record at `path` (where its content was just found): both paths
- *  follow it. Generated media keeps its project-relative path. */
+ *  follow it, and it counts as generated exactly when it lives in the
+ *  project's `generated/` (Save As carries those files along). */
 function pointAt(r: string, record: MediaRecord, path: string): MediaRecord {
-  return { ...record, absolutePath: path, relativePath: toRelativePath(r, path) }
+  const relativePath = toRelativePath(r, path)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { generated, ...rest } = record
+  const inGenerated = !!relativePath && relativePath.toLowerCase().startsWith('generated/')
+  return { ...rest, absolutePath: path, relativePath, ...(inGenerated ? { generated: true } : {}) }
 }
 
 /** How a picked file compares with a clip's fingerprint, for the Relink warning. */
@@ -257,15 +265,18 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
   const fp = await fingerprintOf(srcPath)
   let cutsReset = false
   if (sameFingerprint(fp, entry.record.fingerprint)) {
-    putEntry(pointAt(r, entry.record, srcPath), srcPath)
+    putEntry(pointAt(r, entry.record, srcPath), srcPath, r)
   } else {
     if (!force) throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
     const probe = await probeFile(srcPath)
     if (probe.audio?.channels === 2) probe.audio.monoFoldChannel = await detectMonoFoldChannel(srcPath)
     cutsReset = Math.abs(probe.durationSec - entry.record.probe.durationSec) > 0.01
+    // The cache is disposable — rebuild it from the new file now. The
+    // transcript isn't: hide it, and let Save delete it (not saving brings
+    // the old record back, and with it the transcript that matches).
     await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
-    await fsp.rm(transcriptPath(r, id), { force: true })
-    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe }, srcPath)
+    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe }, srcPath, r)
+    markTranscriptStale(id)
   }
   const asset = await hydrate(r, toAsset(r, getEntry(id)!))
   return { asset, cutsReset, alsoFound: await relinkSiblings(r, dirname(srcPath)) }
@@ -295,7 +306,7 @@ async function relinkSiblings(r: string, dir: string): Promise<string[]> {
     for (const path of bySize.get(entry.record.fingerprint.size) ?? []) {
       const fp = await fingerprintOf(path).catch(() => null)
       if (!fp || !sameFingerprint(fp, entry.record.fingerprint)) continue
-      putEntry(pointAt(r, entry.record, path), path)
+      putEntry(pointAt(r, entry.record, path), path, r)
       found.push(entry.record.fileName)
       break
     }
@@ -333,7 +344,7 @@ async function register(
     probe,
     kind
   }
-  const asset = toAsset(r, putEntry(record, path))
+  const asset = toAsset(r, putEntry(record, path, r))
   await makeThumb(r, asset)
   await makeImage(r, asset) // images: build the display PNG now (it is their "proxy")
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
@@ -349,12 +360,12 @@ async function register(
 export async function importFile(srcPath: string, displayName?: string): Promise<MediaAsset> {
   const r = getProjectRoot()
   const fp = await fingerprintOf(srcPath)
-  const id = fingerprintId(fp)
+  const id = freeIdFor(fingerprintId(fp), fp)
   return importFlight(id, async () => {
     const existing = findByFingerprint(fp)
     if (existing) {
       const res = await resolveEntry(existing.record.id)
-      if (res && !res.entry.path) putEntry(pointAt(r, res.entry.record, srcPath), srcPath)
+      if (res && !res.entry.path) putEntry(pointAt(r, res.entry.record, srcPath), srcPath, r)
       return hydrate(r, toAsset(r, getEntry(existing.record.id)!))
     }
     return register(r, id, srcPath, displayName ?? basename(srcPath), fp, false)
@@ -369,7 +380,7 @@ export async function importFile(srcPath: string, displayName?: string): Promise
 export async function importGenerated(tmpPath: string, displayName: string): Promise<MediaAsset> {
   const r = getProjectRoot()
   const fp = await fingerprintOf(tmpPath)
-  const id = fingerprintId(fp)
+  const id = freeIdFor(fingerprintId(fp), fp)
   return importFlight(id, async () => {
     const existing = findByFingerprint(fp)
     const found = existing ? await resolveEntry(existing.record.id) : null
@@ -383,7 +394,7 @@ export async function importGenerated(tmpPath: string, displayName: string): Pro
     // file name; the library keeps showing it, the file gets a safe one.
     const dest = join(dir, uniqueFileName(safeFileName(displayName), (n) => existsSync(join(dir, n))))
     await moveFile(tmpPath, dest)
-    if (existing) return hydrate(r, toAsset(r, putEntry(pointAt(r, existing.record, dest), dest)))
+    if (existing) return hydrate(r, toAsset(r, putEntry(pointAt(r, existing.record, dest), dest, r)))
     return register(r, id, dest, displayName, fp, true)
   })
 }

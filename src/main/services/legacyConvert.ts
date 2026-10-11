@@ -25,11 +25,11 @@ import { isMediaPath } from './importScan'
 import { copyAtomic, linkOrCopy } from './linkOrCopy'
 import { hashFile } from './mediaStore'
 import { toRelativePath } from './mediaRef'
+import { ensureProjectFolders } from './projectStore'
 import {
   cacheDir,
   docPath,
   generatedRoot,
-  projectSubdirs,
   safeFileName,
   transcriptPath,
   uniqueFileName
@@ -253,7 +253,8 @@ export async function convertLegacyProject(
     dirIsShared: isSharedDir(reelDir, [...userFolders(), ...(opts.sharedDirs ?? [])]),
     taken: (folder) => existsSync(folder)
   })
-  for (const dir of [root, ...projectSubdirs(root)]) await fsp.mkdir(dir, { recursive: true })
+  await fsp.mkdir(root, { recursive: true })
+  await ensureProjectFolders(root) // marks a generated/ it creates, so cleanup may tidy it later
 
   const ctx: Ctx = { root, reelDir, report }
   const dataDir = getDataDir()

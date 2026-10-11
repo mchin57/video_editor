@@ -30,7 +30,8 @@ vi.mock('./audio', () => ({
   generateWaveform: vi.fn(async () => {})
 }))
 
-import { createProject } from './projectStore'
+import { createProject, saveProjectFile } from './projectStore'
+import { createEmptyProject } from '@shared/project'
 import { importFile, relinkCheck, relinkMedia } from './mediaStore'
 import { getEntry } from './library'
 
@@ -82,16 +83,35 @@ describe('Relink (docs/MEDIA-POINTERS.md)', () => {
     expect((await relinkCheck(c.id, other)).matches).toBe(true) // its fingerprint follows the file
   })
 
-  it('accepting a file of a different length reports the cut reset and drops the old transcript + cache', async () => {
+  it('accepting a file of a different length reports the cut reset; the old transcript is hidden, deleted only on Save', async () => {
     const d = await importFile(file(join(root, 'd'), 'd.wav', 'clip D 6s'))
-    writeFileSync(join(root, 'transcripts', `${d.id}.json`), '{}')
+    const transcript = join(root, 'transcripts', `${d.id}.json`)
+    writeFileSync(transcript, '{}')
     mkdirSync(join(root, 'cache', d.id), { recursive: true })
     writeFileSync(join(root, 'cache', d.id, 'audio.m4a'), 'old proxy')
     const longer = file(join(root, 'd'), 'd-full.wav', 'clip D extended 9s')
     const res = await relinkMedia(d.id, longer, true)
     expect(res.cutsReset).toBe(true)
     expect(res.asset.probe.durationSec).toBe(9)
-    expect(existsSync(join(root, 'transcripts', `${d.id}.json`))).toBe(false)
-    expect(existsSync(join(root, 'cache', d.id, 'audio.m4a'))).toBe(false)
+    expect(existsSync(join(root, 'cache', d.id, 'audio.m4a'))).toBe(false) // disposable: rebuilt from the new file
+    // Not saved yet: the transcript is hidden but still on disk (reopening
+    // without saving brings back the old record it belongs to).
+    expect(res.asset.transcribed).toBe(false)
+    expect(getEntry(d.id)!.staleTranscript).toBe(true)
+    expect(existsSync(transcript)).toBe(true)
+    await saveProjectFile({ ...createEmptyProject('p', 'Relink'), mediaIds: [d.id] })
+    expect(existsSync(transcript)).toBe(false)
+    expect(getEntry(d.id)!.staleTranscript).toBe(false)
+  })
+
+  it('re-importing the ORIGINAL after a forced relink gets its own id; the relinked clip keeps its file', async () => {
+    const original = file(join(root, 'e'), 'e.wav', 'clip E 2s')
+    const e = await importFile(original)
+    const replacement = file(join(root, 'e'), 'e-other.wav', 'clip E replacement 2s')
+    await relinkMedia(e.id, replacement, true) // the clip keeps id e.id, now holding other content
+    const again = await importFile(original)
+    expect(again.id).not.toBe(e.id)
+    expect(getEntry(e.id)!.path).toBe(replacement)
+    expect(getEntry(again.id)!.path).toBe(original)
   })
 })

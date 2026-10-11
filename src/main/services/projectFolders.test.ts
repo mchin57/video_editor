@@ -49,7 +49,7 @@ async function pointAt(root: string, path: string): Promise<MediaRecord> {
     probe: { durationSec: 1, container: 'mov', video: null, audio: null },
     kind: 'video'
   }
-  putEntry(record, path)
+  putEntry(record, path, root)
   return record
 }
 
@@ -209,8 +209,49 @@ describe('project folders (pointer model)', () => {
     expect(existsSync(join(root, 'autosave.json'))).toBe(false)
   })
 
+  // --- Review findings (2026-10-11) -----------------------------------------
+
+  it('Save As never writes over another project', async () => {
+    const other = (await createProject('Other', reels)).project
+    await saveProjectFile(other)
+    const before = readFileSync(join(reels, 'Other', 'Other.reel'), 'utf8')
+    const mine = (await createProject('Mine', reels)).project
+    await expect(saveProjectAs(mine, join(reels, 'Other.reel'))).rejects.toThrow('already exists')
+    expect(readFileSync(join(reels, 'Other', 'Other.reel'), 'utf8')).toBe(before)
+    expect(currentProjectRoot()).toBe(join(reels, 'Mine')) // nothing switched
+  })
+
+  it('a second .reel in a project folder is refused (it would load and save the folder’s own)', async () => {
+    writeFileSync(join(reels, 'Other', 'Other - copy.reel'), readFileSync(join(reels, 'Other', 'Other.reel')))
+    await expect(openProject(join(reels, 'Other', 'Other - copy.reel'))).rejects.toThrow('open that file instead')
+    expect(currentProjectRoot()).toBe(join(reels, 'Mine'))
+  })
+
+  it('a leftover autosave from another format is ignored, not loaded', async () => {
+    writeFileSync(join(reels, 'Other', 'autosave.json'), JSON.stringify({ id: 'stale', version: 24, layers: [] }))
+    const res = await openProject(join(reels, 'Other', 'Other.reel'))
+    expect(res.project.id).not.toBe('stale')
+    expect(res.dirty).toBe(false)
+  })
+
+  it('cleanup never touches a generated/ the app did not create', async () => {
+    const footage = join(reels, 'Footage folder')
+    mkdirSync(join(footage, 'generated'), { recursive: true })
+    writeFileSync(join(footage, 'generated', 'my AI clip.mp4'), 'the user’s own')
+    writeFileSync(join(footage, 'Footage folder.reel'), readFileSync(join(reels, 'Other', 'Other.reel')))
+    await openProject(join(footage, 'Footage folder.reel'))
+    expect(existsSync(join(footage, 'generated', 'my AI clip.mp4'))).toBe(true)
+    // …while one the app made is cleaned (marker present).
+    expect(existsSync(join(reels, 'Other', 'generated', '.reel-editor'))).toBe(true)
+  })
+
+  it('a library write for a project that is no longer open is refused', async () => {
+    const record = getEntry(clip.id)?.record ?? clip
+    expect(() => putEntry(record, null, join(reels, 'Mine'))).toThrow('The project changed')
+  })
+
   it('a missing last project launches to the start screen with a note', async () => {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(currentProjectRoot()!, { recursive: true, force: true })
     initProjectRoot()
     const launch = await loadProject()
     expect(launch.loaded).toBeNull()

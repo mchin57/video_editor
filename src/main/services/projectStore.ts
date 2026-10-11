@@ -28,8 +28,16 @@ import { validateProjectName } from '@shared/projectName'
 import { getSubdir } from '../config'
 import { replaceFile } from './atomicWrite'
 import { copyAtomic } from './linkOrCopy'
-import { closeLibrary, openLibrary, rebaseLibrary, recordsFor, resolveAll } from './library'
-import { fromRelativePath } from './mediaRef'
+import {
+  clearStaleTranscript,
+  closeLibrary,
+  openLibrary,
+  rebaseLibrary,
+  recordsFor,
+  resolveAll,
+  staleTranscriptIds
+} from './library'
+import { fromRelativePath, samePath } from './mediaRef'
 import { currentProjectRoot, getProjectRoot, setProjectRoot } from './projectRoot'
 import {
   autosavePath,
@@ -37,10 +45,12 @@ import {
   cacheRoot,
   cleanupPlan,
   docPath,
+  GENERATED_MARKER,
   generatedRoot,
   projectFolderFor,
   projectSubdirs,
   sweepPlan,
+  transcriptPath,
   transcriptsRoot
 } from './projectLayout'
 
@@ -143,6 +153,23 @@ export function initProjectRoot(): void {
   setProjectRoot(null)
 }
 
+// --- Folders -------------------------------------------------------------------
+
+/**
+ * Create the project's `generated/`, `transcripts/` and `cache/` if missing.
+ * A `generated/` created HERE gets the marker that lets cleanup delete unused
+ * files in it; one that already existed (a user's own folder of that name in
+ * a footage folder taken over as a project) never gets cleaned.
+ */
+export async function ensureProjectFolders(root: string): Promise<void> {
+  const generated = generatedRoot(root)
+  if (!existsSync(generated)) {
+    await fsp.mkdir(generated, { recursive: true })
+    await fsp.writeFile(join(generated, GENERATED_MARKER), 'Files here were made by Reel Editor for this project.\n')
+  }
+  for (const dir of projectSubdirs(root)) await fsp.mkdir(dir, { recursive: true })
+}
+
 // --- Sweep ---------------------------------------------------------------------
 
 const listDir = (dir: string): string[] => {
@@ -173,7 +200,10 @@ async function sweep(root: string): Promise<void> {
   }
   if (!docs.length) return
   const files = (dir: string): string[] => listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
-  const plan = cleanupPlan({ generated: files(generatedRoot(root)), transcripts: files(transcriptsRoot(root)) }, docs)
+  // Only a generated/ the app created (marker) is ever cleaned.
+  const ours = existsSync(join(generatedRoot(root), GENERATED_MARKER))
+  const generated = ours ? files(generatedRoot(root)).filter((n) => n !== GENERATED_MARKER) : []
+  const plan = cleanupPlan({ generated, transcripts: files(transcriptsRoot(root)) }, docs)
   for (const name of plan.generated) await fsp.rm(join(generatedRoot(root), name), { force: true }).catch(() => {})
   for (const name of plan.transcripts) await fsp.rm(join(transcriptsRoot(root), name), { force: true }).catch(() => {})
   for (const id of sweepPlan(listDir(cacheRoot(root)), docs)) {
@@ -191,19 +221,25 @@ async function sweep(root: string): Promise<void> {
  */
 async function readFolder(root: string): Promise<LoadedProject> {
   const doc = docPath(root)
-  let raw: SavedDoc
+  let raw: SavedDoc | null = null
   let dirty = false
   try {
-    raw = (await readJson(autosavePath(root))) as SavedDoc
-    dirty = true
+    const autosave = (await readJson(autosavePath(root))) as SavedDoc
+    // An autosave left by another format (a schema-24 working copy in a folder
+    // converted in place) is not this project's state: the saved document is.
+    if (documentFormat(autosave) === 'current') {
+      raw = autosave
+      dirty = true
+    }
   } catch {
-    raw = (await readJson(doc)) as SavedDoc
+    /* no autosave: no unsaved changes */
   }
+  raw ??= (await readJson(doc)) as SavedDoc
   const { library, ...rest } = raw
   // A folder project is named by its folder (the folder is what the user sees,
   // renames and moves).
   const project = { ...migrateProject(rest), name: basename(root) }
-  for (const dir of projectSubdirs(root)) await fsp.mkdir(dir, { recursive: true })
+  await ensureProjectFolders(root)
   openLibrary(root, Array.isArray(library) ? library : [])
   if (await resolveAll()) dirty = true
   openId = project.id
@@ -248,7 +284,7 @@ export function createProject(name: string, location: string): Promise<LoadedPro
     const root = join(location, clean)
     if (existsSync(root)) throw new Error(`A folder named "${clean}" already exists there.`)
     await fsp.mkdir(root)
-    for (const dir of projectSubdirs(root)) await fsp.mkdir(dir, { recursive: true })
+    await ensureProjectFolders(root)
     await writeJsonAtomic(docPath(root), { ...createEmptyProject(crypto.randomUUID(), clean), version: PROJECT_VERSION, library: [] })
     await discardCurrent()
     rememberRoot(root)
@@ -267,8 +303,16 @@ export function openProject(reelPath: string): Promise<LoadedProject> {
     // Validate before discarding anything: a bad file must not cost the open
     // project its unsaved work.
     assertOpenable(await readJson(reelPath))
-    // Keep `<Name>/<Name>.reel` true when the user renamed the folder.
-    if (reelPath !== docPath(root) && !existsSync(docPath(root))) await fsp.rename(reelPath, docPath(root))
+    if (!samePath(reelPath, docPath(root))) {
+      // A second .reel in a project folder (an Explorer copy) is not that
+      // folder's project: opening it would load and save <Folder>.reel instead.
+      if (existsSync(docPath(root))) {
+        throw new Error(`This folder's project is "${basename(docPath(root))}" — open that file instead.`)
+      }
+      // Keep `<Name>/<Name>.reel` true when the user renamed the folder.
+      await fsp.rename(reelPath, docPath(root))
+    }
+    await ensureProjectFolders(root) // fails here (read-only media) before anything is discarded
     await discardCurrent()
     rememberRoot(root)
     await sweep(root)
@@ -311,6 +355,7 @@ export function saveProjectFile(project: Project): Promise<Project> {
     const root = getProjectRoot()
     const saved = await writeProjectFile(docPath(root), { ...project, name: basename(root) })
     await fsp.rm(autosavePath(root), { force: true })
+    await dropStaleTranscripts(root)
     openId = saved.id
     return saved
   })
@@ -343,19 +388,45 @@ export function saveProjectAs(project: Project, chosenPath: string): Promise<{ p
   return serial(async () => {
     const from = getProjectRoot()
     const to = projectFolderFor(chosenPath)
-    if (to !== from) {
-      for (const dir of [to, ...projectSubdirs(to)]) await fsp.mkdir(dir, { recursive: true })
+    const moving = !samePath(to, from)
+    // Never write over another project: its .reel, autosave and generated
+    // files would all be lost or mixed up with this one's.
+    if (moving && existsSync(docPath(to))) {
+      throw new Error(`A project named "${basename(to)}" already exists there. Choose another name.`)
+    }
+    if (moving) {
+      await fsp.mkdir(to, { recursive: true })
+      await ensureProjectFolders(to)
       await copyTree(generatedRoot(from), generatedRoot(to))
       await copyTree(transcriptsRoot(from), transcriptsRoot(to))
       rebaseLibrary(to, fromRelativePath)
-      await fsp.rm(autosavePath(from), { force: true })
+    }
+    let saved: Project
+    try {
+      saved = await writeProjectFile(docPath(to), { ...project, name: basename(to) })
+    } catch (error) {
+      // Nothing switched: the open project is still `from`, untouched.
+      if (moving) rebaseLibrary(from, fromRelativePath)
+      throw error
+    }
+    await fsp.rm(autosavePath(to), { force: true })
+    if (moving) {
+      await fsp.rm(autosavePath(from), { force: true }) // its unsaved edits now live in `to`
       rememberRoot(to)
     }
-    const saved = await writeProjectFile(docPath(to), { ...project, name: basename(to) })
-    await fsp.rm(autosavePath(to), { force: true })
+    await dropStaleTranscripts(to)
     openId = saved.id
     return { path: docPath(to), project: saved }
   })
+}
+
+/** After a save: delete transcripts a forced relink made stale (the saved
+ *  record now describes the new content). */
+async function dropStaleTranscripts(root: string): Promise<void> {
+  for (const id of staleTranscriptIds()) {
+    await fsp.rm(transcriptPath(root, id), { force: true })
+    clearStaleTranscript(id)
+  }
 }
 
 /** The default `.reel` path the Save As dialog suggests. */

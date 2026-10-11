@@ -23,6 +23,7 @@ import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { replaceFile } from './atomicWrite'
 import { requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
+import { clearStaleTranscript, getEntry } from './library'
 import { singleFlight } from './atomicWrite'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
 import { buildWhisperArgs, decodeStartSec, dtwPreset } from './whisperArgs'
@@ -107,6 +108,8 @@ async function runTranscription(
 }
 
 export async function getTranscript(mediaId: string): Promise<Transcript | null> {
+  // A forced relink gave the clip new content: its transcript is stale.
+  if (getEntry(mediaId)?.staleTranscript) return null
   try {
     const cached = JSON.parse(await fsp.readFile(transcriptFile(mediaId), 'utf8')) as Transcript
     // A transcript from an older pipeline can be missing words or mistime them
@@ -176,6 +179,7 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
     // temp + rename, so a reader never sees a half-written transcript.
     await fsp.mkdir(join(transcriptPath, '..'), { recursive: true })
     await replaceFile(transcriptPath, JSON.stringify(transcript, null, 2))
+    clearStaleTranscript(mediaId) // it describes the clip's current content now
 
     // Clean up scratch files. (`transcribed` is read from the file's existence.)
     await fsp.rm(wav, { force: true }).catch(() => {})

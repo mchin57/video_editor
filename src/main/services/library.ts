@@ -11,7 +11,8 @@
  * side that didn't match is updated here, which makes the project dirty.
  */
 
-import { promises as fsp } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, promises as fsp } from 'node:fs'
 import type { Fingerprint, MediaRecord } from '@shared/media'
 import { fingerprintFile, sameFingerprint } from './fingerprint'
 import { locateOriginal, toRelativePath } from './mediaRef'
@@ -20,6 +21,10 @@ export interface LibraryEntry {
   record: MediaRecord
   /** Where the original was found this session; null = missing. */
   path: string | null
+  /** A forced relink gave this clip different content, so its transcript
+   *  describes the old file. It is hidden now and deleted only on Save (not
+   *  saving puts the old record — and transcript — back). */
+  staleTranscript?: boolean
 }
 
 let root: string | null = null
@@ -79,12 +84,49 @@ export function findByFingerprint(fp: Fingerprint): LibraryEntry | null {
   return null
 }
 
-/** Add or replace a record, found at `path`. */
-export function putEntry(record: MediaRecord, path: string | null): LibraryEntry {
-  const entry = { record, path }
+/**
+ * Add or replace a record, found at `path`. `forRoot` is the project the
+ * caller captured when it started: if another project opened meanwhile (an
+ * import still running across File > Open), the write is refused rather than
+ * landing in the wrong library.
+ */
+export function putEntry(record: MediaRecord, path: string | null, forRoot: string): LibraryEntry {
+  if (root !== forRoot) throw new Error('The project changed while this media was being added.')
+  const entry: LibraryEntry = { record, path, staleTranscript: entries.get(record.id)?.staleTranscript }
   entries.set(record.id, entry)
   notify()
   return entry
+}
+
+/**
+ * An id for new content: `preferred` (the fingerprint's id) unless a record
+ * holding DIFFERENT content already has it — a clip relinked with "Update path
+ * anyway" keeps its old id — then a derived one.
+ */
+export function freeIdFor(preferred: string, fp: Fingerprint): string {
+  let id = preferred
+  for (let n = 1; ; n++) {
+    const taken = entries.get(id)
+    if (!taken || sameFingerprint(taken.record.fingerprint, fp)) return id
+    id = createHash('sha1').update(`${preferred}:${n}`).digest('hex').slice(0, 12)
+  }
+}
+
+/** Hide a clip's transcript until Save deletes it (see `staleTranscript`). */
+export function markTranscriptStale(id: string): void {
+  const entry = entries.get(id)
+  if (entry) entry.staleTranscript = true
+}
+
+/** A new transcript was written for the clip's current content. */
+export function clearStaleTranscript(id: string): void {
+  const entry = entries.get(id)
+  if (entry) entry.staleTranscript = false
+}
+
+/** Ids whose transcript is stale — Save deletes those files and clears them. */
+export function staleTranscriptIds(): string[] {
+  return [...entries.values()].filter((e) => e.staleTranscript).map((e) => e.record.id)
 }
 
 /**
@@ -129,15 +171,18 @@ export function recordsFor(docJson: string): MediaRecord[] {
 
 /**
  * Save As moved the project: measure every relative path from `newRoot`.
- * Generated media was copied along, so its absolute path moves too.
+ * Generated media living in `generated/` was copied along, so its absolute
+ * path moves too — when the copy is really there; anything else (footage, or
+ * a generated record whose file was already gone) keeps its absolute path.
  */
-export function rebaseLibrary(newRoot: string, generatedPathIn: (root: string, rel: string) => string): void {
+export function rebaseLibrary(newRoot: string, resolve: (root: string, rel: string) => string): void {
   for (const entry of entries.values()) {
     const r = entry.record
-    if (r.generated && r.relativePath) {
-      const absolutePath = generatedPathIn(newRoot, r.relativePath)
-      entry.record = { ...r, absolutePath }
-      entry.path = absolutePath
+    const copied =
+      r.generated && r.relativePath?.toLowerCase().startsWith('generated/') ? resolve(newRoot, r.relativePath) : null
+    if (copied && existsSync(copied)) {
+      entry.record = { ...r, absolutePath: copied }
+      entry.path = copied
     } else {
       entry.record = { ...r, relativePath: toRelativePath(newRoot, entry.path ?? r.absolutePath) }
     }

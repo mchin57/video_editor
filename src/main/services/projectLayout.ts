@@ -29,6 +29,11 @@ export const cacheRoot = (root: string): string => join(root, 'cache')
 export const cacheDir = (root: string, id: string): string => join(cacheRoot(root), id)
 export const transcriptPath = (root: string, id: string): string => join(transcriptsRoot(root), `${id}.json`)
 
+/** Written into a `generated/` the app created. Cleanup only ever deletes in a
+ *  `generated/` that has it: a footage folder taken over as a project may
+ *  already hold the user's OWN folder of that name. */
+export const GENERATED_MARKER = '.reel-editor'
+
 /** The folders New creates (and Open re-creates if someone deleted one). */
 export const projectSubdirs = (root: string): string[] => [generatedRoot(root), transcriptsRoot(root), cacheRoot(root)]
 
