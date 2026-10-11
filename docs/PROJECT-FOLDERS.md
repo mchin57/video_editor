@@ -2,6 +2,10 @@
 
 _Status: phases 1–3 implemented (2026-10-10), marked `[~]` in docs/TODO.md with what is verified and what is not. Phase 4 (Storage panel, share without cache) is not started._
 
+> **Being replaced (2026-10-11):** the owner chose to have the library point at originals in place
+> instead of hard-linking them into the project. See [MEDIA-POINTERS.md](MEDIA-POINTERS.md). The
+> project folder stays; the media-ownership parts of this doc will be rewritten when that lands.
+
 ## Goals
 
 1. Moving, renaming, deleting or replacing a source file can't break a clip.

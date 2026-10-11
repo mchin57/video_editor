@@ -316,6 +316,16 @@ _(Empty — the assistant's `request_feature` tool appends new entries under thi
 - [ ] **GPU whisper build** — transcription is CPU-only (`small.en`); GPU/CUDA build is optional upgrade.
 - [ ] **Multi-cam editing** — out of scope for single-creator Reels workflow.
 
+### Media relinking
+
+- [ ] **Choose how the timeline keeps its cuts when a clip is relinked to a different-length file.** Background: Relink checks the chosen file against the clip's fingerprint, and "Update path anyway" accepts a file that doesn't match. Until this lands, a mismatched file **with a different length** resets every timeline placement of that clip to the new file's full length, and the old source in/out is discarded. Instead, offer three options:
+  1. **Full clip:** drop the new file in at its full length (today's behaviour).
+  2. **Keep the old cut:** reuse the old source in/out unchanged. Offered only when the cut still fits, i.e. the new file is at least as long as the old cut's end.
+  3. **Slide the old cut:** offered when the new file is at least as long as the old cut's *duration*. A window opens showing the new file with a window the length of the old cut. You slide it to pick the section, and the cut keeps its length. Example: the old file was 15 s and the cut was 12–14 s, so you get a 2 s window to slide anywhere along the new file.
+
+  For 2 and 3, the library item becomes the whole new file, and only the chosen cut goes on the timeline.
+  - **Open questions:** a clip placed several times on the timeline: one choice for all placements, or per placement? Cuts with freeze holds or speed ramps must map through `videoSourceTime` / the `lib/timeline.ts` helpers, never inline. A placement that grows under option 1 can overlap the next clip on its layer, which needs the timeline's usual rules.
+
 ### Portable project bundles
 
 - [~] **Self-contained project folder (portable save)** — _Subsumed by project folders (Bugs ▸ "Project folders"): a project folder is portable as it is (its originals are real files to whatever copies it); a lighter share without `cache/` is a follow-up. Original proposal kept below._ — package the project file and all its media into a single transferable folder so a project can be moved between computers and opened in its exact state. Proposed format: a `<ProjectName>.reel/` folder containing `project.json` plus a `media/` subfolder with copies of every imported file (original + proxy). On open, the app detects a `.reel/` folder, resolves media paths relative to it rather than the global `%USERPROFILE%\Documents\VideoEditor\media\` store, and imports any missing assets into the local library automatically.
