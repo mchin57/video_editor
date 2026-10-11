@@ -96,6 +96,18 @@ For each item, try the **relative path first, then the absolute path**:
    other missing clips (size first, then the samples) and reconnects every match. An info box lists
    them.
 
+## Unknown clips
+
+A clip the document uses but no record describes (an old project converted while the old media
+library was missing) would otherwise have no library card, and so could never be relinked. On open,
+each such id gets a placeholder record (`unknownMedia.ts`): named "Unknown clip", no paths, the
+`UNKNOWN_FINGERPRINT`, and a kind and length taken from how the timeline uses it. It is listed in the
+library (added to `mediaIds` if needed — an unsaved change) and shows **Missing, unknown clip**.
+
+Relink always asks "Update path anyway?" (nothing can be checked), then the clip takes the picked
+file's name, kind, probe and fingerprint. Its cuts are **kept**: with no known old length there is
+nothing to compare, so no reset.
+
 ## Save As
 
 Writes the `.reel` into a new project folder, copying `generated/` and `transcripts/` (`cache/` is

@@ -101,6 +101,14 @@ export interface MediaRecord {
  *  its absolute path holds a file matching its fingerprint. */
 export type MediaStatus = 'ok' | 'missing'
 
+/** Display name of a placeholder for a clip the project uses but nothing
+ *  describes (main/services/unknownMedia.ts). */
+export const UNKNOWN_CLIP_NAME = 'Unknown clip'
+
+/** A placeholder record: the project uses the clip, but no record says which
+ *  file it was (an empty absolute path). Relink fills it in. */
+export const isUnknownClip = (r: Pick<MediaRecord, 'absolutePath'>): boolean => r.absolutePath === ''
+
 /** A library item as the app uses it: the saved record plus runtime facts. */
 export interface MediaAsset extends MediaRecord {
   /** Absolute path of the original to READ: where it was found this session,

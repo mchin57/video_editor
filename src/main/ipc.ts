@@ -76,10 +76,16 @@ const mb = (bytes: number): string => `${(bytes / 1024 ** 2).toFixed(1)} MB`
 
 /** The Relink warning's detail: which fingerprint fields differ, in words. */
 function relinkMismatchDetail(c: RelinkCheck): string {
+  if (c.placeholder) {
+    return (
+      "Nothing records which file this clip was (its project was converted without the old media library), " +
+      "so this file can't be checked against it. The clip will use this file; its cuts on the timeline stay as they are."
+    )
+  }
   if (c.unknown) {
     return (
       `"${c.fileName}" was never fingerprinted (its file was already gone when the project was converted), ` +
-      "so this file can't be checked against it. The clip will use this file."
+      "so this file can't be checked against it. The clip will use this file; its cuts on the timeline stay as they are."
     )
   }
   const lines = c.differs.map((f) =>

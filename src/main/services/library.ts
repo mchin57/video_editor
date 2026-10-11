@@ -48,6 +48,12 @@ async function memoFingerprint(path: string): Promise<Fingerprint> {
 /** Fingerprint a file through the same memo the checks use. */
 export const fingerprintOf = memoFingerprint
 
+/** Add records quietly while a project is opening (placeholders for clips the
+ *  document uses but nothing describes — unknownMedia.ts). Existing ids win. */
+export function addOpeningRecords(records: MediaRecord[]): void {
+  for (const record of records) if (!entries.has(record.id)) entries.set(record.id, { record, path: null })
+}
+
 /** Replace the library with a newly opened project's records (paths unchecked). */
 export function openLibrary(projectRoot: string, records: MediaRecord[]): void {
   root = projectRoot
@@ -183,6 +189,8 @@ export function rebaseLibrary(newRoot: string, resolve: (root: string, rel: stri
     if (copied && existsSync(copied)) {
       entry.record = { ...r, absolutePath: copied }
       entry.path = copied
+    } else if (!entry.path && !r.absolutePath) {
+      // An unknown clip: no path at all to re-measure.
     } else {
       entry.record = { ...r, relativePath: toRelativePath(newRoot, entry.path ?? r.absolutePath) }
     }

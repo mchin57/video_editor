@@ -30,7 +30,9 @@ vi.mock('./audio', () => ({
   generateWaveform: vi.fn(async () => {})
 }))
 
-import { createProject, saveProjectFile } from './projectStore'
+import { createProject, openProject, saveProjectFile } from './projectStore'
+import { makeVideoLayer } from '@shared/layers'
+import { isUnknownClip } from '@shared/media'
 import { createEmptyProject } from '@shared/project'
 import { importFile, relinkCheck, relinkMedia } from './mediaStore'
 import { getEntry } from './library'
@@ -102,6 +104,29 @@ describe('Relink (docs/MEDIA-POINTERS.md)', () => {
     await saveProjectFile({ ...createEmptyProject('p', 'Relink'), mediaIds: [d.id] })
     expect(existsSync(transcript)).toBe(false)
     expect(getEntry(d.id)!.staleTranscript).toBe(false)
+  })
+
+  it('a clip the project uses but nothing describes opens as an unknown clip; Relink names it and keeps the cuts', async () => {
+    // A converted project whose clip had no record (old library missing).
+    const dir = join(reels, 'Converted')
+    mkdirSync(dir, { recursive: true })
+    const doc = { ...createEmptyProject('cv', 'Converted'), version: 25, library: [] }
+    doc.layers = [makeVideoLayer('v1', 'cccccccccccc', 0, 4)]
+    writeFileSync(join(dir, 'Converted.reel'), JSON.stringify(doc))
+    const opened = await openProject(join(dir, 'Converted.reel'))
+    expect(opened.project.mediaIds).toContain('cccccccccccc') // its card is listed
+    expect(opened.dirty).toBe(true)
+    const placeholder = getEntry('cccccccccccc')!
+    expect(isUnknownClip(placeholder.record)).toBe(true)
+    expect(placeholder.path).toBeNull()
+
+    const found = file(join(dir, 'footage'), 'IMG_9000.wav', 'the real clip 7s')
+    const check = await relinkCheck('cccccccccccc', found)
+    expect(check).toMatchObject({ matches: false, placeholder: true })
+    const res = await relinkMedia('cccccccccccc', found, true)
+    expect(res.cutsReset).toBe(false) // no known old length: the timeline's cut stays
+    expect(res.asset).toMatchObject({ status: 'ok', fileName: 'IMG_9000.wav', kind: 'audio', relativePath: 'footage/IMG_9000.wav' })
+    expect(isUnknownClip(getEntry('cccccccccccc')!.record)).toBe(false)
   })
 
   it('re-importing the ORIGINAL after a forced relink gets its own id; the relinked clip keeps its file', async () => {

@@ -17,7 +17,7 @@ import { createReadStream, existsSync, promises as fsp } from 'node:fs'
 import { basename, dirname, join, parse } from 'node:path'
 import type { FingerprintField, MediaAsset, MediaKind, MediaRecord } from '@shared/media'
 import type { RelinkResult } from '@shared/ipc'
-import { deriveKind, isAudioAsset, isImageAsset, kindFromExt } from '@shared/media'
+import { deriveKind, isAudioAsset, isImageAsset, isUnknownClip, kindFromExt } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
@@ -238,6 +238,8 @@ export interface RelinkCheck {
   matches: boolean
   /** The clip was never fingerprinted (converted after its file was gone). */
   unknown: boolean
+  /** Nothing records which file the clip was (a placeholder: unknownMedia.ts). */
+  placeholder: boolean
   /** The fields that differ (empty when it matches). */
   differs: FingerprintField[]
   recordedSize: number
@@ -255,6 +257,7 @@ export async function relinkCheck(id: string, srcPath: string): Promise<RelinkCh
     fileName: entry.record.fileName,
     matches: !unknown && differs.length === 0,
     unknown,
+    placeholder: isUnknownClip(entry.record),
     differs,
     recordedSize: recorded.size,
     foundSize: found.size
@@ -282,13 +285,20 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
     if (!force) throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
     const probe = await probeFile(srcPath)
     if (probe.audio?.channels === 2) probe.audio.monoFoldChannel = await detectMonoFoldChannel(srcPath)
-    cutsReset = Math.abs(probe.durationSec - entry.record.probe.durationSec) > 0.01
+    // Cuts reset only when the old length was KNOWN and differs: a clip never
+    // fingerprinted has no real length to compare, so its cuts stay.
+    const lengthKnown = !isUnknownFingerprint(entry.record.fingerprint)
+    cutsReset = lengthKnown && Math.abs(probe.durationSec - entry.record.probe.durationSec) > 0.01
+    // A placeholder takes the file's name and kind; a known clip keeps its own.
+    const identity = isUnknownClip(entry.record)
+      ? { fileName: basename(srcPath), kind: kindFromExt(srcPath) ?? deriveKind(probe) }
+      : {}
     // The cache is disposable — rebuild it from the new file now. The
     // transcript isn't: hide it, and let Save delete it (not saving brings
     // the old record back, and with it the transcript that matches).
     await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
     forgetFailures(cacheDir(r, id)) // new content: its derived files get a fresh try
-    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe }, srcPath, r)
+    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe, ...identity }, srcPath, r)
     markTranscriptStale(id)
   }
   const asset = await hydrate(r, toAsset(r, getEntry(id)!))

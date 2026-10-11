@@ -1,6 +1,6 @@
 import { type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
-import { assetAspect, isImageAsset } from '@shared/media'
+import { assetAspect, isImageAsset, isUnknownClip } from '@shared/media'
 import { useLibrary, useImportMedia, useRepairMedia } from '@/hooks/useMedia'
 import { latestJob, useEditor } from '@/state/store'
 import { activeComp, getFormat, useProject } from '@/state/projectStore'
@@ -154,7 +154,13 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
     <div className="rounded border border-amber-500/40" data-testid={`media-${status}`}>
       {card}
       <div className="space-y-1 px-2 pb-1.5 pt-1 text-[10px] text-amber-200">
-        <p title={asset.absolutePath}>Missing: no file matching this clip at its saved location.</p>
+        {isUnknownClip(asset) ? (
+          <p data-testid="media-unknown">
+            Missing, unknown clip: the timeline uses it, but nothing records which file it was. Relink… to find it.
+          </p>
+        ) : (
+          <p title={asset.absolutePath}>Missing: no file matching this clip at its saved location.</p>
+        )}
         <div className="flex gap-1">
           <button
             disabled={busy}

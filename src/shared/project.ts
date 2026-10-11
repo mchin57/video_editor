@@ -590,24 +590,41 @@ export interface Project extends Composition {
   updatedAt: string
 }
 
-/** Every media id this document references through its layers/audio, RECURSING
- *  into nested compositions (compound layers and layout-cell comps). A
- *  `Composition` satisfies the parameter shape, so this is also the canonical
- *  media walker for nested comps — don't write a parallel one. */
-export function referencedMediaIds(p: Pick<Project, 'layers' | 'audioClips'>): string[] {
-  const ids: string[] = []
+/** One place a document uses a media item: as what, and the furthest source
+ *  second it plays (0 = unknown, e.g. an audio clip running "to the end"). */
+export interface MediaUse {
+  mediaId: string
+  as: 'video' | 'image' | 'audio'
+  outSec: number
+}
+
+/** Every use of media in this document — layers, layout cells and audio clips,
+ *  RECURSING into nested compositions (compound layers and layout-cell comps).
+ *  THE canonical media walker for nested comps — don't write a parallel one;
+ *  `referencedMediaIds` is built on it. */
+export function mediaUses(p: Pick<Project, 'layers' | 'audioClips'>): MediaUse[] {
+  const uses: MediaUse[] = []
   for (const l of p.layers) {
-    if (l.content.kind === 'video' || l.content.kind === 'image') ids.push(l.content.mediaId)
-    if (l.content.kind === 'layout') {
-      for (const cell of l.content.cells) {
-        if (cell.comp) ids.push(...referencedMediaIds(cell.comp))
-        else if (cell.mediaId) ids.push(cell.mediaId)
+    const c = l.content
+    if (c.kind === 'video') uses.push({ mediaId: c.mediaId, as: 'video', outSec: Math.max(0, c.outSec) })
+    if (c.kind === 'image') uses.push({ mediaId: c.mediaId, as: 'image', outSec: 0 })
+    if (c.kind === 'layout') {
+      for (const cell of c.cells) {
+        if (cell.comp) uses.push(...mediaUses(cell.comp))
+        else if (cell.mediaId) uses.push({ mediaId: cell.mediaId, as: 'video', outSec: Math.max(0, cell.outSec) })
       }
     }
-    if (l.content.kind === 'compound') ids.push(...referencedMediaIds(l.content.comp))
+    if (c.kind === 'compound') uses.push(...mediaUses(c.comp))
   }
-  for (const a of p.audioClips) ids.push(a.mediaId)
-  return [...new Set(ids)]
+  for (const a of p.audioClips) uses.push({ mediaId: a.mediaId, as: 'audio', outSec: Math.max(0, a.outSec) })
+  return uses
+}
+
+/** Every media id this document references through its layers/audio, RECURSING
+ *  into nested compositions (compound layers and layout-cell comps). A
+ *  `Composition` satisfies the parameter shape. */
+export function referencedMediaIds(p: Pick<Project, 'layers' | 'audioClips'>): string[] {
+  return [...new Set(mediaUses(p).map((u) => u.mediaId))]
 }
 
 /** Effective source out-point (outSec<=0 means "to the source end"). */

@@ -29,8 +29,10 @@ import { getSubdir } from '../config'
 import { replaceFile } from './atomicWrite'
 import { copyAtomic } from './linkOrCopy'
 import {
+  addOpeningRecords,
   clearStaleTranscript,
   closeLibrary,
+  getEntry,
   openLibrary,
   rebaseLibrary,
   recordsFor,
@@ -38,6 +40,7 @@ import {
   staleTranscriptIds
 } from './library'
 import { fromRelativePath, samePath } from './mediaRef'
+import { unknownRecords } from './unknownMedia'
 import { currentProjectRoot, getProjectRoot, setProjectRoot } from './projectRoot'
 import {
   autosavePath,
@@ -238,9 +241,21 @@ async function readFolder(root: string): Promise<LoadedProject> {
   const { library, ...rest } = raw
   // A folder project is named by its folder (the folder is what the user sees,
   // renames and moves).
-  const project = { ...migrateProject(rest), name: basename(root) }
+  let project = { ...migrateProject(rest), name: basename(root) }
   await ensureProjectFolders(root)
   openLibrary(root, Array.isArray(library) ? library : [])
+  // A clip the document uses but nothing describes still gets a library card
+  // (Missing — unknown clip) so it can be relinked; one missing from the
+  // library list joins it (an unsaved change).
+  const unknown = unknownRecords(project, (id) => !!getEntry(id))
+  if (unknown.length) {
+    addOpeningRecords(unknown)
+    const unlisted = unknown.map((r) => r.id).filter((id) => !project.mediaIds.includes(id))
+    if (unlisted.length) {
+      project = { ...project, mediaIds: [...project.mediaIds, ...unlisted] }
+      dirty = true
+    }
+  }
   if (await resolveAll()) dirty = true
   openId = project.id
   return { project, path: doc, dirty }
