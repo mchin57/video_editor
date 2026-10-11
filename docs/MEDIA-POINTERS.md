@@ -1,6 +1,7 @@
 # Media pointers: the library points at your originals
 
-Status: **design, approved direction (2026-10-11). Not implemented.** Branch `claude/media-pointers`.
+Status: **implemented on branch `claude/media-pointers` (2026-10-11), phases 1–7.** Marked `[~]` in
+TODO.md with what is verified; this doc describes the built behavior unless a line says otherwise.
 This replaces the media-ownership half of [PROJECT-FOLDERS.md](PROJECT-FOLDERS.md): no more
 hard-linking or copying originals into the project. The project folder itself stays.
 
@@ -85,11 +86,15 @@ For each item, try the **relative path first, then the absolute path**:
      so previews rebuild, and its transcript is dropped.
    - **Same length:** timeline cuts are kept.
    - **Different length:** every timeline placement of that clip resets to the new file's full length
-     and the old cut is discarded, for now. The three-option follow-up is in TODO.md ▸ "Media
-     relinking". A placement that grows follows the timeline's usual overlap rule.
+     and the old cut is discarded, for now (`resetMediaCuts`, `shared/compositions.ts`: in 0 → out =
+     new length, freeze holds and speed ramp cleared, a constant speed kept; nested comps too; one
+     undo step). The three-option follow-up is in TODO.md ▸ "Media relinking". Layers are separate
+     rows, so a placement that grows doesn't collide with another layer's clip.
+   - **A clip that was never fingerprinted** (an old project converted after its file was gone,
+     `UNKNOWN_FINGERPRINT`) always gets the warning, worded to say it can't be checked.
 4. **Relink one, fix the rest:** afterwards, the app scans the picked file's folder for the project's
-   other missing clips (size first, then the samples) and reconnects every match. One summary line
-   says how many were found.
+   other missing clips (size first, then the samples) and reconnects every match. An info box lists
+   them.
 
 ## Save As
 
@@ -112,10 +117,17 @@ lives in the same folder. If a document can't be read, nothing is deleted.
   - Each item's absolute path comes from the library's record. The fingerprint and relative path are
     computed now, and the original is checked as on open.
   - Generated originals are copied into `generated/` and transcripts into `transcripts/`.
-  - Proxies are carried into `cache/` when they're on the same drive.
+  - Derived files (proxies, thumbnails, waveforms) are linked into `cache/`, or copied across drives;
+    a failure is ignored because the cache rebuilds.
+  - An original that is gone (or no longer the same bytes) is looked for beside the `.reel` by its
+    old whole-file hash. Not found: the record gets `UNKNOWN_FINGERPRINT` and shows Missing.
+  - Converted clips keep their OLD ids (the timeline references them); only new imports get
+    fingerprint-derived ids.
   - The old `.reel` is kept as `.reel-legacy`.
   - The batch keeps the "delete the old library" offer only when no old project is left anywhere the
     app looks (the 2026-10-10 fix).
+- **Where:** File ▸ Open of an old `.reel` offers to convert it, then opens the result; File ▸
+  Convert old projects… converts a whole folder (top level + one level of subfolders).
 - **Projects in the hard-link format** (schema 24) are **not migrated**. Only a handful were made, on
   2026-10-10, and the owner restores them from backup and converts them as old projects. Opening one
   shows a message saying so, and the file is left untouched.
@@ -123,10 +135,10 @@ lives in the same folder. If a document can't be read, nothing is deleted.
 
 ## What goes away
 
-Hard-linking and copying originals (`linkOrCopy` for originals, `placeAgain`, the `storage` field),
-size + modified-date stamps and the "source was overwritten" logic in `mediaHealth`, `media/<id>/`
-record files, the scratch folder, and the "Use the new file" button. *Relink* covers that case
-through the mismatch warning.
+Hard-linking and copying originals (`placeAgain`, the `storage` field), size + modified-date stamps
+and the "source was overwritten" logic in `mediaHealth`, `media/<id>/` record files, the scratch
+folder, and the "Use the new file" button. *Relink* covers that case through the mismatch warning.
+(`linkOrCopy` stays for cache files during conversion; `copyAtomic`/`moveFile` for generated media.)
 
 ## Tests
 

@@ -130,7 +130,7 @@ sample-by-sample (peaks quoted as a fraction of full scale; the dry click is
   landing at exactly their designed gains, and total duration still source +
   longest voice delay. Only the swept path is primed; echo and ensemble are
   clean and must stay byte-identical so their rendered assets keep their
-  content hash.
+  fingerprint (re-rendering the same settings reuses the asset).
 - **`asetrate`+`aresample`+`atempo` shifts pitch without moving duration.** A
   1 kHz tone measured 998.8 Hz at ratio 1.0, 1006.3 Hz shifted up 0.6%, and
   993.8 Hz shifted down 0.6%, with durations 0.9990/0.9980/0.9990 s. Sub-1 ms
@@ -368,11 +368,10 @@ anything ffmpeg writes straight to its final name is a trap:
   `image.png` IS an image asset's "ready" signal.
 - **Windows: `fs.rename` onto a target that is OPEN fails `EPERM`** — even a
   plain Node read handle blocks it. Harmless for ffmpeg outputs (the final
-  name never exists when we rename). Records, transcripts and project
-  documents DO replace an existing name (they must: inside a project folder a
-  name may be a hardlink, and an in-place write would go through it), so they
-  use `replaceFile` (`atomicWrite.ts`), which retries a short EPERM/EBUSY —
-  readers only hold these files for a single read.
+  name never exists when we rename). Transcripts and project documents DO
+  replace an existing name (temp + rename, so a reader never sees a torn
+  file), so they use `replaceFile` (`atomicWrite.ts`), which retries a short
+  EPERM/EBUSY — readers only hold these files for a single read.
 - The partial name is fixed per file (a crash's leftover is overwritten by the
   next attempt's `-y`), so two writers of one file would share it —
   `mediaStore` coalesces them with `singleFlight` (per asset for
@@ -530,7 +529,7 @@ looking for an `-ss` in the transcription path.
   two entries, `(birds` and `chirping)`, so a whole-string noise regex matches
   neither. Real transcripts in the library carry these as caption words. `-sns`
   (`--suppress-nst`) exists and is untried. STILL OPEN.
-- Transcripts are cached at `media/<id>/transcript.json` with no re-run flag.
+- Transcripts are cached at the project's `transcripts/<id>.json` with no re-run flag.
   `TRANSCRIPT_VERSION` (`shared/transcript.ts`) is the cache version: any other
   version is treated as stale and re-transcribed. Change the whisper flags or
   the parse and you must bump it, or every existing transcript keeps its old
