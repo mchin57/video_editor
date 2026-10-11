@@ -11,8 +11,8 @@
  * the final name only after it succeeds. See FFMPEG-NOTES "Partial outputs".
  */
 
-import { promises as fsp } from 'node:fs'
-import { join, parse } from 'node:path'
+import { existsSync, promises as fsp } from 'node:fs'
+import { basename, join, parse } from 'node:path'
 
 /**
  * `…/proxy.mp4` → `…/proxy.part.mp4`: same directory (so the rename is atomic),
@@ -40,6 +40,10 @@ export async function writeAtomically(
   const part = partialPath(finalPath)
   try {
     await write(part)
+    // A writer can "succeed" without writing anything (ffmpeg exits 0 with
+    // "Output file is empty, nothing was encoded"): say so, rather than
+    // failing the rename with a baffling ENOENT on the partial name.
+    if (!existsSync(part)) throw new Error(`${basename(finalPath)} was not written: the command finished without producing a file`)
     await fsp.rename(part, finalPath)
   } catch (error) {
     await fsp.rm(part, { force: true }).catch(() => {})

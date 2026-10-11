@@ -378,6 +378,21 @@ anything ffmpeg writes straight to its final name is a trap:
   `ensureProxy`, per path for thumb/waveform/image). That is per-process: two
   app instances on one data dir are not coordinated (there is no
   single-instance lock).
+- **A run can exit 0 having written nothing** ("Output file is empty, nothing
+  was encoded"). `writeAtomically` checks the partial exists before renaming
+  and says so, instead of failing the rename with ENOENT on `*.part.*`.
+
+## Stills: no input seek (verified ffmpeg 8.1.1, 2026-10)
+
+- **`-ss 0` before `-i` on a JPEG still drops its only frame.** On iPhone
+  JPEGs (image2/mjpeg, probed as 1 frame at 25 fps, duration 0.04) the thumb
+  command printed "No filtered frames for output stream" and "Output file is
+  empty, nothing was encoded" and exited **0**. Every JPEG thumbnail failed, so
+  library cards showed the ▶ placeholder; the old global store never had a
+  thumb for any image either. PNGs survived the same seek.
+- **Without `-ss` every still works** (JPEG and PNG tested), so
+  `buildThumbnailArgs(..., still)` omits it for image assets. Videos keep
+  `-ss 0`, unchanged.
 
 ## Progress parsing
 

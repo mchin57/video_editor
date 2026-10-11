@@ -95,6 +95,17 @@ const proxyFlight = singleFlight<void>() // keyed by cache path of the proxy
 const artifactFlight = singleFlight<void>() // keyed by output path
 const importFlight = singleFlight<MediaAsset>() // keyed by media id
 
+/** Derived files whose generator failed this session (by output path): the
+ *  library load runs on every refetch and must not retry — and log — a file
+ *  that can't be made over and over. Relaunching retries. */
+const artifactFailed = new Set<string>()
+
+/** Forget the failures remembered for one asset's cache dir (proxy + artifacts). */
+function forgetFailures(dir: string): void {
+  for (const out of [...artifactFailed]) if (out.startsWith(dir)) artifactFailed.delete(out)
+  proxyFailed.delete(dir)
+}
+
 /** Best-effort derived file: skipped if present, generated once however many
  *  callers race for it, and never throws (a missing thumb must not fail an import). */
 async function makeArtifact(
@@ -103,12 +114,13 @@ async function makeArtifact(
   id: string,
   generate: (out: string) => Promise<void>
 ): Promise<void> {
-  if (existsSync(out)) return
+  if (existsSync(out) || artifactFailed.has(out)) return
   await artifactFlight(out, async () => {
     try {
       await fsp.mkdir(join(out, '..'), { recursive: true })
       await generate(out)
     } catch (error) {
+      artifactFailed.add(out)
       console.error(`${what} failed for`, id, error)
     }
   })
@@ -118,7 +130,7 @@ async function makeArtifact(
 async function makeThumb(r: string, asset: MediaAsset): Promise<void> {
   if (!asset.probe.video) return
   await makeArtifact(thumbPath(r, asset.id), 'thumbnail', asset.id, (out) =>
-    generateThumbnail(asset.originalPath, out, asset.probe)
+    generateThumbnail(asset.originalPath, out, asset.probe, isImageAsset(asset))
   )
 }
 
@@ -275,6 +287,7 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
     // transcript isn't: hide it, and let Save delete it (not saving brings
     // the old record back, and with it the transcript that matches).
     await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
+    forgetFailures(cacheDir(r, id)) // new content: its derived files get a fresh try
     putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe }, srcPath, r)
     markTranscriptStale(id)
   }

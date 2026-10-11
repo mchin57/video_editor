@@ -55,6 +55,14 @@ describe('writeAtomically', () => {
     expect(existsSync(partialPath(final))).toBe(false)
   })
 
+  it('a writer that "succeeds" without writing anything is an error, not a baffling ENOENT', async () => {
+    // ffmpeg can exit 0 with "Output file is empty, nothing was encoded" (a
+    // JPEG thumb after an input seek — FFMPEG-NOTES "Stills: no input seek").
+    const final = join(dir, 'thumb.jpg')
+    await expect(writeAtomically(final, async () => {})).rejects.toThrow('thumb.jpg was not written')
+    expect(existsSync(final)).toBe(false)
+  })
+
   it('overwrites a stale partial left by an earlier crash', async () => {
     const final = join(dir, 'audio.m4a')
     await fsp.writeFile(partialPath(final), 'stale bytes from a killed run')
