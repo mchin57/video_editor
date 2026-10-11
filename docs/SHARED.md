@@ -214,21 +214,26 @@ _Note:_ `assBuilder.ts` and `audio.ts` keep their own local round/format helpers
 (assBuilder's `r` collides with a hex-component name in another scope) — low
 priority; the string-pinning tests guard them either way.
 
-## Project folders & media — `projectLayout.ts`, `linkOrCopy.ts`, `mediaHealth.ts`, `mediaStore.ts`
+## Project folders & media — `projectLayout.ts`, `library.ts`, `mediaRef.ts`, `fingerprint.ts`, `mediaStore.ts`
 
-A project is a folder that owns its media (docs/PROJECT-FOLDERS.md). Main owns
-which one is open.
+A project is a folder (`<Name>.reel`, `generated/`, `transcripts/`, `cache/`);
+its library items POINT at originals where they are (docs/MEDIA-POINTERS.md).
+Main owns which project is open and its in-memory library; only Save writes the
+`.reel`.
 
 | Concept | Home | Use instead of |
 | --- | --- | --- |
-| `docPath`/`autosavePath`/`mediaDir`/`cacheDir`/`cachePath`/`assetJsonPath`/`transcriptPath`, `originalName`, `projectFolderFor`, `sweepPlan`, `isMediaId` | `projectLayout.ts` | joining paths into a project folder by hand. Pure; every main-side path into a project goes through it |
-| `getProjectRoot()` / `setProjectRoot()` | `projectRoot.ts` | a global data-dir media path (`getSubdir('media')` is the LEGACY store now). Capture the root once at the start of a long job |
-| `linkOrCopy(src, dest)`, `copyAtomic`, `moveFile` | `linkOrCopy.ts` | `fs.copyFile` for an original (doubles disk) or a bare `fs.link` (no fallback across volumes/FAT/shares). `moveFile` adopts a file the app generated |
-| `replaceFile(path, data)` | `atomicWrite.ts` | `fs.writeFile` onto a record/transcript/document. Temp + rename (never writes THROUGH a hardlink, never torn), with the Windows EPERM retry |
-| `importFile(src)` / `importGenerated(tmp, name)` | `mediaStore.ts` | registering media any other way. External files are linked in; app outputs (stills, effects, extracted audio, background removal) are moved in. Both dedup by content hash (`findByHash`, since an accepted change keeps its old id) |
-| `requireUsable(id)`, `assertMediaUsable(ids)` | `mediaStore.ts` | `getAsset` before a job that READS the original (proxy, transcribe, matte, still, silence, export). They run the changed/missing check and throw a message naming the files |
-| `statVerdict`/`hashVerdict`/`unusableMessage` | `mediaHealth.ts` | re-deriving the change-detection rule (stamp match → ok; mismatch → re-hash; same hash → re-stamp) |
-| `conversionFolder`, `adoptAction`, `legacyIdsIn`, `isLegacyDoc` | `legacyPlan.ts` | ad-hoc legacy `.reel` handling; `legacyConvert.ts` does the I/O |
+| `docPath`/`autosavePath`/`generatedRoot`/`transcriptsRoot`/`cacheDir`/`cachePath`/`transcriptPath`, `projectSubdirs`, `projectFolderFor`, `sweepPlan`, `isMediaId` | `projectLayout.ts` | joining paths into a project folder by hand. Pure; every main-side path into a project goes through it. (`mediaDir`/`assetJsonPath`/`originalName` are the schema-24 layout, kept only for conversion) |
+| `safeFileName(name)`, `uniqueFileName(name, taken)` | `projectLayout.ts` | writing a display name to disk as-is. A display name can hold `:` (time ranges), which Windows refuses; the library keeps the display name |
+| `getProjectRoot()` / `currentProjectRoot()` / `setProjectRoot()` | `projectRoot.ts` | a global data-dir media path. There may be NO open project (start screen): `currentProjectRoot()` returns null, `getProjectRoot()` throws. Capture the root once at the start of a long job |
+| `openLibrary`/`getEntry`/`putEntry`/`resolveEntry`/`resolveAll`/`recordsFor`/`rebaseLibrary`, `onLibraryChanged`, `fingerprintOf` | `library.ts` | reading or writing media records anywhere else. Records live in memory; `projectStore` writes them into the autosave and, on Save, the `.reel`. A change after open notifies the renderer (unsaved changes) |
+| `locateOriginal(record, dir, read?)`, `decideResolution`, `toRelativePath`/`fromRelativePath`, `samePath` | `mediaRef.ts` | resolving a record's file yourself. Relative path first, absolute second, each fingerprint-checked; returns which path to use and which fields to update |
+| `fingerprintFile`, `sameFingerprint`, `fingerprintDiff`, `fingerprintId` | `fingerprint.ts` | hashing a whole file to identify it. Size + three 256 KiB samples; `fingerprintId` is the id of a new import (never change its formula) |
+| `importFile(src)` / `importGenerated(tmp, name)` | `mediaStore.ts` | adding media any other way. `importFile` points at the file (no copy); `importGenerated` moves an app output into `generated/`. Both dedup by fingerprint |
+| `requireUsable(id)`, `assertMediaUsable(ids)` | `mediaStore.ts` | `getAsset` before a job that READS the original (proxy, transcribe, matte, still, silence, export). They locate the original now and throw a message naming any missing file |
+| `replaceFile(path, data)` | `atomicWrite.ts` | `fs.writeFile` onto a document/transcript. Temp + rename (never torn), with the Windows EPERM retry |
+| `validateProjectName(name)`, `PROJECT_NAME_MAX` | `shared/projectName.ts` | checking a project name by hand. Null or a short reason (Windows folder rules); the New project window shows it live and main re-checks before creating |
+| `conversionFolder`, `adoptAction`, `legacyIdsIn`, `isLegacyDoc` | `legacyPlan.ts` | ad-hoc legacy `.reel` handling; `legacyConvert.ts` does the I/O. (Paused: being rebuilt for the pointer model) |
 
 ## IPC — `src/preload/index.ts`, `src/renderer/src/ipc/client.ts`
 

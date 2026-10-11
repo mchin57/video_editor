@@ -9,6 +9,12 @@
  * the New project window calls. A spec about the start screen or New itself
  * uses `electronApp` + `firstWindow()` directly.
  *
+ * NOTHING may wait on a person. Every native dialog in main CANCELS by default
+ * (Save/Open → canceled, message boxes → their cancel button) and the
+ * renderer's `alert`/`confirm` log and cancel instead of blocking. A spec that
+ * needs an answer stubs that dialog itself (`dialog.showSaveDialog = …` via
+ * `electronApp.evaluate`); one that forgets fails fast instead of hanging.
+ *
  * Pattern for specs: ARRANGE via `window.__reelStores` (the same store actions
  * the UI calls — exposed in renderer main.tsx), ACT via real pointer/keyboard
  * events, ASSERT on DOM + store state.
@@ -64,11 +70,28 @@ export const test = base.extend<{
         REEL_TODO_PATH: join(scratch, 'TODO.md')
       }
     })
+    await app.evaluate(({ dialog }) => {
+      dialog.showSaveDialog = (async () => ({ canceled: true, filePath: '' })) as typeof dialog.showSaveDialog
+      dialog.showOpenDialog = (async () => ({ canceled: true, filePaths: [] })) as typeof dialog.showOpenDialog
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        const opts = args.find((a) => !!a && typeof a === 'object' && 'message' in a) as { cancelId?: number } | undefined
+        return { response: opts?.cancelId ?? 0, checkboxChecked: false }
+      }) as typeof dialog.showMessageBox
+      dialog.showErrorBox = (title: string, content: string) => console.error('[e2e] error box:', title, content)
+    })
     await use(app)
     await app.close()
   },
   appPage: async ({ electronApp, projectsDir }, use) => {
     const page = await electronApp.firstWindow()
+    page.on('dialog', (d) => void d.dismiss().catch(() => {}))
+    await page.evaluate(() => {
+      window.alert = (message?: unknown) => console.error('[e2e] alert:', message)
+      window.confirm = (message?: string) => {
+        console.error('[e2e] confirm → cancel:', message)
+        return false
+      }
+    })
     await page.getByTestId('start-screen').waitFor()
     await page.evaluate((dir) => window.__reelStores.useProject.getState().createProject('E2E', dir), projectsDir)
     await page.getByTestId('start-screen').waitFor({ state: 'detached' })
