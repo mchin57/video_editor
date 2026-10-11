@@ -9,6 +9,7 @@ import {
   makeCompFromCell,
   makeCompFromLayer,
   resolveCompAtPath,
+  resetMediaCuts,
   stepInto,
   syncCompoundWindows,
   updateCompAtPath
@@ -225,5 +226,40 @@ describe('syncCompoundWindows', () => {
     const root = createEmptyProject('p', 't')
     root.layers = [makeVideoLayer('v', 'm', 0, 5), layoutLayer('lay', { mediaId: 'm' })]
     expect(syncCompoundWindows(root)).toBe(root)
+  })
+})
+
+describe('resetMediaCuts (relink to a different-length file)', () => {
+  it('resets every placement of the media to the whole new source, recursively', () => {
+    const root = nestedRoot() // m-inner, behind a compound layer and a layout cell comp
+    const clip = { ...makeVideoLayer('v', 'm', 2, 3), name: 'cut' }
+    if (clip.content.kind === 'video') {
+      clip.content = { ...clip.content, inSec: 4, outSec: 7, speed: 2, freezes: [{ atSec: 5, holdSec: 1 }], speedRamp: [] }
+    }
+    root.layers.push(clip, layoutLayer('cells', { mediaId: 'm', inSec: 3, outSec: 4 }))
+    root.audioClips = [audio('m', 0, 2, 3), audio('other', 0, 1, 2)]
+    const next = resetMediaCuts(root, 'm', 10)
+
+    const v = next.layers.find((l) => l.id === 'v')!
+    expect(v.content).toMatchObject({ kind: 'video', inSec: 0, outSec: 10, speed: 2 })
+    expect(v.content).not.toHaveProperty('freezes')
+    expect(v.content).not.toHaveProperty('speedRamp')
+    expect(v.startSec).toBe(2)
+    expect(v.endSec).toBeCloseTo(2 + 10 / 2, 9) // the whole source at the kept constant speed
+    expect(v.name).toBe('cut')
+    const cell = next.layers.find((l) => l.id === 'cells')!.content
+    expect(cell.kind === 'layout' && cell.cells[0]).toMatchObject({ inSec: 0, outSec: 10 })
+    expect(next.audioClips[0]).toMatchObject({ inSec: 0, outSec: 10 })
+    expect(next.audioClips[1]).toBe(root.audioClips[1])
+
+    const deep = resetMediaCuts(root, 'm-inner', 9)
+    const mid = (deep.layers[0].content as { comp: Composition }).comp
+    const inner = (mid.layers[0].content as { cells: LayoutCell[] }).cells[0].comp!
+    expect(inner.layers[0].content).toMatchObject({ inSec: 0, outSec: 9 })
+  })
+
+  it('returns the input when nothing uses the media (no undo churn)', () => {
+    const root = nestedRoot()
+    expect(resetMediaCuts(root, 'nope', 5)).toBe(root)
   })
 })

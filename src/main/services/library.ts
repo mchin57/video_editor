@@ -68,6 +68,11 @@ export function getEntry(id: string): LibraryEntry | null {
   return entries.get(id) ?? null
 }
 
+/** Every entry (e.g. to look for the other missing clips after a relink). */
+export function allEntries(): LibraryEntry[] {
+  return [...entries.values()]
+}
+
 /** The entry already holding this content, if any (import dedup / auto-relink). */
 export function findByFingerprint(fp: Fingerprint): LibraryEntry | null {
   for (const entry of entries.values()) if (sameFingerprint(entry.record.fingerprint, fp)) return entry

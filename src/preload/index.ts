@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
@@ -24,7 +24,7 @@ const api = {
     ipcRenderer.invoke(IPC.listProjectMedia, ids),
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
   /** Pick a file holding a missing asset's original (null = canceled). */
-  relinkMediaDialog: (id: string): Promise<MediaAsset | null> => ipcRenderer.invoke(IPC.relinkMediaDialog, id),
+  relinkMediaDialog: (id: string): Promise<RelinkResult | null> => ipcRenderer.invoke(IPC.relinkMediaDialog, id),
 
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read/write its working copy (autosave); the *File*

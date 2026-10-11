@@ -14,8 +14,9 @@
 
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, promises as fsp } from 'node:fs'
-import { basename, join, parse } from 'node:path'
-import type { MediaAsset, MediaKind, MediaRecord } from '@shared/media'
+import { basename, dirname, join, parse } from 'node:path'
+import type { FingerprintField, MediaAsset, MediaKind, MediaRecord } from '@shared/media'
+import type { RelinkResult } from '@shared/ipc'
 import { deriveKind, isAudioAsset, isImageAsset, kindFromExt } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
@@ -28,9 +29,10 @@ import { singleFlight } from './atomicWrite'
 import { moveFile } from './linkOrCopy'
 import { getProjectRoot } from './projectRoot'
 import { unusableMessage } from './mediaHealth'
-import { fingerprintId, sameFingerprint } from './fingerprint'
+import { fingerprintDiff, fingerprintId, isUnknownFingerprint, sameFingerprint } from './fingerprint'
 import { toRelativePath } from './mediaRef'
 import {
+  allEntries,
   findByFingerprint,
   fingerprintOf,
   getEntry,
@@ -210,20 +212,95 @@ function pointAt(r: string, record: MediaRecord, path: string): MediaRecord {
   return { ...record, absolutePath: path, relativePath: toRelativePath(r, path) }
 }
 
+/** How a picked file compares with a clip's fingerprint, for the Relink warning. */
+export interface RelinkCheck {
+  fileName: string
+  matches: boolean
+  /** The clip was never fingerprinted (converted after its file was gone). */
+  unknown: boolean
+  /** The fields that differ (empty when it matches). */
+  differs: FingerprintField[]
+  recordedSize: number
+  foundSize: number
+}
+
+export async function relinkCheck(id: string, srcPath: string): Promise<RelinkCheck> {
+  const entry = getEntry(id)
+  if (!entry) throw new Error('That media is no longer in the library.')
+  const recorded = entry.record.fingerprint
+  const found = await fingerprintOf(srcPath)
+  const unknown = isUnknownFingerprint(recorded)
+  const differs = fingerprintDiff(recorded, found)
+  return {
+    fileName: entry.record.fileName,
+    matches: !unknown && differs.length === 0,
+    unknown,
+    differs,
+    recordedSize: recorded.size,
+    foundSize: found.size
+  }
+}
+
 /**
- * "Relink": point a missing asset at `srcPath`. It must match the asset's
- * fingerprint. (The "Update path anyway" warning for a file that doesn't
- * match lands with the relink work — docs/MEDIA-POINTERS.md "Relink".)
+ * "Relink": point `id` at `srcPath` (docs/MEDIA-POINTERS.md "Relink"). A file
+ * that doesn't match the clip's fingerprint is taken only with `force` — the
+ * user's "Update path anyway" — and then the clip becomes that file: its
+ * fingerprint and probe follow it, and its cache and transcript go (they
+ * describe the old content). A change of length is reported (`cutsReset`) so
+ * the renderer resets the clip's cuts. Afterwards the picked file's folder is
+ * searched for the project's other missing clips (relink one, fix the rest).
  */
-export async function relinkMedia(id: string, srcPath: string): Promise<MediaAsset> {
+export async function relinkMedia(id: string, srcPath: string, force = false): Promise<RelinkResult> {
   const r = getProjectRoot()
   const entry = getEntry(id)
   if (!entry) throw new Error('That media is no longer in the library.')
   const fp = await fingerprintOf(srcPath)
-  if (!sameFingerprint(fp, entry.record.fingerprint)) {
-    throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
+  let cutsReset = false
+  if (sameFingerprint(fp, entry.record.fingerprint)) {
+    putEntry(pointAt(r, entry.record, srcPath), srcPath)
+  } else {
+    if (!force) throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
+    const probe = await probeFile(srcPath)
+    if (probe.audio?.channels === 2) probe.audio.monoFoldChannel = await detectMonoFoldChannel(srcPath)
+    cutsReset = Math.abs(probe.durationSec - entry.record.probe.durationSec) > 0.01
+    await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
+    await fsp.rm(transcriptPath(r, id), { force: true })
+    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe }, srcPath)
   }
-  return hydrate(r, toAsset(r, putEntry(pointAt(r, entry.record, srcPath), srcPath)))
+  const asset = await hydrate(r, toAsset(r, getEntry(id)!))
+  return { asset, cutsReset, alsoFound: await relinkSiblings(r, dirname(srcPath)) }
+}
+
+/**
+ * Relink one, fix the rest: every other missing clip whose file is in `dir`
+ * (matched by size, then fingerprint) is pointed at it. Returns their names.
+ */
+async function relinkSiblings(r: string, dir: string): Promise<string[]> {
+  const missing: LibraryEntry[] = []
+  for (const entry of allEntries()) {
+    if (isUnknownFingerprint(entry.record.fingerprint)) continue
+    const res = await resolveEntry(entry.record.id)
+    if (res && !res.entry.path) missing.push(res.entry)
+  }
+  if (!missing.length) return []
+  const bySize = new Map<number, string[]>()
+  for (const name of await fsp.readdir(dir).catch(() => [] as string[])) {
+    const path = join(dir, name)
+    const s = await fsp.stat(path).catch(() => null)
+    if (!s?.isFile()) continue
+    bySize.set(s.size, [...(bySize.get(s.size) ?? []), path])
+  }
+  const found: string[] = []
+  for (const entry of missing) {
+    for (const path of bySize.get(entry.record.fingerprint.size) ?? []) {
+      const fp = await fingerprintOf(path).catch(() => null)
+      if (!fp || !sameFingerprint(fp, entry.record.fingerprint)) continue
+      putEntry(pointAt(r, entry.record, path), path)
+      found.push(entry.record.fileName)
+      break
+    }
+  }
+  return found
 }
 
 /**

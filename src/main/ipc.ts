@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join, parse } from 'node:path'
-import { IPC, IPC_EVENT, type AudioFxRequest, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -18,7 +18,9 @@ import {
   extractAudioToLibrary,
   getProjectMedia,
   importGenerated,
+  relinkCheck,
   relinkMedia,
+  type RelinkCheck,
   renderAudioFxToLibrary,
   requireUsable,
   tmpOutput
@@ -55,6 +57,28 @@ function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
   if (req.flipV) chain.push('vflip')
   if (req.color && !isNeutralColor(req.color)) chain.push(eqFilter(req.color))
   return chain
+}
+
+const mb = (bytes: number): string => `${(bytes / 1024 ** 2).toFixed(1)} MB`
+
+/** The Relink warning's detail: which fingerprint fields differ, in words. */
+function relinkMismatchDetail(c: RelinkCheck): string {
+  if (c.unknown) {
+    return (
+      `"${c.fileName}" was never fingerprinted (its file was already gone when the project was converted), ` +
+      "so this file can't be checked against it. The clip will use this file."
+    )
+  }
+  const lines = c.differs.map((f) =>
+    f === 'size'
+      ? `File size: ${mb(c.recordedSize)} recorded, ${mb(c.foundSize)} in this file`
+      : `Content sample at the ${f} of the file: different`
+  )
+  return (
+    `This file doesn't match "${c.fileName}":\n${lines.join('\n')}\n\n` +
+    'The clip will use this file. If its length differs, every place the clip is used on the timeline ' +
+    'resets to the whole new file.'
+  )
 }
 
 export function registerIpcHandlers(): void {
@@ -124,10 +148,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listProjectMedia, (_event, ids: string[]) => getProjectMedia(ids))
   ipcMain.handle(IPC.ensureProxy, (_event, id: string) => ensureProxy(id))
 
-  // A library card's repair action: point a missing clip at a file holding
-  // its original (null = dialog canceled). docs/MEDIA-POINTERS.md "Relink".
-  ipcMain.handle(IPC.relinkMediaDialog, async (event, id: string): Promise<MediaAsset | null> => {
+  // A library card's repair action (docs/MEDIA-POINTERS.md "Relink"): pick a
+  // file; one that doesn't match the clip's fingerprint needs "Update path
+  // anyway"; then other missing clips in that folder reconnect too. Null =
+  // canceled at either question.
+  ipcMain.handle(IPC.relinkMediaDialog, async (event, id: string): Promise<RelinkResult | null> => {
     const win = BrowserWindow.fromWebContents(event.sender)
+    const ask = (box: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
+      win ? dialog.showMessageBox(win, box) : dialog.showMessageBox(box)
     const options: Electron.OpenDialogOptions = {
       title: 'Find the original file',
       properties: ['openFile'],
@@ -136,9 +164,33 @@ export function registerIpcHandlers(): void {
         { name: 'All files', extensions: ['*'] }
       ]
     }
-    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
-    if (result.canceled || !result.filePaths[0]) return null
-    return relinkMedia(id, result.filePaths[0])
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths[0]) return null
+    const path = picked.filePaths[0]
+    const check = await relinkCheck(id, path)
+    if (!check.matches) {
+      const answer = await ask({
+        type: 'warning',
+        buttons: ['Update path anyway', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'These fields do not match',
+        message: 'These fields do not match. Update path anyway?',
+        detail: relinkMismatchDetail(check)
+      })
+      if (answer.response !== 0) return null
+    }
+    const result = await relinkMedia(id, path, !check.matches)
+    if (result.alsoFound.length) {
+      const n = result.alsoFound.length
+      await ask({
+        type: 'info',
+        buttons: ['OK'],
+        message: `Also reconnected ${n} other missing clip${n === 1 ? '' : 's'} found in that folder.`,
+        detail: result.alsoFound.join('\n')
+      })
+    }
+    return result
   })
 
   // A library record changed after the project opened (import, relink, a path

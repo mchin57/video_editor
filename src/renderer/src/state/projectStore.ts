@@ -20,6 +20,7 @@ import {
   compDepth,
   makeCompFromCell,
   makeCompFromLayer,
+  resetMediaCuts,
   resolveCompAtPath,
   syncCompoundWindows,
   updateCompAtPath,
@@ -140,6 +141,9 @@ interface ProjectState {
   save: () => Promise<void>
   saveAs: () => Promise<void>
   setPreset: (preset: PresetId) => void
+  /** A relink pointed `mediaId` at a file of a different length: every
+   *  placement (nested comps too) resets to the whole new file. One undo step. */
+  resetMediaCuts: (mediaId: string, durationSec: number) => void
   addMedia: (ids: string[]) => void
   removeMedia: (id: string) => void
   /** Update the ACTIVE composition without recording history (live drag
@@ -444,6 +448,8 @@ export const useProject = create<ProjectState>((set, get) => {
     },
 
     setPreset: (preset) => commit((p) => ({ ...p, preset })),
+
+    resetMediaCuts: (mediaId, durationSec) => commit((p) => resetMediaCuts(p, mediaId, durationSec)),
 
     addMedia: (ids) =>
       commit((p) => {

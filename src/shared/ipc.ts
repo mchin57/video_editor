@@ -105,6 +105,16 @@ export interface LoadedProject {
   dirty: boolean
 }
 
+/** A Relink that went through (docs/MEDIA-POINTERS.md "Relink"). */
+export interface RelinkResult {
+  asset: import('./media').MediaAsset
+  /** The clip was pointed at a file of a different length ("Update path
+   *  anyway"): the renderer resets every placement to the whole new file. */
+  cutsReset: boolean
+  /** Other missing clips found in the same folder and reconnected (file names). */
+  alsoFound: string[]
+}
+
 /** What the app opens to: the last project, or none (the start screen) with
  *  an optional reason to show there. */
 export interface LaunchState {
