@@ -6,13 +6,14 @@
  */
 
 import { basename, dirname, extname, join, parse, relative, isAbsolute } from 'node:path'
-import { PROJECT_VERSION } from '@shared/project'
 import { REEL_EXT, isMediaId } from './projectLayout'
 
-/** A document whose media still lives in the old global store. */
+/** A document whose media still lives in the old global store (schema < 24).
+ *  Schema 24 (hard-linked project folders) is not legacy: it is refused, not
+ *  converted (docs/MEDIA-POINTERS.md "Migration"). */
 export function isLegacyDoc(raw: unknown): boolean {
   const v = (raw as { version?: unknown } | null)?.version
-  return typeof v !== 'number' || v < PROJECT_VERSION
+  return typeof v !== 'number' || v < 24
 }
 
 /** Facts about the place a legacy `.reel` sits, gathered by the caller. */

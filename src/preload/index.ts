@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT, type AudioFxRequest, type LoadedProject, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
@@ -23,23 +23,35 @@ const api = {
   listProjectMedia: (ids: string[]): Promise<MediaAsset[]> =>
     ipcRenderer.invoke(IPC.listProjectMedia, ids),
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
-  /** Accept a changed original ("Use the new file"). */
-  acceptChangedMedia: (id: string): Promise<MediaAsset> => ipcRenderer.invoke(IPC.acceptChangedMedia, id),
-  /** Pick a file holding a missing/changed asset's original bytes (null = canceled). */
+  /** Pick a file holding a missing asset's original (null = canceled). */
   relinkMediaDialog: (id: string): Promise<MediaAsset | null> => ipcRenderer.invoke(IPC.relinkMediaDialog, id),
 
-  // Project (M2) — a project is a folder. loadProject/saveProject read/write
-  // its working copy (autosave); the *File* methods open, save and create it.
-  loadProject: (): Promise<LoadedProject> => ipcRenderer.invoke(IPC.loadProject),
+  // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
+  // loadProject/saveProject read/write its working copy (autosave); the *File*
+  // methods create, open and save it.
+  /** What to open at launch: the last project, or none (start screen). */
+  loadProject: (): Promise<LaunchState> => ipcRenderer.invoke(IPC.loadProject),
   saveProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.saveProject, project),
   openProjectFile: (): Promise<LoadedProject | null> => ipcRenderer.invoke(IPC.openProjectFile),
   saveProjectAs: (project: Project): Promise<{ path: string; project: Project } | null> =>
     ipcRenderer.invoke(IPC.saveProjectAs, project),
   saveProjectFile: (project: Project): Promise<Project> => ipcRenderer.invoke(IPC.saveProjectFile, project),
-  /** File ▸ New: discard the open project's unsaved state, start a scratch one. */
-  newProject: (project: Project): Promise<void> => ipcRenderer.invoke(IPC.newProject, project),
-  /** The open project's folder (the scratch folder while unsaved). */
-  getProjectDir: (): Promise<string> => ipcRenderer.invoke(IPC.getProjectDir),
+  /** File ▸ New: create `<location>/<name>/` and open it (rejects with a reason). */
+  createProject: (name: string, location: string): Promise<LoadedProject> =>
+    ipcRenderer.invoke(IPC.createProject, name, location),
+  /** The New window's "Choose location…" folder picker (null = canceled). */
+  chooseProjectLocation: (current: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.chooseProjectLocation, current),
+  /** Where the New window starts: the Settings export folder. */
+  defaultProjectLocation: (): Promise<string> => ipcRenderer.invoke(IPC.defaultProjectLocation),
+  /** The open project's folder (null when none is open). */
+  getProjectDir: (): Promise<string | null> => ipcRenderer.invoke(IPC.getProjectDir),
+  /** A library record changed after the project opened: it has unsaved changes. */
+  onLibraryChanged: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on(IPC_EVENT.libraryChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_EVENT.libraryChanged, handler)
+  },
   /** File ▸ Convert old projects…: summary lines, or null if canceled. */
   convertLegacyFolderDialog: (): Promise<string[] | null> => ipcRenderer.invoke(IPC.convertLegacyFolderDialog),
 

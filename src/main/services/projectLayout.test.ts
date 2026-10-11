@@ -5,11 +5,12 @@ import {
   cachePath,
   docPath,
   isMediaId,
-  mediaDir,
-  originalName,
+  generatedRoot,
+  projectSubdirs,
   projectFolderFor,
   sweepPlan,
-  transcriptPath
+  transcriptPath,
+  uniqueFileName
 } from './projectLayout'
 
 const root = join('C:', 'Reels', 'bad brick')
@@ -20,15 +21,17 @@ describe('project folder layout', () => {
     expect(autosavePath(root)).toBe(join(root, 'autosave.json'))
   })
 
-  it('keeps originals + transcripts in media/, derived files in cache/', () => {
-    expect(mediaDir(root, 'ab12cd34ef56')).toBe(join(root, 'media', 'ab12cd34ef56'))
-    expect(transcriptPath(root, 'ab12cd34ef56')).toBe(join(root, 'media', 'ab12cd34ef56', 'transcript.json'))
+  it('keeps generated media, transcripts and derived files in their own folders', () => {
+    expect(projectSubdirs(root)).toEqual([join(root, 'generated'), join(root, 'transcripts'), join(root, 'cache')])
+    expect(generatedRoot(root)).toBe(join(root, 'generated'))
+    expect(transcriptPath(root, 'ab12cd34ef56')).toBe(join(root, 'transcripts', 'ab12cd34ef56.json'))
     expect(cachePath(root, 'ab12cd34ef56', 'proxy.mp4')).toBe(join(root, 'cache', 'ab12cd34ef56', 'proxy.mp4'))
   })
 
-  it('names an original by the source extension, lower-cased', () => {
-    expect(originalName('C:/footage/IMG_1234.MOV')).toBe('original.mov')
-    expect(originalName('song')).toBe('original')
+  it('finds a free name for generated media', () => {
+    const taken = new Set(['clip (still).png', 'clip (still) (2).png'])
+    expect(uniqueFileName('new.png', (n) => taken.has(n))).toBe('new.png')
+    expect(uniqueFileName('clip (still).png', (n) => taken.has(n))).toBe('clip (still) (3).png')
   })
 })
 

@@ -580,9 +580,9 @@ export interface Project extends Composition {
   stabilizeDefault: Stabilize | null
   script: ScriptLine[]
   /**
-   * Ids of the media assets that belong to this project (the library panel),
-   * whose records + originals live in the project folder's media/<id>/
-   * (originals hardlinked, so the same clip in two projects isn't duplicated).
+   * Ids of the media assets that belong to this project (the library panel).
+   * Their records (paths to the originals + fingerprints) are main's in-memory
+   * library, saved in the .reel beside the document (docs/MEDIA-POINTERS.md).
    * Import order, deduped.
    */
   mediaIds: string[]
@@ -688,7 +688,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 24
+export const PROJECT_VERSION = 25
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1004,11 +1004,14 @@ export function migrateProject(raw: unknown): Project {
   // v23 adds free-angle layer rotation (`Layer.rotationDeg`) and video flips
   // (`VideoContent.flipH`/`flipV`). Purely additive — absent means upright and
   // unflipped, which is what every older layer is — so nothing is rewritten.
-  // v24 moves media ownership into the project FOLDER (docs/PROJECT-FOLDERS.md):
-  // a v24 document lives at <Name>/<Name>.reel beside its own media/ + cache/.
-  // Nothing in the document itself changes — a v23-or-older file's media lives
-  // in the old global store, and main converts it (projectMigration.ts) before
-  // it opens; the version only records which side of that line a file is on.
+  // v24 moved media ownership into the project folder (hard-linked originals,
+  // docs/PROJECT-FOLDERS.md) — a short-lived format main now refuses.
+  // v25 makes library items POINTERS to originals in place, saved in the .reel
+  // beside the document (docs/MEDIA-POINTERS.md). The library records are
+  // main's (projectStore strips them before this runs and writes them on
+  // Save); nothing in the document itself changes, and main refuses or
+  // converts older files before they get here, so the version only records
+  // which side of that line a file is on.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

@@ -30,8 +30,8 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const removeMedia = useProject((s) => s.removeMedia)
 
   const repair = useRepairMedia()
-  // A missing or changed original can't be added (its proxy, if any, shows
-  // bytes the file no longer has) until it is repaired below.
+  // A missing original can't be added (its proxy, if any, may describe a file
+  // that's gone) until it is relinked below.
   const status = asset.status ?? 'ok'
   const ready = asset.proxyReady && status === 'ok'
 
@@ -120,7 +120,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           removeMedia(asset.id)
         }}
         className="rounded px-1 text-zinc-600 opacity-0 transition hover:text-rose-400 group-hover:opacity-100"
-        title="Remove from this project (its files are cleaned out of the project folder the next time it opens)"
+        title="Remove from this project (your file stays where it is)"
       >
         ×
       </span>
@@ -149,30 +149,13 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   )
   if (status === 'ok') return card
 
-  const busy = repair.accept.isPending || repair.relink.isPending
+  const busy = repair.relink.isPending
   return (
     <div className="rounded border border-amber-500/40" data-testid={`media-${status}`}>
       {card}
       <div className="space-y-1 px-2 pb-1.5 pt-1 text-[10px] text-amber-200">
-        <p>
-          {status === 'missing'
-            ? 'The file is gone from this project’s media folder.'
-            : 'The file changed outside the app (its source was overwritten).'}
-        </p>
+        <p title={asset.absolutePath}>Missing: no file matching this clip at its saved location.</p>
         <div className="flex gap-1">
-          {status === 'changed' && (
-            <button
-              disabled={busy}
-              onClick={(e) => {
-                e.stopPropagation()
-                repair.accept.mutate(asset.id)
-              }}
-              className={`${btnCls} ${disabledCls} py-0.5 text-[10px]`}
-              title="Use the file as it is now: clips keep their in/out points, which now point into the new content"
-            >
-              Use the new file
-            </button>
-          )}
           <button
             disabled={busy}
             onClick={(e) => {
@@ -180,7 +163,7 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
               repair.relink.mutate(asset.id)
             }}
             className={`${btnCls} ${disabledCls} py-0.5 text-[10px]`}
-            title="Pick a file with the original footage (a copy or backup); it must be byte-identical"
+            title="Find the file yourself (it must be the same footage)"
           >
             Relink…
           </button>

@@ -2,7 +2,7 @@
  * whisper.cpp transcription. Extracts 16k mono audio from a media's original,
  * runs whisper-cli word-level (-ml 1 -sow -ojf, with DTW token timestamps when
  * the model maps to a `-dtw` preset), parses to a Transcript (source time), and
- * caches it as the project's media/<id>/transcript.json (project-owned: it is
+ * caches it as the project's transcripts/<id>.json (project-owned: it is
  * slow to rebuild, so it does not live in the disposable cache). Discovery looks under
  * <dataDir>/bin/whisper (whisper-cli in Release/, bin/ or build/bin/, with a
  * .bin model alongside).
@@ -22,7 +22,7 @@ import { getSubdir, getBundledBinDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { replaceFile } from './atomicWrite'
-import { markTranscribed, requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
+import { requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
 import { singleFlight } from './atomicWrite'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
 import { buildWhisperArgs, decodeStartSec, dtwPreset } from './whisperArgs'
@@ -173,11 +173,11 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
       version: TRANSCRIPT_VERSION,
       decodeStartSec: startSec
     }
-    // temp + rename: never write in place inside a project folder (linkOrCopy.ts).
+    // temp + rename, so a reader never sees a half-written transcript.
+    await fsp.mkdir(join(transcriptPath, '..'), { recursive: true })
     await replaceFile(transcriptPath, JSON.stringify(transcript, null, 2))
 
-    // Mark the asset and clean up scratch files.
-    await markTranscribed(mediaId).catch(() => {})
+    // Clean up scratch files. (`transcribed` is read from the file's existence.)
     await fsp.rm(wav, { force: true }).catch(() => {})
     await fsp.rm(`${rawPrefix}.json`, { force: true }).catch(() => {})
 

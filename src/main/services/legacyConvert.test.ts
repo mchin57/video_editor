@@ -68,7 +68,11 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true })
 })
 
-describe('legacy conversion', () => {
+// SKIPPED ON PURPOSE (2026-10-11): this converter writes the schema-24
+// hard-link layout, which the pointer model (docs/MEDIA-POINTERS.md) no longer
+// opens. Both entry points (Open of an old file, File ▸ Convert old projects…)
+// refuse until the converter is rewritten in phase 7, which replaces this suite.
+describe.skip('legacy conversion', () => {
   it('finds legacy .reel files at the top level and one folder down, skipping converted ones', () => {
     expect(findLegacyReels(reels).sort()).toEqual([join(reels, 'bad brick', 'reel.reel'), join(reels, 'test 2.reel')].sort())
   })

@@ -96,46 +96,23 @@ export interface MediaRecord {
   kind: MediaKind
 }
 
-/** How a project holds an original: a hardlink to the imported source (no
- *  extra disk), a real copy (other volume / link failed), or a file the app
- *  generated itself (background removal, effects, extracted audio, stills). */
-export type MediaStorage = 'link' | 'copy' | 'generated'
-
-/** Whether a project's original is still the file it imported (checked by main
- *  on every library load): `missing` = the file under media/ is gone;
- *  `changed` = its bytes differ from import — usually the SOURCE was overwritten
- *  in place, which rewrites a hardlinked original too. */
+/** Whether a library item's original was found this session (checked by main
+ *  on open and on every library load): `missing` = neither its relative nor
+ *  its absolute path holds a file matching its fingerprint.
+ *  @deprecated `changed` belonged to the schema-24 hard-link model and is never
+ *  produced now; it goes with that model's cleanup. */
 export type MediaStatus = 'ok' | 'missing' | 'changed'
 
-export interface MediaAsset {
-  /** Stable id — the content hash (first 12 hex of sha1) at import; also the
-   *  folder name under the project's media/ and cache/. */
-  id: string
-  fileName: string
-  /** Absolute path of the file to READ — the project's own original under
-   *  `media/<id>/`. Resolved from the open project folder at load time, never
-   *  stored (the folder can move). */
+/** A library item as the app uses it: the saved record plus runtime facts. */
+export interface MediaAsset extends MediaRecord {
+  /** Absolute path of the original to READ: where it was found this session,
+   *  else (missing) the record's absolute path. Runtime only. */
   originalPath: string
-  /** Content hash of the original's current bytes (equals `id` unless the user
-   *  accepted a changed file). Absent on legacy records. */
-  hash?: string
-  /** Where it was imported from (informational, used to relink); null for
-   *  app-generated media. */
-  sourcePath?: string | null
-  storage?: MediaStorage
-  /** Size + mtime of the original when recorded — the change-detection key. */
-  size?: number
-  mtimeMs?: number
-  /** Runtime only (never stored): the latest health check. */
+  /** Runtime only: the latest check. */
   status?: MediaStatus
-  importedAt: string
-  probe: ProbeInfo
   proxyReady: boolean
-  /** Whether a transcript.json has been generated. */
+  /** Whether a transcript exists in the project's transcripts/. */
   transcribed: boolean
-  /** Coarse media class. Optional for assets imported before this field existed
-   * (derived from the probe via {@link assetKind} as a fallback). */
-  kind?: MediaKind
 }
 
 /** Source extensions we recognise, by class. Drive the import dialog + kind. */
