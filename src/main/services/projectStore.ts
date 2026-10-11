@@ -18,7 +18,7 @@
  * Save, and an autosave from a document that is no longer open is dropped.
  */
 
-import { existsSync, promises as fsp, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, promises as fsp, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { LaunchState, LoadedProject } from '@shared/ipc'
 import type { MediaRecord } from '@shared/media'
@@ -35,6 +35,7 @@ import {
   autosavePath,
   cacheDir,
   cacheRoot,
+  cleanupPlan,
   docPath,
   generatedRoot,
   projectFolderFor,
@@ -98,10 +99,8 @@ export function documentFormat(raw: unknown): 'legacy' | 'hardlink' | 'current' 
 function assertOpenable(raw: unknown): void {
   const format = documentFormat(raw)
   if (format === 'legacy') {
-    throw new Error(
-      'This project uses the old shared media library. Converting old projects is being rebuilt ' +
-        'for the new project format and is not available in this build yet.'
-    )
+    // File ▸ Open converts an old file before calling openProject (ipc.ts).
+    throw new Error('This project uses the old shared media library and has to be converted first.')
   }
   if (format === 'hardlink') {
     throw new Error(
@@ -155,11 +154,12 @@ const listDir = (dir: string): string[] => {
 }
 
 /**
- * Delete `cache/<id>` that neither the saved document nor the autosave
- * mentions — media removed from the library (kept until now so undo worked).
- * Only ever touches cache/: the user's footage often shares the folder.
- * Skipped entirely if a document that exists can't be read: never delete on a
- * guess. (generated/ and transcripts/ cleanup: docs/MEDIA-POINTERS.md "Cleanup".)
+ * Cleanup on open (docs/MEDIA-POINTERS.md "Cleanup on open"): delete what
+ * neither the saved document nor the autosave still uses — media removed from
+ * the library (kept until now so undo worked). `cache/<id>` dirs, `generated/`
+ * files and `transcripts/<id>.json`, and NOTHING ELSE: the user's footage
+ * often shares the folder. Skipped entirely if a document that exists can't be
+ * read or parsed: never delete on a guess.
  */
 async function sweep(root: string): Promise<void> {
   const docs: string[] = []
@@ -172,6 +172,10 @@ async function sweep(root: string): Promise<void> {
     }
   }
   if (!docs.length) return
+  const files = (dir: string): string[] => listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
+  const plan = cleanupPlan({ generated: files(generatedRoot(root)), transcripts: files(transcriptsRoot(root)) }, docs)
+  for (const name of plan.generated) await fsp.rm(join(generatedRoot(root), name), { force: true }).catch(() => {})
+  for (const name of plan.transcripts) await fsp.rm(join(transcriptsRoot(root), name), { force: true }).catch(() => {})
   for (const id of sweepPlan(listDir(cacheRoot(root)), docs)) {
     await fsp.rm(cacheDir(root, id), { recursive: true, force: true }).catch(() => {})
   }

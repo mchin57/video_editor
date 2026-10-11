@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   autosavePath,
+  cleanupPlan,
   cachePath,
   docPath,
   isMediaId,
@@ -46,6 +47,26 @@ describe('project folder layout', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('cleanup keeps what a saved document uses and never deletes on an unreadable one', () => {
+    const reel = JSON.stringify({
+      mediaIds: ['aaaaaaaaaaaa'],
+      library: [
+        { id: 'aaaaaaaaaaaa', generated: true, relativePath: 'generated/Clip (no bg 0.03–0.05).webm' },
+        { id: 'bbbbbbbbbbbb', relativePath: 'footage/IMG_1.MOV' }
+      ]
+    })
+    const autosave = JSON.stringify({ mediaIds: ['cccccccccccc'], library: [{ id: 'cccccccccccc', generated: true, relativePath: 'generated/x (still).png' }] })
+    const present = {
+      generated: ['clip (no bg 0.03–0.05).webm', 'x (still).png', 'orphan (audio).wav'],
+      transcripts: ['aaaaaaaaaaaa.json', 'cccccccccccc.json', 'dddddddddddd.json', 'notes.txt']
+    }
+    expect(cleanupPlan(present, [reel, autosave])).toEqual({
+      generated: ['orphan (audio).wav'],
+      transcripts: ['dddddddddddd.json'] // never a file that isn't <id>.json
+    })
+    expect(cleanupPlan(present, [reel, '{ torn'])).toEqual({ generated: [], transcripts: [] })
   })
 
   it('finds a free name for generated media', () => {

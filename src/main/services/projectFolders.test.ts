@@ -143,15 +143,24 @@ describe('project folders (pointer model)', () => {
     expect((await resolveEntry(clip.id))!.entry.path).toBeNull()
   })
 
-  it('cleanup touches only cache/: a user file in the project folder survives', async () => {
+  it('cleanup removes unused cache/generated/transcripts only: a user file in the project folder survives', async () => {
     await saveProjectFile(project)
     writeFileSync(join(root, 'my notes.txt'), 'mine')
+    mkdirSync(join(root, 'b-roll'))
+    writeFileSync(join(root, 'b-roll', 'unused take.mov'), 'mine too')
     mkdirSync(join(root, 'cache', 'abcdefabcdef'), { recursive: true })
     mkdirSync(join(root, 'cache', clip.id), { recursive: true })
+    writeFileSync(join(root, 'generated', 'orphan (audio).wav'), 'x')
+    writeFileSync(join(root, 'transcripts', 'abcdefabcdef.json'), '{}')
+    writeFileSync(join(root, 'transcripts', `${clip.id}.json`), '{}')
     await openProject(join(root, 'Race day.reel'))
     expect(existsSync(join(root, 'my notes.txt'))).toBe(true)
+    expect(existsSync(join(root, 'b-roll', 'unused take.mov'))).toBe(true)
     expect(existsSync(join(root, 'cache', 'abcdefabcdef'))).toBe(false)
     expect(existsSync(join(root, 'cache', clip.id))).toBe(true)
+    expect(existsSync(join(root, 'generated', 'orphan (audio).wav'))).toBe(false)
+    expect(existsSync(join(root, 'transcripts', 'abcdefabcdef.json'))).toBe(false)
+    expect(existsSync(join(root, 'transcripts', `${clip.id}.json`))).toBe(true)
   })
 
   it('Save As copies generated/ + transcripts/, re-measures relative paths, and leaves the old folder at its last save', async () => {

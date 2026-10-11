@@ -94,6 +94,42 @@ export function sweepPlan(present: string[], docs: string[]): string[] {
   return present.filter((id) => isMediaId(id) && !docs.some((d) => d.includes(`"${id}"`)))
 }
 
+/**
+ * Cleanup on open (docs/MEDIA-POINTERS.md "Cleanup on open"): which files in
+ * `generated/` and `transcripts/` neither saved document (`.reel`, autosave)
+ * still uses. A generated file is kept if any document's library has a
+ * generated record whose relative path names it; a transcript `<id>.json` if
+ * its id appears anywhere in a document's text. `docs` are the documents' raw
+ * texts; if one can't be parsed, NOTHING is deleted (never delete on a guess).
+ */
+export function cleanupPlan(
+  present: { generated: string[]; transcripts: string[] },
+  docs: string[]
+): { generated: string[]; transcripts: string[] } {
+  const keepGenerated = new Set<string>()
+  for (const text of docs) {
+    let library: unknown
+    try {
+      library = (JSON.parse(text) as { library?: unknown }).library
+    } catch {
+      return { generated: [], transcripts: [] }
+    }
+    for (const r of Array.isArray(library) ? library : []) {
+      const rel = (r as { relativePath?: unknown }).relativePath
+      if (typeof rel === 'string' && rel.toLowerCase().startsWith('generated/')) {
+        keepGenerated.add(rel.slice('generated/'.length).toLowerCase())
+      }
+    }
+  }
+  return {
+    generated: present.generated.filter((name) => !keepGenerated.has(name.toLowerCase())),
+    transcripts: present.transcripts.filter((name) => {
+      const id = name.replace(/\.json$/i, '')
+      return isMediaId(id) && name.toLowerCase().endsWith('.json') && !docs.some((d) => d.includes(`"${id}"`))
+    })
+  }
+}
+
 // --- Schema-24 (hard-link) layout: read only by legacy conversion ------------
 
 /** @deprecated schema 24 only — where that layout kept originals and records. */
