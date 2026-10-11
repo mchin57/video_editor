@@ -116,11 +116,9 @@ lives in the same folder. If a document can't be read, nothing is deleted.
   - The old `.reel` is kept as `.reel-legacy`.
   - The batch keeps the "delete the old library" offer only when no old project is left anywhere the
     app looks (the 2026-10-10 fix).
-- **Projects already in the hard-link format** (schema 24, a handful made on 2026-10-10):
-  - The recorded source path becomes the absolute path.
-  - If that file doesn't match, the copy already inside the project's `media/` is used instead, so
-    nothing is lost.
-  - Restoring those projects from backup and converting them as old projects is the cleaner route.
+- **Projects in the hard-link format** (schema 24) are **not migrated**. Only a handful were made, on
+  2026-10-10, and the owner restores them from backup and converts them as old projects. Opening one
+  shows a message saying so, and the file is left untouched.
 - Schema goes to 25; `migrateProject` gets a step.
 
 ## What goes away
@@ -154,11 +152,13 @@ through the mismatch warning.
 4. Checking on open, Missing, Relink with the warning, relink-one-fix-the-rest.
 5. The New project window, no untitled state, the launch screen, Save As.
 6. Cleanup limited to the three folders.
-7. Migration of old projects and schema-24 projects.
+7. Migration of old projects; schema-24 projects refused with a restore-from-backup message.
 8. Remove the hard-link code; rewrite PROJECT-FOLDERS.md, SHARED.md, TODO.md and the end-to-end
    specs.
 
-## Open
+## Related TODO items
 
-- The assistant's `new_project` TODO item needs a name and location under this model.
-- One relink choice for every placement of a clip, or per placement (TODO.md ▸ "Media relinking").
+- **The assistant's `new_project` tool** (TODO.md ▸ AI assistant features): same structure as New.
+  The assistant must ask the user for the name; the location defaults to the Settings export folder.
+- **Keeping cuts on a different-length relink** (TODO.md ▸ "Media relinking"): for a clip placed more
+  than once, the window offers both one choice for every placement and a choice per placement.
