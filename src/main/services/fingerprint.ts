@@ -16,6 +16,17 @@ export const SAMPLE_BYTES = 256 * 1024
 
 const FIELDS: FingerprintField[] = ['size', 'start', 'middle', 'end']
 
+/**
+ * The fingerprint of a record whose original could not be read when it was
+ * made (an old project converted after its footage was deleted). Matches no
+ * file, so the clip shows Missing; Relink then goes through the "Update path
+ * anyway" warning, which fills in the real fingerprint.
+ */
+export const UNKNOWN_FINGERPRINT: Fingerprint = Object.freeze({ size: -1, start: '', middle: '', end: '' })
+
+/** Whether a record's fingerprint is the {@link UNKNOWN_FINGERPRINT} marker. */
+export const isUnknownFingerprint = (fp: Fingerprint): boolean => fp.size < 0
+
 const sha1 = (data: Buffer | string): string => createHash('sha1').update(data).digest('hex')
 
 /** Exactly `length` bytes from `position`; throws if the file ends first. */
