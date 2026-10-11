@@ -28,7 +28,7 @@ test('an imported JPEG gets its thumbnail and the card shows it', async ({ appPa
   const thumb = join(projectsDir, 'E2E', 'cache', id, 'thumb.jpg')
   await expect.poll(() => existsSync(thumb), { timeout: 20_000 }).toBe(true)
   // The card's <img> really loads (not the ▶ placeholder it falls back to).
-  const img = page.locator(`img[src="reelmedia://${id}/thumb.jpg"]`)
+  const img = page.locator(`img[src^="reelmedia://${id}/thumb.jpg"]`)
   await expect(img).toBeVisible()
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 })

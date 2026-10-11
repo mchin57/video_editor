@@ -596,7 +596,7 @@ function CompAudioTrack({
       {clips.map((a) => {
         const asset = assetById.get(a.mediaId)
         if (!asset?.proxyReady) return null
-        const src = asset.probe.video ? videoProxyUrl(asset) : audioUrl(asset.id)
+        const src = asset.probe.video ? videoProxyUrl(asset) : audioUrl(asset)
         return (
           <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
         )
@@ -841,7 +841,7 @@ function LayoutLayerView({
           // Proxy still building: hold the thumb so the cell doesn't flash empty.
           return (
             <div key={i} style={{ ...rel, overflow: 'hidden' }}>
-              <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
+              <img src={thumbUrl(asset)} alt="" className="h-full w-full object-cover opacity-40" />
             </div>
           )
         }
@@ -911,7 +911,7 @@ function StackLayer({
                 className={`flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500 ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : ''}`}
               >
                 {asset ? (
-                  <img src={thumbUrl(asset.id)} alt="" className="h-full w-full object-cover opacity-40" />
+                  <img src={thumbUrl(asset)} alt="" className="h-full w-full object-cover opacity-40" />
                 ) : (
                   'missing'
                 )}
@@ -984,7 +984,7 @@ function StackLayer({
                   overflow: 'hidden'
                 }}
               >
-                <img src={imageUrl(content.mediaId)} alt="" draggable={false} style={imgStyle} />
+                <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} style={imgStyle} />
               </div>
             </div>
           )

@@ -131,7 +131,7 @@ function PreviewPopout({
       >
         <video
           ref={ref}
-          src={proxyUrl(asset.id)}
+          src={proxyUrl(asset)}
           loop
           autoPlay
           playsInline
@@ -209,7 +209,7 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
         <span className="flex h-full w-full items-center justify-center text-base text-zinc-600">▶</span>
       ) : (
         <img
-          src={thumbUrl(asset.id)}
+          src={thumbUrl(asset)}
           alt=""
           onError={() => setFailed(true)}
           className="h-full w-full object-cover"
@@ -247,7 +247,7 @@ export function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
       {glyph}
       <audio
         ref={audioRef}
-        src={audioUrl(asset.id)}
+        src={audioUrl(asset)}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}

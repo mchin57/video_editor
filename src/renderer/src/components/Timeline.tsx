@@ -905,7 +905,7 @@ export function Timeline(): JSX.Element {
       >
         {asset && (
           <img
-            src={thumbUrl(asset.id)}
+            src={thumbUrl(asset)}
             alt=""
             onError={(e) => (e.currentTarget.style.display = 'none')}
             className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"
@@ -987,7 +987,7 @@ export function Timeline(): JSX.Element {
       >
         {asset && (
           <img
-            src={waveformUrl(asset.id)}
+            src={waveformUrl(asset)}
             alt=""
             onError={(e) => (e.currentTarget.style.display = 'none')}
             className={`pointer-events-none absolute inset-y-0 max-w-none ${
