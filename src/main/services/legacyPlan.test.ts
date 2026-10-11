@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import {
-  adoptAction,
   conversionFolder,
+  generatedFileName,
+  idsToConvert,
   isGeneratedPath,
   isLegacyDoc,
+  isSharedDir,
   legacyBackupPath,
   legacyIdsIn,
+  nearbyOrder,
+  noRecordLine,
   reportLine
 } from './legacyPlan'
 
@@ -17,6 +21,7 @@ describe('isLegacyDoc', () => {
     expect(isLegacyDoc({ version: 23 })).toBe(true)
     expect(isLegacyDoc({})).toBe(true)
     expect(isLegacyDoc({ version: 24 })).toBe(false)
+    expect(isLegacyDoc({ version: 25 })).toBe(false)
   })
 })
 
@@ -51,9 +56,15 @@ describe('conversionFolder', () => {
       join(reels, 'test 2 (3)')
     )
   })
+
+  it('recognises a shared folder whatever its case or trailing separator', () => {
+    const docs = join('C:', 'Users', 'me', 'Documents')
+    expect(isSharedDir(join('c:', 'users', 'ME', 'documents') + '\\', [docs])).toBe(true)
+    expect(isSharedDir(join(docs, 'Reels'), [docs, ''])).toBe(false)
+  })
 })
 
-describe('adopting legacy media', () => {
+describe('which media to convert', () => {
   const data = join('C:', 'Users', 'me', 'Documents', 'VideoEditor')
 
   it('picks out the store ids a document mentions', () => {
@@ -64,17 +75,30 @@ describe('adopting legacy media', () => {
     ])
   })
 
+  it('adds the document’s own mediaIds that the store lost, once each', () => {
+    const doc = JSON.stringify({ mediaIds: ['aaaaaaaaaaaa', 'dddddddddddd', 'junk'] })
+    expect(idsToConvert(doc, ['aaaaaaaaaaaa'], ['aaaaaaaaaaaa', 'dddddddddddd', 'junk', 7])).toEqual([
+      'aaaaaaaaaaaa',
+      'dddddddddddd'
+    ])
+    expect(idsToConvert(doc, [], undefined)).toEqual([])
+  })
+
   it('tells app-generated originals from the user’s footage', () => {
     expect(isGeneratedPath(join(data, 'nobg', 'x.webm'), data)).toBe(true)
     expect(isGeneratedPath(join('c:', 'users', 'me', 'documents', 'videoeditor', 'stills', 'y.png'), data)).toBe(true)
     expect(isGeneratedPath(join(reels, 'IMG_1.MOV'), data)).toBe(false)
   })
 
-  it('adopts only an original that still exists with its import-time bytes', () => {
-    const src = join(reels, 'IMG_1.MOV')
-    expect(adoptAction(src, { exists: true, hash: 'abc' }, 'abc', data)).toEqual({ kind: 'adopt', from: src, generated: false })
-    expect(adoptAction(src, { exists: false, hash: null }, 'abc', data)).toEqual({ kind: 'missing', reason: 'gone' })
-    expect(adoptAction(src, { exists: true, hash: 'zzz' }, 'abc', data)).toEqual({ kind: 'missing', reason: 'different' })
+  it('names a generated copy with its real extension', () => {
+    expect(generatedFileName('clip (no bg 0.03–0.05).webm', 'x/abc.webm')).toBe('clip (no bg 0.03–0.05).webm')
+    expect(generatedFileName('clip (no bg)', 'x/abc.WEBM')).toBe('clip (no bg).webm')
+  })
+
+  it('hashes a nearby file named like the record first', () => {
+    const files = [join(reels, 'a.mov'), join(reels, 'IMG_1.MOV'), join(reels, 'z.mov')]
+    expect(nearbyOrder(files, 'img_1.mov')).toEqual([join(reels, 'IMG_1.MOV'), join(reels, 'a.mov'), join(reels, 'z.mov')])
+    expect(nearbyOrder(files, undefined)).toEqual(files)
   })
 })
 
@@ -84,9 +108,13 @@ describe('reporting', () => {
   })
 
   it('summarises each project in one line', () => {
-    const base = { from: join(reels, 'sick', 'project.reel'), to: 'x', linked: 3, copied: 1, missing: [] as string[] }
-    expect(reportLine(base)).toBe('✓ project: 4 files (1 copied)')
-    expect(reportLine({ ...base, missing: ['IMG_9.MOV'] })).toBe('! project: 4 files (1 copied), missing IMG_9.MOV')
+    const base = { from: join(reels, 'sick', 'project.reel'), to: 'x', found: 4, copied: 1, missing: [] as string[] }
+    expect(reportLine(base)).toBe('✓ project: 4 files found (1 copied)')
+    expect(reportLine({ ...base, found: 1, copied: 0 })).toBe('✓ project: 1 file found')
+    expect(reportLine({ ...base, missing: ['IMG_9.MOV', noRecordLine(2)] })).toBe(
+      '! project: 4 files found (1 copied), missing IMG_9.MOV, 2 clips with no record in the old library'
+    )
     expect(reportLine({ ...base, error: 'bad JSON' })).toBe('✗ project: bad JSON')
+    expect(noRecordLine(1)).toBe('1 clip with no record in the old library')
   })
 })
