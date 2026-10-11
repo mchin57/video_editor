@@ -9,6 +9,7 @@
 import { useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { useProject } from '@/state/projectStore'
+import { startPointerDrag } from '@/lib/pointerDrag'
 import { normalizeDeg } from '@shared/rotation'
 
 /** Stock text/number input. */
@@ -206,11 +207,12 @@ export function Slider({
       // in the paired number field) parks the thumb at the end, unchanged.
       value={Math.min(max, Math.max(min, value))}
       onPointerDown={() => {
-        const store = useProject.getState()
-        store.beginGesture()
-        const end = (): void => useProject.getState().endGesture()
-        window.addEventListener('pointerup', end, { once: true })
-        window.addEventListener('pointercancel', end, { once: true })
+        useProject.getState().beginGesture()
+        // startPointerDrag: window-level release (incl. pointercancel) + the interaction lock.
+        startPointerDrag(
+          () => {},
+          () => useProject.getState().endGesture()
+        )
       }}
       onChange={(e) => onChange(Number(e.target.value))}
       className={`${className} accent-sky-400`}

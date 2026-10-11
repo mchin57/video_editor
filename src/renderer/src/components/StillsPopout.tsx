@@ -7,6 +7,7 @@ import { Popout } from './Popout'
 import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
+import { idle } from '@/lib/interaction'
 import { captureStillToDisk, captureStillToLibrary, imageUrl } from '@/ipc/client'
 
 /**
@@ -50,6 +51,7 @@ export function StillsPopout(): JSX.Element | null {
     setErr(null)
     try {
       const asset = await captureStillToLibrary(req)
+      await idle() // the capture can finish mid-drag; adding waits for the release
       addMedia([asset.id]) // make it part of this project's library
       setShots((s) => [asset, ...s])
       void queryClient.invalidateQueries({ queryKey: ['library'] })

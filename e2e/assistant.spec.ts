@@ -117,7 +117,17 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   const b = clip('b.mp4', 'blue')
   const c = await connect(await pipeOf(electronApp))
 
-  const imported = JSON.parse(textOf(await call(c, 'import_media', { paths: [a, b] }))) as { id: string; fileName: string }[]
+  const relative = await call(c, 'import_media', { paths: ['a.mp4'] })
+  expect(relative.isError).toBe(true)
+  expect(textOf(relative)).toContain('Paths must be absolute: a.mp4')
+
+  const missing = join(dir, 'missing.mp4')
+  const { imported, skipped } = JSON.parse(textOf(await call(c, 'import_media', { paths: [a, missing, b] }))) as {
+    imported: { id: string; fileName: string }[]
+    skipped: { path: string; reason: string }[]
+  }
+  expect(imported.map((x) => x.fileName)).toEqual(['a.mp4', 'b.mp4'])
+  expect(skipped.map((s) => s.path)).toEqual([missing])
   const idOf = (f: string): string => imported.find((x) => x.fileName === f)!.id
   const [A, B] = [idOf('a.mp4'), idOf('b.mp4')]
 
@@ -174,4 +184,118 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   )
   expect(duration).toBeGreaterThan(3.4)
   expect(duration).toBeLessThan(3.7)
+
+  // A requested folder: must be absolute and exist; the file lands there, not in Settings' folder.
+  const notThere = await call(c, 'export_video', { fileName: 'cut', folder: join(dir, 'nope') })
+  expect(notThere.isError).toBe(true)
+  expect(textOf(notThere)).toContain('No folder at')
+  expect((await call(c, 'export_video', { fileName: 'cut', folder: 'out' })).isError).toBe(true)
+  const there = JSON.parse(textOf(await call(c, 'export_video', { fileName: 'cut', folder: dir }))) as { path: string }
+  expect(there.path).toBe(join(dir, 'cut.mp4'))
+  expect(existsSync(there.path)).toBe(true)
+})
+
+test('an edit that arrives mid-drag waits for the release instead of being overwritten', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(90_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const clip = join(dir, 'a.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=540x960:r=30:d=3',
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+  ])
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
+  const item = { mediaId: imported[0].id, inSec: 0, outSec: 1 }
+  expect((await call(c, 'place_sequence', { items: [item] })).isError).toBeFalsy()
+  const state = (): Promise<{ layers: { id: string; startSec: number }[]; past: number }> =>
+    page.evaluate(() => {
+      const s = window.__reelStores.useProject.getState()
+      return { layers: s.project!.layers.map((l) => ({ id: l.id, startSec: l.startSec })), past: s.past.length }
+    })
+  const start = await state()
+  const dragged = start.layers[0].id
+  const box = (await page.getByTestId(`tile-layer-${dragged}`).boundingBox())!
+
+  // 1. A real move drag is held while place_sequence arrives: the cut waits.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 4 })
+  const pending = call(c, 'place_sequence', { items: [item] })
+  await page.waitForTimeout(700)
+  expect((await state()).layers).toHaveLength(1) // not applied mid-drag
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 4 })
+  await page.mouse.up()
+  const placed = await pending
+  expect(placed.isError).toBeFalsy()
+
+  const after = await state()
+  const moved = after.layers.find((l) => l.id === dragged)!
+  expect(moved.startSec).toBeGreaterThan(0) // the drag survived…
+  expect(after.layers).toHaveLength(2) // …and so did the cut, after it
+  expect(after.past).toBe(start.past + 2) // two undo steps, drag first
+  await call(c, 'undo') // undoes only the cut
+  const undone = await state()
+  expect(undone.layers.map((l) => l.id)).toEqual([dragged])
+  expect(undone.layers[0].startSec).toBeCloseTo(moved.startSec, 6)
+
+  // 2. Pressed but not yet moved (inside the click slop): the drag's snapshot is already
+  //    taken, so a removal must still wait for the release.
+  const box2 = (await page.getByTestId(`tile-layer-${dragged}`).boundingBox())!
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2)
+  await page.mouse.down()
+  const removing = call(c, 'remove_items', { ids: [dragged] })
+  await page.waitForTimeout(700)
+  expect((await state()).layers).toHaveLength(1)
+  await page.mouse.up()
+  expect((await removing).isError).toBeFalsy()
+  expect((await state()).layers).toHaveLength(0)
+})
+
+test('an edit that reaches a blocked editor after the timeout is dropped, not applied late', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(90_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const clip = join(dir, 'a.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=540x960:r=30:d=2',
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+  ])
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
+  expect((await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 1 }] })).isError).toBeFalsy()
+  const before = await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
+  })
+  expect(before.layerIds).toHaveLength(1)
+
+  // Block the renderer's main thread past main's 10 s timeout, like a window.confirm would.
+  // Scheduled from a timer so this evaluate returns before the loop starts.
+  await page.evaluate(() => {
+    setTimeout(() => {
+      const until = Date.now() + 11_500
+      while (Date.now() < until) {
+        /* busy */
+      }
+    }, 0)
+  })
+  // remove_items is a single edit op to the renderer (no read first), so it is the request that waits.
+  const late = await call(c, 'remove_items', { ids: before.layerIds })
+  expect(late.isError).toBe(true)
+  expect(textOf(late)).toContain('did not answer')
+
+  // This evaluate runs only once the loop ends, and the queued removal is delivered first. It must not have run.
+  await page.waitForTimeout(500)
+  const after = await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
+  })
+  expect(after).toEqual(before)
 })

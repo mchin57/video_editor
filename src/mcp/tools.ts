@@ -30,7 +30,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'import_media',
     {
       description:
-        'Import files or folders from this computer into the project library (a folder imports the media inside it). Returns the new library entries. Only use paths the user gave you.',
+        'Import files or folders from this computer into the project library (a folder imports the media inside it). Returns {imported: the new library entries, skipped: files that failed, with why}. Paths must be absolute. Only use paths the user gave you.',
       inputSchema: { paths: z.array(z.string().min(1)).min(1).describe('Absolute paths of files or folders') }
     },
     async (args) => result(await call('import_media', args))
@@ -111,8 +111,15 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'export_video',
     {
       description:
-        'Render the whole project to an .mp4 exactly as the Export button does, into the export folder from Settings. Waits until the render finishes (progress shows in the editor). Never overwrites: a taken name gets " (2)". Only export when the user asks.',
-      inputSchema: { fileName: z.string().max(120).optional().describe('File name without folder, e.g. "beach reel"') }
+        'Render the whole project to an .mp4 exactly as the Export button does, into the export folder from Settings unless you give a folder. Waits until the render finishes (progress shows in the editor). Never overwrites: a taken name gets " (2)". Only export when the user asks.',
+      inputSchema: {
+        fileName: z.string().max(120).optional().describe('File name without folder, e.g. "beach reel"'),
+        folder: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Absolute path of an existing folder to write into, only when the user asked for one')
+      }
     },
     async (args) => result(await call('export_video', args))
   )

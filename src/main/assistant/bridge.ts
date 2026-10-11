@@ -10,6 +10,8 @@ import { IPC, IPC_EVENT } from '@shared/ipc'
 import type { AssistantOp, AssistantOps, AssistantRequest, AssistantResponse } from '@shared/assistant/protocol'
 
 export const RENDERER_TIMEOUT_MS = 10_000
+/** How far ahead of the timeout a request expires in the renderer (see `AssistantRequest.deadline`). */
+const EXPIRY_MARGIN_MS = 1_000
 
 interface Pending {
   resolve: (v: unknown) => void
@@ -47,10 +49,14 @@ export function callRenderer<K extends AssistantOp>(
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id)
-      reject(new Error(`The editor did not answer "${op}" within ${RENDERER_TIMEOUT_MS / 1000}s`))
+      reject(
+        new Error(
+          `The editor did not answer "${op}" within ${RENDERER_TIMEOUT_MS / 1000}s (it may be showing a dialog, or the user is holding a drag). Nothing was changed; it is safe to retry.`
+        )
+      )
     }, RENDERER_TIMEOUT_MS)
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
-    const req: AssistantRequest<K> = { id, op, args }
+    const req: AssistantRequest<K> = { id, op, args, deadline: Date.now() + RENDERER_TIMEOUT_MS - EXPIRY_MARGIN_MS }
     win.webContents.send(IPC_EVENT.assistantRequest, req)
   })
 }

@@ -17,6 +17,7 @@ import { ScriptModal } from '@/components/ScriptModal'
 import { StatusFooter } from '@/components/StatusFooter'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
+import { interactionOpen } from '@/lib/interaction'
 import { onJobProgress, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
@@ -63,6 +64,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey
+      // Mid-drag, any edit would be overwritten by the drag's next move and folded
+      // into (or orphaned by) its undo step on release; New/Open would get the old
+      // snapshot written into them. Only save and play/pause act until release.
+      if (interactionOpen() && !(mod && e.key.toLowerCase() === 's') && e.code !== 'Space') return
       // File shortcuts work everywhere, even while a text field has focus.
       if (mod && e.key.toLowerCase() === 's') {
         e.preventDefault()

@@ -10,6 +10,7 @@
 
 import type { Project } from '@shared/project'
 import { useProject } from '@/state/projectStore'
+import { beginInteraction } from './interaction'
 
 /**
  * Begin a drag: install window `pointermove`/`pointerup` listeners and tear them
@@ -19,17 +20,26 @@ import { useProject } from '@/state/projectStore'
  * `pointercancel` (window focus loss, OS gesture stealing the pointer) is
  * treated as a release — without it the move listener leaks, the drag's undo
  * step is never committed, and any rAF loop stopped in `onUp` spins forever.
+ *
+ * The drag holds the interaction lock (`lib/interaction.ts`) from here until
+ * release, AFTER `onUp` has committed — so assistant calls wait for it and
+ * keyboard shortcuts are ignored instead of being overwritten by the next move.
  */
 export function startPointerDrag(
   onMove: (ev: PointerEvent) => void,
   onUp?: (ev: PointerEvent) => void
 ): void {
+  const end = beginInteraction()
   const move = (ev: PointerEvent): void => onMove(ev)
   const up = (ev: PointerEvent): void => {
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', up)
-    onUp?.(ev)
+    try {
+      onUp?.(ev)
+    } finally {
+      end() // even if onUp throws: a lock left open would hold every assistant call
+    }
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)

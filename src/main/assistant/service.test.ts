@@ -2,7 +2,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { callPipe } from './pipe'
+import { NOT_RUNNING, callPipe } from './pipe'
 import { handleTool } from './tools'
 
 // service.ts reads settings and routes calls through handleTool; both pull in
@@ -90,6 +90,32 @@ describe('assistant service', () => {
     await stopped
     expect((await restarted).state).toBe('listening')
     expect(assistantStatus().state).toBe('listening')
+  })
+
+  it('switching off answers while a call is still in flight, and a re-enable still listens', async () => {
+    await startAssistant()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    let entered!: () => void
+    const handlerEntered = new Promise<void>((resolve) => (entered = resolve))
+    vi.mocked(handleTool).mockImplementation(async () => {
+      entered()
+      await held
+      return []
+    })
+    const inFlight = callPipe(pipePath(), 'export_video', {})
+    await handlerEntered
+
+    settings.enabled = false
+    expect((await startAssistant()).state).toBe('off') // would hang here if it waited for the drain
+    // A new call is refused. (On Windows its connect waits until the drain ends, then fails.)
+    const refused = callPipe(pipePath(), 'get_timeline', {})
+    release()
+    expect(await inFlight).toEqual([])
+    await expect(refused).rejects.toThrow(NOT_RUNNING)
+
+    settings.enabled = true
+    expect((await startAssistant()).state).toBe('listening')
   })
 
   it('reports an error instead of throwing when starting fails', async () => {

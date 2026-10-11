@@ -34,6 +34,8 @@ item, move it into the guarded table below.
 | Per-tile edge trims report the delta they `achieved` (source limits, minimum window, speed conversion) — what the group clamp is built on | `lib/timeline.test.ts` |
 | Linked tiles on the real timeline — a clip with audio is **added linked**, edge drags trim the whole group (from either side), Ctrl-click multi-select → 🔗 Link, group drag keeps the offset, clamp at 0, S/✂ splits every crossed member (and only those, **incl. a text tile**), ⛓ Unlink restores independent move AND trim, click narrows a multi-selection, Del removes the group in one undo step | `e2e/link.spec.ts` |
 | T/Ctrl+Z/Ctrl+Shift+Z/Delete keybind flow | `e2e/keybinds.spec.ts` |
+| Editing shortcuts (Delete, Ctrl+Z, T, S, N, New/Open) are ignored while a timeline drag is held; the drag records exactly one undo step | `e2e/keybinds.spec.ts` |
+| An assistant edit that arrives mid-drag (or between press and first move) waits for the release, then lands as its own undo step | `e2e/assistant.spec.ts` |
 | Snap-to-previous — the delta closes a gap (left) or an overlap (right), picks the NEAREST preceding tile in the SAME lane, ignores other lanes and the audio/fx split, snaps to 0 with nothing before it, moves a link group off its earliest member, and skips a tile whose end is unknown | `lib/links.test.ts` |
 | ⇤ Snap / **N** on the real timeline — button + keybind agree, N is ignored while a field has focus, the button disables when already flush, one undo step, a linked pair keeps its offset | `e2e/snapToPrevious.spec.ts` |
 | Edge auto-scroll speed is CONSTANT across the 40px band (no proximity ramp) | `lib/pointerDrag.test.ts` |
