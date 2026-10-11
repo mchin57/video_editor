@@ -176,7 +176,12 @@ function PreviewPopout({
  * closes it after a grace period a re-enter cancels (no card→popout flicker).
  */
 export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
-  const [failed, setFailed] = useState(false)
+  // The ▶ fallback is tied to the asset data the thumb failed FOR: each library
+  // refresh brings a new object, so the card tries again then. A card drawn a
+  // moment before its thumb existed (cached list on reopen, a project just
+  // converted) used to stay on ▶ for good though the thumb was right there.
+  const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
+  const failed = failedFor === asset
   const [hover, setHover] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const hideTimer = useRef<number | null>(null)
@@ -211,7 +216,7 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
         <img
           src={thumbUrl(asset)}
           alt=""
-          onError={() => setFailed(true)}
+          onError={() => setFailedFor(asset)}
           className="h-full w-full object-cover"
         />
       )}

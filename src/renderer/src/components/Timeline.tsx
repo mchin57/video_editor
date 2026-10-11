@@ -11,7 +11,7 @@ import type { AudioClip, CaptionSegment, Composition, Layer, Project, ScriptLine
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
-import { assetAspect, assetKind } from '@shared/media'
+import { assetAspect, assetKind, type MediaAsset } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
@@ -80,6 +80,24 @@ const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
   startSec: l.startSec,
   endSec: l.endSec
 })
+
+/**
+ * A layer tile's thumbnail. Hidden while it can't load — but only for the asset
+ * data it failed for: the next library refresh (new object) tries again, so a
+ * tile drawn a moment before its thumb existed doesn't stay blank for good.
+ */
+function TileThumb({ asset }: { asset: MediaAsset }): JSX.Element | null {
+  const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
+  if (failedFor === asset) return null
+  return (
+    <img
+      src={thumbUrl(asset)}
+      alt=""
+      onError={() => setFailedFor(asset)}
+      className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"
+    />
+  )
+}
 
 function tc(sec: number): string {
   const s = Math.max(0, sec)
@@ -903,14 +921,7 @@ export function Timeline(): JSX.Element {
         } ${l.hidden ? 'opacity-40' : ''}`}
         style={{ left, width, top: laneTop(laneKey) + (rows.get(l.id) ?? 0) * rowH, height: rowH - 2 }}
       >
-        {asset && (
-          <img
-            src={thumbUrl(asset)}
-            alt=""
-            onError={(e) => (e.currentTarget.style.display = 'none')}
-            className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"
-          />
-        )}
+        {asset && <TileThumb asset={asset} />}
         <span className="truncate text-[9px] font-medium text-zinc-100">
           {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : l.content.kind === 'compound' ? '🧩' : '🎬'}&nbsp;
           {asset?.fileName ?? layerLabel(l)}
