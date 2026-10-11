@@ -64,10 +64,8 @@ export function singleFlight<T>(): (key: string, run: () => Promise<T>) => Promi
 }
 
 /**
- * Replace a small file (a record, a transcript, a project document) via a
- * sibling temp + rename, so a reader sees the old or the new content, never a
- * torn one — and so the write never goes THROUGH a hardlink (inside a project
- * folder any name may share its bytes with another; see linkOrCopy.ts).
+ * Replace a small file (a transcript, a project document) via a sibling temp +
+ * rename, so a reader sees the old or the new content, never a torn one.
  *
  * On Windows a rename onto a file someone holds open fails EPERM (verified,
  * FFMPEG-NOTES "Partial outputs"); readers here hold files only for a single

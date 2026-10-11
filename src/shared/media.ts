@@ -98,10 +98,8 @@ export interface MediaRecord {
 
 /** Whether a library item's original was found this session (checked by main
  *  on open and on every library load): `missing` = neither its relative nor
- *  its absolute path holds a file matching its fingerprint.
- *  @deprecated `changed` belonged to the schema-24 hard-link model and is never
- *  produced now; it goes with that model's cleanup. */
-export type MediaStatus = 'ok' | 'missing' | 'changed'
+ *  its absolute path holds a file matching its fingerprint. */
+export type MediaStatus = 'ok' | 'missing'
 
 /** A library item as the app uses it: the saved record plus runtime facts. */
 export interface MediaAsset extends MediaRecord {

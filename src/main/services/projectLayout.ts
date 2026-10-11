@@ -129,16 +129,3 @@ export function cleanupPlan(
     })
   }
 }
-
-// --- Schema-24 (hard-link) layout: read only by legacy conversion ------------
-
-/** @deprecated schema 24 only — where that layout kept originals and records. */
-export const mediaRoot = (root: string): string => join(root, 'media')
-/** @deprecated schema 24 only. */
-export const mediaDir = (root: string, id: string): string => join(mediaRoot(root), id)
-/** @deprecated schema 24 only. */
-export const assetJsonPath = (root: string, id: string): string => join(mediaDir(root, id), 'asset.json')
-/** @deprecated schema 24 only: `original.<ext>` inside a media dir. */
-export function originalName(sourcePath: string): string {
-  return `original${extname(sourcePath).toLowerCase()}`
-}
