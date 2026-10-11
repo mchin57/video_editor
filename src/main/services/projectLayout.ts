@@ -40,6 +40,21 @@ export const cachePath = (root: string, id: string, file: CacheFile): string => 
 export const isMediaId = (name: string): boolean => /^[0-9a-f]{12}$/.test(name)
 
 /**
+ * A display name made safe as a Windows file name, for generated media saved
+ * in `generated/` (the library keeps showing the display name itself). `:` —
+ * which time ranges like "0:03–0:05" carry — becomes `.`; the other forbidden
+ * characters and control characters become `_`; trailing dots and spaces go;
+ * a reserved device name (CON, NUL, COM1, …) gets a leading `_`.
+ */
+export function safeFileName(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  let safe = name.replace(/:/g, '.').replace(/[<>"/\\|?*\u0000-\u001f]/g, '_')
+  safe = safe.replace(/[. ]+$/, '').trim()
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(safe)) safe = `_${safe}`
+  return safe || 'media'
+}
+
+/**
  * A free file name for generated media: `name` itself, else `name (2)`,
  * `name (3)`… before the extension. `taken` says whether a name is in use.
  */

@@ -4,12 +4,17 @@
  * profile (REEL_USER_DATA_DIR → localStorage/caches), so tests are hermetic —
  * no state leaks between tests or into the developer's real app.
  *
+ * There is no untitled project (docs/MEDIA-POINTERS.md), so `appPage` creates
+ * one — `E2E/` in the test's own `projectsDir` — through the same store action
+ * the New project window calls. A spec about the start screen or New itself
+ * uses `electronApp` + `firstWindow()` directly.
+ *
  * Pattern for specs: ARRANGE via `window.__reelStores` (the same store actions
  * the UI calls — exposed in renderer main.tsx), ACT via real pointer/keyboard
  * events, ASSERT on DOM + store state.
  */
 
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import {
@@ -25,12 +30,26 @@ const root = resolve(__dirname, '..')
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const electronBin = require('electron') as unknown as string
 
-export const test = base.extend<{ electronApp: ElectronApplication; appPage: Page }>({
+export const test = base.extend<{
+  scratchDir: string
+  projectsDir: string
+  electronApp: ElectronApplication
+  appPage: Page
+}>({
+  // The test's own temp dir (data dir, profile, pipe, projects).
+  scratchDir: async ({}, use) => {
+    await use(mkdtempSync(join(tmpdir(), 'reel-e2e-')))
+  },
+  // Where the test's projects are created (`appPage` opens `E2E/` here).
+  projectsDir: async ({ scratchDir }, use) => {
+    const dir = join(scratchDir, 'projects')
+    mkdirSync(dir, { recursive: true })
+    await use(dir)
+  },
   // The app handle itself, for the rare spec that must reach the MAIN process
   // (e.g. stubbing a native dialog with `electronApp.evaluate`). Most specs
   // only need `appPage`.
-  electronApp: async ({}, use) => {
-    const scratch = mkdtempSync(join(tmpdir(), 'reel-e2e-'))
+  electronApp: async ({ scratchDir: scratch }, use) => {
     const app = await electron.launch({
       executablePath: electronBin,
       args: [join(root, 'out', 'main', 'index.js')],
@@ -48,9 +67,11 @@ export const test = base.extend<{ electronApp: ElectronApplication; appPage: Pag
     await use(app)
     await app.close()
   },
-  appPage: async ({ electronApp }, use) => {
+  appPage: async ({ electronApp, projectsDir }, use) => {
     const page = await electronApp.firstWindow()
-    await page.getByText('Reel Editor', { exact: true }).waitFor()
+    await page.getByTestId('start-screen').waitFor()
+    await page.evaluate((dir) => window.__reelStores.useProject.getState().createProject('E2E', dir), projectsDir)
+    await page.getByTestId('start-screen').waitFor({ state: 'detached' })
     await use(page)
   }
 })

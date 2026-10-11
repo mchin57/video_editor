@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   autosavePath,
@@ -10,6 +12,7 @@ import {
   projectFolderFor,
   sweepPlan,
   transcriptPath,
+  safeFileName,
   uniqueFileName
 } from './projectLayout'
 
@@ -26,6 +29,23 @@ describe('project folder layout', () => {
     expect(generatedRoot(root)).toBe(join(root, 'generated'))
     expect(transcriptPath(root, 'ab12cd34ef56')).toBe(join(root, 'transcripts', 'ab12cd34ef56.json'))
     expect(cachePath(root, 'ab12cd34ef56', 'proxy.mp4')).toBe(join(root, 'cache', 'ab12cd34ef56', 'proxy.mp4'))
+  })
+
+  it('makes a display name a legal file name (the OS has to accept it, not just the regex)', () => {
+    // Background removal names its output with a time range: ':' is illegal on Windows.
+    const safe = safeFileName('clip (no bg 0:03–0:05).webm')
+    expect(safe).toBe('clip (no bg 0.03–0.05).webm')
+    expect(safeFileName('a<b>c"d/e\\f|g?h*i\u0001.wav')).toBe('a_b_c_d_e_f_g_h_i_.wav')
+    expect(safeFileName('trailing. . ')).toBe('trailing')
+    expect(safeFileName('CON.png')).toBe('_CON.png')
+    expect(safeFileName(':::')).toBe('media') // nothing usable left
+    const dir = mkdtempSync(join(tmpdir(), 'reel-names-'))
+    try {
+      writeFileSync(join(dir, safe), 'x')
+      expect(readdirSync(dir)).toEqual([safe])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('finds a free name for generated media', () => {

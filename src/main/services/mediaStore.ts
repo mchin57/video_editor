@@ -38,7 +38,7 @@ import {
   resolveEntry,
   type LibraryEntry
 } from './library'
-import { cacheDir, cachePath, generatedRoot, transcriptPath, uniqueFileName } from './projectLayout'
+import { cacheDir, cachePath, generatedRoot, safeFileName, transcriptPath, uniqueFileName } from './projectLayout'
 import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
@@ -302,7 +302,9 @@ export async function importGenerated(tmpPath: string, displayName: string): Pro
     }
     const dir = generatedRoot(r)
     await fsp.mkdir(dir, { recursive: true })
-    const dest = join(dir, uniqueFileName(displayName, (n) => existsSync(join(dir, n))))
+    // The display name (e.g. "clip (no bg 0:03–0:05).webm") may not be a legal
+    // file name; the library keeps showing it, the file gets a safe one.
+    const dest = join(dir, uniqueFileName(safeFileName(displayName), (n) => existsSync(join(dir, n))))
     await moveFile(tmpPath, dest)
     if (existing) return hydrate(r, toAsset(r, putEntry(pointAt(r, existing.record, dest), dest)))
     return register(r, id, dest, displayName, fp, true)
