@@ -122,7 +122,7 @@ export function StillsPopout(): JSX.Element | null {
             <div className="grid grid-cols-2 gap-2">
               {shots.map((s) => (
                 <div key={s.id} className="overflow-hidden rounded border border-white/10 bg-black/30">
-                  <img src={imageUrl(s.id)} alt="" className="aspect-[9/16] w-full object-cover" />
+                  <img src={imageUrl(s)} alt="" className="aspect-[9/16] w-full object-cover" />
                   <div className="flex flex-col gap-1 p-1">
                     <button
                       onClick={() => addAsLayer(s)}

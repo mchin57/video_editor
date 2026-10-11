@@ -6,6 +6,7 @@ import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { imageUrl } from '@/ipc/client'
+import { useLibrary } from '@/hooks/useMedia'
 
 const FULL: NormCrop = { x: 0, y: 0, w: 1, h: 1 }
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
@@ -25,6 +26,9 @@ export function ImageEditPopout(): JSX.Element | null {
   const content = layer && layer.content.kind === 'image' ? layer.content : null
   const wrapRef = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<NormCrop>(content?.crop ?? FULL)
+  // The asset (not just its id) so the image URL carries its revision.
+  const { data: assets = [] } = useLibrary()
+  const asset = assets.find((a) => a.id === content?.mediaId)
 
   // Re-sync when switching to a different image layer.
   useEffect(() => {
@@ -77,7 +81,7 @@ export function ImageEditPopout(): JSX.Element | null {
     <Popout title="Edit image" onClose={() => setOpen(false)} width={320}>
       <p className="mb-2 text-[11px] text-zinc-500">Drag to move the crop, drag the corner to resize.</p>
       <div ref={wrapRef} className="relative mb-3 select-none">
-        <img src={imageUrl(content.mediaId)} alt="" draggable={false} className="block w-full rounded" />
+        <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} className="block w-full rounded" />
         <div className="pointer-events-none absolute inset-0 bg-black/50" />
         <div
           onPointerDown={move}

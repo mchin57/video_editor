@@ -159,7 +159,9 @@ function toAsset(r: string, entry: LibraryEntry): MediaAsset {
     status: entry.path ? 'ok' : 'missing',
     proxyReady: false,
     // A transcript a forced relink made stale is hidden until Save deletes it.
-    transcribed: !entry.staleTranscript && existsSync(transcriptPath(r, entry.record.id))
+    transcribed: !entry.staleTranscript && existsSync(transcriptPath(r, entry.record.id)),
+    // Changes exactly when the content does, so the renderer's media URLs do too.
+    rev: fingerprintId(entry.record.fingerprint)
   }
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
   return asset

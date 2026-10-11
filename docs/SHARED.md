@@ -255,8 +255,13 @@ only true once the playable proxy is COMPLETE (the proxies are written
 atomically, see `atomicWrite.ts` above). `ensureProxy(id)` resolves only once
 it is — concurrent calls for one asset share a single build.
 
-`ipc/client.ts` also owns the `reelmedia://` URL builders. For a video layer's
-playable proxy use **`videoProxyUrl(asset)`**, not `proxyUrl(id)` directly — it
+`ipc/client.ts` also owns the `reelmedia://` URL builders. **Pass them the
+asset** (a `MediaRef`: `{ id, rev }`), never a bare id: they append the asset's
+content revision (`?v=<rev>`, `MediaAsset.rev`, from its fingerprint), which
+changes when "Update path anyway" gives the clip different content — with the
+same address the `<video>`, `<audio>` and `<img>` would keep the old proxy
+(`e2e/relinkPreview.spec.ts`). For a video layer's playable proxy use
+**`videoProxyUrl(asset)`**, not `proxyUrl` directly — it
 picks the alpha-preserving `proxy.webm` for background-removed clips
 (`probe.video.hasAlpha`) and the H.264 `proxy.mp4` otherwise, so the preview
 `<video>` keeps transparency. The matching main-side split is in

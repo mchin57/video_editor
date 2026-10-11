@@ -119,6 +119,11 @@ export interface MediaAsset extends MediaRecord {
   proxyReady: boolean
   /** Whether a transcript exists in the project's transcripts/. */
   transcribed: boolean
+  /** Runtime only: the content's revision (from its fingerprint). It changes
+   *  exactly when the clip's content does — "Update path anyway" — and every
+   *  `reelmedia://` URL carries it, so players and images reload instead of
+   *  keeping the old proxy (same id, same file name). */
+  rev?: string
 }
 
 /** Source extensions we recognise, by class. Drive the import dialog + kind. */

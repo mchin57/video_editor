@@ -53,28 +53,40 @@ export const {
   assistantStatus
 } = window.api
 
+/** What a media URL needs: the asset's id and its content revision. An
+ *  asset (`MediaAsset`) is one; a bare `{ id }` works but never reloads after
+ *  the content changes. */
+export type MediaRef = { id: string; rev?: string }
+
+/** `reelmedia://<id>/<file>?v=<rev>`. The protocol reads only the host and
+ *  path; the revision exists so a clip relinked to DIFFERENT content ("Update
+ *  path anyway") gets new addresses — same id and file names otherwise, so
+ *  <video>, <audio> and <img> would keep showing the old proxy. */
+const mediaUrl = (m: MediaRef, file: string): string =>
+  `reelmedia://${m.id}/${file}${m.rev ? `?v=${m.rev}` : ''}`
+
 /** Stream URL for a media asset's proxy via the reelmedia:// scheme. */
-export const proxyUrl = (id: string): string => `reelmedia://${id}/proxy.mp4`
+export const proxyUrl = (m: MediaRef): string => mediaUrl(m, 'proxy.mp4')
 
 /** Stream URL for a background-removed clip's alpha-preserving VP9 WebM proxy. */
-export const alphaProxyUrl = (id: string): string => `reelmedia://${id}/proxy.webm`
+export const alphaProxyUrl = (m: MediaRef): string => mediaUrl(m, 'proxy.webm')
 
 /** The playable video-proxy URL for an asset: the alpha WebM for background-removed
  *  clips (so <video> keeps transparency), else the H.264 mp4. */
 export const videoProxyUrl = (asset: MediaAsset): string =>
-  asset.probe.video?.hasAlpha ? alphaProxyUrl(asset.id) : proxyUrl(asset.id)
+  asset.probe.video?.hasAlpha ? alphaProxyUrl(asset) : proxyUrl(asset)
 
 /** URL for a media asset's first-frame thumbnail. */
-export const thumbUrl = (id: string): string => `reelmedia://${id}/thumb.jpg`
+export const thumbUrl = (m: MediaRef): string => mediaUrl(m, 'thumb.jpg')
 
 /** URL for an image asset's full display PNG (alpha preserved) — for overlays. */
-export const imageUrl = (id: string): string => `reelmedia://${id}/image.png`
+export const imageUrl = (m: MediaRef): string => mediaUrl(m, 'image.png')
 
 /** Stream URL for an audio-only asset's AAC proxy (music bed). */
-export const audioUrl = (id: string): string => `reelmedia://${id}/audio.m4a`
+export const audioUrl = (m: MediaRef): string => mediaUrl(m, 'audio.m4a')
 
 /** URL for an audio asset's waveform image. */
-export const waveformUrl = (id: string): string => `reelmedia://${id}/waveform.png`
+export const waveformUrl = (m: MediaRef): string => mediaUrl(m, 'waveform.png')
 
 /** URL for a bundled font file (resources/fonts/<file>) for `@font-face`. */
 export const fontUrl = (file: string): string => `reelmedia://fonts/${file}`

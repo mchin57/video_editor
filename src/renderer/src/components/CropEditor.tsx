@@ -93,7 +93,7 @@ function CropModal({
         style={{ width: rendered.w || 'auto', height: rendered.h || 'auto' }}
       >
         <img
-          src={thumbUrl(asset.id)}
+          src={thumbUrl(asset)}
           alt=""
           onLoad={(e) => setRendered({ w: e.currentTarget.clientWidth, h: e.currentTarget.clientHeight })}
           className="block max-h-[70vh] max-w-[80vw] select-none rounded"
