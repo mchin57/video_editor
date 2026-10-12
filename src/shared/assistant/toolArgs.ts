@@ -25,6 +25,7 @@ export interface ToolArgs {
   get_text: TextQuery
   set_text: { edits: TextEdit[] }
   set_playhead: { timeSec: number }
+  render_frame: { times: number[] }
   request_feature: { title: string; problem: string; proposal: string; workaround?: string }
 }
 

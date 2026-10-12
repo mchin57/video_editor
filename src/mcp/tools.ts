@@ -190,6 +190,16 @@ export function registerTools(server: McpServer, call: CallEditor): void {
   )
 
   server.registerTool(
+    'render_frame',
+    {
+      description:
+        'The FINISHED picture at TIMELINE seconds — every layer, text and caption burned in exactly as the export renders it (unlike get_frames, which shows raw source footage). Use it to check how text actually looks on screen: cut off, off-frame, unreadable over the picture, overlapping. 1–4 times per call (all rendered in one pass); takes a few seconds. Times past the end show the last frame.',
+      inputSchema: { times: z.array(z.number().min(0)).min(1).max(4) }
+    },
+    async (args) => result(await call('render_frame', args))
+  )
+
+  server.registerTool(
     'request_feature',
     {
       description:

@@ -21,7 +21,7 @@ import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
 import { hdrToSdrChain } from '../services/proxy'
-import { exportProject, suggestedExportName } from '../services/exporter'
+import { exportProject, renderFrames, suggestedExportName } from '../services/exporter'
 import { listJobs } from '../services/jobs'
 import { getSettings } from '../services/settings'
 import { exportRefusal, sanitizeExportName, uniqueExportPath } from '../services/exportTarget'
@@ -176,6 +176,26 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     const r = await callRenderer('setPlayhead', { timeSec, sourceDurations })
     const clamped = r.timeSec !== timeSec ? ` (clamped; the edit is ${r2(r.durationSec)}s long)` : ''
     return text(`Playhead at ${r2(r.timeSec)}s${clamped}. Playback is paused there.`)
+  },
+
+  render_frame: async ({ times }) => {
+    const project = await callRenderer('getProject', {})
+    const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'render-frame-'))
+    try {
+      const { paths, skippedStabilize } = await renderFrames(project, project.preset ?? 'reel', times, dir)
+      // Label + image per time, so each picture is captioned with its moment.
+      const out: ToolContent[] = []
+      for (let k = 0; k < paths.length; k++) {
+        out.push({ type: 'text', text: `Finished frame @ ${r2(times[k])}s (timeline)` })
+        out.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(paths[k])).toString('base64') })
+      }
+      if (skippedStabilize) {
+        out.push({ type: 'text', text: 'Note: stabilization is skipped in these frames, so stabilized clips may sit slightly differently than in the export.' })
+      }
+      return out
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
   },
 
   request_feature: async (req) => {

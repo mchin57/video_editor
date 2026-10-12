@@ -235,6 +235,31 @@ export interface ExportPlan {
    * Absent/false = the ordinary opaque H.264 project export.
    */
   alpha?: boolean
+  /**
+   * Render STILLS instead of a video: the same inputs and chains, then each
+   * listed output frame (`frameIndexAt`) of the final composite as a JPEG
+   * (`buildFrameArgs`). Audio is dropped entirely — an unmapped audio graph is
+   * fatal (FFMPEG-NOTES "Single-frame renders").
+   */
+  frames?: { index: number; path: string }[]
+}
+
+/**
+ * The output frame on screen at timeline second `t` in a render of `totalDur`
+ * seconds: frame n spans [n/30, (n+1)/30) and captions/`enable` are evaluated
+ * at n/30, so n = floor(t·30) (with an epsilon for float noise). The base
+ * canvas emits ceil(f3(totalDur)·30) frames; later times clamp to the last.
+ * Verified against full renders — FFMPEG-NOTES "Single-frame renders".
+ */
+export function frameIndexAt(t: number, totalDur: number): number {
+  const last = Math.max(0, Math.ceil(Number(f3(totalDur)) * 30) - 1)
+  return Math.min(last, Math.max(0, Math.floor(t * 30 + 1e-6)))
+}
+
+/** `buildExportArgs` in stills mode: one JPEG per `frames` entry, one pass. */
+export function buildFrameArgs(plan: ExportPlan, frames: { index: number; path: string }[]): string[] {
+  if (frames.length === 0) throw new Error('buildFrameArgs needs at least one frame')
+  return buildExportArgs({ ...plan, audio: [], alpha: false, frames }, frames[0].path)
 }
 
 /**
@@ -337,7 +362,8 @@ export function escapeFilterPath(p: string): string {
  * `assFile` references are resolved relative to ffmpeg's cwd (the temp dir).
  */
 export function buildExportArgs(plan: ExportPlan, output: string): string[] {
-  const { target, totalDur, visuals, audio, captionsAss, fontsDir, caps, preferNvenc, alpha } = plan
+  const { target, totalDur, visuals, captionsAss, fontsDir, caps, preferNvenc, alpha, frames } = plan
+  const audio = frames ? [] : plan.audio
   const W = target.width
   const H = target.height
   // Appended to every `ass=` filter so libass finds the bundled faces. The value
@@ -561,6 +587,21 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
   }))
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, null) : null
   if (graph) chains.push(graph.filter)
+
+  if (frames) {
+    // Stills: cut each wanted frame out of the final composite by exact index
+    // (output -ss rounds to the NEAREST frame; select fights -fps_mode cfr).
+    const labels = frames.map((_, k) => `vf${k}`)
+    if (frames.length === 1) chains.push(`${videoMap}trim=start_frame=${frames[0].index}:end_frame=${frames[0].index + 1}[vf0]`)
+    else {
+      chains.push(`${videoMap}split=${frames.length}${labels.map((_, k) => `[s${k}]`).join('')}`)
+      frames.forEach((f, k) => chains.push(`[s${k}]trim=start_frame=${f.index}:end_frame=${f.index + 1}[vf${k}]`))
+    }
+    const outs = frames.flatMap((f, k) => [
+      '-map', `[${labels[k]}]`, '-frames:v', '1', '-r', '30', '-fps_mode', 'cfr', '-pix_fmt', 'yuv420p', '-an', '-q:v', '2', f.path
+    ])
+    return ['-y', '-hide_banner', '-nostdin', ...inputs, '-filter_complex', chains.join(';'), '-progress', 'pipe:1', '-nostats', ...outs]
+  }
 
   const nvenc = !alpha && preferNvenc && caps.encoders.h264_nvenc
   // An alpha intermediate must go out as VP9/WebM `yuva420p` — H.264 has no

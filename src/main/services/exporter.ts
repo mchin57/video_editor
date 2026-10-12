@@ -7,7 +7,7 @@
  * media. Progress is the single encode's progress over the project duration.
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Composition, Project, Stabilize, TextStyleBase } from '@shared/project'
@@ -47,10 +47,13 @@ import { assertMediaUsable, audioProxyIfReady, ensureImagePath, getAsset } from 
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import {
   buildExportArgs,
+  buildFrameArgs,
+  frameIndexAt,
   buildVidstabDetectArgs,
   buildVidstabTransformArgs,
   targetForPreset,
   type ExportAudio,
+  type ExportPlan,
   type ExportImage,
   type ExportVisual,
   type StabilizeJob,
@@ -183,6 +186,9 @@ interface RenderCtx {
   cache: Map<string, string>
   /** Monotonic counter for unique per-render temp subdirs. */
   n: { v: number }
+  /** Stills render (`renderFrames`): skips the stabilization pre-pass and
+   *  records here whether a clip wanted it. */
+  stills?: { skippedStabilize: boolean }
 }
 
 async function runExport(
@@ -214,6 +220,47 @@ async function runExport(
 }
 
 /**
+ * The finished frame at each timeline second in `times` (1–4), as JPEGs in
+ * `outDir` — the export's own compositor, text layout and caption burn, cut to
+ * single frames (`buildFrameArgs`). Not an export job: it never blocks the
+ * Export button and shows no progress. Skips the stabilization pre-pass (a
+ * whole-clip analysis per frame would be far too slow); `skippedStabilize`
+ * says when that made a frame differ from the real export.
+ */
+export async function renderFrames(
+  project: Project,
+  preset: PresetId,
+  times: number[],
+  outDir: string
+): Promise<{ paths: string[]; skippedStabilize: boolean }> {
+  await assertMediaUsable(referencedMediaIds(project))
+  const caps = await getCapabilities()
+  const { ffmpeg } = await getBinaries()
+  const tmpRoot = join(getSubdir('tmp'), `frames-${randomUUID()}`)
+  await fsp.mkdir(tmpRoot, { recursive: true })
+  const ctx: RenderCtx = {
+    target: targetForPreset(preset),
+    caps,
+    ffmpeg,
+    jobId: '',
+    opts: { preset, preferNvenc: false },
+    denoiseDefault: project.denoiseDefault,
+    stabilizeDefault: project.stabilizeDefault,
+    tmpRoot,
+    cache: new Map(),
+    n: { v: 0 },
+    stills: { skippedStabilize: false }
+  }
+  const frames = times.map((timeSec, k) => ({ timeSec, path: join(outDir, `frame_${k}.jpg`) }))
+  try {
+    await renderComposition(project, ctx, frames[0].path, { alpha: false, depth: 1, frames })
+  } finally {
+    await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
+  }
+  return { paths: frames.map((f) => f.path), skippedStabilize: ctx.stills!.skippedStabilize }
+}
+
+/**
  * Render ONE composition to a file — the single implementation used for the
  * root project export AND (recursively, with `alpha`) for every nested comp
  * intermediate. Nested comps are pre-rendered to transparent VP9/WebM and fed
@@ -224,7 +271,7 @@ async function renderComposition(
   comp: Composition,
   ctx: RenderCtx,
   output: string,
-  o: { alpha: boolean; depth: number }
+  o: { alpha: boolean; depth: number; frames?: { timeSec: number; path: string }[] }
 ): Promise<string> {
   const { target, caps, ffmpeg, jobId, opts } = ctx
   // Canonical logical → output px. The project's format is a window centred on
@@ -391,7 +438,11 @@ async function renderComposition(
       let hdrChain = v?.isHdr ? hdrToSdrChain(v) : ''
       let hasAlpha = !!v?.hasAlpha
       let inputDecoder = alphaInputDecoder(v)
-      const stab = effectiveStabilize(c, ctx.stabilizeDefault)
+      let stab = effectiveStabilize(c, ctx.stabilizeDefault)
+      if (stab && ctx.stills) {
+        ctx.stills.skippedStabilize = true
+        stab = null
+      }
       if (stab) {
         srcPath = await stabilizeClip(asset.originalPath, c.inSec, trimLen, hdrChain, stab)
         srcInSec = 0
@@ -822,24 +873,25 @@ async function renderComposition(
   if (rendererRef.current) rendererRef.current.dispose()
 
   await fsp.mkdir(dirname(output), { recursive: true })
-  const args = buildExportArgs(
-    {
-      target,
-      totalDur,
-      visuals,
-      audio,
-      captionsAss,
-      topOverlays: captionOverlays,
-      fontsDir: fontsDir ?? undefined,
-      caps,
-      preferNvenc: opts.preferNvenc,
-      alpha: o.alpha
-    },
-    output
-  )
-  // Only the top-level render drives the job bar; nested pre-renders would
-  // rewind it (weighting them across N+1 passes is a Stage 5 item).
-  await runFfmpeg(ffmpeg, args, totalDur, o.depth === 1 ? (pr) => setProgress(jobId, pr) : undefined, tmp)
+  const plan: ExportPlan = {
+    target,
+    totalDur,
+    visuals,
+    audio,
+    captionsAss,
+    topOverlays: captionOverlays,
+    fontsDir: fontsDir ?? undefined,
+    caps,
+    preferNvenc: opts.preferNvenc,
+    alpha: o.alpha
+  }
+  const args = o.frames
+    ? buildFrameArgs(plan, o.frames.map((f) => ({ index: frameIndexAt(f.timeSec, totalDur), path: f.path })))
+    : buildExportArgs(plan, output)
+  // Only the top-level export drives the job bar; nested pre-renders would
+  // rewind it (weighting them across N+1 passes is a Stage 5 item). Stills have no job.
+  const progress = o.depth === 1 && !o.frames ? (pr: number): void => setProgress(jobId, pr) : undefined
+  await runFfmpeg(ffmpeg, args, totalDur, progress, tmp)
 
   return output
 }
