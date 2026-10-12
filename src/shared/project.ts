@@ -1022,7 +1022,7 @@ export function migrateProject(raw: unknown): Project {
   // (`VideoContent.flipH`/`flipV`). Purely additive — absent means upright and
   // unflipped, which is what every older layer is — so nothing is rewritten.
   // v24 moved media ownership into the project folder (hard-linked originals,
-  // docs/PROJECT-FOLDERS.md) — a short-lived format main now refuses.
+  // docs/archived/PROJECT-FOLDERS.md) — a short-lived format main now refuses.
   // v25 makes library items POINTERS to originals in place, saved in the .reel
   // beside the document (docs/MEDIA-POINTERS.md). The library records are
   // main's (projectStore strips them before this runs and writes them on

@@ -6,7 +6,7 @@
  * `copyAtomic` copies generated media / transcripts; `moveFile` adopts a
  * generated output into `generated/`.
  *
- * Hardlink semantics verified for the schema-24 model (docs/PROJECT-FOLDERS.md):
+ * Hardlink semantics verified for the schema-24 model (docs/archived/PROJECT-FOLDERS.md):
  * a link survives the source being moved, renamed or deleted, but an in-place
  * overwrite of the source changes it too — fine for cache files, which are
  * never written in place.

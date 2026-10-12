@@ -1,7 +1,7 @@
 # Research — Text updates: Fonts + Colors & styling
 
 > Expands the **Text updates → Fonts** and **Text updates → Colors & styling**
-> sections of [`TODO.md`](TODO.md) into a concrete, build-ready spec: a specific
+> sections of [`TODO.md`](../TODO.md) into a concrete, build-ready spec: a specific
 > font bundle, specific colors/presets, the data-model and ASS/preview wiring each
 > item needs, and the gotchas found while reading the current code.
 > Branch: `feature/text-fonts-colors` (off `feature/add-caption-features`).
@@ -75,7 +75,7 @@ Grouped to match the picker's intended categories (Caption / Hook·Display / Sty
 
 **Minimum viable subset** if you want to ship fewer first: **Montserrat ExtraBold** (default caption), **Anton** + **Bebas Neue** (hooks), **Poppins Bold**, **Inter** — covers ~90% of real use; the TODO's named priority picks plus Inter.
 
-**Brand fit note (triathlon coach):** the athletic/energetic register is best served by **Anton, Bebas Neue, Teko, Barlow Condensed** for hooks and **Montserrat ExtraBold / League Spartan** for captions. Keep Pacifico/Abril for the occasional "soft" or "premium" post.
+**Brand fit note (fitness/sports content):** the athletic/energetic register is best served by **Anton, Bebas Neue, Teko, Barlow Condensed** for hooks and **Montserrat ExtraBold / League Spartan** for captions. Keep Pacifico/Abril for the occasional "soft" or "premium" post.
 
 ### A2. Wiring checklist (the part that makes fonts actually burn)
 
@@ -136,7 +136,7 @@ All five TODO items. Summary of the ASS tag each maps to, then specifics.
   | Magenta | `#FF2D95` | Playful pop |
   | Purple | `#AF52DE` | Secondary accent |
 
-  (For the triathlon brand specifically, replace 2–3 of these with his actual brand hexes once known; that's exactly what the feature is for.)
+  (For a specific brand, replace 2–3 of these with its actual brand hexes once known; that's exactly what the feature is for.)
 - **Convention to support:** white base text + one **highlight color** on the keyword/spoken word. This is the same hook the future "word-by-word highlight" animation needs, so model the highlight color now (a second color on the style) even if animation comes later.
 
 ### B2. Semi-transparent pill backgrounds (TODO: "Semi-transparent pill backgrounds")

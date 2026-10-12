@@ -4,7 +4,7 @@ The reusable homes for things that were previously hand-rolled in 3–4 places.
 **Before writing a labelled form field, a drag handler, an ffmpeg fragment, a
 1080×1920 constant, an inherit/override resolver, or an IPC wrapper — reach for
 one of these instead of re-rolling it.** Adding a feature should extend these, not
-copy them. (Result of the de-duplication refactor; see `docs/HANDOFF.md` →
+copy them. (Result of the de-duplication refactor; see `docs/archived/HANDOFF.md` →
 Refactor for the per-theme history.)
 
 ## Layout of the codebase

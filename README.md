@@ -1,6 +1,6 @@
 # Reel Editor
 
-A local, offline desktop video editor for Windows, purpose-built for creating Instagram Reels from iPhone footage. Built for a triathlon coach who uses Reels for client acquisition.
+A local, offline desktop video editor for Windows, purpose-built for creating Instagram Reels from iPhone footage. Built for a small business that uses Reels for client acquisition.
 
 > **Status: working prototype.** The editor runs, and you can build a Windows
 > installer that bundles everything an end user needs. See
@@ -24,11 +24,12 @@ A local, offline desktop video editor for Windows, purpose-built for creating In
 
 ## Stack
 
-Electron + TypeScript (React 19 + Vite + Tailwind 4 renderer) orchestrating **ffmpeg** and **whisper.cpp** as child processes. Fully local, no cloud. See [`docs/PLAN.md`](docs/PLAN.md) for the rationale (including why not Python, and the Tauri alternative).
+Electron + TypeScript (React 19 + Vite + Tailwind 4 renderer) orchestrating **ffmpeg** and **whisper.cpp** as child processes. Fully local, no cloud. See [`docs/archived/PLAN.md`](docs/archived/PLAN.md) for the original rationale (including why not Python, and the Tauri alternative).
 
-## Target machine (verified)
+## Tested on
 
-Windows 11, RTX 4070 Ti Super (NVENC + CUDA), i9-14900K, 32 GB RAM.
+Windows 11 with an NVIDIA RTX GPU (NVENC). Without NVENC, export falls back to
+`libx264`.
 
 ## Installing (end users)
 
@@ -162,6 +163,6 @@ A plain `npm run build:win` never uploads — it only embeds the feed URL.
 - [`docs/FFMPEG-NOTES.md`](docs/FFMPEG-NOTES.md): verified ffmpeg/whisper behaviors and traps
 - [`docs/TIMELINE.md`](docs/TIMELINE.md): timeline interaction checklist
 - [`docs/MEDIA-POINTERS.md`](docs/MEDIA-POINTERS.md): how the library references original files, plus Missing/Relink
-- [`docs/PLAN.md`](docs/PLAN.md): the original implementation plan (architecture, pipelines, milestones)
-- [`docs/HANDOFF.md`](docs/HANDOFF.md): the original handoff and decisions log
-- [`docs/PROJECT-FOLDERS.md`](docs/PROJECT-FOLDERS.md): historical, superseded by media pointers
+- [`docs/superpowers/specs/2026-10-06-ai-assistant-mcp-design.md`](docs/superpowers/specs/2026-10-06-ai-assistant-mcp-design.md): design of the Claude Code / MCP assistant
+- [`docs/archived/`](docs/archived/): superseded docs kept for history (the original plan and handoff, the
+  project-folders design, the fonts/colors research, the assistant's build plan)

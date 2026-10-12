@@ -2,21 +2,21 @@
 
 ## Context
 
-The user is a triathlon coach using Instagram Reels for client acquisition (strategy documented in `C:\Users\57tuc\Desktop\Code\coaching_webapp\obsidian_notes\Instagram Strategy\`). He films on iPhone and edits on this Windows PC. He wants a **local video editing program** that supports all major formats, prioritizes iPhone footage, and bakes in the features his strategy notes say drive Reel performance:
+The owner uses Instagram Reels for client acquisition (strategy documented in private notes, not in this repo), films on iPhone and edits on a Windows PC. The goal is a **local video editing program** that supports all major formats, prioritizes iPhone footage, and bakes in the features the strategy notes say drive Reel performance:
 
 - 9:16 vertical output, 30–90s sweet spot, hook text in the **first 3 seconds**
 - Text overlays mandatory (~half of viewers watch muted); Instagram OCRs on-screen text and transcribes speech for ranking → captions and spoken keywords matter algorithmically
 - Safe zones: bottom ~25% and right rail are covered by Instagram UI
 - Clean, watermark-free H.264 exports; hybrid-carousel 3–5s video-slide exports
 
-`C:\Users\57tuc\Desktop\Code\video_editor` is empty (greenfield, not a git repo). User explicitly okayed departing from his Python/React webapp stack if something fits better.
+The project directory is empty (greenfield, not a git repo). The owner explicitly okayed departing from their usual Python/React webapp stack if something fits better.
 
 ## Stack decision: Electron desktop app, TypeScript end-to-end
 
-**Why this over a React+Python local web app** (the rejected first draft): single language and toolchain (shared TS types between UI and engine instead of pydantic models mirrored by hand), a real installable desktop app (native file dialogs, drag-drop from Explorer, packaged .exe — no "start two servers, open a browser tab"), job progress pushed over IPC instead of HTTP polling, and ffmpeg orchestration via `child_process` is equally capable in Node. The one thing Python did better — faster-whisper — is replaced by **whisper.cpp** spawned as a child process (same pattern as ffmpeg); the i9-14900K runs `small.en` several times faster than realtime on CPU, with an optional CUDA/Vulkan build upgrade path. React skills carry over fully.
+**Why this over a React+Python local web app** (the rejected first draft): single language and toolchain (shared TS types between UI and engine instead of pydantic models mirrored by hand), a real installable desktop app (native file dialogs, drag-drop from Explorer, packaged .exe — no "start two servers, open a browser tab"), job progress pushed over IPC instead of HTTP polling, and ffmpeg orchestration via `child_process` is equally capable in Node. The one thing Python did better — faster-whisper — is replaced by **whisper.cpp** spawned as a child process (same pattern as ffmpeg); a modern desktop CPU runs `small.en` several times faster than realtime on CPU, with an optional CUDA/Vulkan build upgrade path. React skills carry over fully.
 
 - **Scaffold**: electron-vite (React + TS template), Tailwind CSS 4, electron-builder (NSIS installer) for packaging.
-- **Hardware leverage**: RTX 4070 Ti Super → `h264_nvenc` exports (libx264 fallback); i9 → CPU whisper.cpp.
+- **Hardware leverage**: NVIDIA RTX GPU → `h264_nvenc` exports (libx264 fallback); CPU whisper.cpp.
 - **Not installed yet** (verified): ffmpeg, Node. Setup: `winget install Gyan.FFmpeg OpenJS.NodeJS.LTS` (Gyan **full** build has h264_nvenc, libx264, libass, zscale — conda-forge/static builds often lack NVENC).
 
 ## Key technical decisions
@@ -122,7 +122,7 @@ Project JSON: `clips[]` (mediaId, inSec/outSec trim, crop rect in source px aspe
 Transcribe job: extract 16kHz mono wav via ffmpeg → run whisper.cpp (`small.en`, word timestamps, JSON out) → `transcript.json` (source-time word list). First run downloads binary/model with a visible "downloading model" job phase. Renderer maps source→timeline time through clip trims, groups words into Reels-style segments, all editable in `CaptionEditor` (text, merge/split, retime, per-segment toggle). Preview via `CaptionLayer`; export burns the same numbers via ASS. Default yBaseline sits just above the 1440px safe line.
 
 ### Reel checklist (pure renderer logic, live)
-duration ∈ [30,90]s · a hook overlay starting ≤3s · captions enabled & covering ≥80% of detected speech · transcript ∪ overlay text contains ≥1 keyword from configurable bank (seeded from his notes: triathlon, Ironman 70.3, swim technique, …; case-insensitive) · all text bounding boxes outside safe zones. Each rule → pass/warn/fail + fix hint in `ReelChecklist` panel.
+duration ∈ [30,90]s · a hook overlay starting ≤3s · captions enabled & covering ≥80% of detected speech · transcript ∪ overlay text contains ≥1 keyword from configurable bank (seeded from the owner's niche keywords; case-insensitive) · all text bounding boxes outside safe zones. Each rule → pass/warn/fail + fix hint in `ReelChecklist` panel.
 
 ## Milestones (each independently verifiable)
 

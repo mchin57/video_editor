@@ -1,6 +1,6 @@
 # Project folders, schema 24 (hard-linked originals) — historical
 
-_Status: **superseded (2026-10-11)** by [MEDIA-POINTERS.md](MEDIA-POINTERS.md). Kept as a record of
+_Status: **superseded (2026-10-11)** by [MEDIA-POINTERS.md](../MEDIA-POINTERS.md). Kept as a record of
 what schema 24 was, why it was dropped, and the hard-link facts verified for it._
 
 ## What schema 24 was (2026-10-10, one day)

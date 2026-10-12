@@ -2,7 +2,7 @@
 
 Status: **implemented on branch `claude/media-pointers` (2026-10-11), phases 1–7.** Marked `[~]` in
 TODO.md with what is verified; this doc describes the built behavior unless a line says otherwise.
-This replaces the media-ownership half of [PROJECT-FOLDERS.md](PROJECT-FOLDERS.md): no more
+This replaces the media-ownership half of [PROJECT-FOLDERS.md](archived/PROJECT-FOLDERS.md): no more
 hard-linking or copying originals into the project. The project folder itself stays.
 
 ## Goals

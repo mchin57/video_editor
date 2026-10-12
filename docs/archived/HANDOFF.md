@@ -9,18 +9,16 @@
 - **Phase:** **M0 complete and verified** (2026-06-12). The app builds, typechecks, tests pass, and the Electron window launches with a working ffmpeg/NVENC capability probe (confirmed on screen). All work is on branch **`prototype`** (per owner instruction — do all build work there, not `main`).
 - **Next action:** Begin **Milestone M1** (media import → ffprobe → proxy job → player → library). See "Exact next step" at the bottom.
 - **Stack is settled and now real:** Electron 42 + TypeScript (React 19 + Vite 7 + Tailwind 4 + zustand + react-query) orchestrating ffmpeg (+ whisper.cpp later). *Not* Python. *Not* a browser web app.
-- **The full plan lives in [`PLAN.md`](PLAN.md)** in this folder (also mirrored at `C:\Users\57tuc\.claude\plans\build-a-video-editing-glowing-torvalds.md`). Read it in full before writing code.
+- **The full plan lives in [`PLAN.md`](PLAN.md)** in this folder. Read it in full before writing code.
 - **To run:** `npm install` then `npm run dev` (must prepend Node to PATH in agent shells — see env note). `npm run build` / `npm run typecheck` / `npm test` all green.
 
 ---
 
 ## Who this is for / the real goal
 
-The owner is a **US-based triathlon coach** (strong swim background) who sells coaching to age-group triathletes. He uses **Instagram Reels as a client-acquisition channel**. This editor is not a general NLE — it is a **purpose-built Reels factory** that bakes his Instagram strategy into the tool.
+The owner uses **Instagram Reels as a client-acquisition channel** for a small business. This editor is not a general NLE — it is a **purpose-built Reels factory** that bakes the owner's Instagram strategy into the tool.
 
-His strategy knowledge base (read these — they drive every feature decision):
-`C:\Users\57tuc\Desktop\Code\coaching_webapp\obsidian_notes\Instagram Strategy\`
-- `00 - Start here.md`, `Instagram algorithm 2026.md`, `Content strategy and formats.md`, `90-day playbook.md`, `Metrics and benchmarks.md` (+ niche/funnel/integration notes).
+The owner's private Instagram strategy notes (not in this repo) drove every feature decision.
 
 **Strategy facts that became product requirements:**
 - Reels: **30–90s** sweet spot; **first 3 seconds decide everything** → hook text must be on screen in the first 3s (we add a 3s hook-zone marker + checklist rule).
@@ -30,7 +28,7 @@ His strategy knowledge base (read these — they drive every feature decision):
 - **Carousels** can include 3–5s video slides → we have a "Carousel slide" export preset.
 - Output is **vertical 9:16, 1080×1920**.
 
-Owner preferences (from the strategy vault's "how to behave" note): prefers **conda over pip** for Python tooling; **runs all git pushes himself — never push for him**. (We pivoted off Python, so conda is moot, but the *never push* rule still applies — commit locally only when he asks; do not `git push`.)
+Owner preferences: prefers **conda over pip** for Python tooling; **runs all git pushes — never push for the owner**. (We pivoted off Python, so conda is moot, but the *never push* rule still applies — commit locally only when asked; do not `git push`.)
 
 ---
 
@@ -39,18 +37,16 @@ Owner preferences (from the strategy vault's "how to behave" note): prefers **co
 | Fact | Value |
 |---|---|
 | OS | Windows 11 Home 10.0.26200 |
-| GPU | **NVIDIA RTX 4070 Ti Super** (NVENC h264/hevc + CUDA) + Intel UHD 770 |
-| CPU | **i9-14900K** |
-| RAM | 31.8 GB |
+| GPU | **NVIDIA RTX** (NVENC h264/hevc + CUDA) |
 | ffmpeg | **INSTALLED 2026-06-12** — `Gyan.FFmpeg` full build **8.1.1** via winget. Verified present: `h264_nvenc`, `hevc_nvenc`, `libx264`, `aac`, and filters `ass`, `subtitles`, `zscale`, `tonemap`, `sidechaincompress`, `showwavespic`. Binary at `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-8.1.1-full_build\bin\`. |
 | Node | **ALREADY INSTALLED** — v24.16.0 / npm 11.13.0 at `C:\Program Files\nodejs` (on the Machine PATH). It was never missing; the earlier "not installed" claim was wrong — a bare PATH lookup in the *agent* shell fails (see env note below). |
 | **Agent-shell PATH** | The harness launches its tool shells (`bash -c`, PowerShell `-NoProfile`) with a **stripped PATH** that excludes the Windows Machine PATH and **ignores `~/.bashrc` and the PS profile**. To run node/npm/ffmpeg from a tool shell, prepend the dir: `export PATH="/c/Program Files/nodejs:$PATH"`. Verified — do not waste time re-testing profile files. |
 | Docker | Installed (v29.4.0) — not needed for this project |
-| conda | miniconda3 at `C:\Users\57tuc\miniconda3` (no longer relevant after pivot off Python) |
-| git | v2.53.0; global user.name = `mchin57` |
-| Project dir | `C:\Users\57tuc\Desktop\Code\video_editor` — git initialized. **Active branch: `prototype`** (build here; `main` holds only planning/handoff commits). |
+| conda | miniconda3 (no longer relevant after pivot off Python) |
+| git | v2.53.0 |
+| Project dir | git initialized. **Active branch: `prototype`** (build here; `main` holds only planning/handoff commits). |
 
-**Reference for conventions** (his other project, if you want to mirror code style): `C:\Users\57tuc\Desktop\Code\coaching_webapp` — React 19 + Vite + TS + Tailwind 4 (`@tailwindcss/vite`, `@` alias, `/api` proxy), `@tanstack/react-query`, eslint 9 + prettier + vitest. The renderer of *this* project should feel familiar to him (same React/Vite/Tailwind/react-query/vitest tooling).
+**Reference for conventions** (the owner's other project, if you want to mirror code style): React 19 + Vite + TS + Tailwind 4 (`@tailwindcss/vite`, `@` alias, `/api` proxy), `@tanstack/react-query`, eslint 9 + prettier + vitest. The renderer of *this* project should feel familiar to the owner (same React/Vite/Tailwind/react-query/vitest tooling).
 
 ---
 
@@ -62,7 +58,7 @@ Owner preferences (from the strategy vault's "how to behave" note): prefers **co
 4. **Proxy-based preview.** Chromium can't reliably decode iPhone HEVC on Windows → generate H.264 proxies on import; keep originals for export. HDR sources get the **same tonemap** on proxy and export so preview colors match output.
 5. **Export = per-clip normalize → concat demuxer → one final pass.** Intermediates are near-lossless H.264 + **PCM** audio (.mov); AAC is encoded exactly once at the end (no concat clicks). Chosen over one mega-filtergraph for robustness + debuggability + Windows quoting safety.
 6. **Text via a single ASS file** (captions + hook overlays), `PlayResX=1080 PlayResY=1920` so the same coordinates drive preview and burn; same TTFs given to libass via `fontsdir`.
-7. **whisper.cpp** (child process) for captions — replaces Python's faster-whisper. CPU `small.en` is ≫ realtime on the i9; GPU build optional later.
+7. **whisper.cpp** (child process) for captions — replaces Python's faster-whisper. CPU `small.en` is ≫ realtime on the dev machine; GPU build optional later.
 8. **JSON-file persistence** (atomic writes), content-hash media library. No SQLite.
 9. **zustand** for renderer state (project doc + undo snapshots; separate high-frequency playback store), react-query for IPC/server-ish calls.
 10. **ffmpeg = Gyan full build**, discovered + capability-probed at startup; `h264_nvenc` with `libx264` fallback; hard-require `ass` + `zscale` filters.
@@ -71,10 +67,10 @@ Owner preferences (from the strategy vault's "how to behave" note): prefers **co
 
 ## Conversation arc (what happened this session, in order)
 
-1. Owner asked to build a local video editor prioritizing iPhone video + Instagram-success features, drawing on his Instagram Strategy notes.
-2. I explored: read all the Instagram Strategy notes; confirmed `video_editor` was empty; probed the machine (GPU/CPU/RAM, ffmpeg/Node/conda/docker presence); inspected `coaching_webapp` for stack conventions.
-3. I asked the owner two clarifying questions (app form; v1 feature set) — **he dismissed them** ("do not proceed, wait"). I proceeded with sensible defaults: all four strategy features in v1.
-4. I had a **Plan agent** design a React+Python+conda local web app. Wrote it to the plan file. Called ExitPlanMode → **rejected**: *"This doesn't necessarily need to integrate directly with the coaching_webapp tech stack if there are better options than python."*
+1. Owner asked to build a local video editor prioritizing iPhone video + Instagram-success features, drawing on the owner's Instagram Strategy notes.
+2. I explored: read all the Instagram Strategy notes; confirmed `video_editor` was empty; probed the machine (GPU/CPU/RAM, ffmpeg/Node/conda/docker presence); inspected the owner's other web app for stack conventions.
+3. I asked the owner two clarifying questions (app form; v1 feature set) — **they were dismissed** ("do not proceed, wait"). I proceeded with sensible defaults: all four strategy features in v1.
+4. I had a **Plan agent** design a React+Python+conda local web app. Wrote it to the plan file. Called ExitPlanMode → **rejected**: *"This doesn't necessarily need to integrate directly with the [other web app's] tech stack if there are better options than python."*
 5. I **rewrote the plan to Electron + TypeScript** (current `PLAN.md`). Called ExitPlanMode → **rejected** with: *"Also make sure to setup a git repo and other supporting infrastructure."*
 6. Owner then asked **"Is Python really the best option?"** (answered: no — see decision 1), switched the model to **claude-opus-4-8** via `/model`, and asked to **"Save all work so a future iteration of Fable can pick it up exactly where left off… save the exact state of the context window and the generated plan."**
 7. **This handoff + repo setup is the response to step 6.** Git initialized; `.gitignore`, `.editorconfig`, `README.md`, `docs/PLAN.md`, `docs/HANDOFF.md` created.
@@ -121,11 +117,11 @@ M0 is done. Begin **M1** on the `prototype` branch:
    - Media serving for `<video>` — `protocol.registerFileProtocol` (or small localhost server) so the renderer can play proxies.
    - Renderer: Library panel (clips + thumbnails, dialog + drag-drop import), player wired to the existing 9:16 `PreviewStage` + safe-zone overlay.
 3. **Verification needs a real iPhone clip** (HEVC + rotation + VFR). Ask the owner to drop one in; synthetic `testsrc` clips only exercise the mechanics.
-4. **Do NOT `git push`** — owner runs pushes himself. (And per owner: light checkpointing on `prototype` — don't over-document.)
+4. **Do NOT `git push`** — the owner runs all pushes. (And per owner: light checkpointing on `prototype` — don't over-document.)
 
 ## Guardrails carried over
 
-- **Never `git push`** — owner does pushes himself. Commit locally only when asked.
+- **Never `git push`** — the owner does all pushes. Commit locally only when asked.
 - Don't re-probe the environment (facts table above is current).
 - Don't reopen settled decisions (decision log) without a concrete reason.
 - Keep the tool single-purpose: a Reels factory, not a general NLE. Out-of-scope list is at the end of PLAN.md.

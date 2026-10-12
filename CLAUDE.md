@@ -106,7 +106,7 @@ checklist into guarantees a refactor can't silently break.
 
 ## House rules
 
-- **Never push.** Commit locally only — the owner runs all `git push` himself.
+- **Never push.** Commit locally only — the owner runs every `git push`.
 - Behavior-preserving refactors must keep `npm test` + `npm run typecheck` green at
   every step.
 - **Don't let untested behavior get refactored away.** `npm test` only guards the
