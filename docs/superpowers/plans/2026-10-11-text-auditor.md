@@ -1,7 +1,7 @@
 # Text tools + auditor agent — build plan
 
 Branch `claude/text-auditor` (worktree `.claude/worktrees/text-auditor`, `node_modules` and ffmpeg
-junctioned). Status: **proposed, not started.** Scope: now → review complete. The owner's `/edit-video`
+junctioned). Status: **built through Step 6 (2026-10-11); Step 7 review pending.** Scope: now → review complete. The owner's `/edit-video`
 smoke test comes after.
 
 ## Goal
