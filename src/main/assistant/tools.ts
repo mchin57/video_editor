@@ -163,6 +163,21 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     return json({ path, sizeMB: Math.round((size / 1_048_576) * 10) / 10 })
   },
 
+  get_text: async (q) => json(await callRenderer('getText', q)),
+
+  set_text: async ({ edits }) => {
+    const results = await callRenderer('applyTextEdits', { edits })
+    return json({ results, note: 'One undo step: call undo to revert this whole batch.' })
+  },
+
+  set_playhead: async ({ timeSec }) => {
+    // Open-ended audio clips end at their source's length, which only the library knows.
+    const sourceDurations = Object.fromEntries([...(await projectAssets())].map(([id, a]) => [id, a.probe.durationSec]))
+    const r = await callRenderer('setPlayhead', { timeSec, sourceDurations })
+    const clamped = r.timeSec !== timeSec ? ` (clamped; the edit is ${r2(r.durationSec)}s long)` : ''
+    return text(`Playhead at ${r2(r.timeSec)}s${clamped}. Playback is paused there.`)
+  },
+
   request_feature: async (req) => {
     const r = await fileFeatureRequest(req)
     return text(r.status === 'duplicate' ? `Already requested: "${req.title}" is in ${r.path}` : `Filed in ${r.path}:\n${r.entry}`)

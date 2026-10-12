@@ -12,14 +12,16 @@ import type { CaptionSegment, CaptionStyle, Composition, Layer, TextContent } fr
 import type { FrameRect } from '@shared/frame'
 import { FONTS, isKnownFont } from '@shared/fonts'
 import { makeTextLayer } from '@shared/layers'
-import { CAPTION_LANE_ID, type TextEdit, type TextEditResult } from '@shared/assistant/onScreenText'
+import {
+  CAPTION_LANE_ID,
+  MIN_TEXT_SEC,
+  TEXT_FONT_SIZE_MAX,
+  TEXT_FONT_SIZE_MIN,
+  type TextEdit,
+  type TextEditResult
+} from '@shared/assistant/onScreenText'
 import { captionInWindow, captionWithText } from './captions'
 import { isLinked } from './links'
-
-/** Shortest window a text item may have (seconds). */
-export const MIN_TEXT_SEC = 0.1
-export const TEXT_FONT_SIZE_MIN = 12
-export const TEXT_FONT_SIZE_MAX = 1000
 
 const KNOWN_KEYS = new Set<keyof TextEdit>([
   'id', 'kind', 'text', 'startSec', 'endSec', 'visible', 'x', 'y', 'rotationDeg', 'fontFamily',

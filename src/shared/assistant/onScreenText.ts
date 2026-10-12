@@ -13,6 +13,11 @@ import type { TextAnimation } from '../textAnim'
 /** Reserved `set_text` / `get_text` id for the caption lane (on/off + lane-wide style). */
 export const CAPTION_LANE_ID = 'captions'
 
+/** `set_text` limits, shared by the MCP schema and the renderer's validation. */
+export const MIN_TEXT_SEC = 0.1
+export const TEXT_FONT_SIZE_MIN = 12
+export const TEXT_FONT_SIZE_MAX = 1000
+
 /** The style fields every on-screen text item has (text layer or caption). */
 export interface TextLook {
   fontFamily: string

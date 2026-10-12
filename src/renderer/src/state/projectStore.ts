@@ -47,6 +47,8 @@ import { extractAudioPieces } from '@/lib/timeline'
 import * as links from '@/lib/links'
 import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
 import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
+import type { TextEdit, TextEditResult } from '@shared/assistant/onScreenText'
+import { applyTextEdits } from '@/lib/textEdits'
 import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
@@ -189,6 +191,10 @@ interface ProjectState {
    *  undo step and return what was placed. Throws — changing nothing — when
    *  there is no project or an item is unusable. */
   addVideoSequence: (plan: SequencePlan) => PlacedClip[]
+  /** Apply the assistant's `set_text` edits (create/patch text layers and
+   *  captions, restyle the caption lane) as ONE undo step. Throws — changing
+   *  nothing — when there is no project or any edit is invalid. */
+  applyTextEdits: (edits: TextEdit[]) => TextEditResult[]
   /** Add an empty multi-clip layout layer (front) at `startSec`. */
   addLayoutLayer: (id: string, presetId: string, startSec: number) => void
   /** Re-shape a layout to another preset (cells keep media/trim by index). */
@@ -553,6 +559,14 @@ export const useProject = create<ProjectState>((set, get) => {
       const result = applySequence(comp, plan, { frame: projectFormat(get()).frame, newId })
       commitComp(() => result.comp)
       return result.placed
+    },
+
+    applyTextEdits: (edits) => {
+      const comp = activeComp(get())
+      if (!comp) throw new Error('Editor has no project open')
+      const result = applyTextEdits(comp, edits, { frame: projectFormat(get()).frame, newId })
+      commitComp(() => result.comp)
+      return result.results
     },
 
     addLayoutLayer: (id, presetId, startSec) =>

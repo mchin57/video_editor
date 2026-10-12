@@ -6,6 +6,7 @@
 
 import type { Project, TimelineItemRef } from '../project'
 import type { TimelineSummary } from './timelineSummary'
+import type { OnScreenText, TextEdit, TextEditResult, TextQuery } from './onScreenText'
 
 /** One clip in a rough cut. In/out are SOURCE seconds. */
 export interface SequenceItem {
@@ -45,6 +46,17 @@ export interface AssistantOps {
   removeItems: { args: { ids: string[] }; result: { removed: TimelineItemRef[] } }
   undo: { args: NoArgs; result: { undone: boolean; timeline: TimelineSummary } }
   getProject: { args: NoArgs; result: Project }
+  getText: { args: TextQuery; result: OnScreenText }
+  /** All edits are ONE undo step; any invalid edit throws and nothing changes. */
+  applyTextEdits: { args: { edits: TextEdit[] }; result: TextEditResult[] }
+  /**
+   * Move the playhead (view state; no undo step). `sourceDurations` (main fills
+   * it from the library) lets the renderer measure open-ended audio for the clamp.
+   */
+  setPlayhead: {
+    args: { timeSec: number; sourceDurations: Record<string, number> }
+    result: { timeSec: number; durationSec: number }
+  }
 }
 
 export type AssistantOp = keyof AssistantOps
