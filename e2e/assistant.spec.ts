@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { ElectronApplication } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { test, expect } from './fixtures'
@@ -18,7 +18,7 @@ const MCP = join(ROOT, 'out', 'main', 'mcp.js')
 const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
 const FFMPEG = join(BIN, 'ffmpeg.exe')
 const FFPROBE = join(BIN, 'ffprobe.exe')
-const TOOLS = ['export_video', 'get_frames', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'request_feature', 'undo']
+const TOOLS = ['export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'request_feature', 'set_playhead', 'set_text', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -298,4 +298,168 @@ test('an edit that reaches a blocked editor after the timeout is dropped, not ap
     return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
   })
   expect(after).toEqual(before)
+})
+
+// --- On-screen text: get_text / set_text / set_playhead -----------------------
+
+/** A text layer "t1" (0–3 s) and a caption "c1" (2–4 s, "helo wrld") with word timings. */
+async function seedText(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addLayer({
+      id: 't1',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 600,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'Helo there',
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 76,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 }
+      }
+    })
+    const captions = window.__reelStores.useProject.getState().project!.captions
+    s.setCaptions({
+      ...captions,
+      enabled: true,
+      segments: [
+        {
+          id: 'c1',
+          startSec: 2,
+          endSec: 4,
+          text: 'helo wrld',
+          words: [
+            { text: 'helo', startSec: 2, endSec: 2.8 },
+            { text: 'wrld', startSec: 3, endSec: 3.8 }
+          ],
+          enabled: true
+        }
+      ]
+    })
+  })
+}
+
+type TextState = { past: number; layers: { id: string; text?: string; color?: string }[]; captions: { id: string; text: string }[] }
+const textState = (page: Page): Promise<TextState> =>
+  page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    const p = s.project!
+    return {
+      past: s.past.length,
+      layers: p.layers.map((l) =>
+        l.content.kind === 'text' ? { id: l.id, text: l.content.text, color: l.content.color } : { id: l.id }
+      ),
+      captions: p.captions.segments.map((c) => ({ id: c.id, text: c.text }))
+    }
+  })
+
+/** An MCP call that may be refused by schema validation (thrown) or by the editor (isError). */
+async function refusal(c: Client, name: string, args: Record<string, unknown>): Promise<string> {
+  try {
+    const r = await call(c, name, args)
+    expect(r.isError).toBe(true)
+    return textOf(r)
+  } catch (e) {
+    return (e as Error).message
+  }
+}
+
+test('get_text lists text layers and captions; set_text creates and fixes them in one undo step', async ({
+  electronApp,
+  appPage: page
+}) => {
+  await seedText(page)
+  const c = await connect(await pipeOf(electronApp))
+
+  const listed = JSON.parse(textOf(await call(c, 'get_text'))) as {
+    captionLane: { id: string; visible: boolean }
+    items: { id: string; kind: string; text: string; styleFrom?: string; visible: boolean }[]
+  }
+  expect(listed.captionLane).toMatchObject({ id: 'captions', visible: true })
+  expect(listed.items.map((i) => [i.id, i.kind, i.text])).toEqual([
+    ['t1', 'text', 'Helo there'],
+    ['c1', 'caption', 'helo wrld']
+  ])
+  expect(listed.items[1].styleFrom).toBe('lane')
+  // What is on screen at 1 s: only the title.
+  const at1 = JSON.parse(textOf(await call(c, 'get_text', { fromSec: 1, toSec: 1 }))) as { items: { id: string }[] }
+  expect(at1.items.map((i) => i.id)).toEqual(['t1'])
+
+  const before = await textState(page)
+  const r = await call(c, 'set_text', {
+    edits: [
+      { id: 'c1', text: 'hello world' },
+      { id: 't1', text: 'Hello there', color: '#ff0000' },
+      { text: 'Day one', startSec: 1, endSec: 2 }
+    ]
+  })
+  expect(r.isError).toBeFalsy()
+  const { results } = JSON.parse(textOf(r)) as { results: { id: string; kind: string; created: boolean }[] }
+  expect(results.map((x) => [x.kind, x.created])).toEqual([
+    ['caption', false],
+    ['text', false],
+    ['text', true]
+  ])
+  const created = results[2].id
+  await expect(page.getByTestId(`tile-layer-${created}`)).toBeVisible()
+  const after = await textState(page)
+  expect(after.past).toBe(before.past + 1)
+  expect(after.captions).toEqual([{ id: 'c1', text: 'hello world' }])
+  expect(after.layers.find((l) => l.id === 't1')).toMatchObject({ text: 'Hello there', color: '#ff0000' })
+  expect(after.layers.find((l) => l.id === created)).toMatchObject({ text: 'Day one' })
+
+  // One undo reverts the whole batch.
+  await call(c, 'undo')
+  expect(await textState(page)).toEqual(before)
+  await expect(page.getByTestId(`tile-layer-${created}`)).toHaveCount(0)
+})
+
+test('set_text refuses bad edits and changes nothing', async ({ electronApp, appPage: page }) => {
+  await seedText(page)
+  // Link the caption to the title so its timing is locked.
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().linkItems([
+      { kind: 'layer', id: 't1' },
+      { kind: 'caption', id: 'c1' }
+    ])
+  )
+  const c = await connect(await pipeOf(electronApp))
+  const before = await textState(page)
+
+  expect(await refusal(c, 'set_text', { edits: [{ id: 't1', colour: '#ffffff' }] })).toMatch(/colour/)
+  expect(await refusal(c, 'set_text', { edits: [{ id: 't1', fontFamily: 'comic-sans' }] })).toMatch(/fontFamily|comic-sans/)
+  // A good edit in the same batch as a bad one is not applied either.
+  const mixed = await refusal(c, 'set_text', { edits: [{ id: 't1', text: 'Fine' }, { id: 'nope', text: 'x' }] })
+  expect(mixed).toMatch(/Nothing was changed[\s\S]*edit 2 \(id "nope"\): no text layer or caption has this id/)
+  expect(await refusal(c, 'set_text', { edits: [{ id: 'c1', startSec: 2.5 }] })).toMatch(/linked to another timeline item/)
+  expect(await refusal(c, 'set_text', { edits: [{ text: 'no window' }] })).toMatch(/needs startSec and endSec/)
+
+  expect(await textState(page)).toEqual(before)
+  // Text on a linked caption is still fine.
+  expect((await call(c, 'set_text', { edits: [{ id: 'c1', text: 'hello world' }] })).isError).toBeFalsy()
+})
+
+test('a caption fixed through set_text keeps the fix when it is split', async ({ electronApp, appPage: page }) => {
+  await seedText(page)
+  const c = await connect(await pipeOf(electronApp))
+  expect((await call(c, 'set_text', { edits: [{ id: 'c1', text: 'hello world' }] })).isError).toBeFalsy()
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().splitItemsAt([{ kind: 'caption', id: 'c1' }], 2.9, () => 0)
+  )
+  expect((await textState(page)).captions.map((x) => x.text)).toEqual(['hello', 'world'])
+})
+
+test('set_playhead parks the playhead, paused, clamped to the edit', async ({ electronApp, appPage: page }) => {
+  await seedText(page) // the edit is 3 s long: the title ends at 3 (captions do not extend it)
+  const c = await connect(await pipeOf(electronApp))
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setPlaying(true))
+  expect(textOf(await call(c, 'set_playhead', { timeSec: 2.5 }))).toMatch(/^Playhead at 2\.5s\. Playback is paused/)
+  expect(await page.evaluate(() => window.__reelStores.usePlayback.getState())).toMatchObject({ time: 2.5, playing: false })
+  expect(textOf(await call(c, 'set_playhead', { timeSec: 99 }))).toMatch(/^Playhead at 3s \(clamped; the edit is 3s long\)/)
+  expect(await page.evaluate(() => window.__reelStores.usePlayback.getState().time)).toBe(3)
 })
