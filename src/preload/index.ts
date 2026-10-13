@@ -25,6 +25,9 @@ const api = {
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
   /** Pick a file holding a missing asset's original (null = canceled). */
   relinkMediaDialog: (id: string): Promise<RelinkResult | null> => ipcRenderer.invoke(IPC.relinkMediaDialog, id),
+  /** Library Rename: the original on disk and the item get `stem` + the file's
+   *  own extension (rejects with a reason; nothing changes then). */
+  renameMedia: (id: string, stem: string): Promise<MediaAsset> => ipcRenderer.invoke(IPC.renameMedia, id, stem),
 
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read/write its working copy (autosave); the *File*

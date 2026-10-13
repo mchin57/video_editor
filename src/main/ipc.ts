@@ -20,6 +20,7 @@ import {
   importGenerated,
   relinkCheck,
   relinkMedia,
+  renameMedia,
   type RelinkCheck,
   renderAudioFxToLibrary,
   requireUsable,
@@ -211,6 +212,10 @@ export function registerIpcHandlers(): void {
     }
     return result
   })
+
+  // A library card's Rename (docs/MEDIA-POINTERS.md "Rename"): the file on
+  // disk first, then the record. Rejects with a plain reason.
+  ipcMain.handle(IPC.renameMedia, (_event, id: string, stem: string) => renameMedia(id, stem))
 
   // A library record changed after the project opened (import, relink, a path
   // fixed by a re-check): tell the renderer it now has unsaved changes.

@@ -148,11 +148,12 @@ export async function exportProject(
   opts: ExportOptions,
   outputPath: string
 ): Promise<string> {
-  const job = createJob('export', `Export · ${project.name}`, project.id)
+  const mediaIds = referencedMediaIds(project)
+  const job = createJob('export', `Export · ${project.name}`, project.id, { uses: mediaIds })
   try {
     // Missing or changed originals block the export, naming every file — never
     // render a clip from different bytes than the user edited.
-    await assertMediaUsable(referencedMediaIds(project))
+    await assertMediaUsable(mediaIds)
     await runExport(project, opts, job.id, outputPath)
     finishJob(job.id, outputPath)
     return outputPath

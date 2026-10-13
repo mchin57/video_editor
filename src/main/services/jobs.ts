@@ -8,6 +8,9 @@ import type { Job, JobType, JobProgressEvent } from '@shared/jobs'
 const jobs = new Map<string, Job>()
 /** Abort controllers of cancelable jobs still in flight, by job id. */
 const aborts = new Map<string, AbortController>()
+/** The library media ids a job still in flight READS (its `uses`), by job id:
+ *  a Rename refuses while one of them is running (`activeJobUsing`). */
+const uses = new Map<string, Set<string>>()
 
 function broadcast(job: Job): void {
   const ev: JobProgressEvent = {
@@ -38,12 +41,15 @@ export type RunningJob = Job & { signal?: AbortSignal }
  * work, kill whatever it spawned and remove partial output, and report the
  * outcome through `failJob` — which records it as `canceled`, not `error`,
  * once the signal has fired.
+ *
+ * `uses` lists the library media ids whose originals the job reads, so a
+ * Rename can refuse while it runs (`activeJobUsing`).
  */
 export function createJob(
   type: JobType,
   label: string,
   subjectId?: string,
-  opts: { cancelable?: boolean } = {}
+  opts: { cancelable?: boolean; uses?: string[] } = {}
 ): RunningJob {
   // Evict the oldest finished jobs so the registry doesn't grow unbounded over
   // a long session (Map iteration order = insertion order = age).
@@ -62,6 +68,7 @@ export function createJob(
     startedAt: Date.now()
   }
   jobs.set(job.id, job)
+  if (opts.uses?.length) uses.set(job.id, new Set(opts.uses))
   let signal: AbortSignal | undefined
   if (cancelable) {
     const ac = new AbortController()
@@ -91,6 +98,7 @@ export function finishJob(id: string, result?: unknown): void {
   const job = jobs.get(id)
   if (!job) return
   aborts.delete(id)
+  uses.delete(id)
   job.status = 'done'
   job.progress = 1
   job.result = result
@@ -104,6 +112,7 @@ export function failJob(id: string, error: string): void {
   if (!job) return
   const canceled = aborts.get(id)?.signal.aborted ?? false
   aborts.delete(id)
+  uses.delete(id)
   job.status = canceled ? 'canceled' : 'error'
   if (!canceled) job.error = error
   broadcast(job)
@@ -124,6 +133,15 @@ export function cancelJob(id: string): boolean {
   if (!ac || ac.signal.aborted) return false
   ac.abort()
   return true
+}
+
+/** A job still in flight that reads this media's original, if any. */
+export function activeJobUsing(mediaId: string): Job | null {
+  for (const [id, ids] of uses) {
+    const job = jobs.get(id)
+    if (job && (job.status === 'queued' || job.status === 'running') && ids.has(mediaId)) return job
+  }
+  return null
 }
 
 export function listJobs(): Job[] {

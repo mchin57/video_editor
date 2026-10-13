@@ -20,6 +20,7 @@ export const {
   listProjectMedia,
   ensureProxy,
   relinkMediaDialog,
+  renameMedia,
   loadProject,
   saveProject,
   openProjectFile,
