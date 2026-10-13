@@ -337,7 +337,8 @@ export function renameFailureMessage(error: unknown, fileName: string): string {
  * case-only change of the same file is allowed), or while a job reads the
  * file. The file is renamed FIRST; the record (`fileName` + both paths, via
  * `pointAt`) changes only once that succeeded. The fingerprint, id, cache and
- * transcript are untouched: the bytes are the same.
+ * transcript are untouched: the bytes are the same. The change is NOT
+ * broadcast: the caller marks the library changed and saves.
  */
 export async function renameMedia(id: string, stem: string): Promise<MediaAsset> {
   const r = getProjectRoot()
@@ -367,7 +368,9 @@ export async function renameMedia(id: string, stem: string): Promise<MediaAsset>
     }
   }
   const record = { ...pointAt(r, found.entry.record, target.path), fileName: target.name }
-  if (!target.unchanged || record.fileName !== found.entry.record.fileName) putEntry(record, target.path, r)
+  // Quiet: the renderer marks the change and saves right after this returns
+  // (docs/MEDIA-POINTERS.md "Rename").
+  if (!target.unchanged || record.fileName !== found.entry.record.fileName) putEntry(record, target.path, r, true)
   return hydrate(r, toAsset(r, getEntry(id)!))
 }
 

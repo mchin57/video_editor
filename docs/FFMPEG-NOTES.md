@@ -727,6 +727,31 @@ through the real exporter (`e2e/motionExport.spec.ts`). Drives `placeTag` /
   on the image keyframe path (`overlay` x/y expressions), so a move that
   starts off-frame isn't clipped out of the PNG.
 
+## Renaming a file ffmpeg is reading (verified ffmpeg 8.1.1 / Node 24 / Windows 11, 2026-10)
+
+Library Rename (`renameMedia`, docs/MEDIA-POINTERS.md "Rename") renames the
+user's original with `fs.rename`. Checked in a scratch dir with a 20 s lavfi
+clip read by `ffmpeg -re -i clip.mp4 -f null -`:
+
+- **While ffmpeg reads the file, `fs.rename` fails with `EBUSY`** (errno
+  −4082, "resource busy or locked") — for a different name and for a
+  case-only change alike. ffmpeg opens its inputs without
+  `FILE_SHARE_DELETE`, so Windows refuses the move. After ffmpeg exits the same
+  rename succeeds. `renameFailureMessage` maps `EBUSY` (and `EPERM`/`EACCES`,
+  what other locking or protected files give) to a plain "another program is
+  using it" message; `renameMedia` also refuses up front while a job that
+  registered the media in `createJob(…, { uses })` is running.
+- **A file Node itself has open does NOT block a rename** (libuv opens with
+  `FILE_SHARE_DELETE`): a `fs.open` handle held across the call didn't stop it.
+- **`fs.rename` silently REPLACES an existing target on Windows** (libuv uses
+  `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`): renaming `a.txt` onto an
+  existing `b.txt` succeeded and `b.txt` then held `a`'s bytes. A rename must
+  check the target itself — `renameMedia` stats it first.
+- **Case-only renames work** (`clip.mp4` → `CLIP.mp4` and back), and
+  `existsSync`/`stat` of the other-case name finds the file itself (same
+  `ino`). So "the target exists" is true for a case-only change; `renameMedia`
+  compares `ino` (bigint stat) to tell "the same file" from "another file".
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

@@ -9,7 +9,9 @@ import {
   importFolderDialog,
   importPaths,
   listProjectMedia,
+  ipcErrorMessage,
   relinkMediaDialog,
+  renameMedia,
   renderAudioFx
 } from '@/ipc/client'
 import { useEditor } from '@/state/store'
@@ -217,4 +219,31 @@ export function useRepairMedia(): {
     onError: (err) => window.alert(err.message)
   })
   return { relink }
+}
+
+/**
+ * A library card's Rename (docs/MEDIA-POINTERS.md "Rename"): main renames the
+ * file on disk, then the record; then the library is marked changed and the
+ * project SAVED at once, so the `.reel` names the file by its new name (owner
+ * decision — an unsaved rename would leave the `.reel` naming a file that no
+ * longer exists). Rejects with main's reason, cleaned for showing inline.
+ */
+export function useRenameMedia(): (id: string, stem: string) => Promise<void> {
+  const qc = useQueryClient()
+  return async (id, stem) => {
+    try {
+      await renameMedia(id, stem)
+    } catch (err) {
+      throw new Error(ipcErrorMessage(err))
+    }
+    const store = useProject.getState()
+    store.markLibraryChanged()
+    void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
+    try {
+      await store.save()
+    } catch (err) {
+      // The file IS renamed; only the save failed. Say so, and let the dialog close.
+      window.alert(`The file was renamed, but the project couldn't be saved: ${ipcErrorMessage(err)}\n\nUse File ▸ Save.`)
+    }
+  }
 }

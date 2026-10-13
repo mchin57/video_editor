@@ -308,6 +308,7 @@ export function ClipCard({
   onClick,
   draggable,
   onDragStart,
+  onContextMenu,
   trailing,
   footer,
   proxyPct,
@@ -318,6 +319,8 @@ export function ClipCard({
   onClick?: () => void
   draggable?: boolean
   onDragStart?: (e: React.DragEvent) => void
+  /** Right-click (the Library's menu: Rename…, Reveal in Explorer). */
+  onContextMenu?: (e: React.MouseEvent) => void
   trailing?: ReactNode
   footer?: ReactNode
   proxyPct?: number
@@ -333,6 +336,7 @@ export function ClipCard({
       onClick={onClick}
       draggable={draggable}
       onDragStart={onDragStart}
+      onContextMenu={onContextMenu}
       className={`group flex w-full gap-2 rounded-lg border p-2 text-left transition ${
         selected ? 'border-sky-400/50 bg-sky-400/10' : 'border-white/5 bg-white/[0.02] hover:bg-white/5'
       }`}

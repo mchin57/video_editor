@@ -91,3 +91,11 @@ export const waveformUrl = (m: MediaRef): string => mediaUrl(m, 'waveform.png')
 
 /** URL for a bundled font file (resources/fonts/<file>) for `@font-face`. */
 export const fontUrl = (file: string): string => `reelmedia://fonts/${file}`
+
+/** A rejected IPC call's own message, without Electron's wrapper
+ *  ("Error invoking remote method 'media:rename': Error: …"), for showing to
+ *  the user inline. */
+export function ipcErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, '')
+}

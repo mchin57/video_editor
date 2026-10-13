@@ -108,6 +108,40 @@ Relink always asks "Update path anyway?" (nothing can be checked), then the clip
 file's name, kind, probe and fingerprint. Its cuts are **kept**: with no known old length there is
 nothing to compare, so no reset.
 
+## Rename
+
+Right-clicking a library card opens a menu (the shared `ContextMenu`) with **Rename…** and **Reveal
+in Explorer**. Both are greyed out, with the reason, for a Missing clip and an unknown clip: there
+is no file to act on.
+
+- **The dialog** (`RenameMediaDialog`, in-app) edits the name of the file **on disk** without its
+  extension, which is shown fixed. It starts from the file's current name (which can differ from the
+  card's name: a known clip relinked to a differently named file keeps its old display name, and
+  generated media's display name may hold characters a file can't). The name is checked live with
+  `validateFileStem` (`shared/fileName.ts`: empty, `< > : " / \ | ? *` and control characters, a
+  trailing dot, the reserved device names `CON PRN AUX NUL COM1-9 LPT1-9` with any extension, and the
+  255-character name limit); the name is trimmed, so a trailing space never reaches the disk. The
+  dialog says other projects using this file will show it as Missing until relinked there.
+- **Main (`renameMedia`)** re-checks the name and refuses, changing nothing, when the clip is unknown
+  or missing, the name is already taken in that folder (`fs.rename` would silently replace that file
+  on Windows; a case-only change of the same file is allowed), or a running job reads the file
+  (proxy, captions, background removal, audio effect, export — `createJob(…, { uses })`). Then it
+  renames the file, and **only after that succeeded** updates the record: `fileName` and both paths
+  (`pointAt`, so a file in `generated/` stays generated). A file another program holds open fails
+  with `EBUSY` (verified, docs/FFMPEG-NOTES.md) and gets a plain "in use" message.
+- **Unchanged:** the id, the fingerprint (same bytes), `cache/<id>/` and the transcript (both keyed
+  by id).
+- **Saving:** a successful rename **saves the project at once** (owner decision), so the `.reel`
+  never names a file that no longer exists. Main updates its record quietly; the renderer marks the
+  library changed and then runs Save (a change notification arriving after that Save would mark the
+  project unsaved again).
+- **Not guarded:** the taken-name check and the rename aren't atomic, so a file created under the
+  new name in between would be replaced.
+- **Tests:** `rename.test.ts` (main, real files, mocked probe), `fileName.test.ts`,
+  `projectLayout.test.ts` (`renameTarget`), `ContextMenu.test.tsx`, and `e2e/libraryRename.spec.ts`
+  (rename → disk, card and saved `.reel`; reopen finds it; a taken name refused; Escape cancels; a
+  Missing card's Rename disabled).
+
 ## Save As
 
 Writes the `.reel` into a new project folder, copying `generated/` and `transcripts/` (`cache/` is
