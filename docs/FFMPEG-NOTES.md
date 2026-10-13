@@ -394,6 +394,50 @@ anything ffmpeg writes straight to its final name is a trap:
   `buildThumbnailArgs(..., still)` omits it for image assets. Videos keep
   `-ss 0`, unchanged.
 
+## Loudness series — momentary loudness + per-step peak in one pass (verified ffmpeg 8.1.1, 2026-10)
+
+Backing for `cache/<id>/loudness.json` (`services/loudness.ts` →
+`shared/loudness.ts`; volume levels read it). The chain is
+`[pan fold,]aresample=48000,asetnsamples=n=4800:p=0,astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=Peak_level,ebur128=metadata=1,ametadata=mode=print:file=<name>`
+on `-map 0:a:0 -vn -f null -`: 0.35 s for a 3:13, 950 MB 4K HEVC recording.
+
+- **One metadata frame per 0.1 s, only at 48 kHz.** `asetnsamples=n=4800` makes
+  every frame exactly 0.1 s only when the stream is 48 kHz, so resample FIRST
+  (a 44.1 kHz source gave the same clean 0.1 s cadence after `aresample=48000`).
+  `ebur128=metadata=1` then tags each frame with `lavfi.r128.M`: the 400 ms
+  block ENDING at that frame's end — frame k (pts k·0.1) covers
+  `(k·0.1 − 0.3, k·0.1 + 0.1]`. Checked on a tone→silence edge: the first M
+  short of a full tone block lands exactly where that alignment predicts.
+  Frames 0–2 carry M = −120.691 (no full block yet: ebur128's floor) and
+  digital silence prints `nan`; the series stores both as `null`.
+- **`astats` with `reset=1` gives the peak of each 0.1 s frame**
+  (`lavfi.astats.Overall.Peak_level`, `-inf` for digital silence → `null`).
+  The max of a window's steps matched `astats` run directly on the trimmed
+  window exactly (−14.48 for 60–85 s, −22.16 for 30–40 s of the recovery
+  teleprompter file).
+- **`ebur128`'s own peak metadata is a running MAXIMUM** — with
+  `peak=true+sample`, `lavfi.r128.true_peaks_ch0` and `sample_peaks_ch0` stayed
+  at the first half's 0.125 through a later section 14 dB quieter. Useless for
+  a window's peak, hence `astats`.
+- **Gated windows from the series match ebur128 on the window.** BS.1770 gating
+  (absolute −70, relative −10; block power 10^((M+0.691)/10)) over the blocks
+  wholly inside the window reproduced ebur128's integrated loudness of
+  `aresample=48000,atrim=IN:OUT,asetpts=N/SR/TB` to its printed 0.1 on five
+  windows of the recovery file (−40.7, −59.2, −36.9, −34.9, −61.6) and on a
+  synthesized two-level tone (`e2e/loudness.spec.ts`).
+- **Mono is measured as mono, not upmixed.** A mono source's stereo proxy
+  (`-ac 2`, or `aformat=channel_layouts=stereo`) has the SAME integrated
+  loudness (−36.9 either way: the upmix puts −3 dB in each channel) but a peak
+  3.01 dB LOWER (−17.49 vs −14.48). The export mixes an extracted video clip's
+  ORIGINAL (`audioProxyIfReady` only exists for audio assets), and an all-mono
+  mix stays mono, so the source's own peak is the safe bound for a cap.
+  By contrast a duplicated-to-both-channels signal (`pan=stereo|c0=c0|c1=c0`)
+  IS 3 LU louder (−33.9) — which is why a one-sided stereo source must be
+  measured AFTER the mono-fold pan (`e2e/loudness.spec.ts`: folded ≈ +3 LU).
+- **Print file on Windows: pass a bare file name and run ffmpeg with that
+  directory as its cwd.** An unescaped absolute path (`file=C:/…`) is a
+  filtergraph parse error (the drive colon splits the option).
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are
