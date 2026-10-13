@@ -759,6 +759,10 @@ hash-compared (`framemd5`, yuv420p) against a lossless full render.
   frame n, and about 25 dB from n±1, so the right frame is unambiguous. A trim
   past the end yields zero frames, and ffmpeg fails with exit −22 ("Non
   full-range YUV is non-standard"), which is why the index is clamped.
+- **Downscale after the trim.** `render_frame` appends `,scale=W:H:flags=bicubic`
+  to each trimmed branch, fitting 1280 px on the long side (`STILL_MAX_SIDE`).
+  Checked in e2e: a 1080×1920 project gives a 720×1280 JPEG with the caption
+  where the lane puts it.
 - **Cost** (median of 3, 20 Mb/s 1080×1920 source): about 0.35 s at t=5 and
   about 1.7 s at t=55; four frames in one pass take about 1.7 s. The full
   render took 10.3 s. Decoding up to t dominates, so late frames cost the most.
