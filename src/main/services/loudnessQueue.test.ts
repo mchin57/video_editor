@@ -38,7 +38,7 @@ vi.mock('./ffmpegRun', () => ({
     })
 }))
 
-import { ensureLoudnessFor, type LoudnessSource } from './loudness'
+import { ensureLoudnessFor, loudnessPassReading, type LoudnessSource } from './loudness'
 
 let scratch: string
 beforeAll(() => {
@@ -63,23 +63,30 @@ function rename(src: LoudnessSource, stem: string): LoudnessSource {
   return { ...src, path: to }
 }
 const runsReach = (n: number): Promise<void> => vi.waitFor(() => expect(h.runs.length).toBe(n))
+/** The started pass reading `path` (passes sharing the limiter start in no fixed order). */
+const runOf = (path: string | null | undefined): (typeof h.runs)[number] => {
+  const run = h.runs.find((r) => r.input === path)
+  if (!run) throw new Error(`no pass is reading ${path}`)
+  return run
+}
 
 describe('ensureLoudnessFor and a Rename', () => {
   it('a pass queued behind the limiter measures the file at its renamed path', async () => {
     h.runs.length = 0
-    const a = ensureLoudnessFor(h.root, media('a'))
-    const b = ensureLoudnessFor(h.root, media('b'))
+    const [srcA, srcB] = [media('a'), media('b')]
+    const a = ensureLoudnessFor(h.root, srcA)
+    const b = ensureLoudnessFor(h.root, srcB)
     const c = media('c')
     const queued = ensureLoudnessFor(h.root, c)
     await runsReach(2) // a and b hold both slots; c waits
     const renamed = rename(c, 'c renamed')
     // renameMedia's hydrate kicks the pass again with the new path: it joins the queued one.
     const again = ensureLoudnessFor(h.root, renamed)
-    h.runs[0].release()
+    runOf(srcA.path).release()
     await runsReach(3)
     expect(h.runs[2].input).toBe(renamed.path)
     h.runs[2].release()
-    h.runs[1].release()
+    runOf(srcB.path).release()
     await Promise.all([a, b])
     expect(await queued).toMatchObject({ momentary: [-20], peak: [-6] })
     expect(await again).toEqual(await queued)
@@ -98,6 +105,22 @@ describe('ensureLoudnessFor and a Rename', () => {
     expect(h.runs[1].input).toBe(renamed.path)
     h.runs[1].release()
     expect(await second).toMatchObject({ momentary: [-20] })
+  })
+
+  it('reports a pass as reading its original only while it runs (not while queued)', async () => {
+    h.runs.length = 0
+    const [f, g, k] = [media('f'), media('g'), media('k')]
+    const runs = [f, g, k].map((s) => ensureLoudnessFor(h.root, s))
+    await runsReach(2)
+    expect([f, g, k].map((s) => loudnessPassReading(h.root, s.id))).toEqual([true, true, false])
+    runOf(f.path).release()
+    await runsReach(3)
+    expect(loudnessPassReading(h.root, 'f')).toBe(false)
+    expect(loudnessPassReading(h.root, 'k')).toBe(true)
+    runOf(g.path).release()
+    runOf(k.path).release()
+    await Promise.all(runs)
+    expect([f, g, k].some((s) => loudnessPassReading(h.root, s.id))).toBe(false)
   })
 
   it('a genuine failure (the file is there) is still remembered for the session', async () => {

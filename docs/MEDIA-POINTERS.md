@@ -127,10 +127,14 @@ is no file to act on.
 - **Main (`renameMedia`)** re-checks the name and refuses, changing nothing, when the clip is unknown
   or missing, the name is already taken in that folder (`fs.rename` would silently replace that file
   on Windows; a case-only change of the same file is allowed), or a running job reads the file
-  (proxy, captions, background removal, audio effect, export — `createJob(…, { uses })`). Then it
+  (proxy, captions, background removal, audio effect, export — `createJob(…, { uses })`) or a
+  loudness pass is measuring it (`loudnessPassReading`; a queued pass reads the path only when it
+  starts, so it follows the rename). Then it
   renames the file, and **only after that succeeded** updates the record: `fileName` and both paths
   (`pointAt`, so a file in `generated/` stays generated). A file another program holds open fails
-  with `EBUSY` (verified, docs/FFMPEG-NOTES.md) and gets a plain "in use" message.
+  with `EBUSY` (verified, docs/FFMPEG-NOTES.md) and gets a plain "in use" message that also says
+  the editor itself may still be reading it — thumbnail, waveform, mono-fold and silence passes
+  read originals right after an open or import without a job — so "try again in a moment".
 - **Unchanged:** the id, the fingerprint (same bytes), `cache/<id>/` and the transcript (both keyed
   by id).
 - **Saving:** a successful rename **saves the project at once** (owner decision), so the `.reel`

@@ -55,7 +55,7 @@ import {
 import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
-import { forgetLoudnessFailure, kickLoudness, type LoudnessSource } from './loudness'
+import { forgetLoudnessFailure, kickLoudness, loudnessPassReading, type LoudnessSource } from './loudness'
 
 /** Full-content hash (first 12 hex of sha1) — the id scheme before
  *  fingerprints. Only legacy conversion still needs it. */
@@ -329,11 +329,13 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
 /** A failed `fs.rename` in words. Windows answers a file another program
  *  holds open (ffmpeg reading it, a player) with EBUSY — verified, see
  *  docs/FFMPEG-NOTES.md "Renaming a file ffmpeg is reading" — and a locked or
- *  protected one with EPERM / EACCES. */
+ *  protected one with EPERM / EACCES. The holder may be the editor itself:
+ *  thumbnail, waveform, mono-fold and silence passes read originals right
+ *  after an open or import without a job to refuse on. */
 export function renameFailureMessage(error: unknown, fileName: string): string {
   const code = (error as NodeJS.ErrnoException | null)?.code
   if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') {
-    return `Windows wouldn't rename “${fileName}”: another program is using it, or you don't have permission to change it. Close whatever has it open and try again.`
+    return `Windows wouldn't rename “${fileName}”: it's in use — by another program, or the editor is still reading it — or you don't have permission to change it. Try again in a moment, or close whatever else has it open.`
   }
   if (code === 'ENOENT') return `“${fileName}” is no longer where it was. Nothing was renamed.`
   return `Couldn't rename “${fileName}”: ${error instanceof Error ? error.message : String(error)}`
@@ -344,8 +346,8 @@ export function renameFailureMessage(error: unknown, fileName: string): string {
  * gets `stem` plus its own extension, in its own folder, and the library item
  * takes the same name. Refused — with nothing changed — for a missing or
  * unknown clip, an invalid name, a name already taken in that folder (a
- * case-only change of the same file is allowed), or while a job reads the
- * file. The file is renamed FIRST; the record (`fileName` + both paths, via
+ * case-only change of the same file is allowed), or while a job or a
+ * loudness pass reads the file. The file is renamed FIRST; the record (`fileName` + both paths, via
  * `pointAt`) changes only once that succeeded. The fingerprint, id, cache and
  * transcript are untouched: the bytes are the same. The change is NOT
  * broadcast: the caller marks the library changed and saves.
@@ -363,6 +365,7 @@ export async function renameMedia(id: string, stem: string): Promise<MediaAsset>
   if (reason) throw new Error(reason)
   const busy = activeJobUsing(id)
   if (busy) throw new Error(`“${current}” is in use by “${busy.label}”. Wait for it to finish, then rename.`)
+  if (loudnessPassReading(r, id)) throw new Error(`“${current}” is still being measured for volume levels. Try again in a moment.`)
 
   const target = renameTarget(from, stem)
   if (!target.unchanged) {

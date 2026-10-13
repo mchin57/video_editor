@@ -830,9 +830,11 @@ clip read by `ffmpeg -re -i clip.mp4 -f null -`:
   case-only change alike. ffmpeg opens its inputs without
   `FILE_SHARE_DELETE`, so Windows refuses the move. After ffmpeg exits the same
   rename succeeds. `renameFailureMessage` maps `EBUSY` (and `EPERM`/`EACCES`,
-  what other locking or protected files give) to a plain "another program is
-  using it" message; `renameMedia` also refuses up front while a job that
-  registered the media in `createJob(…, { uses })` is running.
+  what other locking or protected files give) to a plain "in use — by another
+  program, or the editor is still reading it" message (the editor's own
+  thumbnail/waveform/mono-fold/silence passes read originals without a job);
+  `renameMedia` also refuses up front while a job that registered the media in
+  `createJob(…, { uses })` is running, or a loudness pass is measuring it.
 - **A file Node itself has open does NOT block a rename** (libuv opens with
   `FILE_SHARE_DELETE`): a `fs.open` handle held across the call didn't stop it.
 - **`fs.rename` silently REPLACES an existing target on Windows** (libuv uses

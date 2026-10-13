@@ -146,6 +146,8 @@ const flight = singleFlight<LoudnessSeries | null>()
 /** Series whose measurement failed this session (by output path): not retried
  *  until relaunch or a relink to new content (`forgetLoudnessFailure`). */
 const failed = new Set<string>()
+/** Series whose pass is running — its ffmpeg has the original open (by output path). */
+const reading = new Set<string>()
 const MAX_PASSES = 2
 
 /**
@@ -200,6 +202,7 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
     limited(async () => {
       const input = inputNow(root, src)
       if (!input) return null // gone missing while queued: not a failure to remember
+      reading.add(out)
       try {
         await fsp.mkdir(dirname(out), { recursive: true })
         // A stale (other-version) file is replaced; the rename needs it gone.
@@ -211,9 +214,18 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
         if (existsSync(input)) failed.add(out)
         console.error('loudness measurement failed for', src.id, error)
         return null
+      } finally {
+        reading.delete(out)
       }
     })
   )
+}
+
+/** Whether a loudness pass is reading the asset's original right now (a
+ *  queued one isn't: it reads the path when it starts). Rename refuses then —
+ *  Windows won't rename a file ffmpeg holds open. */
+export function loudnessPassReading(root: string, id: string): boolean {
+  return reading.has(loudnessPath(root, id))
 }
 
 /** Start a missing series in the background (the media store's hydrate: new
