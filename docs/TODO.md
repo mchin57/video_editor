@@ -388,6 +388,8 @@ Hands-on steps that can't be done in code — needed to actually ship the macOS 
 
 - [ ] **Decide what the settings menu should contain (owner decision, then build).** The current settings menu (`ProjectSettingsMenu` and the no-selection "Project settings" in the Inspector) has grown ad hoc and needs a redesign, but the owner hasn't decided what belongs there yet. Before any code: list what settings exist today (project defaults like noise filter and stabilization, captions on/off, output format, export dir, keyword bank, brand colors) and decide the split between per-project settings and app-wide preferences, plus what's missing (e.g. profiles, follow mode, GPU/engine choice, ffmpeg/whisper paths). Once decided, turn the result into a concrete backlog item here. Related: Platform profiles and the File/Edit/Insert menu bar items.
 
+- [ ] **Audit defaults and settings (owner).** Go through the app and find the defaults and project-wide behaviours that are hardcoded, or buried in project menus, and really belong in Settings: anything the owner would want to set once rather than per project. Note each one (what it is, where it lives now, whether it should be app-wide or per project) and feed the list into the settings-menu decision above. Example of the pattern: volume levels auto-join is planned as a Settings toggle rather than a hardcoded default.
+
 - [ ] **Push to GitHub** so the macOS CI build can run. The repo exists
   (`mchin57/video_editor`) and is wired as `origin`; `electron-builder.yml`
   `publish:` points at it. Nothing has been pushed yet — the owner runs every
