@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type {
+  AudioClip,
   CaptionStyle,
   Composition,
   Layer,
@@ -7,8 +8,12 @@ import type {
   Stabilize,
   TextContent,
   TimelineItemKind,
-  VideoContent
+  VideoContent,
+  VolumeLevel
 } from '@shared/project'
+import { levelOf, levelStatusText } from '@shared/volumeLevels'
+import { useClipGain } from '@/hooks/useClipGain'
+import { LevelLoudnessField } from './VolumeLevelDialog'
 import {
   DEFAULT_STABILIZE,
   MAX_VIDEO_SPEED,
@@ -68,6 +73,7 @@ import {
   Field,
   NumberInput,
   Row,
+  Slider,
   btnCls,
   colorCls,
   dangerBtnCls,
@@ -1497,20 +1503,7 @@ function AudioClipEditor(): JSX.Element | null {
       <Check checked={!!clip.mute} onChange={(v) => update(clip.id, { mute: v })}>
         🔇 Mute this clip
       </Check>
-      {/* The level is kept, not zeroed, so unmuting restores it — but the
-          slider is disabled while muted so it can't look like it does anything. */}
-      <Field label={clip.mute ? `Volume · muted (${clip.gainDb} dB)` : `Volume · ${clip.gainDb} dB`}>
-        <input
-          type="range"
-          min={-40}
-          max={6}
-          step={1}
-          value={clip.gainDb}
-          disabled={!!clip.mute}
-          onChange={(e) => update(clip.id, { gainDb: Number(e.target.value) })}
-          className={`w-full accent-sky-400 ${disabledCls}`}
-        />
-      </Field>
+      <ClipVolumeSection clip={clip} />
       {/* An audio clip's Start is a MOVE (its trim doesn't change), so unlike a
           layer's it translates onto a group: the whole group shifts by the delta. */}
       <Field label={linked ? 'Start (s) · moves the group' : 'Start (s)'}>
@@ -1598,6 +1591,92 @@ function AudioClipEditor(): JSX.Element | null {
         {linked ? `Delete linked group (${groupSize})` : 'Remove audio clip'}
       </button>
     </div>
+  )
+}
+
+const NO_LEVELS: VolumeLevel[] = []
+const NO_CLIPS: AudioClip[] = []
+const NEW_LEVEL = '__new-level'
+
+/**
+ * An audio clip's loudness controls, top to bottom: its OWN volume slider; the
+ * "Volume level" picker; and, for a clip in a level, that level's loudness
+ * (which moves every clip in it) with the status line saying what the level
+ * did to this clip. The gain itself comes from `clipGain` — the export's call.
+ *
+ * The own slider keeps its value, but is greyed out and locked while the clip
+ * is muted (unmuting restores it) or in a level (leaving restores it).
+ */
+function ClipVolumeSection({ clip }: { clip: AudioClip }): JSX.Element {
+  const update = useProject((s) => s.updateAudioClip)
+  const setClipsLevel = useProject((s) => s.setClipsVolumeLevel)
+  const levels = useProject((s) => s.project?.volumeLevels ?? NO_LEVELS)
+  const clips = useProject((s) => activeComp(s)?.audioClips ?? NO_CLIPS)
+  const { data: assets = [] } = useLibrary()
+  const durationOf = (id: string): number => assets.find((a) => a.id === id)?.probe.durationSec ?? 0
+  const gain = useClipGain(clip, clips, durationOf)
+  const isFx = clip.kind === 'fx'
+  const level = levelOf(clip, levels)
+  const followed = gain.status.kind === 'follows' ? levels.find((l) => l.id === gain.levelId) : null
+  const status = levelStatusText(gain.status, gain.gainDb)
+
+  const label = clip.mute
+    ? `Volume · muted (${clip.gainDb} dB)`
+    : level
+      ? `Volume · ${clip.gainDb} dB · set by the level`
+      : `Volume · ${clip.gainDb} dB`
+  return (
+    <>
+      <Field label={label}>
+        <Slider
+          ariaLabel="Clip volume"
+          min={-40}
+          max={24}
+          step={1}
+          value={clip.gainDb}
+          disabled={!!clip.mute || !!level}
+          title={level ? `Set by the “${level.name}” volume level — choose None below to use this again` : undefined}
+          onChange={(v) => update(clip.id, { gainDb: v })}
+          className={`w-full ${disabledCls}`}
+        />
+      </Field>
+      <Field label="Volume level">
+        <select
+          data-testid="volume-level-select"
+          value={isFx ? '' : (level?.id ?? '')}
+          disabled={isFx}
+          title={isFx ? 'An effect track follows the level of the clip it was made from' : undefined}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === NEW_LEVEL) useUi.getState().setLevelDialog({ mode: 'create', assign: [clip.id] })
+            else setClipsLevel([clip.id], v || null)
+          }}
+          className={`${inputCls} ${disabledCls}`}
+        >
+          <option value="">None — its own volume</option>
+          {levels.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name} ({l.targetLufs} LUFS)
+            </option>
+          ))}
+          <option value={NEW_LEVEL}>New level…</option>
+        </select>
+      </Field>
+      {level && <LevelLoudnessField levelId={level.id} />}
+      {followed && (
+        <p className="-mt-1 mb-2 text-[11px] text-zinc-500">
+          Its source clip is in “{followed.name}” ({followed.targetLufs} LUFS).
+        </p>
+      )}
+      {status && (
+        <p
+          data-testid="level-status"
+          className={`-mt-1 mb-2 text-[11px] ${gain.status.kind === 'short' ? 'text-amber-300' : 'text-zinc-400'}`}
+        >
+          {status}
+        </p>
+      )}
+    </>
   )
 }
 

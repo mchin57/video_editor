@@ -122,7 +122,7 @@ test('opening an old project converts it in place, keeping its clip id and point
   expect(opened.layers).toEqual([expect.objectContaining({ kind: 'video', mediaId: oldId })])
   await expect(page.getByText('Old.reel', { exact: true })).toBeVisible()
 
-  // On disk: the new .reel (schema 25) keeps the OLD id and points at the
+  // On disk: the new .reel (current schema) keeps the OLD id and points at the
   // clip by relative path; the old file is kept as .reel-legacy.
   // (Names compared exactly: on Windows `old.reel` and `Old.reel` are one path.)
   const names = readdirSync(oldDir)
@@ -131,7 +131,7 @@ test('opening an old project converts it in place, keeping its clip id and point
   expect(names).not.toContain('old.reel')
   expect(JSON.parse(readFileSync(`${oldReel}-legacy`, 'utf8'))).toEqual(oldDoc)
   const saved = JSON.parse(readFileSync(reel, 'utf8')) as { version: number; mediaIds: string[]; library: MediaRecord[] }
-  expect(saved.version).toBe(25)
+  expect(saved.version).toBe(26)
   expect(saved.mediaIds).toEqual([oldId])
   expect(saved.library).toHaveLength(1)
   expect(saved.library[0]).toMatchObject({ id: oldId, fileName: 'clip.mp4', relativePath: 'clip.mp4', absolutePath: clip })

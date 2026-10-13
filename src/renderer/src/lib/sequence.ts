@@ -9,6 +9,7 @@ import type { AudioClip, Composition, Layer, VideoContent } from '@shared/projec
 import type { FrameRect } from '@shared/frame'
 import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import { makeVideoLayer, visualDuration } from '@shared/layers'
+import { extractedAudioClip } from '@shared/volumeLevels'
 import { trimVideoEnd, trimVideoStart } from './timeline'
 import { expandSelection, removeItems } from './links'
 
@@ -18,19 +19,23 @@ export const MIN_SEQUENCE_ITEM_SEC = 0.1
 export interface SequenceCtx {
   frame: FrameRect
   newId: () => string
+  /** Settings ▸ auto-join: the extracted audio lands in the Default volume level. */
+  autoJoinLevel: boolean
 }
 
 /** The audio a video drop pulls off its source, linked to the clip. One
- *  definition, shared with `addVideoLayer`. */
+ *  definition, shared with `addVideoLayer`; built by `extractedAudioClip`,
+ *  which is where auto-join is decided (shared/volumeLevels.ts). */
 export function makeExtractedAudioClip(
   id: string,
   mediaId: string,
   startSec: number,
   inSec: number,
   outSec: number,
-  linkGroupId: string
+  linkGroupId: string,
+  autoJoinLevel: boolean
 ): AudioClip {
-  return { id, mediaId, startSec, inSec, outSec, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, linkGroupId, kind: 'extracted' }
+  return extractedAudioClip({ id, mediaId, startSec, inSec, outSec, linkGroupId }, autoJoinLevel)
 }
 
 /**
@@ -85,7 +90,7 @@ export function applySequence(
     if (item.hasAudio) {
       const group = ctx.newId()
       layer = { ...layer, linkGroupId: group }
-      audioClips.push(makeExtractedAudioClip(ctx.newId(), item.mediaId, layer.startSec, inSec, outSec, group))
+      audioClips.push(makeExtractedAudioClip(ctx.newId(), item.mediaId, layer.startSec, inSec, outSec, group, ctx.autoJoinLevel))
     }
     layers.push(layer)
     placed.push({ layerId: id, mediaId: item.mediaId, inSec, outSec, startSec: layer.startSec, endSec: layer.endSec })

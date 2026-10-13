@@ -7,7 +7,16 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type { AudioClip, CaptionSegment, Composition, Layer, Project, ScriptLine, TimelineItemRef } from '@shared/project'
+import type {
+  AudioClip,
+  CaptionSegment,
+  Composition,
+  Layer,
+  Project,
+  ScriptLine,
+  TimelineItemRef,
+  VolumeLevel
+} from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
@@ -52,6 +61,8 @@ import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
+import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/components/ui'
+import { levelOf } from '@shared/volumeLevels'
 
 const DEFAULT_PPS = 48
 const HOOK_SEC = 3
@@ -72,6 +83,7 @@ const EMPTY_LAYERS: Layer[] = []
 const EMPTY_CAPTIONS: CaptionSegment[] = []
 const EMPTY_SCRIPT: ScriptLine[] = []
 const EMPTY_AUDIO: AudioClip[] = []
+const EMPTY_LEVELS: VolumeLevel[] = []
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
@@ -195,6 +207,7 @@ export function Timeline(): JSX.Element {
   const captionSegs = comp?.captions.enabled ? comp.captions.segments : EMPTY_CAPTIONS
   const audioClips = comp?.audioClips ?? EMPTY_AUDIO
   const script = project?.script ?? EMPTY_SCRIPT
+  const volumeLevels = project?.volumeLevels ?? EMPTY_LEVELS
 
   const selectLayer = useUi((s) => s.selectLayer)
   const selectAudio = useUi((s) => s.selectAudio)
@@ -589,6 +602,12 @@ export function Timeline(): JSX.Element {
     if (!before || !comp0) return
     const tile = tileOf(comp0, ref)
     if (!tile) return
+    // Right button: select (unless it is already part of the selection) and
+    // let the context menu open — never start a move.
+    if (e.button === 2) {
+      if (!selKeys.has(refKey(ref))) selectItems(expandGroup(comp0, ref), ref)
+      return
+    }
     if ((e.ctrlKey || e.metaKey) && tile.linkable) {
       toggleSelected(comp0, ref)
       return
@@ -962,6 +981,58 @@ export function Timeline(): JSX.Element {
   const isEmpty = layers.length === 0 && audioClips.length === 0
 
   /**
+   * Right-click on an audio tile: "Add to volume level ▸" (None / each level /
+   * New level…), through the shared ContextMenu. Applies to the clicked clip —
+   * or, when it is part of the selection, to every selected audio clip. An
+   * effect track can't join: it follows the clip it was made from.
+   */
+  const tileMenu = useContextMenu()
+  const audioTileMenu = (a: AudioClip): ContextMenuEntry[] => {
+    if (a.kind === 'fx') {
+      return [
+        {
+          label: 'Add to volume level',
+          disabled: true,
+          reason: 'An effect track follows the volume level of the clip it was made from.',
+          testId: 'ctx-volume-level'
+        }
+      ]
+    }
+    const levels = useProject.getState().project?.volumeLevels ?? []
+    const clipsNow = getActiveComp()?.audioClips ?? []
+    const sel = useUi.getState().selection
+    const ids = (sel.some((r) => r.kind === 'audio' && r.id === a.id)
+      ? sel.filter((r) => r.kind === 'audio').map((r) => r.id)
+      : [a.id]
+    ).filter((id) => clipsNow.find((c) => c.id === id)?.kind !== 'fx')
+    const current = levelOf(a, levels)?.id ?? null
+    const assign = (levelId: string | null) => (): void => useProject.getState().setClipsVolumeLevel(ids, levelId)
+    return [
+      {
+        label: 'Add to volume level',
+        testId: 'ctx-volume-level',
+        submenu: [
+          { label: 'None', checked: current === null, onSelect: assign(null), testId: 'ctx-level-none' },
+          ...levels.map(
+            (l): ContextMenuEntry => ({
+              label: `${l.name} · ${l.targetLufs} LUFS`,
+              checked: current === l.id,
+              onSelect: assign(l.id),
+              testId: `ctx-level-${l.id}`
+            })
+          ),
+          MENU_SEPARATOR,
+          {
+            label: 'New level…',
+            testId: 'ctx-level-new',
+            onSelect: () => useUi.getState().setLevelDialog({ mode: 'create', assign: ids })
+          }
+        ]
+      }
+    ]
+  }
+
+  /**
    * One audio tile. Shared by the Audio lane and the FX lane so a generated
    * effect track behaves EXACTLY like the audio it sits over — same drag,
    * trim handles, selection, waveform and badges — rather than becoming a
@@ -981,11 +1052,13 @@ export function Timeline(): JSX.Element {
     const linked = isLinkedTile(a.linkGroupId)
     const rowH = laneRowHeight(laneKey)
     const fxName = a.fx ? fxLabel(a.fx.settings) : null
+    const level = levelOf(a, volumeLevels)
     return (
       <div
         key={a.id}
         data-testid={`tile-audio-${a.id}`}
         onPointerDown={(e) => startTileDrag(e, { kind: 'audio', id: a.id })}
+        onContextMenu={(e) => tileMenu.open(e, audioTileMenu(a))}
         title={
           [fxName ? `${fxName} track` : null, asset?.fileName ?? a.mediaId, linked ? 'linked' : null]
             .filter(Boolean)
@@ -1022,8 +1095,17 @@ export function Timeline(): JSX.Element {
         </span>
         {/* Badges share one right-aligned row so a clip carrying both doesn't
             stack them on top of each other. */}
-        {(a.mute || denoiseOverridden(a)) && (
+        {(a.mute || denoiseOverridden(a) || level) && (
           <span className="pointer-events-none absolute right-1.5 top-0.5 flex items-center gap-1">
+            {level && (
+              <span
+                data-testid={`tile-level-${a.id}`}
+                className="max-w-[6rem] truncate rounded bg-violet-500/80 px-1 text-[8px] font-bold leading-tight text-violet-50"
+                title={`In the “${level.name}” volume level (${level.targetLufs} LUFS)`}
+              >
+                ◎ {level.name}
+              </span>
+            )}
             {a.mute && (
               <span
                 className="rounded bg-zinc-900/80 px-1 text-[8px] font-bold leading-tight text-zinc-100"
@@ -1053,6 +1135,7 @@ export function Timeline(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col">
+      {tileMenu.menu}
       {/* Transport / edit toolbar */}
       <div className="flex items-center gap-1 border-b border-white/10 px-3 py-1.5">
         <CompBreadcrumb />

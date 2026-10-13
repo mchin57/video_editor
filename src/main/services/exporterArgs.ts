@@ -16,6 +16,9 @@ import { presetFor } from '@shared/formats'
 import { buildAudioGraph, type AudioGraphItem } from './audio'
 import { cropFilter, f3, piecewiseLinearExpr, r, rotateFilter, speedRampPlayedExpr } from './ffmpegFilters'
 import { normalizeDeg, rotatedBounds } from '@shared/rotation'
+import type { AudioClip } from '@shared/project'
+import { effectiveDenoise, effectiveOut } from '@shared/project'
+import { clipGain, type GainContext } from '@shared/volumeLevels'
 
 /**
  * Per-frame opacity animation for a visual: `sendcmd` (reading `cmdFile`,
@@ -206,6 +209,53 @@ export interface ExportAudio {
   foldChannel?: number | null
   /** Pitch-preserving tempo (a re-timed video layer's own audio; 1 = normal). */
   tempo?: number
+}
+
+/** What the export reads for one audio clip's media. */
+export interface AudioClipSource {
+  /** File to mix from (an audio asset's proxy when ready, else the original). */
+  path: string
+  durationSec: number
+  /** Mono-fold channel (`AudioStreamInfo.monoFoldChannel`), or null. */
+  foldChannel: number | null
+}
+
+/**
+ * A composition's audio clips as mix sources. Each clip's gain resolves
+ * through `clipGain` (shared/volumeLevels.ts) — THE call the preview makes
+ * too, so a clip in a volume level exports at exactly the gain it previews
+ * at; a clip in no level keeps its own `gainDb`, byte-for-byte as before
+ * levels existed. A muted clip is dropped before it ever becomes an input
+ * (`volume=0` would still decode the whole source to add silence to amix),
+ * and so is one whose media is unknown.
+ */
+export function exportAudioClips(
+  clips: AudioClip[],
+  sourceOf: (mediaId: string) => AudioClipSource | null,
+  gain: Omit<GainContext, 'durationOf'>,
+  denoiseDefault: boolean
+): ExportAudio[] {
+  const ctx: GainContext = { ...gain, durationOf: (id) => sourceOf(id)?.durationSec ?? 0 }
+  const out: ExportAudio[] = []
+  for (const a of clips) {
+    const g = clipGain(a, clips, ctx)
+    if (!g.audible) continue
+    const src = sourceOf(a.mediaId)
+    if (!src) continue
+    out.push({
+      path: src.path,
+      inSec: a.inSec,
+      outSec: effectiveOut(a, src.durationSec),
+      startSec: a.startSec,
+      gainDb: g.gainDb,
+      fadeInSec: a.fadeInSec,
+      fadeOutSec: a.fadeOutSec,
+      duck: a.duck,
+      denoise: effectiveDenoise(a, denoiseDefault),
+      foldChannel: src.foldChannel
+    })
+  }
+  return out
 }
 
 export interface ExportPlan {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildExportArgs,
+  exportAudioClips,
   buildVidstabDetectArgs,
   buildVidstabTransformArgs,
   escapeFilterPath,
@@ -10,6 +11,8 @@ import {
   type StabilizeJob
 } from './exporterArgs'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
+import type { AudioClip, VolumeLevel } from '@shared/project'
+import type { LoudnessSeries } from '@shared/loudness'
 
 const caps = (nvenc: boolean): FfmpegCapabilities =>
   ({ encoders: { h264_nvenc: nvenc } }) as unknown as FfmpegCapabilities
@@ -502,6 +505,71 @@ describe('buildExportArgs', () => {
     const noAudio = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
     expect(noAudio).not.toContain('-map [aout]')
     expect(noAudio).not.toContain('-c:a aac')
+  })
+
+  describe('audio clips through volume levels (exportAudioClips → clipGain)', () => {
+    /** A steady source: every 0.1 s step at `m` LUFS momentary, `p` dBFS peak. */
+    const steady = (m: number, p: number): LoudnessSeries => ({
+      version: 1,
+      stepSec: 0.1,
+      startSec: 0,
+      momentary: Array.from({ length: 100 }, (_, i) => (i < 3 ? null : m)),
+      peak: Array.from({ length: 100 }, () => p)
+    })
+    const levels: VolumeLevel[] = [{ id: 'default', name: 'Default', targetLufs: -16 }]
+    const clipA = (over: Partial<AudioClip> = {}): AudioClip => ({
+      id: 'a1',
+      mediaId: 'm1',
+      startSec: 0,
+      inSec: 0,
+      outSec: 8,
+      gainDb: -6,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'extracted',
+      ...over
+    })
+    const audioChain = (c: AudioClip, series: LoudnessSeries | null): string => {
+      const audio = exportAudioClips(
+        [c],
+        () => ({ path: 'C:/v/voice.mov', durationSec: 10, foldChannel: null }),
+        { levels, seriesOf: () => series },
+        false
+      )
+      const args = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], audio }), 'o').join(' ')
+      return /\[2:a\][^;]*\[ac0\]/.exec(args)?.[0] ?? ''
+    }
+
+    it('a clip in no level exports at its own gain — the same string as before levels', () => {
+      expect(audioChain(clipA(), steady(-30, -20))).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=0.501[ac0]'
+      )
+    })
+
+    it('a clip in a level is matched to the target (−30 → −16 LUFS: +14 dB), its own gain unused', () => {
+      expect(audioChain(clipA({ volumeLevelId: 'default' }), steady(-30, -20))).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=5.012[ac0]'
+      )
+    })
+
+    it('a boost the peak cannot take is capped at −1 dBFS (−36 LUFS, −12 dBFS peak: +11 dB)', () => {
+      expect(audioChain(clipA({ volumeLevelId: 'default' }), steady(-36, -12))).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=3.548[ac0]'
+      )
+    })
+
+    it('a clip below the −45 LUFS floor is left as it is (0 dB)', () => {
+      expect(audioChain(clipA({ volumeLevelId: 'default' }), steady(-50, -40))).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=1.000[ac0]'
+      )
+    })
+
+    it('a muted clip, or one whose media is unknown, never becomes an input', () => {
+      const src = () => ({ path: 'x', durationSec: 10, foldChannel: null })
+      expect(exportAudioClips([clipA({ mute: true })], src, { levels, seriesOf: () => null }, false)).toEqual([])
+      expect(exportAudioClips([clipA()], () => null, { levels, seriesOf: () => null }, false)).toEqual([])
+    })
   })
 
   it('uses NVENC when available + preferred, else libx264', () => {

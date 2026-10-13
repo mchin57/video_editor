@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
+import { DEFAULT_VOLUME_LEVEL_ID } from '@shared/project'
+import { levelMemberCounts } from '@shared/volumeLevels'
 import { useProject } from '@/state/projectStore'
+import { useUi } from '@/state/ui'
 import { useExtractAudio, useImportFolder } from '@/hooks/useMedia'
 import { convertLegacyFolderDialog } from '@/ipc/client'
+import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from './ui'
 
 /** Last path segment, handling both Windows and POSIX separators. */
 function basename(path: string): string {
@@ -12,21 +16,69 @@ function basename(path: string): string {
 function MenuItem({
   label,
   shortcut,
-  onClick
+  onClick,
+  testId
 }: {
   label: string
   shortcut: string
-  onClick: () => void
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
+  testId?: string
 }): JSX.Element {
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
       className="flex w-full items-center justify-between gap-6 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
     >
       <span>{label}</span>
       <span className="text-[10px] text-zinc-500">{shortcut}</span>
     </button>
   )
+}
+
+/**
+ * File ▸ Volume levels ▸ — every level (Set loudness…, Rename…, Delete), then
+ * "Create new level…". Default can be re-targeted but not renamed or deleted.
+ * Deleting is one undo step and returns the level's clips to their own volume.
+ * Rows are built when the menu opens, from the project at that moment.
+ */
+function volumeLevelRows(): ContextMenuEntry[] {
+  const store = useProject.getState()
+  const project = store.project
+  if (!project) return []
+  const counts = levelMemberCounts(project)
+  const dialog = useUi.getState().setLevelDialog
+  const clips = (n: number): string => (n === 1 ? '1 clip' : `${n} clips`)
+  return [
+    ...project.volumeLevels.map((l): ContextMenuEntry => {
+      const isDefault = l.id === DEFAULT_VOLUME_LEVEL_ID
+      const n = counts.get(l.id) ?? 0
+      return {
+        label: `${l.name} · ${l.targetLufs} LUFS · ${clips(n)}`,
+        testId: `level-menu-${l.id}`,
+        submenu: [
+          { label: 'Set loudness…', testId: 'level-set-loudness', onSelect: () => dialog({ mode: 'loudness', levelId: l.id }) },
+          {
+            label: 'Rename…',
+            testId: 'level-rename',
+            disabled: isDefault,
+            reason: isDefault ? 'Default keeps its name.' : undefined,
+            onSelect: () => dialog({ mode: 'rename', levelId: l.id })
+          },
+          {
+            label: 'Delete',
+            testId: 'level-delete',
+            disabled: isDefault,
+            reason: isDefault ? 'Default is always there — new clips can join it.' : undefined,
+            hint: !isDefault && n > 0 ? `${clips(n)} back to own volume` : undefined,
+            onSelect: () => useProject.getState().deleteVolumeLevel(l.id)
+          }
+        ]
+      }
+    }),
+    MENU_SEPARATOR,
+    { label: 'Create new level…', testId: 'level-create', onSelect: () => dialog({ mode: 'create' }) }
+  ]
 }
 
 /**
@@ -46,6 +98,7 @@ export function FileMenu(): JSX.Element {
   const importFolder = useImportFolder()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const levelsMenu = useContextMenu()
 
   useEffect(() => {
     if (!open) return
@@ -92,6 +145,19 @@ export function FileMenu(): JSX.Element {
           <MenuItem label="Save" shortcut="Ctrl+S" onClick={run(save)} />
           <MenuItem label="Save As…" shortcut="Ctrl+Shift+S" onClick={run(saveAs)} />
           <div className="my-1 h-px bg-white/10" />
+          <MenuItem
+            label="Volume levels"
+            shortcut="▸"
+            testId="file-volume-levels"
+            onClick={(e) => {
+              // The levels open in the shared menu, beside this row (where a
+              // submenu would sit); the File dropdown itself closes.
+              const r = e.currentTarget.getBoundingClientRect()
+              setOpen(false)
+              levelsMenu.openAt(r.right, r.top, volumeLevelRows())
+            }}
+          />
+          <div className="my-1 h-px bg-white/10" />
           <MenuItem label="Import folder…" shortcut="" onClick={run(() => importFolder.mutate())} />
           <MenuItem
             label="Extract audio from clip…"
@@ -111,6 +177,7 @@ export function FileMenu(): JSX.Element {
           />
         </div>
       )}
+      {levelsMenu.menu}
     </div>
   )
 }

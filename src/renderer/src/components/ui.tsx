@@ -521,6 +521,9 @@ export function ContextMenu({
  */
 export function useContextMenu(): {
   open: (e: React.MouseEvent, items: ContextMenuEntry[]) => void
+  /** Open at a viewport point instead of the cursor — e.g. beside a dropdown
+   *  row that leads into the menu (File ▸ Volume levels ▸). */
+  openAt: (x: number, y: number, items: ContextMenuEntry[]) => void
   close: () => void
   menu: JSX.Element | null
 } {
@@ -531,6 +534,7 @@ export function useContextMenu(): {
     e.stopPropagation()
     setState({ x: e.clientX, y: e.clientY, items })
   }, [])
+  const openAt = useCallback((x: number, y: number, items: ContextMenuEntry[]) => setState({ x, y, items }), [])
   const menu = state ? <ContextMenu x={state.x} y={state.y} items={state.items} onClose={close} /> : null
-  return { open, close, menu }
+  return { open, openAt, close, menu }
 }

@@ -13,7 +13,7 @@
  * duration IS `compositionDuration`.
  */
 
-import type { Composition, Layer, LayoutCell } from './project'
+import type { AudioClip, Composition, Layer, LayoutCell } from './project'
 import { audioClipEnd, createEmptyComposition } from './project'
 import { FRAME, layerLabel, playedVideoDuration, visualDuration } from './layers'
 
@@ -204,6 +204,56 @@ export function resetMediaCuts<T extends Composition>(comp: T, mediaId: string, 
     return { ...a, inSec: 0, outSec: durationSec }
   })
   return changed ? { ...comp, layers, audioClips } : comp
+}
+
+/**
+ * Rewrite every audio clip in `comp` AND every nested composition (compound
+ * layers, layout-cell comps) through `fn`. Untouched branches keep their
+ * identity, and `comp` itself comes back unchanged when `fn` returns every
+ * clip as-is — so a no-op never churns history.
+ */
+export function mapAudioClipsDeep<T extends Composition>(comp: T, fn: (a: AudioClip) => AudioClip): T {
+  let changed = false
+  const layers = comp.layers.map((l): Layer => {
+    const c = l.content
+    if (c.kind === 'compound') {
+      const inner = mapAudioClipsDeep(c.comp, fn)
+      if (inner === c.comp) return l
+      changed = true
+      return { ...l, content: { ...c, comp: inner } }
+    }
+    if (c.kind === 'layout') {
+      let cellsChanged = false
+      const cells = c.cells.map((cell): LayoutCell => {
+        if (!cell.comp) return cell
+        const inner = mapAudioClipsDeep(cell.comp, fn)
+        if (inner === cell.comp) return cell
+        cellsChanged = true
+        return { ...cell, comp: inner }
+      })
+      if (!cellsChanged) return l
+      changed = true
+      return { ...l, content: { ...c, cells } }
+    }
+    return l
+  })
+  const audioClips = comp.audioClips.map((a) => {
+    const next = fn(a)
+    if (next !== a) changed = true
+    return next
+  })
+  return changed ? { ...comp, layers, audioClips } : comp
+}
+
+/** Every audio clip in `comp` and its nested compositions (read-only walk). */
+export function audioClipsDeep(comp: Composition): AudioClip[] {
+  const out: AudioClip[] = [...comp.audioClips]
+  for (const l of comp.layers) {
+    const c = l.content
+    if (c.kind === 'compound') out.push(...audioClipsDeep(c.comp))
+    if (c.kind === 'layout') for (const cell of c.cells) if (cell.comp) out.push(...audioClipsDeep(cell.comp))
+  }
+  return out
 }
 
 /**

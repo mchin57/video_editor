@@ -3,6 +3,7 @@ import type { Settings } from '@shared/settings'
 import { mcpAddCommand } from '@shared/settings'
 import type { AssistantStatus } from '@shared/assistant/protocol'
 import { useUi } from '@/state/ui'
+import { useAppSettings } from '@/state/appSettings'
 import { assistantStatus, chooseExportDir, getSettings, updateSettings } from '@/ipc/client'
 import { btnCls, Check } from './ui'
 
@@ -11,6 +12,8 @@ export function SettingsModal(): JSX.Element | null {
   const open = useUi((s) => s.settingsOpen)
   const setOpen = useUi((s) => s.setSettingsOpen)
   const [settings, setSettings] = useState<Settings | null>(null)
+  const autoJoin = useAppSettings((s) => s.autoJoinDefaultLevel)
+  const setAutoJoin = useAppSettings((s) => s.setAutoJoinDefaultLevel)
 
   const [status, setStatus] = useState<AssistantStatus | null>(null)
   const [copied, setCopied] = useState(false)
@@ -79,6 +82,15 @@ export function SettingsModal(): JSX.Element | null {
         />
         <p className="mt-1 text-[11px] text-zinc-500">
           The checklist scores your captions against these for spoken-keyword reach.
+        </p>
+
+        <div className="mt-5 mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Volume levels</div>
+        <Check checked={autoJoin} onChange={(on) => void setAutoJoin(on)}>
+          Auto-join new clips to the Default volume level
+        </Check>
+        <p className="text-[11px] text-zinc-500">
+          Audio pulled off a video as it lands on the timeline is matched to Default&rsquo;s loudness. Imported
+          music and effect tracks never join. Turning this off leaves clips already in Default where they are.
         </p>
 
         <div className="mt-5 mb-1 text-[10px] uppercase tracking-wide text-zinc-500">

@@ -291,6 +291,13 @@ describe('splitItemsAt', () => {
     expect(a[1]).toMatchObject({ startSec: 5, inSec: 3, outSec: 6 })
   })
 
+  it('keeps a linked audio clip volume level on both halves', () => {
+    const p = pair()
+    const inLevel = { ...p, audioClips: p.audioClips.map((a) => ({ ...a, volumeLevelId: 'lvl' })) }
+    const next = splitItemsAt(inLevel, [L('L1'), A('A1')], 5, srcDur, ids('n'))
+    expect(next.audioClips.map((a) => a.volumeLevelId)).toEqual(['lvl', 'lvl'])
+  })
+
   it('leaves a member the playhead misses whole', () => {
     // Playhead at 1: inside L1 (0..10), before A1 (starts at 2).
     const next = splitItemsAt(pair(), [L('L1'), A('A1')], 1, srcDur, ids())

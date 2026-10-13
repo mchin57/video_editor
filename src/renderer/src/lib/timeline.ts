@@ -15,6 +15,7 @@ import type {
 } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
+import { extractedAudioClip } from '@shared/volumeLevels'
 import { playedBetween, sourceAfterPlayed } from '@shared/speed'
 
 /** Cut tolerance shared by every split below (and mirrored by
@@ -335,20 +336,23 @@ export function trimAudioEdge(
 export function extractAudioPieces(
   layer: Layer,
   content: VideoContent,
-  makeId: () => string
+  makeId: () => string,
+  /** Settings ▸ auto-join: the pieces land in the Default volume level. */
+  autoJoinLevel: boolean
 ): AudioClip[] {
-  const base = (from: number, to: number, holdBefore: number): AudioClip => ({
-    id: makeId(),
-    mediaId: content.mediaId,
-    startSec: layer.startSec + (from - content.inSec) + holdBefore,
-    inSec: from,
-    outSec: to,
-    gainDb: 0,
-    fadeInSec: 0,
-    fadeOutSec: 0,
-    duck: false,
-    kind: 'extracted'
-  })
+  // `extractedAudioClip` is the one constructor for audio pulled off footage
+  // (and where auto-join is decided) — shared with the drop and the assistant.
+  const base = (from: number, to: number, holdBefore: number): AudioClip =>
+    extractedAudioClip(
+      {
+        id: makeId(),
+        mediaId: content.mediaId,
+        startSec: layer.startSec + (from - content.inSec) + holdBefore,
+        inSec: from,
+        outSec: to
+      },
+      autoJoinLevel
+    )
   const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
   const pieces: AudioClip[] = []
   let segStart = content.inSec

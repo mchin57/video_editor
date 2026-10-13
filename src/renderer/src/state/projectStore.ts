@@ -50,6 +50,14 @@ import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
+import { useAppSettings } from '@/state/appSettings'
+import {
+  addVolumeLevel,
+  removeVolumeLevel,
+  renameVolumeLevel,
+  setVolumeLevelTarget,
+  withVolumeLevel
+} from '@shared/volumeLevels'
 import {
   createProject as createProjectFolder,
   loadProject,
@@ -317,6 +325,21 @@ interface ProjectState {
   /** Set the project-wide stabilization default (per-clip overrides still win). */
   setStabilizeDefault: (stab: import('@shared/project').Stabilize | null) => void
   splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[]) => void
+
+  // --- Volume levels (root-level list; shared/volumeLevels.ts) ---
+  /** Create a level named `name` (the default target) and put the ACTIVE
+   *  comp's clips `assign` in it — one undo step. Returns the new level's id. */
+  createVolumeLevel: (name: string, assign?: string[]) => string
+  /** Rename a level (Default keeps its name). */
+  renameVolumeLevel: (id: string, name: string) => void
+  /** Set a level's loudness (LUFS) — every clip in it follows. */
+  setVolumeLevelTarget: (id: string, targetLufs: number) => void
+  /** Delete a level; its clips return to their own volume. One undo step;
+   *  Default can't be deleted. */
+  deleteVolumeLevel: (id: string) => void
+  /** Put the ACTIVE comp's clips `ids` in `levelId` (null = none). Effect
+   *  tracks are skipped — they follow their source clip. */
+  setClipsVolumeLevel: (ids: string[], levelId: string | null) => void
   splitAudioAt: (audioId: string, atSec: number, sourceDurationSec: number) => void
 
   undo: () => void
@@ -539,7 +562,15 @@ export const useProject = create<ProjectState>((set, get) => {
         const audioClips = hasAudio
           ? [
               ...p.audioClips,
-              makeExtractedAudioClip(newId(), mediaId, startSec, 0, Math.max(0.1, durationSec), linkGroupId!)
+              makeExtractedAudioClip(
+                newId(),
+                mediaId,
+                startSec,
+                0,
+                Math.max(0.1, durationSec),
+                linkGroupId!,
+                useAppSettings.getState().autoJoinDefaultLevel
+              )
             ]
           : p.audioClips
         return { ...p, layers: [...p.layers, layer], audioClips }
@@ -550,7 +581,11 @@ export const useProject = create<ProjectState>((set, get) => {
       if (!comp) throw new Error('Editor has no project open')
       // Build first (throws on a bad item before anything is committed), then
       // commit the finished composition as a single history entry.
-      const result = applySequence(comp, plan, { frame: projectFormat(get()).frame, newId })
+      const result = applySequence(comp, plan, {
+        frame: projectFormat(get()).frame,
+        newId,
+        autoJoinLevel: useAppSettings.getState().autoJoinDefaultLevel
+      })
       commitComp(() => result.comp)
       return result.placed
     },
@@ -831,7 +866,7 @@ export const useProject = create<ProjectState>((set, get) => {
         const c = layer.content
         // Freeze holds split the audio into pieces with silent gaps so the dialogue
         // cuts while a frame is held (and stays synced to the stretched video).
-        const pieces = extractAudioPieces(layer, c, newId)
+        const pieces = extractAudioPieces(layer, c, newId, useAppSettings.getState().autoJoinDefaultLevel)
         return {
           ...mapLayer(p, id, (l) => ({ ...l, content: { ...c, mute: true } })),
           audioClips: [...p.audioClips, ...pieces]
@@ -947,6 +982,40 @@ export const useProject = create<ProjectState>((set, get) => {
         }))
         return { ...p, audioClips: replaceAt(p.audioClips, idx, 1, ...pieces) }
       }),
+
+    createVolumeLevel: (name, assign = []) => {
+      const id = newId()
+      const keys = new Set(assign)
+      commit((p) =>
+        updateCompAtPath(addVolumeLevel(p, { id, name }), get().editPath, (c) => ({
+          ...c,
+          audioClips: c.audioClips.map((a) => (keys.has(a.id) ? withVolumeLevel(a, id) : a))
+        }))
+      )
+      return id
+    },
+
+    renameVolumeLevel: (id, name) => commit((p) => renameVolumeLevel(p, id, name)),
+
+    setVolumeLevelTarget: (id, targetLufs) => commit((p) => setVolumeLevelTarget(p, id, targetLufs)),
+
+    deleteVolumeLevel: (id) => commit((p) => removeVolumeLevel(p, id)),
+
+    setClipsVolumeLevel: (ids, levelId) => {
+      const keys = new Set(ids)
+      const levels = get().project?.volumeLevels ?? []
+      if (levelId && !levels.some((l) => l.id === levelId)) return
+      commitComp((c) => {
+        let changed = false
+        const audioClips = c.audioClips.map((a) => {
+          if (!keys.has(a.id)) return a
+          const next = withVolumeLevel(a, levelId)
+          if (next !== a) changed = true
+          return next
+        })
+        return changed ? { ...c, audioClips } : c
+      })
+    },
 
     splitAudioAt: (audioId, atSec, sourceDurationSec) =>
       get().splitItemsAt([{ kind: 'audio', id: audioId }], atSec, () => sourceDurationSec),

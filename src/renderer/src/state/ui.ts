@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import type { Composition, TimelineItemRef } from '@shared/project'
 import { expandGroup } from '@/lib/links'
 
+/** What the volume-level dialog is doing. */
+export type LevelDialog =
+  | { mode: 'create'; assign?: string[] }
+  | { mode: 'rename'; levelId: string }
+  | { mode: 'loudness'; levelId: string }
+
 /** Transient editor UI selection that doesn't belong in the project document. */
 interface UiState {
   /**
@@ -51,6 +57,11 @@ interface UiState {
   /** Whether the New project window is open (File ▸ New, Ctrl+N, start screen). */
   newProjectOpen: boolean
   setNewProjectOpen: (v: boolean) => void
+  /** The volume-level dialog (components/VolumeLevelDialog.tsx): create a level
+   *  (optionally putting the active comp's clips `assign` in it), rename one,
+   *  or set its loudness. Null = closed. */
+  levelDialog: LevelDialog | null
+  setLevelDialog: (v: LevelDialog | null) => void
   /** Whether the checklist modal is open. */
   checklistOpen: boolean
   setChecklistOpen: (v: boolean) => void
@@ -130,6 +141,8 @@ export const useUi = create<UiState>((set) => ({
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   newProjectOpen: false,
   setNewProjectOpen: (v) => set({ newProjectOpen: v }),
+  levelDialog: null,
+  setLevelDialog: (v) => set({ levelDialog: v }),
   checklistOpen: false,
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,

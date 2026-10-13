@@ -533,7 +533,70 @@ export interface AudioClip {
    * an ordinary audio clip, which is exactly the point. @see shared/audioFx.ts
    */
   fx?: AudioFx | null
+  /**
+   * The project volume level this clip is matched to (`Project.volumeLevels`;
+   * absent = none, the clip plays at its own `gainDb`). At most one. While set,
+   * the level decides the clip's gain (`clipGain`, shared/volumeLevels.ts) and
+   * `gainDb` is kept but unused — leaving the level restores it. Ignored on an
+   * effect track (`kind: 'fx'`), which follows the clip it was made from.
+   */
+  volumeLevelId?: string
   kind: AudioKind
+}
+
+/**
+ * A named loudness target audio clips can join (File ▸ Volume levels). Every
+ * clip in a level is gained so its own stretch of audio lands on `targetLufs`
+ * (shared/volumeLevels.ts), in the preview and the export alike.
+ */
+export interface VolumeLevel {
+  id: string
+  name: string
+  /** Integrated loudness each member clip is matched to (LUFS). */
+  targetLufs: number
+}
+
+/** The permanent level every project has: can't be deleted or renamed. */
+export const DEFAULT_VOLUME_LEVEL_ID = 'default'
+export const DEFAULT_VOLUME_LEVEL_NAME = 'Default'
+/** Default's target, and the starting target of a new level (LUFS). */
+export const DEFAULT_TARGET_LUFS = -16
+
+export function defaultVolumeLevel(): VolumeLevel {
+  return { id: DEFAULT_VOLUME_LEVEL_ID, name: DEFAULT_VOLUME_LEVEL_NAME, targetLufs: DEFAULT_TARGET_LUFS }
+}
+
+/**
+ * A document's level list made well-formed: malformed entries and duplicate
+ * ids dropped, Default present (first, named "Default") — its target is kept
+ * when it was set. Returns the input array itself when nothing changes.
+ */
+export function normalizeVolumeLevels(raw: unknown): VolumeLevel[] {
+  const list = Array.isArray(raw) ? (raw as unknown[]) : []
+  const seen = new Set<string>()
+  const out: VolumeLevel[] = []
+  for (const x of list) {
+    const l = x as Partial<VolumeLevel> | null
+    if (!l || typeof l.id !== 'string' || !l.id || seen.has(l.id)) continue
+    if (typeof l.targetLufs !== 'number' || !Number.isFinite(l.targetLufs)) continue
+    seen.add(l.id)
+    out.push(
+      l.id === DEFAULT_VOLUME_LEVEL_ID
+        ? { id: l.id, name: DEFAULT_VOLUME_LEVEL_NAME, targetLufs: l.targetLufs }
+        : { id: l.id, name: typeof l.name === 'string' && l.name.trim() ? l.name : 'Level', targetLufs: l.targetLufs }
+    )
+  }
+  const di = out.findIndex((l) => l.id === DEFAULT_VOLUME_LEVEL_ID)
+  const def = di >= 0 ? out.splice(di, 1)[0] : defaultVolumeLevel()
+  const result = [def, ...out]
+  const same =
+    Array.isArray(raw) &&
+    raw.length === result.length &&
+    result.every((l, i) => {
+      const r = (raw as VolumeLevel[])[i]
+      return r.id === l.id && r.name === l.name && r.targetLufs === l.targetLufs
+    })
+  return same ? (raw as VolumeLevel[]) : result
 }
 
 /** A storyboard/script line, optionally pinned to a timeline time. */
@@ -586,6 +649,12 @@ export interface Project extends Composition {
    * Import order, deduped.
    */
   mediaIds: string[]
+  /**
+   * Named loudness targets audio clips can join (`AudioClip.volumeLevelId`) —
+   * root-only: a clip in a nested comp joins the project's levels. Always
+   * holds Default first (`normalizeVolumeLevels`). Schema v26.
+   */
+  volumeLevels: VolumeLevel[]
   createdAt: string
   updatedAt: string
 }
@@ -705,7 +774,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 25
+export const PROJECT_VERSION = 26
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -719,6 +788,7 @@ export function createEmptyProject(id: string, name: string): Project {
     stabilizeDefault: null,
     script: [],
     mediaIds: [],
+    volumeLevels: [defaultVolumeLevel()],
     createdAt: now,
     updatedAt: now
   }
@@ -1029,6 +1099,13 @@ export function migrateProject(raw: unknown): Project {
   // Save); nothing in the document itself changes, and main refuses or
   // converts older files before they get here, so the version only records
   // which side of that line a file is on.
+  // v26 adds volume levels: `Project.volumeLevels` (named loudness targets,
+  // with a permanent Default at -16 LUFS) and the absence-tolerant
+  // `AudioClip.volumeLevelId`. Every project gets Default, but NO existing clip
+  // joins it — a finished reel must sound exactly as it did — so the only
+  // rewrite is the level list itself (normalised on every load, so a
+  // hand-edited file can't lose Default either).
+  p.volumeLevels = normalizeVolumeLevels(p.volumeLevels)
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
