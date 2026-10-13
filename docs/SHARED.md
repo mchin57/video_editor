@@ -144,6 +144,7 @@ Shape: Claude Code launches **reel-mcp** (`node out/main/mcp.js`, stdio) → JSO
 | `summarizeTimeline(comp)` | `shared/assistant/timelineSummary.ts` | hand-serializing the timeline for the model |
 | `transcriptPhraseText` / `transcriptWordText`, `frameTimes` | `shared/assistant/` | formatting transcripts / choosing frame times for the model |
 | `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` | `main/services/exportTarget.ts` | ad-hoc output naming for a dialog-less export (never overwrites; a name can't leave the export folder) |
+| `exportSaveSkipReason(origin, now)` | `renderer/src/lib/exportSave.ts` | saving after an export without checking WHICH project is open. The Export button and the assistant's `saveProject` op both capture the project's identity before the export and check it here (synchronously, right before `save`): another project opened meanwhile is not saved — the button shows a note, `export_video` returns `saved: false` + `reason`. Pinned by `e2e/exportSaves.spec.ts` |
 | `appendAssistantRequest` / `fileFeatureRequest` | `main/assistant/todoAppend.ts`, `todoFile.ts` | editing docs/TODO.md from code (serialized; `REEL_TODO_PATH` overrides) |
 
 ## Shared model — `src/shared/project.ts`, `src/shared/layers.ts`

@@ -3,13 +3,16 @@ import { presetFor } from '@shared/formats'
 import { useProject } from '@/state/projectStore'
 import { latestJob, useEditor } from '@/state/store'
 import { exportProject, revealFile } from '@/ipc/client'
+import { exportSaveSkipReason, type ExportOrigin } from '@/lib/exportSave'
 
 /**
  * Exports the current timeline to the selected preset (.mp4, NVENC when
  * available). Shows live progress, then a Reveal action on success. A finished
  * export also saves the project (the store's `save`, exactly File > Save — so
- * edits made while it rendered are saved too); a failed, blocked or canceled
- * export saves nothing.
+ * edits made while it rendered are saved too) — but only if that project is
+ * still the open one (`exportSaveSkipReason`): another project opened while
+ * it rendered is left alone, with a note saying so. A failed, blocked or
+ * canceled export saves nothing.
  */
 export function ExportButton(): JSX.Element {
   const project = useProject((s) => s.project)
@@ -20,6 +23,7 @@ export function ExportButton(): JSX.Element {
   const [output, setOutput] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSkipped, setSaveSkipped] = useState<string | null>(null)
 
   const run = async (): Promise<void> => {
     if (!project || clipCount === 0 || busy) return
@@ -27,11 +31,18 @@ export function ExportButton(): JSX.Element {
     setOutput(null)
     setError(null)
     setSaveError(null)
+    setSaveSkipped(null)
+    const origin: ExportOrigin = { id: project.id, filePath: useProject.getState().filePath }
     try {
       const path = await exportProject(project, { preset, preferNvenc: true })
       if (!path) return // Save dialog canceled
       setOutput(path)
-      // The export is done either way; a failed save only adds a note beside Reveal.
+      // The export is done either way; a skipped or failed save only adds a note beside Reveal.
+      const skip = exportSaveSkipReason(origin, useProject.getState())
+      if (skip) {
+        setSaveSkipped(skip)
+        return
+      }
       await useProject
         .getState()
         .save()
@@ -59,6 +70,11 @@ export function ExportButton(): JSX.Element {
       {output && saveError && !busy && (
         <span className="max-w-[260px] truncate text-xs text-amber-400" title={saveError} data-testid="export-save-error">
           Couldn't save the project: {saveError}
+        </span>
+      )}
+      {output && saveSkipped && !busy && (
+        <span className="max-w-[260px] truncate text-xs text-amber-400" title={saveSkipped} data-testid="export-save-skipped">
+          {saveSkipped}
         </span>
       )}
       {error && !busy && (

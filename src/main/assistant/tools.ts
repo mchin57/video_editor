@@ -162,10 +162,12 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     const { size } = await fsp.stat(path)
     const sizeMB = Math.round((size / 1_048_576) * 10) / 10
     // A finished export saves the project, as the Export button does (File > Save: the
-    // editor's CURRENT state, so edits made while it rendered are saved too). The export
-    // stands either way; a failed save is reported beside it.
-    const saved = await callRenderer('saveProject', {}).then(
-      () => ({ saved: true }),
+    // editor's CURRENT state, so edits made while it rendered are saved too) — only if it
+    // is still the project the export came from (another one opened meanwhile is left
+    // alone: saved false + reason). The export stands either way; a failed save is
+    // reported beside it.
+    const saved = await callRenderer('saveProject', { projectId: project.id }).then(
+      (r) => (r.saved ? { saved: true } : { saved: false, reason: r.reason }),
       (e: unknown) => ({ saveError: e instanceof Error ? e.message : String(e) })
     )
     return json({ path, sizeMB, ...saved })

@@ -45,8 +45,9 @@ export interface AssistantOps {
   removeItems: { args: { ids: string[] }; result: { removed: TimelineItemRef[] } }
   undo: { args: NoArgs; result: { undone: boolean; timeline: TimelineSummary } }
   getProject: { args: NoArgs; result: Project }
-  /** The store's `save` (File > Save): writes the open project to its `.reel`. */
-  saveProject: { args: NoArgs; result: null }
+  /** The store's `save` (File > Save): writes the open project to its `.reel` —
+   *  only if it is still project `projectId` (the one an export came from). */
+  saveProject: { args: { projectId: string }; result: { saved: true } | { saved: false; reason: string } }
 }
 
 export type AssistantOp = keyof AssistantOps

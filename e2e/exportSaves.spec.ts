@@ -188,3 +188,61 @@ test('a canceled Save dialog exports and saves nothing', async ({ electronApp, a
   expect(readFileSync(reel).equals(saved)).toBe(true)
   expect(await dirty(page)).toBe(true)
 })
+
+/**
+ * Open another project (a real store action, no dialog) the moment the export
+ * job appears, so the export finishes with a DIFFERENT project open.
+ */
+async function switchProjectWhenExportStarts(page: Page, projectsDir: string): Promise<void> {
+  await page.evaluate((dir) => {
+    const { useEditor, useProject } = window.__reelStores
+    const off = useEditor.subscribe((s) => {
+      if (!Object.values(s.jobs).some((j) => j.type === 'export')) return
+      off()
+      void useProject.getState().createProject('Other', dir)
+    })
+  }, projectsDir)
+}
+
+const otherOpen = async (page: Page, projectsDir: string): Promise<string> => {
+  const other = join(projectsDir, 'Other', 'Other.reel')
+  await expect.poll(() => page.evaluate(() => window.__reelStores.useProject.getState().filePath)).toBe(other)
+  return other
+}
+
+test('the Export button does not save a project opened while it exported', async ({ electronApp, appPage: page, projectsDir }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(120_000)
+  const { reel, saved } = await arrange(page, projectsDir)
+  const target = join(mkdtempSync(join(tmpdir(), 'reel-export-save-')), 'switch.mp4')
+  await stubSaveDialog(electronApp, target)
+  await switchProjectWhenExportStarts(page, projectsDir)
+
+  await exportButton(page).click()
+  const other = await otherOpen(page, projectsDir)
+  const otherBytes = readFileSync(other)
+  await expect(page.getByRole('button', { name: '✓ Reveal export' })).toBeVisible({ timeout: 90_000 })
+  expect(existsSync(target)).toBe(true)
+  await expect(page.getByTestId('export-save-skipped')).toHaveText(/Another project was opened/)
+  expect(readFileSync(reel).equals(saved)).toBe(true) // the source project: untouched (its edit was discarded)
+  expect(readFileSync(other).equals(otherBytes)).toBe(true) // the other project: not saved by the export
+  await expect(page.getByTestId('export-save-error')).toHaveCount(0)
+})
+
+test('assistant export_video does not save a project opened while it exported', async ({ electronApp, appPage: page, projectsDir }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(120_000)
+  const { reel, saved } = await arrange(page, projectsDir)
+  const c = await connect(electronApp)
+  const out = mkdtempSync(join(tmpdir(), 'reel-export-save-'))
+  await switchProjectWhenExportStarts(page, projectsDir)
+
+  const r = await call(c, 'export_video', { fileName: 'switched', folder: out })
+  expect(r.isError, textOf(r)).toBeFalsy()
+  const res = JSON.parse(textOf(r)) as { path: string; saved?: boolean; reason?: string }
+  expect(existsSync(res.path)).toBe(true)
+  expect(res.saved).toBe(false)
+  expect(res.reason).toMatch(/Another project was opened/)
+  await otherOpen(page, projectsDir)
+  expect(readFileSync(reel).equals(saved)).toBe(true)
+})
