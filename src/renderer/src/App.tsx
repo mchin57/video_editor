@@ -17,6 +17,7 @@ import { ScriptModal } from '@/components/ScriptModal'
 import { StatusFooter } from '@/components/StatusFooter'
 import { NewProjectDialog } from '@/components/NewProjectDialog'
 import { StartScreen } from '@/components/StartScreen'
+import { VolumeLevelDialog } from '@/components/VolumeLevelDialog'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
@@ -25,6 +26,7 @@ import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
+import { useAppSettings } from '@/state/appSettings'
 import { makeTextLayer } from '@shared/layers'
 
 /**
@@ -71,6 +73,7 @@ export default function App(): JSX.Element {
   // the last edit.
   useEffect(() => {
     void useProject.getState().load()
+    void useAppSettings.getState().load()
     const flush = (): void => useProject.getState().flushSave()
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
@@ -279,6 +282,7 @@ export default function App(): JSX.Element {
       <ChecklistModal />
       <ScriptModal />
       <NewProjectWindow />
+      <VolumeLevelDialog />
 
       {fileDrag.active && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">

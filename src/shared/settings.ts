@@ -10,6 +10,15 @@ export interface Settings {
   brandColors: string[]
   /** Claude Code connection (AI assistant). */
   assistant: AssistantSettings
+  /** Audio extracted from footage joins the Default volume level as it lands
+   *  on the timeline (shared/volumeLevels.ts `extractedAudioClip`). On by
+   *  default; turning it off never removes clips already in Default. */
+  autoJoinDefaultLevel: boolean
+}
+
+/** The auto-join setting with its default (on) for a missing/odd value. */
+export function withAutoJoinDefault(loaded: unknown): boolean {
+  return typeof loaded === 'boolean' ? loaded : true
 }
 
 /** Starter brand palette — high-attention colors common in Reels captions.

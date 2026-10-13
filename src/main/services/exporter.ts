@@ -10,12 +10,9 @@
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Composition, Project, Stabilize, TextStyleBase } from '@shared/project'
+import type { Composition, Project, Stabilize, TextStyleBase, VolumeLevel } from '@shared/project'
 import {
-  audioClipAudible,
   effectiveCaptionStyle,
-  effectiveDenoise,
-  effectiveOut,
   effectiveStabilize,
   isNeutralColor,
   referencedMediaIds,
@@ -40,7 +37,10 @@ import {
   stretchedBox
 } from '@shared/layers'
 import type { Layer } from '@shared/project'
-import type { ExportKeyframe, OpacityAnim } from './exporterArgs'
+import type { AudioClipSource, ExportKeyframe, OpacityAnim } from './exporterArgs'
+import type { LoudnessSeries } from '@shared/loudness'
+import { seriesNeeded } from '@shared/volumeLevels'
+import { ensureLoudness } from './loudness'
 import { getSubdir, getBundledFontsDir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { assertMediaUsable, audioProxyIfReady, ensureImagePath, getAsset } from './mediaStore'
@@ -49,6 +49,7 @@ import {
   buildExportArgs,
   buildVidstabDetectArgs,
   buildVidstabTransformArgs,
+  exportAudioClips,
   targetForPreset,
   type ExportAudio,
   type ExportImage,
@@ -177,6 +178,8 @@ interface RenderCtx {
   opts: ExportOptions
   denoiseDefault: boolean
   stabilizeDefault: Stabilize | null
+  /** The project's volume levels (root-only; nested clips join the same list). */
+  volumeLevels: VolumeLevel[]
   /** Root temp dir; each composition render gets a numbered subdir under it. */
   tmpRoot: string
   /** Pre-rendered comp intermediates, keyed by content hash — an identical comp
@@ -205,6 +208,7 @@ async function runExport(
     opts,
     denoiseDefault: project.denoiseDefault,
     stabilizeDefault: project.stabilizeDefault,
+    volumeLevels: project.volumeLevels ?? [],
     tmpRoot,
     cache: new Map(),
     n: { v: 0 }
@@ -262,6 +266,8 @@ async function renderComposition(
     if (len <= 0.01) return null
     const key = createHash('sha1')
       .update(JSON.stringify(nested))
+      // A nested clip's gain depends on the project's levels too.
+      .update(JSON.stringify(ctx.volumeLevels))
       .update(`|${target.width}x${target.height}`)
       .digest('hex')
     let file = ctx.cache.get(key)
@@ -748,26 +754,37 @@ async function renderComposition(
   }
 
   // Audio clips (music / voiceover / extracted), trimmed + placed by the graph.
+  // Gains resolve through `clipGain` (volume levels — the preview's own call);
+  // only clips in a level need a loudness series, so a project without levels
+  // measures nothing and exports exactly as before. Muted clips are looked up
+  // too (an effect track may follow one) but `exportAudioClips` drops them.
+  const sources = new Map<string, AudioClipSource | null>()
+  const series = new Map<string, LoudnessSeries | null>()
   for (const a of comp.audioClips) {
-    // A muted clip is dropped before it ever becomes an input: `volume=0` would
-    // work, but it would still decode the whole source to add silence to amix.
-    if (!audioClipAudible(a)) continue
-    const asset = await getAsset(a.mediaId)
-    if (!asset) continue
-    const proxy = audioProxyIfReady(a.mediaId)
-    audio.push({
-      path: proxy ?? asset.originalPath,
-      inSec: a.inSec,
-      outSec: effectiveOut(a, asset.probe.durationSec),
-      startSec: a.startSec,
-      gainDb: a.gainDb,
-      fadeInSec: a.fadeInSec,
-      fadeOutSec: a.fadeOutSec,
-      duck: a.duck,
-      denoise: effectiveDenoise(a, ctx.denoiseDefault),
-      foldChannel: asset.probe.audio?.monoFoldChannel ?? null
-    })
+    if (!sources.has(a.mediaId)) {
+      const asset = await getAsset(a.mediaId)
+      sources.set(
+        a.mediaId,
+        asset
+          ? {
+              path: audioProxyIfReady(a.mediaId) ?? asset.originalPath,
+              durationSec: asset.probe.durationSec,
+              foldChannel: asset.probe.audio?.monoFoldChannel ?? null
+            }
+          : null
+      )
+    }
+    const need = seriesNeeded(a, comp.audioClips, ctx.volumeLevels)
+    if (need && !series.has(need)) series.set(need, await ensureLoudness(need))
   }
+  audio.push(
+    ...exportAudioClips(
+      comp.audioClips,
+      (id) => sources.get(id) ?? null,
+      { levels: ctx.volumeLevels, seriesOf: (id) => series.get(id) ?? null },
+      ctx.denoiseDefault
+    )
+  )
 
   // Captions burn on top of everything, through the SAME block path as a text
   // layer (a caption is a text block at scale 1 that may be rotated): each

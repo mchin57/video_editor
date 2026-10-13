@@ -5,9 +5,9 @@ import { makeImageLayer, makeTextLayer, makeVideoLayer, playedVideoDuration } fr
 import type { SequenceItem } from '@shared/assistant/protocol'
 import { applySequence } from './sequence'
 
-const ctx = () => {
+const ctx = (autoJoinLevel = false) => {
   let n = 0
-  return { frame: centeredFrame(1080, 1920), newId: () => `id${++n}` }
+  return { frame: centeredFrame(1080, 1920), newId: () => `id${++n}`, autoJoinLevel }
 }
 const item = (mediaId: string, inSec: number, outSec: number, extra: Partial<SequenceItem> = {}): SequenceItem => ({
   mediaId,
@@ -127,5 +127,15 @@ describe('applySequence stacking', () => {
     const withImage = { ...first, layers: [...first.layers, makeImageLayer('img', 'pic', 0, 3)] }
     const { comp, placed } = applySequence(withImage, { mode: 'append', items: [item('b', 0, 2), item('c', 0, 2)] }, ids)
     expect(comp.layers.map((l) => l.id)).toEqual([first.layers[0].id, 'img', ...placed.map((p) => p.layerId)])
+  })
+})
+
+describe('applySequence auto-join (volume levels)', () => {
+  it('puts the extracted audio in Default when auto-join is on, and in no level when off', () => {
+    const on = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 2)] }, ctx(true)).comp
+    expect(on.audioClips).toHaveLength(1)
+    expect(on.audioClips[0]).toMatchObject({ kind: 'extracted', volumeLevelId: 'default' })
+    const off = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 2)] }, ctx(false)).comp
+    expect(off.audioClips[0].volumeLevelId).toBeUndefined()
   })
 })

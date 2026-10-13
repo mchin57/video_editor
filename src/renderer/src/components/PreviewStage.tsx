@@ -20,7 +20,6 @@ import type {
   VideoContent
 } from '@shared/project'
 import {
-  audioClipAudible,
   audioClipEnd,
   effectiveCaptionStyle,
   effectiveOut,
@@ -61,6 +60,7 @@ import { LOGICAL } from '@/lib/coords'
 import { startDragWithUndo } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
+import { useClipGain } from '@/hooks/useClipGain'
 import { useLibrary } from '@/hooks/useMedia'
 import { useEditor } from '@/state/store'
 import { activeComp, getActiveComp, projectFormat, useProject } from '@/state/projectStore'
@@ -522,13 +522,18 @@ function MotionPath({
 /** A hidden <audio> that follows the timeline clock for one audio clip. */
 function AudioFollower({
   clip,
+  clips,
   asset,
+  durationOf,
   src,
   time,
   playing
 }: {
   clip: AudioClip
+  /** The clip's composition — an effect track follows its source's level. */
+  clips: AudioClip[]
   asset: MediaAsset
+  durationOf: (mediaId: string) => number
   src: string
   time: number
   playing: boolean
@@ -538,12 +543,16 @@ function AudioFollower({
   const active = time >= clip.startSec - 0.001 && time < clip.startSec + (eo - clip.inSec)
   const target = clip.inSec + (time - clip.startSec)
 
-  // Element `volume` clamps at 1.0, so a boosted clip is routed through a
-  // GainNode to match the export's `volume=` filter. @see lib/mediaGain.ts
-  // A muted clip is held at gain 0 rather than skipped, so it keeps following
-  // the playhead and unmuting mid-playback is instant. The export reaches the
-  // same silence by dropping the clip — `audioClipAudible` is the shared call.
-  useMediaGain(ref, clip.gainDb, !audioClipAudible(clip))
+  // The gain comes from `clipGain` (shared/volumeLevels.ts) — the export's own
+  // call — so a clip in a volume level previews at the level's gain, not its
+  // own slider. Element `volume` clamps at 1.0, so a boosted clip is routed
+  // through a GainNode to match the export's `volume=` filter. @see
+  // lib/mediaGain.ts. A muted clip is held at gain 0 rather than skipped, so it
+  // keeps following the playhead and unmuting mid-playback is instant. The
+  // export reaches the same silence by dropping the clip — `audible` is the
+  // shared decision.
+  const gain = useClipGain(clip, clips, durationOf)
+  useMediaGain(ref, gain.gainDb, !gain.audible)
 
   useEffect(() => {
     const a = ref.current
@@ -563,6 +572,7 @@ function AudioFollower({
     <audio
       ref={ref}
       data-testid="audio-follower"
+      data-clip-id={clip.id}
       // Before `src` on purpose: React sets attributes in prop order, and an
       // element that fetches once without this is tainted for good — a GainNode
       // on it would emit silence. @see lib/mediaGain.ts
@@ -591,6 +601,7 @@ function CompAudioTrack({
   time: number
   playing: boolean
 }): JSX.Element {
+  const durationOf = (id: string): number => assetById.get(id)?.probe.durationSec ?? 0
   return (
     <>
       {clips.map((a) => {
@@ -598,7 +609,16 @@ function CompAudioTrack({
         if (!asset?.proxyReady) return null
         const src = asset.probe.video ? videoProxyUrl(asset) : audioUrl(asset)
         return (
-          <AudioFollower key={a.id} clip={a} asset={asset} src={src} time={time} playing={playing} />
+          <AudioFollower
+            key={a.id}
+            clip={a}
+            clips={clips}
+            asset={asset}
+            durationOf={durationOf}
+            src={src}
+            time={time}
+            playing={playing}
+          />
         )
       })}
     </>
