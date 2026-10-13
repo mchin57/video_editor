@@ -39,6 +39,7 @@ export const {
   transcribeMedia,
   getTranscript,
   detectSilence,
+  getLoudness,
   segmentAvailable,
   removeBackground,
   cancelJob,

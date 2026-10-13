@@ -8,6 +8,7 @@ import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/formats'
 import type { Settings } from '@shared/settings'
 import type { Transcript } from '@shared/transcript'
+import type { LoudnessSeries } from '@shared/loudness'
 import type { AssistantRequest, AssistantResponse, AssistantStatus } from '@shared/assistant/protocol'
 
 /** Typed surface exposed to the renderer as window.api. */
@@ -76,6 +77,10 @@ const api = {
     ipcRenderer.invoke(IPC.getTranscript, mediaId),
   detectSilence: (mediaId: string): Promise<{ start: number; end: number }[]> =>
     ipcRenderer.invoke(IPC.detectSilence, mediaId),
+  /** The asset's loudness series (measured first if not cached yet); null = no
+   *  audio, original missing, or the measurement failed. */
+  getLoudness: (mediaId: string): Promise<LoudnessSeries | null> =>
+    ipcRenderer.invoke(IPC.getLoudness, mediaId),
 
   // Background removal (subject-aware crop) — matte one clip segment into a new
   // transparent library asset (a VP9 WebM with the segment's audio), gated on the
