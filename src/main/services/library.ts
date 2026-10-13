@@ -95,12 +95,16 @@ export function findByFingerprint(fp: Fingerprint): LibraryEntry | null {
  * caller captured when it started: if another project opened meanwhile (an
  * import still running across File > Open), the write is refused rather than
  * landing in the wrong library.
+ *
+ * `quiet` skips the change notification, for a caller whose renderer marks
+ * the change itself in order (Rename, which then saves at once: a
+ * notification arriving after that save would mark it unsaved again).
  */
-export function putEntry(record: MediaRecord, path: string | null, forRoot: string): LibraryEntry {
+export function putEntry(record: MediaRecord, path: string | null, forRoot: string, quiet = false): LibraryEntry {
   if (root !== forRoot) throw new Error('The project changed while this media was being added.')
   const entry: LibraryEntry = { record, path, staleTranscript: entries.get(record.id)?.staleTranscript }
   entries.set(record.id, entry)
-  notify()
+  if (!quiet) notify()
   return entry
 }
 

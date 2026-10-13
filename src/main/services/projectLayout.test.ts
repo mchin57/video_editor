@@ -13,9 +13,11 @@ import {
   projectFolderFor,
   sweepPlan,
   transcriptPath,
+  renameTarget,
   safeFileName,
   uniqueFileName
 } from './projectLayout'
+import { validateFileStem } from '@shared/fileName'
 
 const root = join('C:', 'Reels', 'bad brick')
 
@@ -73,6 +75,44 @@ describe('project folder layout', () => {
     const taken = new Set(['clip (still).png', 'clip (still) (2).png'])
     expect(uniqueFileName('new.png', (n) => taken.has(n))).toBe('new.png')
     expect(uniqueFileName('clip (still).png', (n) => taken.has(n))).toBe('clip (still) (3).png')
+  })
+})
+
+describe('renameTarget (library Rename)', () => {
+  const footage = join('C:', 'Reels', 'footage')
+
+  it('keeps the file in its folder with its own extension, the stem trimmed', () => {
+    expect(renameTarget(join(footage, 'IMG_0010.MOV'), '  Swim drill ')).toEqual({
+      name: 'Swim drill.MOV',
+      path: join(footage, 'Swim drill.MOV'),
+      unchanged: false,
+      caseOnly: false
+    })
+  })
+
+  it('tells an unchanged name and a case-only change apart', () => {
+    expect(renameTarget(join(footage, 'clip.mp4'), 'clip')).toMatchObject({ unchanged: true, caseOnly: false })
+    expect(renameTarget(join(footage, 'clip.mp4'), 'Clip')).toMatchObject({
+      name: 'Clip.mp4',
+      unchanged: false,
+      caseOnly: true
+    })
+    // The extension is the file's own: its case never changes, so neither does "unchanged".
+    expect(renameTarget(join(footage, 'clip.MP4'), 'clip')).toMatchObject({ name: 'clip.MP4', unchanged: true })
+  })
+
+  it('works for generated media and files without an extension', () => {
+    const gen = join('C:', 'Reels', 'P', 'generated', 'clip (no bg 0.03–0.05).webm')
+    expect(renameTarget(gen, 'swimmer cutout').path).toBe(join('C:', 'Reels', 'P', 'generated', 'swimmer cutout.webm'))
+    expect(renameTarget(join(footage, 'README'), 'notes')).toMatchObject({ name: 'notes' })
+  })
+
+  it('every name the rule accepts is already a safe generated-media name', () => {
+    for (const stem of ['Swim drill', 'race (final) v1.2', 'café — brick', '.hidden', 'a'.repeat(200)]) {
+      expect(validateFileStem(stem, '.webm'), stem).toBeNull()
+      const { name } = renameTarget(join(footage, 'x.webm'), stem)
+      expect(safeFileName(name)).toBe(name)
+    }
   })
 })
 

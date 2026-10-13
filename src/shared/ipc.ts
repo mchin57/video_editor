@@ -13,6 +13,7 @@ export const IPC = {
   listProjectMedia: 'media:listForProject',
   ensureProxy: 'media:ensureProxy',
   relinkMediaDialog: 'media:relinkDialog',
+  renameMedia: 'media:rename',
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read and write the working copy (autosave.json:
   // crash recovery + restore on launch); the File ▸ actions below create,

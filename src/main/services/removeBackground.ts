@@ -175,7 +175,7 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
 
   const baseLabel = `Remove background · ${asset.fileName}`
   const onDevice = (d: MatteDevice): string => `${baseLabel} (${d === 'gpu' ? 'GPU' : 'CPU'})`
-  const job = createJob('matte', baseLabel, req.subjectId ?? req.mediaId, { cancelable: true })
+  const job = createJob('matte', baseLabel, req.subjectId ?? req.mediaId, { cancelable: true, uses: [req.mediaId] })
   const signal = job.signal!
   try {
     const ort = await loadOrt()

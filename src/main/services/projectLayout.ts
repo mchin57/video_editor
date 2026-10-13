@@ -15,6 +15,7 @@
  */
 
 import { basename, dirname, extname, join, parse } from 'node:path'
+import { RESERVED_DEVICE_NAME, splitFileName } from '@shared/fileName'
 
 export const REEL_EXT = 'reel'
 export const AUTOSAVE = 'autosave.json'
@@ -55,8 +56,37 @@ export function safeFileName(name: string): string {
   // eslint-disable-next-line no-control-regex
   let safe = name.replace(/:/g, '.').replace(/[<>"/\\|?*\u0000-\u001f]/g, '_')
   safe = safe.replace(/[. ]+$/, '').trim()
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(safe)) safe = `_${safe}`
+  if (RESERVED_DEVICE_NAME.test(safe)) safe = `_${safe}`
   return safe || 'media'
+}
+
+/** Where a library Rename puts a file, and what kind of rename it is. */
+export interface RenameTarget {
+  /** The new file name: the trimmed stem plus the file's own extension. */
+  name: string
+  /** The new full path, in the file's own folder. */
+  path: string
+  /** Exactly the current name: nothing to do. */
+  unchanged: boolean
+  /** Only the letter case differs. On Windows the "existing" target is then
+   *  the file itself, so the taken-name check must not refuse it. */
+  caseOnly: boolean
+}
+
+/**
+ * A library Rename (docs/MEDIA-POINTERS.md "Rename"): the file at `current`
+ * renamed to `stem` plus its own, unchanged extension, in the same folder.
+ * Pure; validate the stem first (`validateFileStem`, shared/fileName.ts).
+ */
+export function renameTarget(current: string, stem: string): RenameTarget {
+  const currentName = basename(current)
+  const name = stem.trim() + splitFileName(currentName).ext
+  return {
+    name,
+    path: join(dirname(current), name),
+    unchanged: name === currentName,
+    caseOnly: name !== currentName && name.toLowerCase() === currentName.toLowerCase()
+  }
 }
 
 /**

@@ -24,7 +24,8 @@ import { generateProxy, generateAlphaProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
-import { createJob, failJob, finishJob } from './jobs'
+import { activeJobUsing, createJob, failJob, finishJob } from './jobs'
+import { splitFileName, validateFileStem } from '@shared/fileName'
 import { singleFlight } from './atomicWrite'
 import { moveFile } from './linkOrCopy'
 import { getProjectRoot } from './projectRoot'
@@ -42,7 +43,15 @@ import {
   resolveEntry,
   type LibraryEntry
 } from './library'
-import { cacheDir, cachePath, generatedRoot, safeFileName, transcriptPath, uniqueFileName } from './projectLayout'
+import {
+  cacheDir,
+  cachePath,
+  generatedRoot,
+  renameTarget,
+  safeFileName,
+  transcriptPath,
+  uniqueFileName
+} from './projectLayout'
 import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
@@ -317,6 +326,64 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
   return { asset, cutsReset, alsoFound: await relinkSiblings(r, dirname(srcPath)) }
 }
 
+/** A failed `fs.rename` in words. Windows answers a file another program
+ *  holds open (ffmpeg reading it, a player) with EBUSY — verified, see
+ *  docs/FFMPEG-NOTES.md "Renaming a file ffmpeg is reading" — and a locked or
+ *  protected one with EPERM / EACCES. */
+export function renameFailureMessage(error: unknown, fileName: string): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') {
+    return `Windows wouldn't rename “${fileName}”: another program is using it, or you don't have permission to change it. Close whatever has it open and try again.`
+  }
+  if (code === 'ENOENT') return `“${fileName}” is no longer where it was. Nothing was renamed.`
+  return `Couldn't rename “${fileName}”: ${error instanceof Error ? error.message : String(error)}`
+}
+
+/**
+ * Library Rename (docs/MEDIA-POINTERS.md "Rename"): the original file on disk
+ * gets `stem` plus its own extension, in its own folder, and the library item
+ * takes the same name. Refused — with nothing changed — for a missing or
+ * unknown clip, an invalid name, a name already taken in that folder (a
+ * case-only change of the same file is allowed), or while a job reads the
+ * file. The file is renamed FIRST; the record (`fileName` + both paths, via
+ * `pointAt`) changes only once that succeeded. The fingerprint, id, cache and
+ * transcript are untouched: the bytes are the same. The change is NOT
+ * broadcast: the caller marks the library changed and saves.
+ */
+export async function renameMedia(id: string, stem: string): Promise<MediaAsset> {
+  const r = getProjectRoot()
+  const entry = getEntry(id)
+  if (!entry) throw new Error('That media is no longer in the library.')
+  if (isUnknownClip(entry.record)) throw new Error('This clip has no known file to rename. Relink it first.')
+  const found = await resolveEntry(id)
+  const from = found?.entry.path
+  if (!found || !from) throw new Error(`“${entry.record.fileName}” is missing, so there is no file to rename. Relink it first.`)
+  const current = basename(from)
+  const reason = validateFileStem(stem, splitFileName(current).ext)
+  if (reason) throw new Error(reason)
+  const busy = activeJobUsing(id)
+  if (busy) throw new Error(`“${current}” is in use by “${busy.label}”. Wait for it to finish, then rename.`)
+
+  const target = renameTarget(from, stem)
+  if (!target.unchanged) {
+    // fs.rename REPLACES an existing target on Windows (verified), so a taken
+    // name must be refused here. A case-only change "finds" the file itself.
+    const there = await fsp.stat(target.path, { bigint: true }).catch(() => null)
+    const self = there && target.caseOnly && (await fsp.stat(from, { bigint: true })).ino === there.ino
+    if (there && !self) throw new Error(`A file named “${target.name}” already exists in that folder.`)
+    try {
+      await fsp.rename(from, target.path)
+    } catch (error) {
+      throw new Error(renameFailureMessage(error, current))
+    }
+  }
+  const record = { ...pointAt(r, found.entry.record, target.path), fileName: target.name }
+  // Quiet: the renderer marks the change and saves right after this returns
+  // (docs/MEDIA-POINTERS.md "Rename").
+  if (!target.unchanged || record.fileName !== found.entry.record.fileName) putEntry(record, target.path, r, true)
+  return hydrate(r, toAsset(r, getEntry(id)!))
+}
+
 /**
  * Relink one, fix the rest: every other missing clip whose file is in `dir`
  * (matched by size, then fingerprint) is pointed at it. Returns their names.
@@ -481,7 +548,7 @@ async function buildProxy(r: string, id: string): Promise<void> {
 
   // Audio-only: small AAC proxy + a waveform for the music lane.
   if (isAudioAsset(asset)) {
-    const job = createJob('proxy', `Audio · ${asset.fileName}`, id)
+    const job = createJob('proxy', `Audio · ${asset.fileName}`, id, { uses: [id] })
     try {
       await generateAudioProxy(asset.originalPath, audioProxyPath(r, id), asset.probe.audio?.monoFoldChannel ?? null)
       await makeWaveform(r, asset)
@@ -494,7 +561,7 @@ async function buildProxy(r: string, id: string): Promise<void> {
   }
 
   await makeThumb(r, asset) // ensure a thumbnail exists even if import-time gen failed
-  const job = createJob('proxy', `Proxy · ${asset.fileName}`, id)
+  const job = createJob('proxy', `Proxy · ${asset.fileName}`, id, { uses: [id] })
   try {
     // Alpha clips (background-removed) proxy to a VP9 WebM so preview keeps
     // transparency; everything else gets the small H.264 mp4.
@@ -599,7 +666,7 @@ export async function renderAudioFxToLibrary(
 
   const label = fxLabel(settings)
   const { name } = parse(source.fileName)
-  const job = createJob('proxy', `${label} · ${name}`)
+  const job = createJob('proxy', `${label} · ${name}`, undefined, { uses: [sourceMediaId] })
   try {
     const tmp = tmpOutput('fx', 'wav')
     await renderAudioFx(settings, source.originalPath, inSec, outSec, tmp)

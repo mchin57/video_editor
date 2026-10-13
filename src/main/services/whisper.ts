@@ -140,7 +140,7 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
   if (!whisper) throw new Error('whisper.cpp is not installed (bin/whisper).')
   const asset = await requireUsable(mediaId)
 
-  const job = createJob('transcribe', `Captions · ${asset.fileName}`, mediaId)
+  const job = createJob('transcribe', `Captions · ${asset.fileName}`, mediaId, { uses: [mediaId] })
   const transcriptPath = transcriptFile(mediaId) // captured now: the project may switch mid-job
   const dir = await scratchDirFor(mediaId)
   const wav = join(dir, 'audio16k.wav')

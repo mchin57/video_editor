@@ -1,14 +1,16 @@
-import { type JSX } from 'react'
+import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect, isImageAsset, isUnknownClip } from '@shared/media'
-import { useLibrary, useImportMedia, useRepairMedia } from '@/hooks/useMedia'
+import { useLibrary, useImportMedia, useRenameMedia, useRepairMedia } from '@/hooks/useMedia'
+import { revealFile } from '@/ipc/client'
+import { RenameMediaDialog } from '@/components/RenameMediaDialog'
 import { latestJob, useEditor } from '@/state/store'
 import { activeComp, getFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { makeImageLayer, visualDuration } from '@shared/layers'
 import { ClipCard } from '@/components/ClipCard'
-import { btnCls, disabledCls } from '@/components/ui'
+import { btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 
 /**
  * A library row: the shared `ClipCard` shell (thumbnail + hover preview + meta),
@@ -30,10 +32,47 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const removeMedia = useProject((s) => s.removeMedia)
 
   const repair = useRepairMedia()
+  const rename = useRenameMedia()
+  const ctx = useContextMenu()
+  const [renaming, setRenaming] = useState(false)
   // A missing original can't be added (its proxy, if any, may describe a file
   // that's gone) until it is relinked below.
   const status = asset.status ?? 'ok'
   const ready = asset.proxyReady && status === 'ok'
+
+  // Right-click: Rename… (docs/MEDIA-POINTERS.md "Rename") and Reveal in
+  // Explorer. Both need the file, so a Missing or unknown clip greys them out.
+  const noFile = isUnknownClip(asset)
+    ? 'This clip has no known file. Relink it first.'
+    : status !== 'ok'
+      ? 'The file is missing. Relink it first.'
+      : undefined
+  const menuItems = (): ContextMenuEntry[] => [
+    { label: 'Rename…', testId: 'ctx-rename', disabled: !!noFile, reason: noFile, onSelect: () => setRenaming(true) },
+    {
+      label: 'Reveal in Explorer',
+      testId: 'ctx-reveal',
+      disabled: !!noFile,
+      reason: noFile,
+      onSelect: () => void revealFile(asset.originalPath)
+    }
+  ]
+  const onContextMenu = (e: React.MouseEvent): void => ctx.open(e, menuItems())
+  const overlays = (
+    <>
+      {ctx.menu}
+      {renaming && (
+        <RenameMediaDialog
+          asset={asset}
+          onClose={() => setRenaming(false)}
+          onRename={async (stem) => {
+            await rename(asset.id, stem)
+            setRenaming(false)
+          }}
+        />
+      )}
+    </>
+  )
 
   const isImage = isImageAsset(asset)
   const isAudio = !asset.probe.video && !!asset.probe.audio
@@ -142,17 +181,26 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
         e.dataTransfer.setData('application/x-reel-asset', asset.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}
+      onContextMenu={onContextMenu}
       proxyPct={pct}
       proxyError={job?.status === 'error'}
       trailing={actions}
     />
   )
-  if (status === 'ok') return card
+  if (status === 'ok') {
+    return (
+      <>
+        {card}
+        {overlays}
+      </>
+    )
+  }
 
   const busy = repair.relink.isPending
   return (
-    <div className="rounded border border-amber-500/40" data-testid={`media-${status}`}>
+    <div className="rounded border border-amber-500/40" data-testid={`media-${status}`} onContextMenu={onContextMenu}>
       {card}
+      {overlays}
       <div className="space-y-1 px-2 pb-1.5 pt-1 text-[10px] text-amber-200">
         {isUnknownClip(asset) ? (
           <p data-testid="media-unknown">
