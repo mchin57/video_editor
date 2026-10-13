@@ -278,6 +278,26 @@ describe('annotations split across -ml 1 entries', () => {
     both([' ♪', ...speech.map((w) => ` ${w}`)], speech)
   })
 
+  // Review cases (synthetic): a stray opener must not pair with a LATER
+  // annotation's mark and swallow the speech between them.
+  it('a stray ( does not pair with the next annotation: the speech between stays', () => {
+    both([' (laughs', ' So', ' today', ' we', ' swim', ' (applause)'], ['So', 'today', 'we', 'swim'])
+    both([' (laughs', ' So', ' today', ' (inhaling', ' and', ' exhaling)', ' we', ' swim'], ['So', 'today', 'we', 'swim'])
+    both([' [', ' So', ' today', ' [', ' Pause', ' ]', ' swim'], ['So', 'today', 'swim'])
+  })
+
+  it('a stray ♪ before a lyric line does not swallow the speech between them', () => {
+    both([' ♪', ' So', ' today', ' we', ' swim', ' ♪', ' la', ' la', ' ♪'], ['So', 'today', 'we', 'swim'])
+  })
+
+  it('pairs back-to-back lyric lines in order', () => {
+    both([' ♪', ' row', ' row', ' ♪', ' ♪', ' your', ' boat', ' ♪', ' Row'], ['Row'])
+  })
+
+  it('keeps a word with a bracket inside it; only marks at an entry’s edge count', () => {
+    both([' my', ' friend(s)', ' did', ' 50(ish)', ' laps', ' a[b]c'], ['my', 'friend(s)', 'did', '50(ish)', 'laps', 'a[b]c'])
+  })
+
   it('bounds the word before a multi-entry annotation by the annotation', () => {
     const { words } = parseWhisperTranscript({
       transcription: [

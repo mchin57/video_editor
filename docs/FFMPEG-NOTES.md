@@ -623,12 +623,18 @@ looking for an `-ss` in the transcription path.
   their own); `♪` `I` `could` `break` `you` `to` `say` `the` `last` `♪` followed
   by `(dramatic` `music)`. A whole-string noise regex matched none of them, so
   they became caption words. Fixed in the parser (`annotationMask`,
-  `whisperParse.ts`), on both the DTW and segment paths: an entry opening with
-  `(`, `[` or `♪` starts a span, and the first later entry holding the matching
-  closer ends it; everything between is dropped. A span that does not close
-  within `MAX_ANNOTATION_ENTRIES` (12; the longest real one is the 10-entry
-  lyric line) is treated as a stray mark, and only the entries that themselves
-  hold a bracket or `♪` are dropped, so speech is never swallowed. Dropped
+  `whisperParse.ts`), on both the DTW and segment paths. Only marks at an
+  entry's edge count (`friend(s)` is a word). An entry opening with `(` or `[`
+  starts a span and the first later entry ending with the matching closer ends
+  it; everything between is dropped. The search gives up at the next opener or
+  after `MAX_ANNOTATION_ENTRIES` (12; the longest real span is the 10-entry
+  lyric line), and then only the stray opener goes — it never pairs with a
+  later annotation's mark across the speech between. `♪` opens and closes
+  alike, so a run of them is paired in order, and an odd run drops the one
+  stray whose pairing swallows the fewest entries. Speech between two real
+  annotations is kept; what the parser cannot tell apart from an annotation
+  (two strays that happen to pair up, or a stray `♪` beside a lyric line whose
+  pairing is a tie) can still be dropped. Dropped
   entries keep their DTW time, so they still end the word before them. Rerun on
   the four clips: only the annotation entries above went (plus `(clicking)`),
   and every spoken word on the DTW path was kept.
