@@ -431,7 +431,10 @@ on `-map 0:a:0 -vn -f null -`: 0.35 s for a 3:13, 950 MB 4K HEVC recording.
   3.01 dB LOWER (−17.49 vs −14.48). The export mixes an extracted video clip's
   ORIGINAL (`audioProxyIfReady` only exists for audio assets), and an all-mono
   mix stays mono, so the source's own peak is the safe bound for a cap.
-  By contrast a duplicated-to-both-channels signal (`pan=stereo|c0=c0|c1=c0`)
+  For an imported mono AUDIO file that bound is ~3 dB conservative: the export
+  mixes its stereo proxy (`audio.m4a`, `-ac 2`), whose peak is 3.01 dB below
+  the mono source the series measured, so a peak-capped clip lands ~3 dB short
+  of what the ceiling would allow (see "Volume levels" below). By contrast a duplicated-to-both-channels signal (`pan=stereo|c0=c0|c1=c0`)
   IS 3 LU louder (−33.9) — which is why a one-sided stereo source must be
   measured AFTER the mono-fold pan (`e2e/loudness.spec.ts`: folded ≈ +3 LU).
 - **Print file on Windows: pass a bare file name and run ffmpeg with that
