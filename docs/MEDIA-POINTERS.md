@@ -60,6 +60,8 @@ like anything else.
 - Import, relinking and path fixes found on open all change the library **in memory** and mark the
   project as having unsaved changes.
 - **Save** writes the document and the library into the `.reel`. Nothing else writes the `.reel`.
+  A finished export (the Export button or the assistant's `export_video`) runs that same Save
+  afterwards; a failed, blocked or canceled export doesn't.
 - `autosave.json` mirrors the in-memory state for crash recovery, as it does today.
 - The per-clip record files (`media/<id>/asset.json`) go away.
 

@@ -111,7 +111,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'export_video',
     {
       description:
-        'Render the whole project to an .mp4 exactly as the Export button does, into the export folder from Settings unless you give a folder. Waits until the render finishes (progress shows in the editor). Never overwrites: a taken name gets " (2)". Only export when the user asks.',
+        'Render the whole project to an .mp4 exactly as the Export button does, into the export folder from Settings unless you give a folder. Waits until the render finishes (progress shows in the editor). Never overwrites: a taken name gets " (2)". A finished export also saves the project, as the button does: the result has saved: true, or saveError (the export still succeeded) to pass on to the user. Only export when the user asks.',
       inputSchema: {
         fileName: z.string().max(120).optional().describe('File name without folder, e.g. "beach reel"'),
         folder: z

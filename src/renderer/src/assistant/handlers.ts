@@ -12,7 +12,9 @@ import { expandSelection, timelineTiles } from '@/lib/links'
 import { assistantRespond, onAssistantRequest } from '@/ipc/client'
 import { interactionOpen, whenIdle } from '@/lib/interaction'
 
-type Handlers = { [K in keyof AssistantOps]: (args: AssistantOps[K]['args']) => AssistantOps[K]['result'] }
+type Handlers = {
+  [K in keyof AssistantOps]: (args: AssistantOps[K]['args']) => AssistantOps[K]['result'] | Promise<AssistantOps[K]['result']>
+}
 
 function project(): Project {
   const p = useProject.getState().project
@@ -50,10 +52,16 @@ const handlers: Handlers = {
     useProject.getState().undo()
     return { undone: useProject.getState().past.length < before, timeline: summarizeTimeline(comp()) }
   },
-  getProject: () => project()
+  getProject: () => project(),
+  saveProject: async () => {
+    project()
+    if (!useProject.getState().filePath) throw new Error('The project has no save file')
+    await useProject.getState().save()
+    return null
+  }
 }
 
-function answer(req: AssistantRequest): void {
+async function answer(req: AssistantRequest): Promise<void> {
   // Arrived (or came off the wait queue) after main gave up — the renderer was blocked
   // by a dialog, or the user held a drag past the deadline: running it now would apply
   // an edit nobody is told about. Main has already answered.
@@ -65,7 +73,7 @@ function answer(req: AssistantRequest): void {
   try {
     // The table is keyed by op, so this lookup is type-safe; widen it to call generically.
     const run = handlers[req.op] as unknown as (args: unknown) => unknown
-    res = { id: req.id, ok: true, result: run(req.args) }
+    res = { id: req.id, ok: true, result: await run(req.args) }
   } catch (e) {
     res = { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) }
   }
@@ -78,6 +86,6 @@ export function installAssistantBridge(): () => void {
   // snapshot, so an edit landing in between would be overwritten (lib/interaction.ts).
   return onAssistantRequest((req: AssistantRequest) => {
     if (interactionOpen()) console.info(`[assistant] "${req.op}" waits for the user's drag to end`)
-    whenIdle(() => answer(req))
+    whenIdle(() => void answer(req))
   })
 }

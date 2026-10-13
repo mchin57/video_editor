@@ -54,7 +54,8 @@ the total length. Mention anything you were unsure about.
 `export_video` (optional `fileName`; optional `folder`, an absolute path to an
 existing folder, only when the user names where it should go — otherwise it uses the
 Settings export folder). It waits for the render and returns the file path — give the
-user that path.
+user that path. A finished export also saves the project, like the Export button: the
+result has `saved: true`, or a `saveError` to pass on (the export itself still succeeded).
 
 ## When an ability is missing
 
