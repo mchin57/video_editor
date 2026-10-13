@@ -17,9 +17,9 @@ import { singleFlight, writeAtomically } from './atomicWrite'
 import { monoFoldPan } from './audio'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
-import { resolveEntry } from './library'
+import { getEntry, resolveEntry } from './library'
 import { cachePath } from './projectLayout'
-import { getProjectRoot } from './projectRoot'
+import { currentProjectRoot, getProjectRoot } from './projectRoot'
 
 /** 48 kHz × 0.1 s: the frame size that makes one metadata frame one series step. */
 const SAMPLE_RATE = 48000
@@ -173,6 +173,19 @@ export function createLimiter(max: number): <T>(run: () => Promise<T>) => Promis
 const limited = createLimiter(MAX_PASSES)
 
 /**
+ * Where the original is NOW. A pass can wait in the limiter long enough for a
+ * library Rename (or relink) to move the file, so the path is read from the
+ * open library when the pass actually starts — the one captured at queue time
+ * may be gone. After a project switch the captured path stands (the pass
+ * finishes in the project it started in, like any long job).
+ */
+function inputNow(root: string, src: LoudnessSource): string | null {
+  if (currentProjectRoot() !== root) return src.path ?? null
+  const entry = getEntry(src.id)
+  return entry ? entry.path : (src.path ?? null)
+}
+
+/**
  * The asset's series: the cached file, else measured now (shared by every
  * concurrent caller). Null when the asset has no audio, its original is
  * missing (and nothing is cached), or measuring failed — never throws.
@@ -183,16 +196,19 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
   const cached = existsSync(out) ? await readLoudnessFile(out) : null
   if (cached) return cached
   if (!src.path || failed.has(out)) return null
-  const input = src.path
   return flight(out, () =>
     limited(async () => {
+      const input = inputNow(root, src)
+      if (!input) return null // gone missing while queued: not a failure to remember
       try {
         await fsp.mkdir(dirname(out), { recursive: true })
         // A stale (other-version) file is replaced; the rename needs it gone.
         await fsp.rm(out, { force: true })
         return await generateLoudness(input, out, src.foldChannel)
       } catch (error) {
-        failed.add(out)
+        // A file that vanished under the pass (renamed or moved meanwhile) says
+        // nothing about its content: leave it to be measured at its new path.
+        if (existsSync(input)) failed.add(out)
         console.error('loudness measurement failed for', src.id, error)
         return null
       }

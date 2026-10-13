@@ -17,7 +17,8 @@
  *    ("short by N dB (would clip)");
  *  - 0 dB — the level leaves the source as it is — when there is nothing to
  *    match (no gated loudness, or quieter than −45 LUFS), when the window is
- *    under 0.4 s, or while the series is still being measured.
+ *    under 0.4 s, while the series is still being measured, or when there is
+ *    no series to read ("couldn't measure" — never reported as silence).
  * A clip in no level plays at its own `gainDb`. In a level, `gainDb` is kept
  * but unused, so leaving the level restores it. Mute still wins (`audible`).
  * An effect track (`kind: 'fx'`) never joins a level itself: it gets the same
@@ -53,6 +54,10 @@ export type LevelStatus =
   | { kind: 'tooShort' }
   /** The loudness series isn't available yet: left at 0 dB. */
   | { kind: 'measuring' }
+  /** There is no series (the measurement failed, or the original is missing
+   *  with nothing cached): left at 0 dB. Kept apart from `silent` so a failure
+   *  never reads as "nothing to match". */
+  | { kind: 'unmeasured' }
   /** An effect track following its source clip's level by `deltaDb`. */
   | { kind: 'follows'; sourceId: string; deltaDb: number; source: LevelStatus }
 
@@ -97,7 +102,7 @@ export function levelMatch(
 ): { gainDb: number; status: Exclude<LevelStatus, { kind: 'none' } | { kind: 'follows' }> } {
   const series = ctx.seriesOf(clip.mediaId)
   if (series === undefined) return { gainDb: 0, status: { kind: 'measuring' } }
-  if (series === null) return { gainDb: 0, status: { kind: 'silent' } }
+  if (series === null) return { gainDb: 0, status: { kind: 'unmeasured' } }
   const out = effectiveOut(clip, ctx.durationOf(clip.mediaId) || seriesEnd(series))
   const w = windowLoudness(series, clip.inSec, out)
   if (w.status === 'tooShort') return { gainDb: 0, status: { kind: 'tooShort' } }
@@ -193,6 +198,8 @@ export function levelStatusText(status: LevelStatus, gainDb: number): string {
       return 'Too short to measure (under 0.4 s) · left as is'
     case 'measuring':
       return 'Measuring…'
+    case 'unmeasured':
+      return 'Couldn’t measure this clip’s loudness · left as is'
     case 'follows':
       return `Follows the level of the clip it was made from · ${signed(status.deltaDb)} dB`
   }
