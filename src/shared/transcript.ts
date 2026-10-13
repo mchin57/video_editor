@@ -18,8 +18,10 @@ export type TimingSource = 'dtw' | 'segment'
  *  1 — DTW word timings (no `version` field was written).
  *  2 — decoding starts just before the first sustained sound, so the opening
  *      sentence is no longer dropped after a click or a long lead-in.
+ *  3 — annotations split across entries (`(birds` `chirping)`, `[` `Pause` `]`)
+ *      and `♪ … ♪` lyric spans are dropped, not captioned.
  */
-export const TRANSCRIPT_VERSION = 2
+export const TRANSCRIPT_VERSION = 3
 
 /** A media file's transcription, cached as media/<id>/transcript.json. */
 export interface Transcript {

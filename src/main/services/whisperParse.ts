@@ -66,11 +66,50 @@ export const MIN_WORD_SEC = 0.08
  */
 const MAX_DUPLICATE_SHARE = 0.25
 
-// Non-speech annotations whisper emits, e.g. [BLANK_AUDIO], (music), [_TT_…].
-const NOISE = /^[[(].*[\])]$/
-
 // whisper's own control tokens, e.g. [_BEG_], [_TT_220]. They carry no audio.
 const SPECIAL = /^\[_.*\]$/
+
+/**
+ * Longest annotation span, in spoken entries from the opening mark to the
+ * closing one inclusive. The longest real one is a ♪ lyric line: 10 entries
+ * (`♪` + 8 words + `♪`). Past this, an opener is treated as unclosed.
+ */
+export const MAX_ANNOTATION_ENTRIES = 12
+
+const MARKS = /[[\]()♪]/
+const CLOSER: Record<string, string> = { '(': ')', '[': ']', '♪': '♪' }
+
+/**
+ * Which entries are non-speech annotations, by index. With `-ml 1` whisper
+ * splits an annotation into one entry per word — `(birds` `chirping)`,
+ * `[` `Pause` `]`, `♪` `I` `could` … `♪` — so a whole-string check misses it.
+ *
+ * An entry OPENING with `(`, `[` or `♪` starts a span, and the first later
+ * entry containing the matching closer ends it; everything in between goes.
+ * A span that does not close within MAX_ANNOTATION_ENTRIES is treated as a
+ * stray mark: only the entries that themselves contain a bracket or `♪` are
+ * dropped, so real speech is never swallowed. Empty entries are not counted.
+ */
+export function annotationMask(texts: string[]): boolean[] {
+  const drop = texts.map(() => false)
+  const spoken = texts.flatMap((t, i) => (t.length > 0 ? [i] : []))
+  for (let n = 0; n < spoken.length; n++) {
+    const text = texts[spoken[n]]
+    if (!MARKS.test(text)) continue
+    drop[spoken[n]] = true
+    const closer = CLOSER[text[0]]
+    // Opener and closer in one entry, e.g. "(clicking)" or "[BLANK_AUDIO]".
+    if (!closer || text.slice(1).includes(closer)) continue
+    const limit = Math.min(spoken.length, n + MAX_ANNOTATION_ENTRIES)
+    for (let m = n + 1; m < limit; m++) {
+      if (!texts[spoken[m]].includes(closer)) continue
+      for (let k = n + 1; k <= m; k++) drop[spoken[k]] = true
+      n = m
+      break
+    }
+  }
+  return drop
+}
 
 const entryText = (e: WhisperEntry): string => (e.text ?? '').trim()
 
@@ -140,9 +179,10 @@ function parseDtwWords(entries: WhisperEntry[]): CaptionWord[] | null {
   }
   if (textual.length > 1 && duplicates / (textual.length - 1) > MAX_DUPLICATE_SHARE) return null
 
+  const drop = annotationMask(entries.map(entryText))
   const words: CaptionWord[] = []
   for (const { i, text } of textual) {
-    if (NOISE.test(text)) continue
+    if (drop[i]) continue
     const startSec = starts[i] as number
     // End at the next acoustic event; the final word falls back to its own
     // segment end. capWords() bounds whatever that turns out to be.
@@ -160,10 +200,12 @@ function parseDtwWords(entries: WhisperEntry[]): CaptionWord[] | null {
 
 /** Word list from the entries' own segment offsets. */
 export function parseWhisperJson(json: WhisperJson): CaptionWord[] {
+  const entries = json.transcription ?? []
+  const drop = annotationMask(entries.map(entryText))
   const words: CaptionWord[] = []
-  for (const entry of json.transcription ?? []) {
+  for (const [i, entry] of entries.entries()) {
     const text = entryText(entry)
-    if (!text || NOISE.test(text)) continue
+    if (!text || drop[i]) continue
     const startSec = (entry.offsets?.from ?? 0) / 1000
     const endSec = (entry.offsets?.to ?? 0) / 1000
     if (!(endSec > startSec)) continue
