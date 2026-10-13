@@ -41,6 +41,7 @@ export const IPC = {
   // Audio editing
   detectSilence: 'audio:detectSilence',
   renderAudioFx: 'audio:renderFx',
+  getLoudness: 'audio:getLoudness',
   // Background removal (subject-aware crop)
   segmentAvailable: 'segment:available',
   removeBackground: 'segment:removeBackground',

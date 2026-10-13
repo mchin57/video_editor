@@ -51,6 +51,7 @@ import type { Settings } from '@shared/settings'
 import { getSettings, updateSettings } from './services/settings'
 import { getTranscript, transcribeMedia, whisperAvailable } from './services/whisper'
 import { detectSilence, type Interval } from './services/silence'
+import { ensureLoudness } from './services/loudness'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 import { cancelJob, createJob, finishJob, setProgress } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
@@ -389,6 +390,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.whisperAvailable, () => whisperAvailable())
   ipcMain.handle(IPC.transcribeMedia, (_event, mediaId: string) => transcribeMedia(mediaId))
   ipcMain.handle(IPC.getTranscript, (_event, mediaId: string) => getTranscript(mediaId))
+
+  // The asset's loudness series, measured now if the cache lacks it (null = no
+  // audio, original missing, or the measurement failed). @see shared/loudness.ts
+  ipcMain.handle(IPC.getLoudness, (_event, mediaId: string) => ensureLoudness(mediaId))
 
   ipcMain.handle(IPC.detectSilence, async (_event, mediaId: string): Promise<Interval[]> => {
     const asset = await requireUsable(mediaId)

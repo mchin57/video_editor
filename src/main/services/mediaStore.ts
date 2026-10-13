@@ -46,6 +46,7 @@ import { cacheDir, cachePath, generatedRoot, safeFileName, transcriptPath, uniqu
 import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
+import { forgetLoudnessFailure, kickLoudness, type LoudnessSource } from './loudness'
 
 /** Full-content hash (first 12 hex of sha1) — the id scheme before
  *  fingerprints. Only legacy conversion still needs it. */
@@ -104,6 +105,7 @@ const artifactFailed = new Set<string>()
 function forgetFailures(dir: string): void {
   for (const out of [...artifactFailed]) if (out.startsWith(dir)) artifactFailed.delete(out)
   proxyFailed.delete(dir)
+  forgetLoudnessFailure(dir)
 }
 
 /** Best-effort derived file: skipped if present, generated once however many
@@ -142,6 +144,14 @@ async function makeWaveform(r: string, asset: MediaAsset): Promise<void> {
     generateWaveform(asset.originalPath, out, asset.probe.durationSec)
   )
 }
+
+/** What the loudness pass needs to know about an asset. */
+const loudnessSource = (asset: MediaAsset): LoudnessSource => ({
+  id: asset.id,
+  path: asset.status === 'ok' ? asset.originalPath : null,
+  hasAudio: !!asset.probe.audio,
+  foldChannel: asset.probe.audio?.monoFoldChannel ?? null
+})
 
 /** Best-effort display PNG (alpha-preserving) for an imported image. */
 async function makeImage(r: string, asset: MediaAsset): Promise<void> {
@@ -372,6 +382,7 @@ async function register(
   const asset = toAsset(r, putEntry(record, path, r))
   await makeThumb(r, asset)
   await makeImage(r, asset) // images: build the display PNG now (it is their "proxy")
+  kickLoudness(r, loudnessSource(asset))
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
   return asset
 }
@@ -501,13 +512,14 @@ async function buildProxy(r: string, id: string): Promise<void> {
 }
 
 /** Backfill derived artifacts (thumb/image/waveform), refresh proxyReady, and
- *  start a missing proxy. A missing original gets no new artifacts; whatever
- *  cache exists still shows. */
+ *  start a missing proxy and loudness series (both in the background). A
+ *  missing original gets no new artifacts; whatever cache exists still shows. */
 async function hydrate(r: string, asset: MediaAsset): Promise<MediaAsset> {
   if (asset.status !== 'ok') return asset
   await makeThumb(r, asset)
   await makeImage(r, asset)
   await makeWaveform(r, asset)
+  kickLoudness(r, loudnessSource(asset))
   asset.proxyReady = existsSync(playableProxyPath(r, asset))
   if (!asset.proxyReady) kickProxy(r, asset.id)
   return asset
