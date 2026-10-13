@@ -222,18 +222,21 @@ async function runExport(
 /**
  * The finished frame at each timeline second in `times` (1–4), as JPEGs in
  * `outDir` — the export's own compositor, text layout and caption burn, cut to
- * single frames (`buildFrameArgs`). Not an export job: it never blocks the
- * Export button and shows no progress. Skips the stabilization pre-pass (a
- * whole-clip analysis per frame would be far too slow); `skippedStabilize`
- * says when that made a frame differ from the real export.
+ * single frames (`buildFrameArgs`). `comp` is what to render (default: the
+ * whole project; pass the composition being edited when the user is inside a
+ * compound clip, so its local times line up). Not an export job: it never
+ * blocks the Export button and shows no progress. Skips the stabilization
+ * pre-pass (a whole-clip analysis per frame would be far too slow);
+ * `skippedStabilize` says when that made a frame differ from the real export.
  */
 export async function renderFrames(
   project: Project,
   preset: PresetId,
   times: number[],
-  outDir: string
-): Promise<{ paths: string[]; skippedStabilize: boolean }> {
-  await assertMediaUsable(referencedMediaIds(project))
+  outDir: string,
+  comp: Composition = project
+): Promise<{ frames: { path: string; shownSec: number }[]; skippedStabilize: boolean }> {
+  await assertMediaUsable(referencedMediaIds(comp))
   const caps = await getCapabilities()
   const { ffmpeg } = await getBinaries()
   const tmpRoot = join(getSubdir('tmp'), `frames-${randomUUID()}`)
@@ -251,14 +254,28 @@ export async function renderFrames(
     n: { v: 0 },
     stills: { skippedStabilize: false }
   }
-  const frames = times.map((timeSec, k) => ({ timeSec, path: join(outDir, `frame_${k}.jpg`) }))
+  const frames: FrameRequest[] = times.map((timeSec, k) => ({ timeSec, path: join(outDir, `frame_${k}.jpg`) }))
   try {
-    await renderComposition(project, ctx, frames[0].path, { alpha: false, depth: 1, frames })
+    await renderComposition(comp, ctx, frames[0].path, { alpha: false, depth: 1, frames })
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
   }
-  return { paths: frames.map((f) => f.path), skippedStabilize: ctx.stills!.skippedStabilize }
+  return {
+    frames: frames.map((f) => ({ path: f.path, shownSec: f.shownSec ?? f.timeSec })),
+    skippedStabilize: ctx.stills!.skippedStabilize
+  }
 }
+
+/** A stills request: the timeline second asked for, the JPEG to write, and —
+ *  filled in by the render — the second the frame actually shows (later times
+ *  clamp to the last frame). */
+interface FrameRequest {
+  timeSec: number
+  path: string
+  shownSec?: number
+}
+
+type RenderOpts = { alpha: boolean; depth: number; frames?: FrameRequest[] }
 
 /**
  * Render ONE composition to a file — the single implementation used for the
@@ -267,11 +284,24 @@ export async function renderFrames(
  * back in as ordinary video inputs (see FFMPEG-NOTES "Nested-composition
  * intermediates"), so the compositor itself never needs to know about nesting.
  */
-async function renderComposition(
+async function renderComposition(comp: Composition, ctx: RenderCtx, output: string, o: RenderOpts): Promise<string> {
+  // The text renderer is a hidden Chromium window, created on first use. Free it
+  // on EVERY way out — a throw half-way (a clip with no source) would otherwise
+  // leak one window per failed export or render_frame. Disposing twice is safe.
+  const rendererRef: { current: TextRenderer | null } = { current: null }
+  try {
+    return await renderCompositionWith(rendererRef, comp, ctx, output, o)
+  } finally {
+    rendererRef.current?.dispose()
+  }
+}
+
+async function renderCompositionWith(
+  rendererRef: { current: TextRenderer | null },
   comp: Composition,
   ctx: RenderCtx,
   output: string,
-  o: { alpha: boolean; depth: number; frames?: { timeSec: number; path: string }[] }
+  o: RenderOpts
 ): Promise<string> {
   const { target, caps, ffmpeg, jobId, opts } = ctx
   // Canonical logical → output px. The project's format is a window centred on
@@ -350,7 +380,6 @@ async function renderComposition(
   // out every burned block, and rasterises the ones libass can't draw
   // (gradients, fixed wrap widths) to PNGs.
   const fontsDir = getBundledFontsDir()
-  const rendererRef: { current: TextRenderer | null } = { current: null }
   let gradN = 0
   function ensureRenderer(): TextRenderer {
     if (!rendererRef.current) {
@@ -885,9 +914,12 @@ async function renderComposition(
     preferNvenc: opts.preferNvenc,
     alpha: o.alpha
   }
-  const args = o.frames
-    ? buildFrameArgs(plan, o.frames.map((f) => ({ index: frameIndexAt(f.timeSec, totalDur), path: f.path })))
-    : buildExportArgs(plan, output)
+  let args: string[]
+  if (o.frames) {
+    const frames = o.frames.map((f) => ({ index: frameIndexAt(f.timeSec, totalDur), path: f.path }))
+    o.frames.forEach((f, k) => (f.shownSec = frames[k].index / 30))
+    args = buildFrameArgs(plan, frames)
+  } else args = buildExportArgs(plan, output)
   // Only the top-level export drives the job bar; nested pre-renders would
   // rewind it (weighting them across N+1 passes is a Stage 5 item). Stills have no job.
   const progress = o.depth === 1 && !o.frames ? (pr: number): void => setProgress(jobId, pr) : undefined

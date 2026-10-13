@@ -15,8 +15,12 @@ export const CAPTION_LANE_ID = 'captions'
 
 /** `set_text` limits, shared by the MCP schema and the renderer's validation. */
 export const MIN_TEXT_SEC = 0.1
-export const TEXT_FONT_SIZE_MIN = 12
+export { TEXT_FONT_SIZE_MIN } from '../textStyle'
 export const TEXT_FONT_SIZE_MAX = 1000
+/** How far past the current end of the edit text may reach (catches ms-for-seconds slips). */
+export const MAX_TEXT_PAST_END_SEC = 60
+/** Half of get_text's 1 ms rounding: a time this close to the current one is "unchanged". */
+export const TEXT_TIME_EPS = 0.0005
 
 /** The style fields every on-screen text item has (text layer or caption). */
 export interface TextLook {
@@ -41,7 +45,9 @@ export interface TextItemSummary extends TextLook {
   text: string
   /** False when the viewer won't see it; `hiddenBecause` says why. */
   visible: boolean
-  hiddenBecause?: 'layer hidden' | 'caption disabled' | 'caption lane off'
+  hiddenBecause?: 'layer hidden' | 'caption disabled' | 'caption lane off' | 'after the end of the edit'
+  /** Captions only: the edit ends at this second, part-way through the caption (the rest never shows). */
+  cutOffAtSec?: number
   /** In a link group with another tile: `set_text` refuses timing changes on it. */
   linked: boolean
   /** Text layers: uniform zoom on top of `fontSizePx` (1 = natural). */
@@ -60,6 +66,8 @@ export interface CaptionLaneSummary extends TextLook {
 }
 
 export interface OnScreenText {
+  /** Length of the edit. Captions don't extend it: one starting at or after it never shows. */
+  durationSec: number
   captionLane: CaptionLaneSummary
   /** Timeline order (start time; text layers before captions on a tie). */
   items: TextItemSummary[]
@@ -137,11 +145,13 @@ function look(s: {
 /**
  * Every text layer and caption segment of `comp`, with the style it actually
  * renders with. `isLinked` comes from the caller (the renderer's `lib/links.ts`
- * owns link-group semantics).
+ * owns link-group semantics); `durationSec` is the edit's length
+ * (`compositionDuration`), which captions do not extend.
  */
 export function summarizeText(
   comp: Composition,
   isLinked: (ref: TimelineItemRef) => boolean,
+  durationSec: number,
   q: TextQuery = {}
 ): OnScreenText {
   const lane = comp.captions
@@ -178,7 +188,7 @@ export function summarizeText(
       startSec: r3(seg.startSec),
       endSec: r3(seg.endSec),
       text: seg.text,
-      visible: lane.enabled && seg.enabled,
+      visible: lane.enabled && seg.enabled && seg.startSec < durationSec,
       linked: isLinked({ kind: 'caption', id: seg.id }),
       ...look(st),
       x: r1(st.x),
@@ -188,6 +198,8 @@ export function summarizeText(
     }
     if (!seg.enabled) s.hiddenBecause = 'caption disabled'
     else if (!lane.enabled) s.hiddenBecause = 'caption lane off'
+    else if (seg.startSec >= durationSec) s.hiddenBecause = 'after the end of the edit'
+    if (seg.startSec < durationSec && seg.endSec > durationSec) s.cutOffAtSec = r3(durationSec)
     items.push(s)
   }
 
@@ -200,6 +212,7 @@ export function summarizeText(
     .sort((a, b) => a.startSec - b.startSec || (a.kind === b.kind ? 0 : a.kind === 'text' ? -1 : 1))
 
   return {
+    durationSec: r3(durationSec),
     captionLane: {
       id: CAPTION_LANE_ID,
       visible: lane.enabled,

@@ -54,3 +54,31 @@ test('a caption fixed in the Inspector keeps the fix when it is split', async ({
   expect(segs[0].words).toEqual([{ text: 'hello', startSec: 2, endSec: 2.8 }])
   expect(segs[1].words).toEqual([{ text: 'world', startSec: 3, endSec: 3.8 }])
 })
+
+test("the store action itself keeps a caption's words in step with new text", async ({ appPage: page }) => {
+  // Any caller of updateCaption(id, {text}) — not just the Inspector — must not leave stale words.
+  const texts = await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.setCaptions({
+      ...s.project!.captions,
+      enabled: true,
+      segments: [
+        {
+          id: 'c1',
+          startSec: 2,
+          endSec: 4,
+          text: 'helo wrld',
+          words: [
+            { text: 'helo', startSec: 2, endSec: 2.8 },
+            { text: 'wrld', startSec: 3, endSec: 3.8 }
+          ],
+          enabled: true
+        }
+      ]
+    })
+    window.__reelStores.useProject.getState().updateCaption('c1', { text: 'hello world' })
+    window.__reelStores.useProject.getState().splitItemsAt([{ kind: 'caption', id: 'c1' }], 2.9, () => 0)
+    return window.__reelStores.useProject.getState().project!.captions.segments.map((c) => c.text)
+  })
+  expect(texts).toEqual(['hello', 'world'])
+})

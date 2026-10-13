@@ -18,6 +18,7 @@ import type { AudioFx } from '@shared/audioFx'
 import {
   MAX_COMP_DEPTH,
   compDepth,
+  compositionDuration,
   makeCompFromCell,
   makeCompFromLayer,
   resetMediaCuts,
@@ -49,6 +50,7 @@ import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
 import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import type { TextEdit, TextEditResult } from '@shared/assistant/onScreenText'
 import { applyTextEdits } from '@/lib/textEdits'
+import { captionWithText } from '@/lib/captions'
 import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
@@ -564,7 +566,8 @@ export const useProject = create<ProjectState>((set, get) => {
     applyTextEdits: (edits) => {
       const comp = activeComp(get())
       if (!comp) throw new Error('Editor has no project open')
-      const result = applyTextEdits(comp, edits, { frame: projectFormat(get()).frame, newId })
+      const durationSec = compositionDuration(comp)
+      const result = applyTextEdits(comp, edits, { frame: projectFormat(get()).frame, newId, durationSec })
       commitComp(() => result.comp)
       return result.results
     },
@@ -894,7 +897,16 @@ export const useProject = create<ProjectState>((set, get) => {
     updateCaption: (id, patch) =>
       commitComp((p) => ({
         ...p,
-        captions: { ...p.captions, segments: updateById(p.captions.segments, id, (s) => ({ ...s, ...patch })) }
+        captions: {
+          ...p.captions,
+          // New text without new words re-times them (captionWithText): a split
+          // rebuilds text FROM the words, so stale words would revert the edit.
+          segments: updateById(p.captions.segments, id, (s) =>
+            patch.text !== undefined && patch.words === undefined
+              ? { ...s, ...patch, words: captionWithText(s, patch.text).words }
+              : { ...s, ...patch }
+          )
+        }
       })),
 
     removeCaption: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'caption', id }])),

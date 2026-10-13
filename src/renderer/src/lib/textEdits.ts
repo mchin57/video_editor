@@ -14,8 +14,10 @@ import { FONTS, isKnownFont } from '@shared/fonts'
 import { makeTextLayer } from '@shared/layers'
 import {
   CAPTION_LANE_ID,
+  MAX_TEXT_PAST_END_SEC,
   MIN_TEXT_SEC,
   TEXT_FONT_SIZE_MAX,
+  TEXT_TIME_EPS,
   TEXT_FONT_SIZE_MIN,
   type TextEdit,
   type TextEditResult
@@ -38,6 +40,9 @@ export interface TextEditCtx {
   newId: () => string
   /** The project's output frame (new text layers sit a third of the way down it). */
   frame: FrameRect
+  /** The edit's length before these edits (seconds) — text may not start or end
+   *  more than `MAX_TEXT_PAST_END_SEC` past it. */
+  durationSec: number
 }
 
 export interface TextEditOutcome {
@@ -113,14 +118,27 @@ function withCaptionStyle(base: CaptionStyle, e: TextEdit): CaptionStyle {
 const touchesStyle = (e: TextEdit): boolean =>
   [...STYLE_KEYS, ...POSITION_KEYS].some((k) => e[k] !== undefined)
 
-/** The [start, end) an edit asks for (falling back to the current window), or a problem. */
-function windowOf(e: TextEdit, cur: { startSec: number; endSec: number } | null): [number, number] | string {
+/**
+ * The [start, end) an edit asks for, or a problem. An existing item keeps its
+ * exact window unless the edit really moves it (`retimes`) — get_text reports
+ * rounded times, and echoing them back must not nudge anything.
+ */
+function windowOf(
+  e: TextEdit,
+  cur: { startSec: number; endSec: number } | null,
+  durationSec: number
+): [number, number] | string {
+  if (cur && !retimes(e, cur)) return [cur.startSec, cur.endSec]
   const s = e.startSec ?? cur?.startSec
   const t = e.endSec ?? cur?.endSec
   if (s === undefined || t === undefined) return 'a new item needs startSec and endSec'
   if (!Number.isFinite(s) || !Number.isFinite(t)) return 'startSec and endSec must be numbers'
   if (s < 0) return 'startSec must be 0 or more'
   if (t - s < MIN_TEXT_SEC) return `endSec must be at least ${MIN_TEXT_SEC}s after startSec`
+  const limit = durationSec + MAX_TEXT_PAST_END_SEC
+  if (t > limit) {
+    return `endSec ${t} is more than ${MAX_TEXT_PAST_END_SEC}s past the end of the edit (${Math.round(durationSec * 100) / 100}s); times are in seconds`
+  }
   return [s, t]
 }
 
@@ -165,7 +183,7 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
       const kind = e.kind ?? 'text'
       if (kind !== 'text' && kind !== 'caption') return fail('kind must be "text" or "caption"')
       if (e.text === undefined) return fail('a new item needs text')
-      const win = windowOf(e, null)
+      const win = windowOf(e, null, ctx.durationSec)
       if (typeof win === 'string') return fail(win)
       const [startSec, endSec] = win
       const id = ctx.newId()
@@ -193,7 +211,7 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
     if (layer) {
       if (layer.content.kind !== 'text') return fail(`that is a ${layer.content.kind} layer, not text`)
       if (e.followLaneStyle !== undefined) return fail('followLaneStyle is for captions only')
-      const win = windowOf(e, layer)
+      const win = windowOf(e, layer, ctx.durationSec)
       if (typeof win === 'string') return fail(win)
       if (retimes(e, layer) && isLinked(c, { kind: 'layer', id: layer.id })) return fail(linkedMsg)
       const next = patchTextLayer({ ...layer, startSec: win[0], endSec: win[1] }, e)
@@ -210,7 +228,7 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
         return fail('followLaneStyle must be true or false')
       }
       if (e.followLaneStyle && touchesStyle(e)) return fail('followLaneStyle: true cannot be combined with style or position fields')
-      const win = windowOf(e, seg)
+      const win = windowOf(e, seg, ctx.durationSec)
       if (typeof win === 'string') return fail(win)
       if (retimes(e, seg) && isLinked(c, { kind: 'caption', id: seg.id })) return fail(linkedMsg)
       let next = retimes(e, seg) ? captionInWindow(seg, win[0], win[1]) : seg
@@ -235,9 +253,10 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
 const linkedMsg =
   'it is linked to another timeline item, so its timing cannot change on its own (text and style edits are fine); unlink it in the editor or leave startSec/endSec out'
 
-/** Whether the edit moves or resizes the item's window. */
+/** Whether the edit moves or resizes the item's window (beyond get_text's rounding). */
 function retimes(e: TextEdit, cur: { startSec: number; endSec: number }): boolean {
-  return (e.startSec !== undefined && e.startSec !== cur.startSec) || (e.endSec !== undefined && e.endSec !== cur.endSec)
+  const differs = (v: number | undefined, now: number): boolean => v !== undefined && !(Math.abs(v - now) <= TEXT_TIME_EPS)
+  return differs(e.startSec, cur.startSec) || differs(e.endSec, cur.endSec)
 }
 
 /** A text layer with the edit's content/position/visibility fields applied (timing is the caller's). */

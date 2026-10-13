@@ -54,6 +54,11 @@ async function projectAssets(): Promise<Map<string, MediaAsset>> {
   return new Map((await getProjectMedia(ids)).map((a) => [a.id, a]))
 }
 
+/** Each library clip's source length — what the renderer needs to measure open-ended audio. */
+async function sourceDurations(): Promise<Record<string, number>> {
+  return Object.fromEntries([...(await projectAssets())].map(([id, a]) => [id, a.probe.durationSec]))
+}
+
 function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
   const asset = assets.get(mediaId)
   if (!asset) {
@@ -163,7 +168,7 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     return json({ path, sizeMB: Math.round((size / 1_048_576) * 10) / 10 })
   },
 
-  get_text: async (q) => json(await callRenderer('getText', q)),
+  get_text: async (q) => json(await callRenderer('getText', { ...q, sourceDurations: await sourceDurations() })),
 
   set_text: async ({ edits }) => {
     const results = await callRenderer('applyTextEdits', { edits })
@@ -171,23 +176,27 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
   },
 
   set_playhead: async ({ timeSec }) => {
-    // Open-ended audio clips end at their source's length, which only the library knows.
-    const sourceDurations = Object.fromEntries([...(await projectAssets())].map(([id, a]) => [id, a.probe.durationSec]))
-    const r = await callRenderer('setPlayhead', { timeSec, sourceDurations })
+    const r = await callRenderer('setPlayhead', { timeSec, sourceDurations: await sourceDurations() })
     const clamped = r.timeSec !== timeSec ? ` (clamped; the edit is ${r2(r.durationSec)}s long)` : ''
     return text(`Playhead at ${r2(r.timeSec)}s${clamped}. Playback is paused there.`)
   },
 
   render_frame: async ({ times }) => {
     const project = await callRenderer('getProject', {})
+    // Render what the editor shows, so times match get_text / get_timeline: inside a
+    // compound clip those are the clip's own local seconds.
+    const { comp, nested } = await callRenderer('getActiveComp', {})
     const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'render-frame-'))
     try {
-      const { paths, skippedStabilize } = await renderFrames(project, project.preset ?? 'reel', times, dir)
+      const { frames, skippedStabilize } = await renderFrames(project, project.preset ?? 'reel', times, dir, comp)
       // Label + image per time, so each picture is captioned with its moment.
       const out: ToolContent[] = []
-      for (let k = 0; k < paths.length; k++) {
-        out.push({ type: 'text', text: `Finished frame @ ${r2(times[k])}s (timeline)` })
-        out.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(paths[k])).toString('base64') })
+      if (nested) out.push({ type: 'text', text: 'The user is inside a nested composition: these frames show it on its own, at its local times.' })
+      for (let k = 0; k < frames.length; k++) {
+        const { path, shownSec } = frames[k]
+        const clamped = shownSec < times[k] - 1 / 30 ? ` — asked for ${r2(times[k])}s, which is past the end of the edit; this is its last frame` : ''
+        out.push({ type: 'text', text: `Finished frame @ ${r2(shownSec)}s (timeline)${clamped}` })
+        out.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(path)).toString('base64') })
       }
       if (skippedStabilize) {
         out.push({ type: 'text', text: 'Note: stabilization is skipped in these frames, so stabilized clips may sit slightly differently than in the export.' })

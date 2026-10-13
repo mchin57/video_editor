@@ -464,49 +464,126 @@ test('set_playhead parks the playhead, paused, clamped to the edit', async ({ el
   expect(await page.evaluate(() => window.__reelStores.usePlayback.getState().time)).toBe(3)
 })
 
-test('render_frame returns the finished picture, caption burned in at the right moment', async ({
-  electronApp,
-  appPage: page
-}) => {
-  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
-  test.setTimeout(120_000)
-  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+/** A 3 s black 540×960 clip, synthesized with the real ffmpeg. */
+function blackClip(dir: string): string {
   const clip = join(dir, 'black.mp4')
   execFileSync(FFMPEG, [
     '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=540x960:r=30:d=3',
     '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
   ])
+  return clip
+}
+
+/** Mean luma of the caption band (the lane's default spot, centre y 1340 of 1920) of a
+ *  returned JPEG, measured by the real ffmpeg. Relative crop: stills are downscaled. */
+function captionLuma(dir: string, b64: string, name: string): number {
+  const jpg = join(dir, name)
+  writeFileSync(jpg, Buffer.from(b64, 'base64'))
+  const raw = execFileSync(FFMPEG, ['-v', 'error', '-i', jpg, '-vf', 'crop=iw*0.74:ih*0.083:iw*0.13:ih*0.656,format=gray', '-f', 'rawvideo', '-'])
+  return raw.reduce((s, v) => s + v, 0) / raw.length
+}
+
+const images = (r: ToolResult): string[] => r.content.filter((x) => x.type === 'image').map((x) => x.data!)
+
+test('render_frame returns the finished picture, caption burned in at the right moment', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG) || !existsSync(FFPROBE), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
   expect((await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }] })).isError).toBeFalsy()
-  // A white caption 0–1 s, in the lane's default spot (centre y 1340).
+  // A white caption 0–1 s, in the lane's default spot.
   expect(
     (await call(c, 'set_text', { edits: [{ id: 'captions', visible: true }, { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }] }))
       .isError
   ).toBeFalsy()
 
-  /** Mean luma of the caption band of a returned JPEG, measured by the real ffmpeg. */
-  const captionLuma = (b64: string, name: string): number => {
-    const jpg = join(dir, name)
-    writeFileSync(jpg, Buffer.from(b64, 'base64'))
-    const raw = execFileSync(FFMPEG, ['-v', 'error', '-i', jpg, '-vf', 'crop=800:160:140:1260,format=gray', '-f', 'rawvideo', '-'])
-    return raw.reduce((s, v) => s + v, 0) / raw.length
-  }
-  const images = (r: ToolResult): string[] => r.content.filter((x) => x.type === 'image').map((x) => x.data!)
-
-  const r = await call(c, 'render_frame', { times: [0.5, 2.5] })
+  const r = await call(c, 'render_frame', { times: [0.5, 2.5, 99] })
   expect(r.isError).toBeFalsy()
-  expect(textOf(r)).toMatch(/Finished frame @ 0\.5s[\s\S]*Finished frame @ 2\.5s/)
+  expect(textOf(r)).toMatch(/Finished frame @ 0\.5s \(timeline\)\n[\s\S]*Finished frame @ 2\.5s \(timeline\)\n/)
+  // Past the end: the label says which frame it really is.
+  expect(textOf(r)).toContain('Finished frame @ 2.97s (timeline) — asked for 99s, which is past the end of the edit; this is its last frame')
   const [during, after] = images(r)
-  expect(captionLuma(during, 'during.jpg')).toBeGreaterThan(20) // white glyphs over black
-  expect(captionLuma(after, 'after.jpg')).toBeLessThan(5) // the caption has ended
+  expect(captionLuma(dir, during, 'during.jpg')).toBeGreaterThan(20) // white glyphs over black
+  expect(captionLuma(dir, after, 'after.jpg')).toBeLessThan(5) // the caption has ended
+  // Downscaled to 1280 on the long side.
+  const size = execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', join(dir, 'during.jpg')])
+    .toString()
+    .trim()
+  expect(size).toBe('720,1280')
 
   // Same moment with the lane off: the band goes dark, so it really was the caption.
   await call(c, 'set_text', { edits: [{ id: 'captions', visible: false }] })
   const off = images(await call(c, 'render_frame', { times: [0.5] }))
   expect(off).toHaveLength(1)
-  expect(captionLuma(off[0], 'off.jpg')).toBeLessThan(5)
+  expect(captionLuma(dir, off[0], 'off.jpg')).toBeLessThan(5)
   // Rendering frames is not an export: no export job appeared (it never blocks the Export button).
   const jobTypes = await page.evaluate(() => Object.values(window.__reelStores.useEditor.getState().jobs).map((j) => j.type))
   expect(jobTypes).not.toContain('export')
+})
+
+test('inside a compound clip, render_frame uses the same local times as get_text', async ({ electronApp, appPage: page }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
+  // The clip sits at 2–5 s on the root, then becomes a compound clip the user enters.
+  const { placed } = JSON.parse(
+    textOf(await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }], atSec: 2 }))
+  ) as { placed: { layerId: string }[] }
+  const layerId = placed[0].layerId
+  await page.evaluate((id) => {
+    const s = window.__reelStores.useProject.getState()
+    s.convertLayerToComp(id)
+    s.enterComposition({ layerId: id })
+  }, layerId)
+  // A caption at LOCAL 0–1 s (root 2–3 s).
+  await call(c, 'set_text', { edits: [{ id: 'captions', visible: true }, { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }] })
+  const listed = JSON.parse(textOf(await call(c, 'get_text'))) as { items: { text: string; startSec: number }[] }
+  expect(listed.items).toEqual([expect.objectContaining({ text: 'HELLO WORLD', startSec: 0 })])
+
+  const r = await call(c, 'render_frame', { times: [0.5] })
+  expect(r.isError).toBeFalsy()
+  expect(textOf(r)).toContain('inside a nested composition')
+  // At local 0.5 s the caption shows (rendering the root at 0.5 s would be black: the clip starts at 2 s).
+  expect(captionLuma(dir, images(r)[0], 'nested.jpg')).toBeGreaterThan(20)
+})
+
+test('a render that fails half-way does not leave its text-layout window behind', async ({ electronApp, appPage: page }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  // A gradient text layer (rasterised by the hidden Chromium window during the walk),
+  // then a clip whose media isn't in the library: the render throws after the window exists.
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addLayer({
+      id: 'grad',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 600,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'Gradient',
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 76,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 },
+        gradient: { from: '#ff0000', to: '#0000ff', angle: 90 }
+      }
+    })
+    s.addVideoLayer('ghost', 'no-such-media', 0, 2, false)
+  })
+  const windows = (): Promise<number> => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  const before = await windows()
+  const c = await connect(await pipeOf(electronApp))
+  const r = await call(c, 'render_frame', { times: [0.5] })
+  expect(r.isError).toBe(true)
+  expect(textOf(r)).toContain('Missing source media')
+  await expect.poll(windows).toBe(before)
 })

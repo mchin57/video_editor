@@ -606,7 +606,7 @@ describe('stills mode (render_frame)', () => {
     const fc = (a: string[]): string => a[a.indexOf('-filter_complex') + 1]
     // Same composite as the export, minus the audio graph, plus the trim.
     const videoChains = fc(video).split(';').filter((c) => !c.includes('[1:a]') && !c.includes('aout') && !c.includes(':a]'))
-    expect(fc(still)).toBe([...videoChains, '[v1]trim=start_frame=150:end_frame=151[vf0]'].join(';'))
+    expect(fc(still)).toBe([...videoChains, '[v1]trim=start_frame=150:end_frame=151,scale=720:1280:flags=bicubic[vf0]'].join(';'))
     expect(still).not.toContain('m.m4a')
     expect(still.join(' ')).toMatch(
       /-progress pipe:1 -nostats -map \[vf0\] -frames:v 1 -r 30 -fps_mode cfr -pix_fmt yuv420p -an -q:v 2 f0\.jpg$/
@@ -619,9 +619,19 @@ describe('stills mode (render_frame)', () => {
       { index: 90, path: 'b.jpg' }
     ])
     const fc = still[still.indexOf('-filter_complex') + 1]
-    expect(fc.endsWith('[v0]split=2[s0][s1];[s0]trim=start_frame=30:end_frame=31[vf0];[s1]trim=start_frame=90:end_frame=91[vf1]')).toBe(true)
+    expect(fc.endsWith('[v0]split=2[s0][s1];[s0]trim=start_frame=30:end_frame=31,scale=720:1280:flags=bicubic[vf0];[s1]trim=start_frame=90:end_frame=91,scale=720:1280:flags=bicubic[vf1]')).toBe(true)
     expect(still.filter((a) => a.endsWith('.jpg'))).toEqual(['a.jpg', 'b.jpg'])
     expect(still.filter((a) => a === '-map')).toHaveLength(2)
+  })
+
+  it('scales stills to fit 1280 on the long side, whatever the format', () => {
+    const fc = (t: ReturnType<typeof targetForPreset>): string => {
+      const a = buildFrameArgs(plan({ target: t, visuals: [{ kind: 'video', video: vid }] }), [{ index: 0, path: 'f.jpg' }])
+      return a[a.indexOf('-filter_complex') + 1]
+    }
+    expect(fc(targetForPreset('landscape'))).toContain(',scale=1280:720:flags=bicubic[vf0]')
+    expect(fc(targetForPreset('cinematic'))).toContain(',scale=1280:548:flags=bicubic[vf0]') // 2520x1080
+    expect(fc({ width: 720, height: 720 })).toMatch(/trim=start_frame=0:end_frame=1\[vf0\]$/) // already small: no scale
   })
 
   it('leaves the ordinary export untouched', () => {

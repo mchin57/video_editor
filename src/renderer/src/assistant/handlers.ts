@@ -54,14 +54,13 @@ const handlers: Handlers = {
     return { undone: useProject.getState().past.length < before, timeline: summarizeTimeline(comp()) }
   },
   getProject: () => project(),
-  getText: (q) => {
+  getActiveComp: () => ({ comp: comp(), nested: useProject.getState().editPath.length > 0 }),
+  getText: ({ sourceDurations, ...q }) => {
     const c = comp()
-    return summarizeText(c, (ref) => isLinked(c, ref), q)
+    const durationSec = compositionDuration(c, (id) => sourceDurations[id] ?? 0)
+    return summarizeText(c, (ref) => isLinked(c, ref), durationSec, q)
   },
-  applyTextEdits: ({ edits }) => {
-    project()
-    return useProject.getState().applyTextEdits(edits)
-  },
+  applyTextEdits: ({ edits }) => useProject.getState().applyTextEdits(edits),
   setPlayhead: ({ timeSec, sourceDurations }) => {
     const durationSec = compositionDuration(comp(), (id) => sourceDurations[id] ?? 0)
     const t = Math.min(Math.max(0, timeSec), durationSec)

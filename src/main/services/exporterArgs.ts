@@ -256,7 +256,12 @@ export function frameIndexAt(t: number, totalDur: number): number {
   return Math.min(last, Math.max(0, Math.floor(t * 30 + 1e-6)))
 }
 
-/** `buildExportArgs` in stills mode: one JPEG per `frames` entry, one pass. */
+/** Longest side of a `render_frame` still (px). The model downsamples images
+ *  anyway; 1280 keeps caption text crisp at a third of the full-size payload. */
+export const STILL_MAX_SIDE = 1280
+
+/** `buildExportArgs` in stills mode: one JPEG per `frames` entry, one pass,
+ *  downscaled to fit `STILL_MAX_SIDE`. */
 export function buildFrameArgs(plan: ExportPlan, frames: { index: number; path: string }[]): string[] {
   if (frames.length === 0) throw new Error('buildFrameArgs needs at least one frame')
   return buildExportArgs({ ...plan, audio: [], alpha: false, frames }, frames[0].path)
@@ -592,10 +597,14 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     // Stills: cut each wanted frame out of the final composite by exact index
     // (output -ss rounds to the NEAREST frame; select fights -fps_mode cfr).
     const labels = frames.map((_, k) => `vf${k}`)
-    if (frames.length === 1) chains.push(`${videoMap}trim=start_frame=${frames[0].index}:end_frame=${frames[0].index + 1}[vf0]`)
+    const k = Math.min(1, STILL_MAX_SIDE / Math.max(W, H))
+    const even = (n: number): number => 2 * Math.round(n / 2)
+    const scale = k < 1 ? `,scale=${even(W * k)}:${even(H * k)}:flags=bicubic` : ''
+    const cut = (f: { index: number }): string => `trim=start_frame=${f.index}:end_frame=${f.index + 1}${scale}`
+    if (frames.length === 1) chains.push(`${videoMap}${cut(frames[0])}[vf0]`)
     else {
-      chains.push(`${videoMap}split=${frames.length}${labels.map((_, k) => `[s${k}]`).join('')}`)
-      frames.forEach((f, k) => chains.push(`[s${k}]trim=start_frame=${f.index}:end_frame=${f.index + 1}[vf${k}]`))
+      chains.push(`${videoMap}split=${frames.length}${labels.map((_, j) => `[s${j}]`).join('')}`)
+      frames.forEach((f, j) => chains.push(`[s${j}]${cut(f)}[vf${j}]`))
     }
     const outs = frames.flatMap((f, k) => [
       '-map', `[${labels[k]}]`, '-frames:v', '1', '-r', '30', '-fps_mode', 'cfr', '-pix_fmt', 'yuv420p', '-an', '-q:v', '2', f.path

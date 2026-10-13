@@ -4,7 +4,7 @@
  * main's `callRenderer` and the renderer's handlers can't drift apart.
  */
 
-import type { Project, TimelineItemRef } from '../project'
+import type { Composition, Project, TimelineItemRef } from '../project'
 import type { TimelineSummary } from './timelineSummary'
 import type { OnScreenText, TextEdit, TextEditResult, TextQuery } from './onScreenText'
 
@@ -46,7 +46,11 @@ export interface AssistantOps {
   removeItems: { args: { ids: string[] }; result: { removed: TimelineItemRef[] } }
   undo: { args: NoArgs; result: { undone: boolean; timeline: TimelineSummary } }
   getProject: { args: NoArgs; result: Project }
-  getText: { args: TextQuery; result: OnScreenText }
+  /** The composition the editor shows (the root, or the compound clip / layout cell
+   *  the user has entered) — what get_text / get_timeline / set_playhead times refer to. */
+  getActiveComp: { args: NoArgs; result: { comp: Composition; nested: boolean } }
+  /** `sourceDurations` as for setPlayhead: the edit's length decides which captions can show. */
+  getText: { args: TextQuery & { sourceDurations: Record<string, number> }; result: OnScreenText }
   /** All edits are ONE undo step; any invalid edit throws and nothing changes. */
   applyTextEdits: { args: { edits: TextEdit[] }; result: TextEditResult[] }
   /**

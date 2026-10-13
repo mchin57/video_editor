@@ -33,7 +33,7 @@ function comp(): Composition {
 
 function ctx(): TextEditCtx {
   let n = 0
-  return { newId: () => `new${++n}`, frame: FULL_FRAME }
+  return { newId: () => `new${++n}`, frame: FULL_FRAME, durationSec: 10 }
 }
 
 const textOf = (c: Composition, id: string): TextContent => c.layers.find((l) => l.id === id)!.content as TextContent
@@ -201,6 +201,33 @@ describe('applyTextEdits', () => {
     expect(() => applyTextEdits(base, [{ id: 'c1', endSec: 4 }], ctx())).not.toThrow() // unchanged window
     const { comp: c } = applyTextEdits(base, [{ id: 'c1', text: 'hello world', color: '#ff0000' }], ctx())
     expect(c.captions.segments[0].text).toBe('hello world')
+  })
+
+  it("echoing get_text's rounded window back is not a retime: a linked caption still takes its fix, and nothing moves", () => {
+    const base = comp()
+    base.captions = {
+      ...base.captions,
+      segments: [cap({ startSec: 2.00041, endSec: 3.99962, words: [w('helo', 2.00041, 2.8), w('wrld', 3, 3.99962)], linkGroupId: 'g' })]
+    }
+    base.layers = base.layers.map((l) => (l.id === 'v' ? { ...l, linkGroupId: 'g' } : l))
+    const { comp: c } = applyTextEdits(base, [{ id: 'c1', text: 'hello world', startSec: 2, endSec: 4 }], ctx())
+    const seg = c.captions.segments[0]
+    expect([seg.startSec, seg.endSec]).toEqual([2.00041, 3.99962]) // exact window kept
+    expect(seg.words).toEqual([w('hello', 2.00041, 2.8), w('world', 3, 3.99962)])
+    // A text layer echoing rounded times keeps its exact window too.
+    const layered = comp()
+    layered.layers = layered.layers.map((l) => (l.id === 't1' ? { ...l, startSec: 1.00049 } : l))
+    const t = applyTextEdits(layered, [{ id: 't1', text: 'x', startSec: 1 }], ctx()).comp.layers.find((l) => l.id === 't1')!
+    expect(t.startSec).toBe(1.00049)
+  })
+
+  it('refuses text more than a minute past the end of the edit (a milliseconds-for-seconds slip)', () => {
+    expect(() => applyTextEdits(comp(), [{ text: 'Subscribe', startSec: 1500, endSec: 1503 }], ctx())).toThrow(
+      /endSec 1503 is more than 60s past the end of the edit \(10s\); times are in seconds/
+    )
+    expect(() => applyTextEdits(comp(), [{ id: 't1', endSec: 900 }], ctx())).toThrow(/past the end of the edit/)
+    // An end card just after the cut is fine.
+    expect(() => applyTextEdits(comp(), [{ text: 'Follow for more', startSec: 10, endSec: 13 }], ctx())).not.toThrow()
   })
 
   it('does not touch the input composition', () => {
