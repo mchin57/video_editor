@@ -147,19 +147,30 @@ const flight = singleFlight<LoudnessSeries | null>()
  *  until relaunch or a relink to new content (`forgetLoudnessFailure`). */
 const failed = new Set<string>()
 const MAX_PASSES = 2
-let activePasses = 0
-const waiting: (() => void)[] = []
 
-async function limited<T>(run: () => Promise<T>): Promise<T> {
-  if (activePasses >= MAX_PASSES) await new Promise<void>((resolve) => waiting.push(resolve))
-  activePasses++
-  try {
-    return await run()
-  } finally {
-    activePasses--
-    waiting.shift()?.()
+/**
+ * Run at most `max` of the given tasks at once; the rest wait their turn (FIFO).
+ * A finishing task HANDS its slot to the next waiter rather than freeing it:
+ * freeing it would let a newcomer arriving before the woken waiter resumes
+ * (a microtask later) take the slot too, briefly running `max + 1`.
+ */
+export function createLimiter(max: number): <T>(run: () => Promise<T>) => Promise<T> {
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async (run) => {
+    if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve))
+    else active++
+    try {
+      return await run()
+    } finally {
+      const next = waiting.shift()
+      if (next) next() // the slot passes straight to it: `active` is unchanged
+      else active--
+    }
   }
 }
+
+const limited = createLimiter(MAX_PASSES)
 
 /**
  * The asset's series: the cached file, else measured now (shared by every
