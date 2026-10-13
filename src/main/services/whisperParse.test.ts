@@ -208,3 +208,87 @@ describe('parseWhisperTranscript', () => {
     expect(words[0].endSec).toBeCloseTo(0.9, 6)
   })
 })
+
+/**
+ * Run raw `-ml 1` entry texts (leading space and empty entries as whisper
+ * emits them) through BOTH timing paths and return the caption words each
+ * keeps. Each spoken entry gets its own increasing DTW time and segment slot.
+ */
+function captionTexts(raw: string[]): { dtw: string[]; segment: string[] } {
+  const dtwJson = { transcription: raw.map((text, i) => dtw(text, text.trim() ? 100 + i * 20 : null, i * 200, (i + 1) * 200)) }
+  const segJson = { transcription: raw.map((text, i) => ({ text, offsets: { from: i * 200, to: (i + 1) * 200 } })) }
+  const d = parseWhisperTranscript(dtwJson)
+  const s = parseWhisperTranscript(segJson)
+  expect(d.timing).toBe('dtw')
+  expect(s.timing).toBe('segment')
+  return { dtw: d.words.map((w) => w.text), segment: s.words.map((w) => w.text) }
+}
+
+describe('annotations split across -ml 1 entries', () => {
+  // Every sequence below is verbatim from real whisper-cli output (small.en,
+  // the app's args) on library footage.
+  // A trailing spoken word keeps the DTW path from coming back empty (and so
+  // falling back to segment timing) when the real sequence is all annotation.
+  const both = (raw: string[], expected: string[]): void => {
+    const { dtw: d, segment: s } = captionTexts([...raw, ' Go.'])
+    expect(d).toEqual([...expected, 'Go.'])
+    expect(s).toEqual([...expected, 'Go.'])
+  }
+
+  it('drops a ♪ lyric span and the annotation after it (FTP test)', () => {
+    both(
+      ['', ' ♪', ' I', ' could', ' break', ' you', ' to', ' say', ' the', ' last', ' ♪', ' (dramatic', ' music)', '', ' (dramatic', ' music)'],
+      []
+    )
+  })
+
+  it('drops a multi-word annotation before speech (recovery)', () => {
+    both(
+      ['', ' (inhaling', ' and', ' exhaling)', ' Your', ' favorite', ' recovery', ' method.', '', ' (clicking)', ' Your', ' favorite'],
+      ['Your', 'favorite', 'recovery', 'method.', 'Your', 'favorite']
+    )
+  })
+
+  it('drops a spaced-out [ Pause ] marker (tritips)', () => {
+    both(['', ' [', ' Pause', ' ]', ' Number', ' two.', ' [', ' Pause', ' ]', ' Number', ' two.'], [
+      'Number',
+      'two.',
+      'Number',
+      'two.'
+    ])
+  })
+
+  it('drops an annotation that is the whole clip (run club)', () => {
+    both(['', ' (birds', ' chirping)'], [])
+  })
+
+  it('still drops single-entry annotations', () => {
+    both([' [BLANK_AUDIO]', ' hi', ' (music)', ' there'], ['hi', 'there'])
+  })
+
+  it('keeps speech after an opener that never closes', () => {
+    // A stray "(" mid-speech must not swallow the sentence after it: only the
+    // entries carrying a mark go.
+    const speech = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
+    both([' Before', ' (laughs', ...speech.map((w) => ` ${w}`), ' later)', ' after'], ['Before', ...speech, 'after'])
+  })
+
+  it('keeps speech after a ♪ that never closes', () => {
+    const speech = ['so', 'the', 'plan', 'for', 'this', 'week', 'is', 'two', 'long', 'rides', 'and', 'a', 'swim']
+    both([' ♪', ...speech.map((w) => ` ${w}`)], speech)
+  })
+
+  it('bounds the word before a multi-entry annotation by the annotation', () => {
+    const { words } = parseWhisperTranscript({
+      transcription: [
+        dtw(' hello', 100, 1000, 1200),
+        dtw(' (birds', 150, 1200, 2000),
+        dtw(' chirping)', 200, 2000, 3000),
+        dtw(' world', 300, 3000, 3200)
+      ]
+    })
+    expect(words.map((w) => w.text)).toEqual(['hello', 'world'])
+    // "hello" ends where the annotation's sound starts, not at "world" (3.00).
+    expect(words[0].endSec).toBeCloseTo(1.5, 3)
+  })
+})

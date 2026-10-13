@@ -540,10 +540,25 @@ looking for an `-ss` in the transcription path.
   never spoken. Real recordings carry room tone and this has not been seen in
   one; whisper's own `--vad` (needs a silero model we do not ship) is the
   general answer if it ever is.
-- **Bracketed annotations leak through `-ml 1`.** `(birds chirping)` arrives as
-  two entries, `(birds` and `chirping)`, so a whole-string noise regex matches
-  neither. Real transcripts in the library carry these as caption words. `-sns`
-  (`--suppress-nst`) exists and is untried. STILL OPEN.
+- **`-ml 1` splits annotations into one entry per word** (verified 2026-10-13,
+  current app args, four library clips). Real raw entries: `(birds` `chirping)`;
+  `(inhaling` `and` `exhaling)`; `[` `Pause` `]` (the brackets as entries of
+  their own); `♪` `I` `could` `break` `you` `to` `say` `the` `last` `♪` followed
+  by `(dramatic` `music)`. A whole-string noise regex matched none of them, so
+  they became caption words. Fixed in the parser (`annotationMask`,
+  `whisperParse.ts`), on both the DTW and segment paths: an entry opening with
+  `(`, `[` or `♪` starts a span, and the first later entry holding the matching
+  closer ends it; everything between is dropped. A span that does not close
+  within `MAX_ANNOTATION_ENTRIES` (12; the longest real one is the 10-entry
+  lyric line) is treated as a stray mark, and only the entries that themselves
+  hold a bracket or `♪` are dropped, so speech is never swallowed. Dropped
+  entries keep their DTW time, so they still end the word before them. Rerun on
+  the four clips: only the annotation entries above went (plus `(clicking)`),
+  and every spoken word on the DTW path was kept.
+- **`-sns` (`--suppress-nst`) is NOT the fix.** Tried on the same four clips: it
+  cleans clips with speech but rewrites real words ("Sorry." lost; "what your"
+  became "why you're"), and on clips with no speech it invents a sentence
+  ("I'm gonna get a box." over birdsong). Do not use it.
 - Transcripts are cached at the project's `transcripts/<id>.json` with no re-run flag.
   `TRANSCRIPT_VERSION` (`shared/transcript.ts`) is the cache version: any other
   version is treated as stale and re-transcribed. Change the whisper flags or
