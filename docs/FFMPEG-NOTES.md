@@ -438,6 +438,39 @@ on `-map 0:a:0 -vn -f null -`: 0.35 s for a 3:13, 950 MB 4K HEVC recording.
   directory as its cwd.** An unescaped absolute path (`file=C:/…`) is a
   filtergraph parse error (the drive colon splits the option).
 
+## Volume levels — exported clips land on the target (verified ffmpeg 8.1.1, 2026-10-13)
+
+`clipGain` (`shared/volumeLevels.ts`) turns a clip's window loudness from the
+series into the `volume=` the export applies (`exportAudioClips`). Checked on a
+real export (`e2e/volumeLevels.spec.ts`, which re-runs it): three mono 48 kHz
+WAVs side by side in Default (−16 LUFS), each stretch of the AAC output then
+measured on its own with `atrim,asetpts,ebur128`:
+
+- a 1 kHz tone at −18 dBFS peak (series −21.8 LUFS; its own gain −10 dB is
+  unused in the level) → **−16.0 LUFS**;
+- the same tone 18 dB down (−39.8 LUFS) → **−16.0 LUFS** — two clips 18 LU
+  apart land on the same number;
+- 10 ms bursts at −12 dBFS every 0.4 s (series −31.07 LUFS, peak −12.04): +15.1
+  wanted, the −1 dBFS cap allows +11.04 → "short by 4.03 dB"; measured
+  **−20.0 LUFS** = −31.07 + 11.04, exactly as predicted. Output peak −3.94.
+- The preview's applied gains (`appliedGain` on the followers) equal the
+  helper's prediction to 0.1 dB in the same spec.
+
+Things the check showed:
+
+- **A gain is a pure loudness shift.** `volume=` before `amix` (normalize=0)
+  and the AAC encode moves the integrated loudness by the gain to within the
+  0.1 LU `ebur128` prints; the 0.2 s trimmed off each stretch's edges doesn't
+  matter for steady material.
+- **An audio asset is mixed from its stereo proxy, so its cap is 3 dB
+  conservative.** The series measures the mono source (peak −12.04); the
+  export reads `audio.m4a` (`-ac 2` upmix: same loudness, peak 3 dB lower),
+  hence −3.94 rather than −1 at the output. Same loudness, so the match itself
+  is exact. A mono VIDEO original is mixed as-is: the same pulses inside an mp4,
+  run through the exporter's chain at +11.04 dB, peaked at **−0.93 dBFS**
+  (the AAC encode overshoots the −1 dBFS ceiling by ~0.07 dB — still well
+  clear of 0).
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are

@@ -27,6 +27,7 @@ import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { useAppSettings } from '@/state/appSettings'
+import { useLoudness } from '@/state/loudness'
 import { makeTextLayer } from '@shared/layers'
 
 /**
@@ -85,6 +86,7 @@ export default function App(): JSX.Element {
     () =>
       onLibraryChanged(() => {
         useProject.getState().markLibraryChanged()
+        useLoudness.getState().refresh()
         void queryClient.invalidateQueries({ queryKey: ['library'] })
       }),
     [queryClient]

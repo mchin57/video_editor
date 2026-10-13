@@ -18,6 +18,11 @@ interface LoudnessState {
   series: Record<string, LoudnessSeries | null>
   /** Fetch `mediaId`'s series unless it is cached or already on its way. */
   request: (mediaId: string) => void
+  /** Re-fetch every cached series (the library changed: a relink or a fixed
+   *  path can change what a clip measures, and a failed one may succeed now).
+   *  The old value stays in force until the new one lands, so levelled clips
+   *  don't drop to "measuring" mid-playback. */
+  refresh: () => void
 }
 
 const pending = new Set<string>()
@@ -32,6 +37,17 @@ export const useLoudness = create<LoudnessState>((set, get) => ({
       set({ series: { ...get().series, [mediaId]: s } })
     }
     getLoudness(mediaId).then(done, () => done(null))
+  },
+  refresh: () => {
+    for (const mediaId of Object.keys(get().series)) {
+      if (pending.has(mediaId)) continue
+      pending.add(mediaId)
+      const done = (s: LoudnessSeries | null): void => {
+        pending.delete(mediaId)
+        if (get().series[mediaId] !== s) set({ series: { ...get().series, [mediaId]: s } })
+      }
+      getLoudness(mediaId).then(done, () => done(null))
+    }
   }
 }))
 
