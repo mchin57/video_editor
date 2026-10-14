@@ -15,6 +15,7 @@ export interface ToolArgs {
   get_frames: { mediaId: string; times?: number[]; count?: number }
   trim_clip: { mediaId: string; startSec: number; endSec: number }
   split_clip: { mediaId: string; times: number[] }
+  add_description: { mediaId: string; description: string }
   get_timeline: NoArgs
   place_sequence: {
     items: { mediaId: string; inSec: number; outSec: number }[]

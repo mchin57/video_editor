@@ -32,6 +32,8 @@ const api = {
   /** Library Quick cut: one new clip in `generated/` per piece, in order (the
    *  original is untouched). Rejects with a reason before any encode. */
   quickCut: (req: QuickCutRequest): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.quickCut, req),
+  /** A library item's description ('' clears); an unsaved change until Save. */
+  setMediaDescription: (id: string, text: string): Promise<void> => ipcRenderer.invoke(IPC.setMediaDescription, id, text),
 
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read/write its working copy (autosave); the *File*

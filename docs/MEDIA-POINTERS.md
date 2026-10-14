@@ -45,6 +45,9 @@ Each item keeps, **inside the `.reel`**:
   start, middle and end of the file. Checking it reads a few MB per clip, whatever the file's size.
 - What the editor already needs: display name, kind, the probe facts (duration, resolution, rotation,
   frame rate, audio layout), import date.
+- **Description** (optional, added 2026-10-14): the user's note on what is in the clip, edited on
+  hover in the library and on the timeline, or by the assistant's `add_description`. Per file, so
+  every timeline placement shows the same one.
 
 **Ids.** Existing clips keep their ids, which are what the timeline references. New imports get ids
 derived from the fingerprint, so importing the same file twice still gives one library item, and

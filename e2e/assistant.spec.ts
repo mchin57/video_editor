@@ -18,7 +18,7 @@ const MCP = join(ROOT, 'out', 'main', 'mcp.js')
 const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
 const FFMPEG = join(BIN, 'ffmpeg.exe')
 const FFPROBE = join(BIN, 'ffprobe.exe')
-const TOOLS = ['export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
+const TOOLS = ['add_description', 'export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -246,6 +246,37 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
   const now = await mediaIds()
   expect(now).toEqual(expect.arrayContaining([id, ...parts.map((p) => p.id), trim.created[0].id]))
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(0)
+})
+
+test('add_description sets, shows and clears a clip description; list_media returns it', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(90_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
+  const id = imported[0].id
+  type Listed = { id: string; description?: string }[]
+  const listed = async (): Promise<Listed> => JSON.parse(textOf(await call(c, 'list_media'))) as Listed
+
+  expect(textOf(await call(c, 'add_description', { mediaId: id, description: '  Night run, streetlights  ' }))).toBe(
+    'Description saved for black.mp4.'
+  )
+  expect((await listed())[0].description).toBe('Night run, streetlights')
+  // The editor's library shows it (and the change is unsaved until Save).
+  await expect
+    .poll(() => page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0].description, id))
+    .toBe('Night run, streetlights')
+  expect(await page.evaluate(() => window.__reelStores.useProject.getState().dirty)).toBe(true)
+
+  expect(textOf(await call(c, 'add_description', { mediaId: id, description: '' }))).toBe('Description removed from black.mp4.')
+  expect((await listed())[0]).not.toHaveProperty('description')
+
+  const bad = await call(c, 'add_description', { mediaId: 'nope', description: 'x' })
+  expect(bad.isError).toBe(true)
+  expect(textOf(bad)).toContain(`Valid ids: ${id}`)
 })
 
 test('an edit that arrives mid-drag waits for the release instead of being overwritten', async ({

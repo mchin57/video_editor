@@ -23,7 +23,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'list_media',
     {
       description:
-        "List the clips in the open project's media library: id, file name, path on disk, kind, duration (s), audio, picture size, whether a transcript exists, whether the preview proxy is ready."
+        "List the clips in the open project's media library: id, file name, path on disk, kind, duration (s), audio, picture size, whether a transcript exists, whether the preview proxy is ready, and the clip's description when it has one (the user's note on what is in it)."
     },
     async () => result(await call('list_media', {}))
   )
@@ -92,6 +92,19 @@ export function registerTools(server: McpServer, call: CallEditor): void {
       }
     },
     async (args) => result(await call('split_clip', args))
+  )
+
+  server.registerTool(
+    'add_description',
+    {
+      description:
+        "Set a library clip's description: a note on what is in it (who, what happens, which take), which the user sees when hovering the clip in the library or on the timeline, and which list_media returns. Replaces any existing description; an empty string removes it. Saved with the project (an unsaved change until the user or export_video saves). Max 2000 characters.",
+      inputSchema: {
+        mediaId: z.string(),
+        description: z.string().max(2000)
+      }
+    },
+    async (args) => result(await call('add_description', args))
   )
 
   server.registerTool(

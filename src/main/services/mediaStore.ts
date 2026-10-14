@@ -17,7 +17,7 @@ import { createReadStream, existsSync, promises as fsp } from 'node:fs'
 import { basename, dirname, join, parse } from 'node:path'
 import type { FingerprintField, MediaAsset, MediaKind, MediaRecord } from '@shared/media'
 import type { RelinkResult } from '@shared/ipc'
-import { deriveKind, isAudioAsset, isImageAsset, isUnknownClip, kindFromExt } from '@shared/media'
+import { deriveKind, isAudioAsset, isImageAsset, isUnknownClip, kindFromExt, normalizeDescription } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
@@ -417,6 +417,21 @@ async function relinkSiblings(r: string, dir: string): Promise<string[]> {
     }
   }
   return found
+}
+
+/**
+ * Set (or with '' clear) a library item's description. An unsaved change like
+ * any other library edit: the change notice marks the project, and Save
+ * writes it into the `.reel`. Works for a Missing clip too — no file is read.
+ */
+export function setMediaDescription(id: string, text: string): void {
+  const r = getProjectRoot()
+  const entry = getEntry(id)
+  if (!entry) throw new Error(`No media "${id}" in this project.`)
+  const description = normalizeDescription(text)
+  if ((entry.record.description ?? '') === description) return
+  const { description: _old, ...rest } = entry.record
+  putEntry(description ? { ...rest, description } : rest, entry.path, r)
 }
 
 /**

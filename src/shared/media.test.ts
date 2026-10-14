@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { alphaInputDecoder, pixFmtHasAlpha } from './media'
+import { alphaInputDecoder, DESCRIPTION_MAX, normalizeDescription, pixFmtHasAlpha } from './media'
 
 describe('pixFmtHasAlpha', () => {
   it('recognises the alpha pixel-format families', () => {
@@ -25,5 +25,13 @@ describe('alphaInputDecoder', () => {
     expect(alphaInputDecoder(v('prores', true))).toBeNull() // ProRes 4444 decodes alpha natively
     expect(alphaInputDecoder(null)).toBeNull()
     expect(alphaInputDecoder(undefined)).toBeNull()
+  })
+})
+
+describe('normalizeDescription', () => {
+  it('folds Windows line endings, trims the ends and caps the length', () => {
+    expect(normalizeDescription('  swim start\r\nwave 2  ')).toBe('swim start\nwave 2')
+    expect(normalizeDescription(' \n ')).toBe('')
+    expect(normalizeDescription('x'.repeat(DESCRIPTION_MAX + 50))).toHaveLength(DESCRIPTION_MAX)
   })
 })

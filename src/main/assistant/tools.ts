@@ -18,7 +18,7 @@ import { frameTimes } from '@shared/assistant/frameTimes'
 import { resolveCompAtPath } from '@shared/compositions'
 import { splitPieces, trimPieces, type CutPiece } from '@shared/quickCut'
 import { getSubdir } from '../config'
-import { ensureProxy, getProjectMedia } from '../services/mediaStore'
+import { ensureProxy, getProjectMedia, setMediaDescription } from '../services/mediaStore'
 import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
@@ -47,7 +47,8 @@ function describeAsset(a: MediaAsset): Record<string, unknown> {
     height: a.probe.video?.displayHeight,
     transcribed: a.transcribed,
     proxyReady: a.proxyReady,
-    status: a.status ?? 'ok'
+    status: a.status ?? 'ok',
+    ...(a.description ? { description: a.description } : {})
   }
 }
 
@@ -62,12 +63,19 @@ async function sourceDurations(): Promise<Record<string, number>> {
   return Object.fromEntries([...(await projectAssets())].map(([id, a]) => [id, a.probe.durationSec]))
 }
 
-function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
+/** The library item `mediaId`, or an error naming the valid ids. */
+function findAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
   const asset = assets.get(mediaId)
   if (!asset) {
     const valid = [...assets.keys()].join(', ') || '(the library is empty — use import_media)'
     throw new Error(`No media "${mediaId}" in this project. Valid ids: ${valid}`)
   }
+  return asset
+}
+
+/** `findAsset`, and its original must be on disk (the tool reads it). */
+function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
+  const asset = findAsset(assets, mediaId)
   if (asset.status && asset.status !== 'ok') {
     throw new Error(`Media "${mediaId}" (${asset.fileName}) is ${asset.status} on disk; the user has to fix it in the Library first.`)
   }
@@ -148,6 +156,13 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
   split_clip: async ({ mediaId, times }) => {
     const asset = requireVideo(await projectAssets(), mediaId)
     return cutClip(asset, splitPieces(asset.probe.durationSec, times))
+  },
+
+  add_description: async ({ mediaId, description }) => {
+    // No file is read, so a Missing clip can be described too (no requireAsset).
+    const asset = findAsset(await projectAssets(), mediaId)
+    setMediaDescription(mediaId, description)
+    return text(description.trim() ? `Description saved for ${asset.fileName}.` : `Description removed from ${asset.fileName}.`)
   },
 
   get_timeline: async () => json(await callRenderer('getTimeline', {})),

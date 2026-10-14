@@ -13,8 +13,10 @@ import {
   quickCut,
   relinkMediaDialog,
   renameMedia,
-  renderAudioFx
+  renderAudioFx,
+  setMediaDescription
 } from '@/ipc/client'
+import { normalizeDescription } from '@shared/media'
 import { useEditor } from '@/state/store'
 import { activeComp, useProject } from '@/state/projectStore'
 import { useLoudness } from '@/state/loudness'
@@ -93,6 +95,28 @@ export function useQuickCut(): ReturnType<typeof useMutation<MediaAsset[], Error
   return useMutation<MediaAsset[], Error, QuickCutRequest>({
     mutationFn: (req) => quickCut(req),
     onSuccess: (assets) => onImported(assets, qc, select)
+  })
+}
+
+/**
+ * A clip's description (`MediaRecord.description`; '' clears). Shown at once
+ * in every open library list, then saved in main — whose change notice marks
+ * the project unsaved and refetches. A failure puts the saved text back.
+ */
+export function useSetDescription(): ReturnType<typeof useMutation<void, Error, { id: string; text: string }>> {
+  const qc = useQueryClient()
+  return useMutation<void, Error, { id: string; text: string }>({
+    mutationFn: ({ id, text }) => setMediaDescription(id, text),
+    onMutate: ({ id, text }) => {
+      const description = normalizeDescription(text) || undefined
+      qc.setQueriesData<MediaAsset[]>({ queryKey: [LIBRARY_KEY] }, (old) =>
+        old?.map((a) => (a.id === id ? { ...a, description } : a))
+      )
+    },
+    onError: (err) => {
+      void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
+      window.alert(`The description was not saved: ${ipcErrorMessage(err)}`)
+    }
   })
 }
 

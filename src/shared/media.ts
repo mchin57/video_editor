@@ -94,6 +94,19 @@ export interface MediaRecord {
   importedAt: string
   probe: ProbeInfo
   kind: MediaKind
+  /** The user's (or the assistant's) note about what is in the clip, shown on
+   *  hover in the library and the timeline. Absent = none. Per FILE: every
+   *  timeline placement of the clip shows the same one. */
+  description?: string
+}
+
+/** Longest description kept (a few paragraphs). */
+export const DESCRIPTION_MAX = 2000
+
+/** A description as stored: Windows line endings folded, ends trimmed, capped.
+ *  '' means "no description". */
+export function normalizeDescription(text: string): string {
+  return text.replace(/\r\n?/g, '\n').trim().slice(0, DESCRIPTION_MAX)
 }
 
 /** Whether a library item's original was found this session (checked by main

@@ -24,6 +24,7 @@ import {
   type RelinkCheck,
   renderAudioFxToLibrary,
   requireUsable,
+  setMediaDescription,
   tmpOutput
 } from './services/mediaStore'
 import {
@@ -220,6 +221,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.renameMedia, (_event, id: string, stem: string) => renameMedia(id, stem))
   // Quick cut: one new clip in generated/ per piece (the original stays as it is).
   ipcMain.handle(IPC.quickCut, (_event, req: QuickCutRequest) => cutToLibrary(req.mediaId, req.pieces))
+  ipcMain.handle(IPC.setMediaDescription, (_event, id: string, text: string) => setMediaDescription(id, text))
 
   // A library record changed after the project opened (import, relink, a path
   // fixed by a re-check): tell the renderer it now has unsaved changes.

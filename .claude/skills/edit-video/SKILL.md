@@ -24,6 +24,9 @@ Look for tools named `mcp__reel-editor__*` (e.g. `mcp__reel-editor__list_media`)
 
 1. `list_media`. If the library is empty or lacks what the user mentioned, ask for
    the file or folder paths and use `import_media` with exactly those paths. Never guess paths.
+   A clip's `description` (when present) is the user's own note on what is in it — trust it
+   when choosing clips. Write one with `add_description` when the user asks you to describe
+   or label clips.
 2. `get_transcript` for each clip with audio (phrase lines, SOURCE seconds). Use
    `words: true` with a `fromSec`/`toSec` range when you need to cut on an exact word.
 3. When the picture matters (no speech, choosing between takes, checking framing),

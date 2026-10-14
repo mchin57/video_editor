@@ -17,27 +17,38 @@ import { isImageAsset } from '@shared/media'
 import { formatDuration } from '@/lib/format'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
+import { useHoverIntent } from '@/hooks/useHoverIntent'
+import { DescriptionBox } from './DescriptionBox'
+
+/** Width of the description panel beside the preview pop-out. */
+const DESC_W = 220
 
 /**
  * Large floating video preview, portaled to <body> so the timeline/library
  * overflow can't clip it. Anchored beside the hovered card (flips to the other
  * side near the viewport edge), sized to the clip's aspect, and plays with sound.
+ * The clip's description sits beside it, on the far side from the card, as an
+ * editable box (`DescriptionBox`).
  *
- * Interactive: the card + popout form one hover group (`onEnter`/`onLeave` feed
- * the card's delayed-close timer), so the cursor can travel onto the popout to
- * grab the scrub bar without dismissing it. An invisible "bridge" spans the gap
- * between card and popout so the crossing never reads as a leave at all.
+ * Interactive: the card + popout form one hover group (`HoverIntent`), so the
+ * cursor can travel onto the popout to grab the scrub bar or type a description
+ * without dismissing it. An invisible "bridge" spans the gap between card and
+ * popout so the crossing never reads as a leave at all; a focused description
+ * pins the group open (`onPin`).
  */
 function PreviewPopout({
   asset,
   anchor,
   onEnter,
-  onLeave
+  onLeave,
+  onPin
 }: {
   asset: MediaAsset
   anchor: HTMLElement
   onEnter: () => void
   onLeave: () => void
+  /** The description's focus; `hovered` = the cursor is over the card or popout right now. */
+  onPin: (pinned: boolean, hovered: boolean) => void
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -72,14 +83,17 @@ function PreviewPopout({
     width = Math.round(height * aspect)
   }
   const rect = anchor.getBoundingClientRect()
+  const total = width + DESC_W
   let left = rect.right + margin
-  if (left + width > window.innerWidth - 8) left = rect.left - margin - width // flip to the left
+  // Flip to the left near the viewport edge; the description stays on the far side.
+  const onRight = left + total <= window.innerWidth - 8
+  if (!onRight) left = rect.left - margin - total
   left = Math.max(8, left)
   const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, window.innerHeight - height - 8))
 
   // Invisible strip covering the card→popout gap, tall enough to span both.
-  const bridgeLeft = left >= rect.right ? rect.right : left + width
-  const bridgeWidth = left >= rect.right ? left - rect.right : rect.left - (left + width)
+  const bridgeLeft = left >= rect.right ? rect.right : left + total
+  const bridgeWidth = left >= rect.right ? left - rect.right : rect.left - (left + total)
   const bridgeTop = Math.min(top, rect.top)
   const bridgeHeight = Math.max(top + height, rect.bottom) - bridgeTop
 
@@ -123,43 +137,59 @@ function PreviewPopout({
       )}
       <div
         ref={rootRef}
-        data-testid="preview-popout"
-        style={{ position: 'fixed', left, top, width, height }}
-        className="z-[500] overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl"
+        style={{ position: 'fixed', left, top, width: total, height }}
+        className={`z-[500] flex overflow-hidden rounded-xl border border-white/15 bg-zinc-900 shadow-2xl ${
+          onRight ? '' : 'flex-row-reverse'
+        }`}
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
       >
-        <video
-          ref={ref}
-          src={proxyUrl(asset)}
-          loop
-          autoPlay
-          playsInline
-          onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
-          className="h-full w-full object-contain"
-        />
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5">
-          <div className="mb-0.5 flex justify-between font-mono text-[9px] text-zinc-300">
-            <span data-testid="popout-time">{formatDuration(cur)}</span>
-            <span>{formatDuration(dur)}</span>
-          </div>
-          <div
-            ref={barRef}
-            data-testid="popout-scrub"
-            onPointerDown={onBarDown}
-            title="Click or drag to seek"
-            className="relative h-3 cursor-pointer"
-          >
-            <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25" />
+        <div data-testid="preview-popout" className="relative h-full shrink-0 bg-black" style={{ width }}>
+          <video
+            ref={ref}
+            src={proxyUrl(asset)}
+            loop
+            autoPlay
+            playsInline
+            onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+            className="h-full w-full object-contain"
+          />
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5">
+            <div className="mb-0.5 flex justify-between font-mono text-[9px] text-zinc-300">
+              <span data-testid="popout-time">{formatDuration(cur)}</span>
+              <span>{formatDuration(dur)}</span>
+            </div>
             <div
-              className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded bg-sky-400"
-              style={{ width: `${frac * 100}%` }}
-            />
-            <div
-              className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300 shadow"
-              style={{ left: `${frac * 100}%` }}
-            />
+              ref={barRef}
+              data-testid="popout-scrub"
+              onPointerDown={onBarDown}
+              title="Click or drag to seek"
+              className="relative h-3 cursor-pointer"
+            >
+              <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25" />
+              <div
+                className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded bg-sky-400"
+                style={{ width: `${frac * 100}%` }}
+              />
+              <div
+                className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300 shadow"
+                style={{ left: `${frac * 100}%` }}
+              />
+            </div>
           </div>
+        </div>
+        <div
+          data-testid="library-description"
+          className={`flex min-w-0 flex-1 flex-col gap-1.5 p-2 ${onRight ? 'border-l' : 'border-r'} border-white/10`}
+        >
+          <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-zinc-400" title={asset.fileName}>
+            Description
+          </div>
+          <DescriptionBox
+            asset={asset}
+            className="flex-1"
+            onFocusChange={(on) => onPin(on, !!rootRef.current?.matches(':hover') || anchor.matches(':hover'))}
+          />
         </div>
       </div>
     </>,
@@ -182,33 +212,15 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   // converted) used to stay on ▶ for good though the thumb was right there.
   const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
   const failed = failedFor === asset
-  const [hover, setHover] = useState(false)
+  const { target: hover, intent } = useHoverIntent<true>()
   const wrapRef = useRef<HTMLDivElement>(null)
-  const hideTimer = useRef<number | null>(null)
   const canPreview = asset.proxyReady && !!asset.probe.video && !isImageAsset(asset)
-  const show = (): void => {
-    if (hideTimer.current != null) {
-      window.clearTimeout(hideTimer.current)
-      hideTimer.current = null
-    }
-    setHover(true)
-  }
-  const scheduleHide = (): void => {
-    if (hideTimer.current != null) window.clearTimeout(hideTimer.current)
-    hideTimer.current = window.setTimeout(() => setHover(false), 160)
-  }
-  useEffect(
-    () => () => {
-      if (hideTimer.current != null) window.clearTimeout(hideTimer.current)
-    },
-    []
-  )
   return (
     <div
       ref={wrapRef}
       className="relative h-full w-full"
-      onMouseEnter={() => canPreview && show()}
-      onMouseLeave={scheduleHide}
+      onMouseEnter={() => canPreview && intent.enter(true)}
+      onMouseLeave={() => intent.leave()}
     >
       {failed ? (
         <span className="flex h-full w-full items-center justify-center text-base text-zinc-600">▶</span>
@@ -221,7 +233,13 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
         />
       )}
       {hover && canPreview && wrapRef.current && (
-        <PreviewPopout asset={asset} anchor={wrapRef.current} onEnter={show} onLeave={scheduleHide} />
+        <PreviewPopout
+          asset={asset}
+          anchor={wrapRef.current}
+          onEnter={() => intent.enter()}
+          onLeave={() => intent.leave()}
+          onPin={(on, hovered) => intent.pin(on, hovered)}
+        />
       )}
     </div>
   )
