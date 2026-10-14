@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type QuickCutRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
 import type { JobProgressEvent } from '@shared/jobs'
@@ -29,6 +29,9 @@ const api = {
   /** Library Rename: the original on disk and the item get `stem` + the file's
    *  own extension (rejects with a reason; nothing changes then). */
   renameMedia: (id: string, stem: string): Promise<MediaAsset> => ipcRenderer.invoke(IPC.renameMedia, id, stem),
+  /** Library Quick cut: one new clip in `generated/` per piece, in order (the
+   *  original is untouched). Rejects with a reason before any encode. */
+  quickCut: (req: QuickCutRequest): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.quickCut, req),
 
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read/write its working copy (autosave); the *File*

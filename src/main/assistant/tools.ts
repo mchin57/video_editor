@@ -16,11 +16,13 @@ import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { transcriptPhraseText, transcriptWordText } from '@shared/assistant/transcriptText'
 import { frameTimes } from '@shared/assistant/frameTimes'
 import { resolveCompAtPath } from '@shared/compositions'
+import { splitPieces, trimPieces, type CutPiece } from '@shared/quickCut'
 import { getSubdir } from '../config'
 import { ensureProxy, getProjectMedia } from '../services/mediaStore'
 import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
+import { cutToLibrary } from '../services/quickCut'
 import { hdrToSdrChain } from '../services/proxy'
 import { exportProject, renderFrames, suggestedExportName } from '../services/exporter'
 import { listJobs } from '../services/jobs'
@@ -72,7 +74,23 @@ function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAs
   return asset
 }
 
-export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<ToolContent[]> } = {
+function requireVideo(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
+  const asset = requireAsset(assets, mediaId)
+  if (assetKind(asset) !== 'video') throw new Error(`${asset.fileName} is not a video clip`)
+  return asset
+}
+
+/** trim_clip / split_clip: the Library's Quick cut — new clips in generated/, added to the project. */
+async function cutClip(asset: MediaAsset, pieces: CutPiece[]): Promise<ToolContent[]> {
+  const made = await cutToLibrary(asset.id, pieces)
+  await callRenderer('addMedia', { ids: made.map((a) => a.id) })
+  return json({
+    created: made.map((a, i) => ({ ...describeAsset(a), fromSourceSec: [pieces[i].inSec, pieces[i].outSec] })),
+    note: `New clips from ${asset.fileName}; the original and the timeline are unchanged.`
+  })
+}
+
+export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<ToolContent[]> } = {
   list_media: async () => json([...(await projectAssets()).values()].map(describeAsset)),
 
   import_media: async ({ paths }) => {
@@ -120,6 +138,16 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     } finally {
       await fsp.rm(dir, { recursive: true, force: true })
     }
+  },
+
+  trim_clip: async ({ mediaId, startSec, endSec }) => {
+    const asset = requireVideo(await projectAssets(), mediaId)
+    return cutClip(asset, trimPieces(asset.probe.durationSec, startSec, endSec))
+  },
+
+  split_clip: async ({ mediaId, times }) => {
+    const asset = requireVideo(await projectAssets(), mediaId)
+    return cutClip(asset, splitPieces(asset.probe.durationSec, times))
   },
 
   get_timeline: async () => json(await callRenderer('getTimeline', {})),

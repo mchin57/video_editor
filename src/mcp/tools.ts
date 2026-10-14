@@ -68,6 +68,33 @@ export function registerTools(server: McpServer, call: CallEditor): void {
   )
 
   server.registerTool(
+    'trim_clip',
+    {
+      description:
+        'Make a NEW library clip from SOURCE seconds [startSec, endSec) of a video, saved in the project folder (frame-accurate re-encode; takes a few seconds). The original clip and the timeline are left alone. Returns {created: [the new library entry]} — place it with place_sequence. An end past the clip is clamped to its end. Use when the user wants a trimmed clip in the library; to just use part of a clip in the edit, place_sequence with inSec/outSec is enough.',
+      inputSchema: {
+        mediaId: z.string(),
+        startSec: z.number().min(0),
+        endSec: z.number().positive()
+      }
+    },
+    async (args) => result(await call('trim_clip', args))
+  )
+
+  server.registerTool(
+    'split_clip',
+    {
+      description:
+        'Cut a video at one or more SOURCE seconds into back-to-back NEW library clips (N times → N+1 clips, in order), saved in the project folder (frame-accurate re-encode). The original and the timeline are left alone. Returns {created: [the new library entries, in order]}. Each piece must be at least 0.1s.',
+      inputSchema: {
+        mediaId: z.string(),
+        times: z.array(z.number().positive()).min(1).max(50).describe('SOURCE seconds to cut at, inside the clip')
+      }
+    },
+    async (args) => result(await call('split_clip', args))
+  )
+
+  server.registerTool(
     'get_timeline',
     {
       description:

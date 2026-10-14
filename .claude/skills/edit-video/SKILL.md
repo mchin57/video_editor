@@ -46,6 +46,12 @@ images, captions and music stay; `"append"`, the default, adds after the last cl
 It is one undo step. Then `get_timeline` and check the clips, order and total length.
 Fix mistakes with `undo` or `remove_items` and place again.
 
+A cut on the timeline does NOT need new files: `inSec`/`outSec` already trim. Use
+`trim_clip` (one window) or `split_clip` (cut at one or more SOURCE seconds) only when
+the user wants trimmed or split clips **in the library** — they write new clips to the
+project folder (a few seconds each), return their new ids in order, and change neither
+the original nor the timeline. `undo` does not remove them.
+
 ## 4. Text and captions
 
 - `get_text` lists every text layer and caption (TIMELINE seconds) with the style it

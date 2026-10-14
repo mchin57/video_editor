@@ -14,6 +14,7 @@ export const IPC = {
   ensureProxy: 'media:ensureProxy',
   relinkMediaDialog: 'media:relinkDialog',
   renameMedia: 'media:rename',
+  quickCut: 'media:quickCut',
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read and write the working copy (autosave.json:
   // crash recovery + restore on launch); the File ▸ actions below create,
@@ -69,6 +70,13 @@ export interface StillRequest {
    *  is a transform like position, so a still does not bake it in. */
   flipH?: boolean
   flipV?: boolean
+}
+
+/** Library ▸ Quick cut…: cut a video into one new library clip per piece
+ *  (`shared/quickCut.ts`). Pieces are source windows, sorted, non-overlapping. */
+export interface QuickCutRequest {
+  mediaId: string
+  pieces: import('./quickCut').CutPiece[]
 }
 
 /** Ask main to render an effect's wet signal into a new library asset. */

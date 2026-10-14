@@ -3,6 +3,8 @@
 export interface FfmpegEncoders {
   h264_nvenc: boolean
   hevc_nvenc: boolean
+  /** HEVC software encoder: the quick-cut fallback for HEVC / 10-bit sources without NVENC. */
+  libx265: boolean
   libx264: boolean
   aac: boolean
 }
@@ -36,7 +38,7 @@ export const EMPTY_CAPABILITIES: FfmpegCapabilities = {
   ffmpegPath: null,
   ffprobePath: null,
   version: null,
-  encoders: { h264_nvenc: false, hevc_nvenc: false, libx264: false, aac: false },
+  encoders: { h264_nvenc: false, hevc_nvenc: false, libx264: false, libx265: false, aac: false },
   filters: {
     ass: false,
     subtitles: false,

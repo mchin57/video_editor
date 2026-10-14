@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync, promises as fsp } from 'node:fs'
 import { join, parse } from 'node:path'
-import { IPC, IPC_EVENT, type AudioFxRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import { IPC, IPC_EVENT, type AudioFxRequest, type QuickCutRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -54,6 +54,7 @@ import { getTranscript, transcribeMedia, whisperAvailable } from './services/whi
 import { detectSilence, type Interval } from './services/silence'
 import { ensureLoudness } from './services/loudness'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
+import { cutToLibrary } from './services/quickCut'
 import { cancelJob, createJob, finishJob, setProgress } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
 import { assistantStatus, startAssistant } from './assistant/service'
@@ -217,6 +218,8 @@ export function registerIpcHandlers(): void {
   // A library card's Rename (docs/MEDIA-POINTERS.md "Rename"): the file on
   // disk first, then the record. Rejects with a plain reason.
   ipcMain.handle(IPC.renameMedia, (_event, id: string, stem: string) => renameMedia(id, stem))
+  // Quick cut: one new clip in generated/ per piece (the original stays as it is).
+  ipcMain.handle(IPC.quickCut, (_event, req: QuickCutRequest) => cutToLibrary(req.mediaId, req.pieces))
 
   // A library record changed after the project opened (import, relink, a path
   // fixed by a re-check): tell the renderer it now has unsaved changes.

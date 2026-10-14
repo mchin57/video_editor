@@ -101,6 +101,7 @@ export async function getCapabilities(force = false): Promise<FfmpegCapabilities
     h264_nvenc: has(encodersOut, 'h264_nvenc'),
     hevc_nvenc: has(encodersOut, 'hevc_nvenc'),
     libx264: has(encodersOut, 'libx264'),
+    libx265: has(encodersOut, 'libx265'),
     aac: has(encodersOut, 'aac')
   }
   const filters = {

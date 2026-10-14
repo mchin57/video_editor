@@ -1,9 +1,10 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
-import { assetAspect, isImageAsset, isUnknownClip } from '@shared/media'
-import { useLibrary, useImportMedia, useRenameMedia, useRepairMedia } from '@/hooks/useMedia'
+import { assetAspect, assetKind, isImageAsset, isUnknownClip } from '@shared/media'
+import { useLibrary, useImportMedia, useQuickCut, useRenameMedia, useRepairMedia } from '@/hooks/useMedia'
 import { revealFile } from '@/ipc/client'
 import { RenameMediaDialog } from '@/components/RenameMediaDialog'
+import { QuickCutDialog } from '@/components/QuickCutDialog'
 import { latestJob, useEditor } from '@/state/store'
 import { activeComp, getFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
@@ -35,19 +36,31 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const rename = useRenameMedia()
   const ctx = useContextMenu()
   const [renaming, setRenaming] = useState(false)
+  const [cutting, setCutting] = useState(false)
+  const quickCut = useQuickCut()
   // A missing original can't be added (its proxy, if any, may describe a file
   // that's gone) until it is relinked below.
   const status = asset.status ?? 'ok'
   const ready = asset.proxyReady && status === 'ok'
 
-  // Right-click: Rename… (docs/MEDIA-POINTERS.md "Rename") and Reveal in
-  // Explorer. Both need the file, so a Missing or unknown clip greys them out.
+  // Right-click: Quick cut… (docs/QUICK-CUT.md), Rename… (docs/MEDIA-POINTERS.md
+  // "Rename") and Reveal in Explorer. All need the file, so a Missing or
+  // unknown clip greys them out.
   const noFile = isUnknownClip(asset)
     ? 'This clip has no known file. Relink it first.'
     : status !== 'ok'
       ? 'The file is missing. Relink it first.'
       : undefined
+  // Quick cut needs a video whose preview proxy is ready (the dialog plays it).
+  const noCut =
+    noFile ??
+    (assetKind(asset) !== 'video'
+      ? 'Quick cut works on video clips.'
+      : !asset.proxyReady
+        ? 'The preview is still being prepared.'
+        : undefined)
   const menuItems = (): ContextMenuEntry[] => [
+    { label: 'Quick cut…', testId: 'ctx-quickcut', disabled: !!noCut, reason: noCut, onSelect: () => setCutting(true) },
     { label: 'Rename…', testId: 'ctx-rename', disabled: !!noFile, reason: noFile, onSelect: () => setRenaming(true) },
     {
       label: 'Reveal in Explorer',
@@ -68,6 +81,16 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           onRename={async (stem) => {
             await rename(asset.id, stem)
             setRenaming(false)
+          }}
+        />
+      )}
+      {cutting && (
+        <QuickCutDialog
+          asset={asset}
+          onClose={() => setCutting(false)}
+          onSave={async (pieces) => {
+            await quickCut.mutateAsync({ mediaId: asset.id, pieces })
+            setCutting(false)
           }}
         />
       )}

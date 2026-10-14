@@ -8,6 +8,14 @@ export function formatDuration(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+/** `m:ss.cc` — a position to the hundredth, for trim/split readouts. */
+export function formatClock(sec: number): string {
+  const cs = Math.max(0, Math.round((Number.isFinite(sec) ? sec : 0) * 100))
+  const m = Math.floor(cs / 6000)
+  const s = Math.floor((cs % 6000) / 100)
+  return `${m}:${s.toString().padStart(2, '0')}.${(cs % 100).toString().padStart(2, '0')}`
+}
+
 export function formatFps(fps: number): string {
   if (!fps) return '—'
   return `${Math.round(fps * 100) / 100} fps`

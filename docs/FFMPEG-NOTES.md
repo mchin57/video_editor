@@ -394,6 +394,36 @@ anything ffmpeg writes straight to its final name is a trap:
   `buildThumbnailArgs(..., still)` omits it for image assets. Videos keep
   `-ss 0`, unchanged.
 
+## Quick cut — frame-exact pieces by re-encode (verified ffmpeg 8.1.1, 2026-10-14)
+
+Backing for `services/quickCut.ts` (`buildCutArgs`): `-ss in` BEFORE `-i`,
+`-t len` after it, `-fps_mode passthrough`, re-encoded.
+
+- **A stream copy can't do it.** iPhone H.264 keyframes sit ~0.97 s apart
+  (IMG_1593: 0, 0.967, 1.933, …), so `-c copy` would snap a trim by up to a
+  second. Re-encoding with an input seek is frame-exact.
+- **Pieces split at one point share no frame and lose none.** IMG_8420 (VFR,
+  avg 59.94 fps, 435 frames) cut at 3.217 s: piece 1 had 193 frames, piece 2
+  242 (= 435). Piece 1 holds exactly the frames with pts < 3.217 (the last is
+  3.203); piece 2 starts with the 3.220 frame — its first frame matched the
+  source's 3.220 frame at PSNR 46.8 dB, vs 15.3 dB against the 3.203 frame.
+- **Rotation is baked in, not carried.** A `rotation=-90` 1920×1080 source
+  comes out 1080×1920 with no display matrix; `-map_metadata 0` copies the
+  `creation_time` tag and does NOT bring the rotation back.
+- **HDR tags:** a fully tagged 10-bit HLG HEVC source cut with `hevc_nvenc
+  -profile:v main10 -pix_fmt p010le` keeps `bt2020 / arib-std-b67 / bt2020nc`
+  even without explicit flags; the args still pass the probe's tags
+  (`-color_primaries/-color_trc/-colorspace`, skipping `unknown`) because
+  iPhone files are often only partly tagged (see `hdrToSdrChain`). ffprobe's
+  `unknown` is not an accepted option value, so it is never passed.
+  `-display_rotation` is an INPUT option in 8.1.1 (it errors as an output one).
+- **Alpha WebM:** with `-c:v libvpx-vp9` before `-i` and VP9 `yuva420p` out,
+  the cut keeps `ALPHA_MODE=1` and the alpha itself (alphaextract: transparent
+  half 0, opaque half 255; 60 frames for 2 s).
+- **Speed / size:** NVENC CQ 18 at preset p6: a 2.5 s 1080×1920 60 fps cut in
+  0.9 s, ~36 Mbps (source 23); a 2.8 s 30 fps cut ~21 Mbps (source 16). A cut
+  is a new original, so it errs large.
+
 ## Loudness series — momentary loudness + per-step peak in one pass (verified ffmpeg 8.1.1, 2026-10)
 
 Backing for `cache/<id>/loudness.json` (`services/loudness.ts` →

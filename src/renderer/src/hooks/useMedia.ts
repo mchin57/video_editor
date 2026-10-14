@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
-import type { RelinkResult } from '@shared/ipc'
+import type { QuickCutRequest, RelinkResult } from '@shared/ipc'
 import {
   ensureProxy,
   extractAudioDialog,
@@ -10,6 +10,7 @@ import {
   importPaths,
   listProjectMedia,
   ipcErrorMessage,
+  quickCut,
   relinkMediaDialog,
   renameMedia,
   renderAudioFx
@@ -79,6 +80,20 @@ async function onImported(
   useProject.getState().addMedia(assets.map((a) => a.id))
   void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
   if (assets[0]) select(assets[0].id)
+}
+
+/**
+ * Library ▸ Quick cut… ▸ Save: encode one new clip per piece (main, ffmpeg) and
+ * add them to the project's library like any import — the first is selected.
+ * Errors reject the call so the dialog can show them inline.
+ */
+export function useQuickCut(): ReturnType<typeof useMutation<MediaAsset[], Error, QuickCutRequest>> {
+  const qc = useQueryClient()
+  const select = useEditor((s) => s.select)
+  return useMutation<MediaAsset[], Error, QuickCutRequest>({
+    mutationFn: (req) => quickCut(req),
+    onSuccess: (assets) => onImported(assets, qc, select)
+  })
 }
 
 /**

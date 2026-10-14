@@ -18,7 +18,7 @@ const MCP = join(ROOT, 'out', 'main', 'mcp.js')
 const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
 const FFMPEG = join(BIN, 'ffmpeg.exe')
 const FFPROBE = join(BIN, 'ffprobe.exe')
-const TOOLS = ['export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'undo']
+const TOOLS = ['export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -193,6 +193,59 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   const there = JSON.parse(textOf(await call(c, 'export_video', { fileName: 'cut', folder: dir }))) as { path: string }
   expect(there.path).toBe(join(dir, 'cut.mp4'))
   expect(existsSync(there.path)).toBe(true)
+})
+
+test('split_clip and trim_clip save new clips to generated/ and the library; bad times change nothing', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG) || !existsSync(FFPROBE), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const src = join(dir, 'clip.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error',
+    '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=30:d=4',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+    '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', src
+  ])
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [src] }))) as { imported: { id: string }[] }
+  const id = imported[0].id
+  const mediaIds = (): Promise<string[]> => page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)
+  const probeDur = (f: string): number =>
+    Number(execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString().trim())
+  type Created = { id: string; fileName: string; path: string; durationSec: number; fromSourceSec: [number, number] }
+
+  // Refused before any encode: nothing is added.
+  const before = await mediaIds()
+  expect(textOf(await call(c, 'split_clip', { mediaId: id, times: [9] }))).toContain('not inside the clip')
+  expect(textOf(await call(c, 'split_clip', { mediaId: id, times: [1, 1.05] }))).toContain('shorter than 0.1s')
+  expect(textOf(await call(c, 'trim_clip', { mediaId: id, startSec: 3, endSec: 2 }))).toContain('must be after the start')
+  expect(await mediaIds()).toEqual(before)
+
+  // Split at two points (any order) → three back-to-back clips, in order.
+  const split = await call(c, 'split_clip', { mediaId: id, times: [2.5, 1] })
+  expect(split.isError).toBeFalsy()
+  const parts = (JSON.parse(textOf(split)) as { created: Created[] }).created
+  expect(parts.map((p) => p.fileName)).toEqual(['clip (cut 1).mp4', 'clip (cut 2).mp4', 'clip (cut 3).mp4'])
+  expect(parts.map((p) => p.fromSourceSec)).toEqual([[0, 1], [1, 2.5], [2.5, 4]])
+  const generated = join(projectsDir, 'E2E', 'generated')
+  for (const [i, want] of [1, 1.5, 1.5].entries()) {
+    expect(parts[i].path).toBe(join(generated, parts[i].fileName))
+    expect(probeDur(parts[i].path)).toBeCloseTo(want, 1)
+  }
+
+  // Trim keeps one window; an end past the clip is clamped.
+  const trim = JSON.parse(textOf(await call(c, 'trim_clip', { mediaId: id, startSec: 0.5, endSec: 99 }))) as { created: Created[] }
+  expect(trim.created.map((p) => [p.fileName, p.fromSourceSec])).toEqual([['clip (cut).mp4', [0.5, 4]]])
+  expect(probeDur(trim.created[0].path)).toBeCloseTo(3.5, 1)
+
+  // All four are in the project's library; the original stays, and the edit is untouched.
+  const now = await mediaIds()
+  expect(now).toEqual(expect.arrayContaining([id, ...parts.map((p) => p.id), trim.created[0].id]))
+  expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(0)
 })
 
 test('an edit that arrives mid-drag waits for the release instead of being overwritten', async ({

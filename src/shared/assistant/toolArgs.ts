@@ -13,6 +13,8 @@ export interface ToolArgs {
   import_media: { paths: string[] }
   get_transcript: { mediaId: string; fromSec?: number; toSec?: number; words?: boolean }
   get_frames: { mediaId: string; times?: number[]; count?: number }
+  trim_clip: { mediaId: string; startSec: number; endSec: number }
+  split_clip: { mediaId: string; times: number[] }
   get_timeline: NoArgs
   place_sequence: {
     items: { mediaId: string; inSec: number; outSec: number }[]
