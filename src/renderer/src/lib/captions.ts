@@ -123,3 +123,42 @@ export function buildTimelineCaptions(
   flush()
   return segments
 }
+
+/** The words of a caption's text, as `buildTimelineCaptions` would have joined them. */
+function splitCaptionWords(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean)
+}
+
+/**
+ * A caption with new text, its word timings kept in step. The words are what
+ * a split rebuilds each half's text from (`splitCaptionSegment`), so changing
+ * only `text` would let the next split bring the old words back. Same word
+ * count → each word keeps its timing (a typo fix). Otherwise the new words are
+ * spread evenly over the span the old words covered (the segment window when
+ * there were none).
+ */
+export function captionWithText(seg: CaptionSegment, text: string): CaptionSegment {
+  const next = splitCaptionWords(text)
+  const old = seg.words ?? []
+  if (next.length === old.length) {
+    return { ...seg, text, words: old.map((w, i) => ({ ...w, text: next[i] })) }
+  }
+  const from = old.length ? old[0].startSec : seg.startSec
+  const to = old.length ? old[old.length - 1].endSec : seg.endSec
+  const step = (to - from) / Math.max(1, next.length)
+  const words = next.map((t, i) => ({ text: t, startSec: from + i * step, endSec: from + (i + 1) * step }))
+  return { ...seg, text, words }
+}
+
+/**
+ * A caption moved/retimed to [startSec, endSec), its word timings mapped
+ * linearly from the old window into the new one, so they keep their relative
+ * placement (a pure move just shifts them).
+ */
+export function captionInWindow(seg: CaptionSegment, startSec: number, endSec: number): CaptionSegment {
+  const oldLen = seg.endSec - seg.startSec
+  const k = oldLen > 0 ? (endSec - startSec) / oldLen : 1
+  const map = (t: number): number => startSec + (t - seg.startSec) * k
+  const words = (seg.words ?? []).map((w) => ({ ...w, startSec: map(w.startSec), endSec: map(w.endSec) }))
+  return { ...seg, startSec, endSec, words }
+}

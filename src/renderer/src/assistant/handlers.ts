@@ -7,8 +7,11 @@
 import type { AssistantOps, AssistantRequest, AssistantResponse } from '@shared/assistant/protocol'
 import type { Composition, Project } from '@shared/project'
 import { summarizeTimeline } from '@shared/assistant/timelineSummary'
+import { summarizeText } from '@shared/assistant/onScreenText'
+import { compositionDuration } from '@shared/compositions'
 import { activeComp, useProject } from '@/state/projectStore'
-import { expandSelection, timelineTiles } from '@/lib/links'
+import { usePlayback } from '@/state/playback'
+import { expandSelection, isLinked, timelineTiles } from '@/lib/links'
 import { assistantRespond, onAssistantRequest } from '@/ipc/client'
 import { interactionOpen, whenIdle } from '@/lib/interaction'
 
@@ -50,7 +53,22 @@ const handlers: Handlers = {
     useProject.getState().undo()
     return { undone: useProject.getState().past.length < before, timeline: summarizeTimeline(comp()) }
   },
-  getProject: () => project()
+  getProject: () => project(),
+  getRenderTarget: () => ({ project: project(), editPath: useProject.getState().editPath }),
+  getText: ({ sourceDurations, ...q }) => {
+    const c = comp()
+    const durationSec = compositionDuration(c, (id) => sourceDurations[id] ?? 0)
+    return summarizeText(c, (ref) => isLinked(c, ref), durationSec, q)
+  },
+  applyTextEdits: ({ edits, sourceDurations }) =>
+    useProject.getState().applyTextEdits(edits, (id) => sourceDurations[id] ?? 0),
+  setPlayhead: ({ timeSec, sourceDurations }) => {
+    const durationSec = compositionDuration(comp(), (id) => sourceDurations[id] ?? 0)
+    const t = Math.min(Math.max(0, timeSec), durationSec)
+    usePlayback.getState().setPlaying(false)
+    usePlayback.getState().setTime(t)
+    return { timeSec: t, durationSec }
+  }
 }
 
 function answer(req: AssistantRequest): void {

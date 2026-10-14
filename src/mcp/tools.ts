@@ -11,6 +11,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
+import { FONTS } from '@shared/fonts'
+import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN } from '@shared/assistant/onScreenText'
 
 export type CallEditor = <K extends ToolName>(tool: K, args: ToolArgs[K]) => Promise<ToolContent[]>
 
@@ -122,6 +124,79 @@ export function registerTools(server: McpServer, call: CallEditor): void {
       }
     },
     async (args) => result(await call('export_video', args))
+  )
+
+  server.registerTool(
+    'get_text',
+    {
+      description:
+        'All text the viewer reads: text layers and caption segments in TIMELINE order, each with id, kind ("text" | "caption"), startSec/endSec, the text, whether it is visible (and why not), whether it is linked, and the style it actually renders with (font, size, colour, pill, stroke, shadow, gradient, centre x/y in the 1080x1920 frame, rotation). Captions say whether they follow the lane style or have their own. Also the caption lane itself (id "captions": on/off + lane-wide style) and durationSec, the length of the edit: captions do not extend it, so one starting at or after it says hiddenBecause "after the end of the edit", and one running past it has cutOffAtSec. Optional: ids, or fromSec/toSec to get what is on screen in that range (fromSec = toSec asks what shows at that moment).',
+      inputSchema: {
+        ids: z.array(z.string()).min(1).optional(),
+        fromSec: z.number().min(0).optional().describe('TIMELINE second'),
+        toSec: z.number().min(0).optional().describe('TIMELINE second')
+      }
+    },
+    async (args) => result(await call('get_text', args))
+  )
+
+  const color = z.string().regex(/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/).describe('#rrggbb or #rrggbbaa')
+  const textEdit = z.strictObject({
+    id: z.string().optional().describe('Item to patch (from get_text). Leave out to CREATE a new item. "captions" = the caption lane.'),
+    kind: z.enum(['text', 'caption']).optional().describe('Only when creating; default "text" (a text layer on top)'),
+    text: z.string().min(1).optional(),
+    startSec: z.number().min(0).optional().describe('TIMELINE second'),
+    endSec: z.number().positive().optional().describe('TIMELINE second'),
+    visible: z.boolean().optional(),
+    x: z.number().optional().describe('Centre x in the 1080x1920 frame'),
+    y: z.number().optional().describe('Centre y in the 1080x1920 frame'),
+    rotationDeg: z.number().optional().describe('Clockwise degrees'),
+    fontFamily: z.enum(FONTS.map((f) => f.id) as [string, ...string[]]).optional(),
+    fontSizePx: z.number().min(TEXT_FONT_SIZE_MIN).max(TEXT_FONT_SIZE_MAX).optional(),
+    color: color.optional(),
+    pill: z
+      .strictObject({ enabled: z.boolean().optional(), color: color.optional(), padPx: z.number().min(0).max(200).optional() })
+      .optional()
+      .describe('Box behind the text; fields merge into the current pill'),
+    stroke: z.strictObject({ widthPx: z.number().min(0).max(100), color }).nullable().optional().describe('Glyph outline (ignored while the pill is on); null removes'),
+    shadow: z
+      .strictObject({ distancePx: z.number().min(0).max(100), color, blur: z.number().min(0).max(50) })
+      .nullable()
+      .optional()
+      .describe('null removes'),
+    gradient: z.strictObject({ from: color, to: color, angle: z.number() }).nullable().optional().describe('Fill gradient, overrides color; null removes'),
+    widthPx: z.number().min(40).max(4000).nullable().optional().describe('Text layers only: wrap width; null = hug the text'),
+    followLaneStyle: z.boolean().optional().describe('Captions only: true drops its own style so it follows the lane again')
+  })
+
+  server.registerTool(
+    'set_text',
+    {
+      description:
+        'Create or change on-screen text. Each edit WITH an id patches that item: only the fields you give change (fix a caption by sending just {id, text}). An edit WITHOUT an id creates a new item and needs text, startSec and endSec (kind "caption" for a caption, otherwise a text layer on top; unset style uses the editor defaults). id "captions" restyles the whole caption lane or turns it on/off (visible). Style/position fields on a caption give it its own style. Timing cannot change on a linked item. The whole call is ONE undo step, and if any edit is invalid nothing changes. Returns the id of each item touched or created.',
+      inputSchema: { edits: z.array(textEdit).min(1).max(200) }
+    },
+    async (args) => result(await call('set_text', args))
+  )
+
+  server.registerTool(
+    'set_playhead',
+    {
+      description:
+        "Move the editor's playhead to a TIMELINE second (pausing playback there) so the user sees that exact moment — e.g. the first point you want them to look at. Changes nothing in the edit.",
+      inputSchema: { timeSec: z.number().min(0) }
+    },
+    async (args) => result(await call('set_playhead', args))
+  )
+
+  server.registerTool(
+    'render_frame',
+    {
+      description:
+        'The FINISHED picture at TIMELINE seconds — every layer, text and caption burned in exactly as the export renders it (unlike get_frames, which shows raw source footage). Use it to check how text actually looks on screen: cut off, off-frame, unreadable over the picture, overlapping. 1–4 times per call (all rendered in one pass); takes a few seconds. Times past the end show the last frame.',
+      inputSchema: { times: z.array(z.number().min(0)).min(1).max(4) }
+    },
+    async (args) => result(await call('render_frame', args))
   )
 
   server.registerTool(

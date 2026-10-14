@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type {
+  CaptionSegment,
   CaptionStyle,
   Composition,
   Layer,
@@ -53,6 +54,7 @@ import { latestJob, useEditor } from '@/state/store'
 import { CancelJobButton, jobProgressText, useNow } from './JobsIndicator'
 import { expandGroup } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
+import { captionWithText } from '@/lib/captions'
 import { activeComp, projectFormat, useProject } from '@/state/projectStore'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { idle } from '@/lib/interaction'
@@ -1374,6 +1376,38 @@ function CaptionStyleEditor(): JSX.Element | null {
   )
 }
 
+/**
+ * A caption's text box. Every change re-times the words through
+ * `captionWithText` — split rebuilds text from the words, so text alone would
+ * revert at the next split. It re-times from the words the caption had when the
+ * box got focus, so intermediate keystrokes (a half-typed word, a stray space)
+ * never wear the original timings down.
+ */
+function CaptionTextInput({
+  seg,
+  onChange
+}: {
+  seg: CaptionSegment
+  onChange: (next: CaptionSegment) => void
+}): JSX.Element {
+  const origin = useRef<CaptionSegment | null>(null)
+  // The focus-time words, unless the caption has since moved (then they'd be in the wrong place).
+  const base = (): CaptionSegment => {
+    const o = origin.current
+    return o && o.id === seg.id && o.startSec === seg.startSec && o.endSec === seg.endSec ? o : seg
+  }
+  return (
+    <textarea
+      value={seg.text}
+      rows={2}
+      onFocus={() => (origin.current = seg)}
+      onBlur={() => (origin.current = null)}
+      onChange={(e) => onChange(captionWithText(base(), e.target.value))}
+      className={inputCls}
+    />
+  )
+}
+
 function CaptionEditor(): JSX.Element | null {
   const selectedCaptionId = useUi((s) => s.selectedCaptionId)
   const captions = useProject((s) => activeComp(s)?.captions)
@@ -1394,7 +1428,7 @@ function CaptionEditor(): JSX.Element | null {
       <div className="mb-2 text-sm font-medium text-zinc-200">Caption</div>
       {linked && <LinkedNote size={groupSize} />}
       <Field label="Text">
-        <textarea value={seg.text} rows={2} onChange={(e) => update(seg.id, { text: e.target.value })} className={inputCls} />
+        <CaptionTextInput seg={seg} onChange={(next) => update(seg.id, { text: next.text, words: next.words })} />
       </Field>
       <div className="flex gap-2">
         <Field label="Start (s)">

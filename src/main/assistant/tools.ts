@@ -15,13 +15,14 @@ import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { transcriptPhraseText, transcriptWordText } from '@shared/assistant/transcriptText'
 import { frameTimes } from '@shared/assistant/frameTimes'
+import { resolveCompAtPath } from '@shared/compositions'
 import { getSubdir } from '../config'
 import { ensureProxy, getProjectMedia } from '../services/mediaStore'
 import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
 import { hdrToSdrChain } from '../services/proxy'
-import { exportProject, suggestedExportName } from '../services/exporter'
+import { exportProject, renderFrames, suggestedExportName } from '../services/exporter'
 import { listJobs } from '../services/jobs'
 import { getSettings } from '../services/settings'
 import { exportRefusal, sanitizeExportName, uniqueExportPath } from '../services/exportTarget'
@@ -52,6 +53,11 @@ function describeAsset(a: MediaAsset): Record<string, unknown> {
 async function projectAssets(): Promise<Map<string, MediaAsset>> {
   const ids = await callRenderer('getMediaIds', {})
   return new Map((await getProjectMedia(ids)).map((a) => [a.id, a]))
+}
+
+/** Each library clip's source length — what the renderer needs to measure open-ended audio. */
+async function sourceDurations(): Promise<Record<string, number>> {
+  return Object.fromEntries([...(await projectAssets())].map(([id, a]) => [id, a.probe.durationSec]))
 }
 
 function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
@@ -161,6 +167,46 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     await done
     const { size } = await fsp.stat(path)
     return json({ path, sizeMB: Math.round((size / 1_048_576) * 10) / 10 })
+  },
+
+  get_text: async (q) => json(await callRenderer('getText', { ...q, sourceDurations: await sourceDurations() })),
+
+  set_text: async ({ edits }) => {
+    const results = await callRenderer('applyTextEdits', { edits, sourceDurations: await sourceDurations() })
+    return json({ results, note: 'One undo step: call undo to revert this whole batch.' })
+  },
+
+  set_playhead: async ({ timeSec }) => {
+    const r = await callRenderer('setPlayhead', { timeSec, sourceDurations: await sourceDurations() })
+    const clamped = r.timeSec !== timeSec ? ` (clamped; the edit is ${r2(r.durationSec)}s long)` : ''
+    return text(`Playhead at ${r2(r.timeSec)}s${clamped}. Playback is paused there.`)
+  },
+
+  render_frame: async ({ times }) => {
+    // Render what the editor shows, so times match get_text / get_timeline: inside a
+    // compound clip those are the clip's own local seconds.
+    const { project, editPath } = await callRenderer('getRenderTarget', {})
+    const comp = resolveCompAtPath(project, editPath) ?? project
+    const nested = comp !== project
+    const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'render-frame-'))
+    try {
+      const { frames, skippedStabilize } = await renderFrames(project, project.preset ?? 'reel', times, dir, comp)
+      // Label + image per time, so each picture is captioned with its moment.
+      const out: ToolContent[] = []
+      if (nested) out.push({ type: 'text', text: 'The user is inside a nested composition: these frames show it on its own, at its local times.' })
+      for (let k = 0; k < frames.length; k++) {
+        const { path, shownSec } = frames[k]
+        const clamped = shownSec < times[k] - 1 / 30 ? ` — asked for ${r2(times[k])}s, which is past the end of the edit; this is its last frame` : ''
+        out.push({ type: 'text', text: `Finished frame @ ${r2(shownSec)}s (timeline)${clamped}` })
+        out.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(path)).toString('base64') })
+      }
+      if (skippedStabilize) {
+        out.push({ type: 'text', text: 'Note: stabilization is skipped in these frames, so stabilized clips may sit slightly differently than in the export.' })
+      }
+      return out
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
   },
 
   request_feature: async (req) => {
