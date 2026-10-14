@@ -34,7 +34,8 @@ each one actually renders with) and `get_timeline` (the cut). Then:
    Is anything the user asked for missing, such as a title, a call to action, a
    word, or a length?
 4. **Timing.** Each item should be on screen long enough to read (roughly 0.3 s per
-   word, never under about 0.7 s). It should not run past the end of the edit,
+   word, never under about 0.7 s). It should not run past the end of the edit
+   (`get_text` flags `hiddenBecause: "after the end of the edit"` and `cutOffAtSec`),
    overlap another text in the same place, or sit over the wrong shot.
 5. **Layout.** Use `render_frame` on the moments that matter (the start of each
    text layer, a sample of captions, anything near the frame edges), up to 4 times

@@ -221,6 +221,13 @@ describe('applyTextEdits', () => {
     expect(t.startSec).toBe(1.00049)
   })
 
+  it('moving one edge keeps the other, echoed edge exact', () => {
+    const base = comp()
+    base.captions = { ...base.captions, segments: [cap({ startSec: 2.00041, endSec: 4, words: [] })] }
+    const seg = applyTextEdits(base, [{ id: 'c1', startSec: 2, endSec: 5 }], ctx()).comp.captions.segments[0]
+    expect([seg.startSec, seg.endSec]).toEqual([2.00041, 5])
+  })
+
   it('refuses text more than a minute past the end of the edit (a milliseconds-for-seconds slip)', () => {
     expect(() => applyTextEdits(comp(), [{ text: 'Subscribe', startSec: 1500, endSec: 1503 }], ctx())).toThrow(
       /endSec 1503 is more than 60s past the end of the edit \(10s\); times are in seconds/

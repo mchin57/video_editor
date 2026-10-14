@@ -130,7 +130,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'get_text',
     {
       description:
-        'All text the viewer reads: text layers and caption segments in TIMELINE order, each with id, kind ("text" | "caption"), startSec/endSec, the text, whether it is visible (and why not), whether it is linked, and the style it actually renders with (font, size, colour, pill, stroke, shadow, gradient, centre x/y in the 1080x1920 frame, rotation). Captions say whether they follow the lane style or have their own. Also the caption lane itself (id "captions": on/off + lane-wide style). Optional: ids, or fromSec/toSec to get what is on screen in that range (fromSec = toSec asks what shows at that moment).',
+        'All text the viewer reads: text layers and caption segments in TIMELINE order, each with id, kind ("text" | "caption"), startSec/endSec, the text, whether it is visible (and why not), whether it is linked, and the style it actually renders with (font, size, colour, pill, stroke, shadow, gradient, centre x/y in the 1080x1920 frame, rotation). Captions say whether they follow the lane style or have their own. Also the caption lane itself (id "captions": on/off + lane-wide style) and durationSec, the length of the edit: captions do not extend it, so one starting at or after it says hiddenBecause "after the end of the edit", and one running past it has cutOffAtSec. Optional: ids, or fromSec/toSec to get what is on screen in that range (fromSec = toSec asks what shows at that moment).',
       inputSchema: {
         ids: z.array(z.string()).min(1).optional(),
         fromSec: z.number().min(0).optional().describe('TIMELINE second'),

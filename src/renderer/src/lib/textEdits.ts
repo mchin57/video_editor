@@ -129,8 +129,9 @@ function windowOf(
   durationSec: number
 ): [number, number] | string {
   if (cur && !retimes(e, cur)) return [cur.startSec, cur.endSec]
-  const s = e.startSec ?? cur?.startSec
-  const t = e.endSec ?? cur?.endSec
+  // Per edge: one that only echoes the current value keeps it exactly.
+  const s = cur && !movesEdge(e.startSec, cur.startSec) ? cur.startSec : e.startSec
+  const t = cur && !movesEdge(e.endSec, cur.endSec) ? cur.endSec : e.endSec
   if (s === undefined || t === undefined) return 'a new item needs startSec and endSec'
   if (!Number.isFinite(s) || !Number.isFinite(t)) return 'startSec and endSec must be numbers'
   if (s < 0) return 'startSec must be 0 or more'
@@ -253,10 +254,14 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
 const linkedMsg =
   'it is linked to another timeline item, so its timing cannot change on its own (text and style edits are fine); unlink it in the editor or leave startSec/endSec out'
 
-/** Whether the edit moves or resizes the item's window (beyond get_text's rounding). */
+/** Whether an edge value moves it (beyond get_text's rounding). */
+function movesEdge(v: number | undefined, now: number): boolean {
+  return v !== undefined && !(Math.abs(v - now) <= TEXT_TIME_EPS)
+}
+
+/** Whether the edit moves or resizes the item's window. */
 function retimes(e: TextEdit, cur: { startSec: number; endSec: number }): boolean {
-  const differs = (v: number | undefined, now: number): boolean => v !== undefined && !(Math.abs(v - now) <= TEXT_TIME_EPS)
-  return differs(e.startSec, cur.startSec) || differs(e.endSec, cur.endSec)
+  return movesEdge(e.startSec, cur.startSec) || movesEdge(e.endSec, cur.endSec)
 }
 
 /** A text layer with the edit's content/position/visibility fields applied (timing is the caller's). */

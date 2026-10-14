@@ -196,7 +196,7 @@ interface ProjectState {
   /** Apply the assistant's `set_text` edits (create/patch text layers and
    *  captions, restyle the caption lane) as ONE undo step. Throws — changing
    *  nothing — when there is no project or any edit is invalid. */
-  applyTextEdits: (edits: TextEdit[]) => TextEditResult[]
+  applyTextEdits: (edits: TextEdit[], srcDur?: links.SourceDuration) => TextEditResult[]
   /** Add an empty multi-clip layout layer (front) at `startSec`. */
   addLayoutLayer: (id: string, presetId: string, startSec: number) => void
   /** Re-shape a layout to another preset (cells keep media/trim by index). */
@@ -563,10 +563,11 @@ export const useProject = create<ProjectState>((set, get) => {
       return result.placed
     },
 
-    applyTextEdits: (edits) => {
+    applyTextEdits: (edits, srcDur) => {
       const comp = activeComp(get())
       if (!comp) throw new Error('Editor has no project open')
-      const durationSec = compositionDuration(comp)
+      // Same measure as get_text's durationSec (whole-source audio needs `srcDur`).
+      const durationSec = compositionDuration(comp, srcDur)
       const result = applyTextEdits(comp, edits, { frame: projectFormat(get()).frame, newId, durationSec })
       commitComp(() => result.comp)
       return result.results

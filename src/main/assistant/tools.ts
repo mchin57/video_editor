@@ -15,6 +15,7 @@ import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { transcriptPhraseText, transcriptWordText } from '@shared/assistant/transcriptText'
 import { frameTimes } from '@shared/assistant/frameTimes'
+import { resolveCompAtPath } from '@shared/compositions'
 import { getSubdir } from '../config'
 import { ensureProxy, getProjectMedia } from '../services/mediaStore'
 import { importManyReport } from '../services/importMany'
@@ -171,7 +172,7 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
   get_text: async (q) => json(await callRenderer('getText', { ...q, sourceDurations: await sourceDurations() })),
 
   set_text: async ({ edits }) => {
-    const results = await callRenderer('applyTextEdits', { edits })
+    const results = await callRenderer('applyTextEdits', { edits, sourceDurations: await sourceDurations() })
     return json({ results, note: 'One undo step: call undo to revert this whole batch.' })
   },
 
@@ -182,10 +183,11 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
   },
 
   render_frame: async ({ times }) => {
-    const project = await callRenderer('getProject', {})
     // Render what the editor shows, so times match get_text / get_timeline: inside a
     // compound clip those are the clip's own local seconds.
-    const { comp, nested } = await callRenderer('getActiveComp', {})
+    const { project, editPath } = await callRenderer('getRenderTarget', {})
+    const comp = resolveCompAtPath(project, editPath) ?? project
+    const nested = comp !== project
     const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'render-frame-'))
     try {
       const { frames, skippedStabilize } = await renderFrames(project, project.preset ?? 'reel', times, dir, comp)
