@@ -17,9 +17,9 @@ import { singleFlight, writeAtomically } from './atomicWrite'
 import { monoFoldPan } from './audio'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
-import { resolveEntry } from './library'
+import { getEntry, resolveEntry } from './library'
 import { cachePath } from './projectLayout'
-import { getProjectRoot } from './projectRoot'
+import { currentProjectRoot, getProjectRoot } from './projectRoot'
 
 /** 48 kHz × 0.1 s: the frame size that makes one metadata frame one series step. */
 const SAMPLE_RATE = 48000
@@ -146,19 +146,45 @@ const flight = singleFlight<LoudnessSeries | null>()
 /** Series whose measurement failed this session (by output path): not retried
  *  until relaunch or a relink to new content (`forgetLoudnessFailure`). */
 const failed = new Set<string>()
+/** Series whose pass is running — its ffmpeg has the original open (by output path). */
+const reading = new Set<string>()
 const MAX_PASSES = 2
-let activePasses = 0
-const waiting: (() => void)[] = []
 
-async function limited<T>(run: () => Promise<T>): Promise<T> {
-  if (activePasses >= MAX_PASSES) await new Promise<void>((resolve) => waiting.push(resolve))
-  activePasses++
-  try {
-    return await run()
-  } finally {
-    activePasses--
-    waiting.shift()?.()
+/**
+ * Run at most `max` of the given tasks at once; the rest wait their turn (FIFO).
+ * A finishing task HANDS its slot to the next waiter rather than freeing it:
+ * freeing it would let a newcomer arriving before the woken waiter resumes
+ * (a microtask later) take the slot too, briefly running `max + 1`.
+ */
+export function createLimiter(max: number): <T>(run: () => Promise<T>) => Promise<T> {
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async (run) => {
+    if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve))
+    else active++
+    try {
+      return await run()
+    } finally {
+      const next = waiting.shift()
+      if (next) next() // the slot passes straight to it: `active` is unchanged
+      else active--
+    }
   }
+}
+
+const limited = createLimiter(MAX_PASSES)
+
+/**
+ * Where the original is NOW. A pass can wait in the limiter long enough for a
+ * library Rename (or relink) to move the file, so the path is read from the
+ * open library when the pass actually starts — the one captured at queue time
+ * may be gone. After a project switch the captured path stands (the pass
+ * finishes in the project it started in, like any long job).
+ */
+function inputNow(root: string, src: LoudnessSource): string | null {
+  if (currentProjectRoot() !== root) return src.path ?? null
+  const entry = getEntry(src.id)
+  return entry ? entry.path : (src.path ?? null)
 }
 
 /**
@@ -172,21 +198,34 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
   const cached = existsSync(out) ? await readLoudnessFile(out) : null
   if (cached) return cached
   if (!src.path || failed.has(out)) return null
-  const input = src.path
   return flight(out, () =>
     limited(async () => {
+      const input = inputNow(root, src)
+      if (!input) return null // gone missing while queued: not a failure to remember
+      reading.add(out)
       try {
         await fsp.mkdir(dirname(out), { recursive: true })
         // A stale (other-version) file is replaced; the rename needs it gone.
         await fsp.rm(out, { force: true })
         return await generateLoudness(input, out, src.foldChannel)
       } catch (error) {
-        failed.add(out)
+        // A file that vanished under the pass (renamed or moved meanwhile) says
+        // nothing about its content: leave it to be measured at its new path.
+        if (existsSync(input)) failed.add(out)
         console.error('loudness measurement failed for', src.id, error)
         return null
+      } finally {
+        reading.delete(out)
       }
     })
   )
+}
+
+/** Whether a loudness pass is reading the asset's original right now (a
+ *  queued one isn't: it reads the path when it starts). Rename refuses then —
+ *  Windows won't rename a file ffmpeg holds open. */
+export function loudnessPassReading(root: string, id: string): boolean {
+  return reading.has(loudnessPath(root, id))
 }
 
 /** Start a missing series in the background (the media store's hydrate: new

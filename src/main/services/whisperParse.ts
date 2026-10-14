@@ -76,37 +76,102 @@ const SPECIAL = /^\[_.*\]$/
  */
 export const MAX_ANNOTATION_ENTRIES = 12
 
-const MARKS = /[[\]()♪]/
-const CLOSER: Record<string, string> = { '(': ')', '[': ']', '♪': '♪' }
+const NOTE = '♪'
+const CLOSER: Record<string, string> = { '(': ')', '[': ']' }
+const OPENER: Record<string, string> = { ')': '(', ']': '[' }
+
+/** The entry without trailing sentence punctuation (`music).` ends with `)`). */
+const bare = (t: string): string => t.replace(/[.,!?;:]+$/, '')
+/** A bracket annotation opening here: `(birds`, `[`, `(clicking)`. */
+const bracketOpener = (t: string): string | null => (t[0] in CLOSER ? t[0] : null)
+/** A bracket closing here — `chirping)`, `]` — not a word with a bracket in it (`friend(s)`). */
+function bracketCloser(t: string): string | null {
+  const b = bare(t)
+  const last = b[b.length - 1]
+  return last in OPENER && !b.includes(OPENER[last]) ? last : null
+}
+/** A `♪` at either end of the entry. */
+const isNote = (t: string): boolean => t.startsWith(NOTE) || bare(t).endsWith(NOTE)
+/** A whole annotation in one entry: `(clicking)`, `[BLANK_AUDIO]`, `♪♪`. */
+function selfContained(t: string): boolean {
+  const open = t.startsWith(NOTE) ? NOTE : bracketOpener(t)
+  return open != null && t.slice(1).includes(open === NOTE ? NOTE : CLOSER[open])
+}
 
 /**
  * Which entries are non-speech annotations, by index. With `-ml 1` whisper
  * splits an annotation into one entry per word — `(birds` `chirping)`,
  * `[` `Pause` `]`, `♪` `I` `could` … `♪` — so a whole-string check misses it.
  *
- * An entry OPENING with `(`, `[` or `♪` starts a span, and the first later
- * entry containing the matching closer ends it; everything in between goes.
- * A span that does not close within MAX_ANNOTATION_ENTRIES is treated as a
- * stray mark: only the entries that themselves contain a bracket or `♪` are
- * dropped, so real speech is never swallowed. Empty entries are not counted.
+ * Only marks at an entry's EDGE count: a word with a bracket inside it
+ * (`friend(s)`) is speech. Empty entries are not counted.
+ *  - Brackets: an entry opening with `(` or `[` starts a span; the first later
+ *    entry ending with the matching closer ends it, and everything between
+ *    goes. The search gives up at the next opener (of any kind) or after
+ *    MAX_ANNOTATION_ENTRIES: the opener was stray, and only it is dropped — it
+ *    never pairs with a LATER annotation's mark across the speech between.
+ *    A stray closer is dropped alone too.
+ *  - `♪` opens and closes alike, so the marks are paired in runs (each within
+ *    MAX_ANNOTATION_ENTRIES of the next): in order when the run is even; when
+ *    it is odd one mark is stray, and the pairing that drops the FEWEST
+ *    entries wins (ties: the last mark is the stray) — when it is ambiguous,
+ *    speech is kept rather than swallowed.
  */
 export function annotationMask(texts: string[]): boolean[] {
   const drop = texts.map(() => false)
   const spoken = texts.flatMap((t, i) => (t.length > 0 ? [i] : []))
+  const at = (n: number): string => texts[spoken[n]]
+  const dropRange = (a: number, b: number): void => {
+    for (let k = a; k <= b; k++) drop[spoken[k]] = true
+  }
+
+  // Brackets.
   for (let n = 0; n < spoken.length; n++) {
-    const text = texts[spoken[n]]
-    if (!MARKS.test(text)) continue
+    const text = at(n)
+    const open = bracketOpener(text)
+    if (!open) {
+      if (bracketCloser(text)) drop[spoken[n]] = true // a stray closer
+      continue
+    }
     drop[spoken[n]] = true
-    const closer = CLOSER[text[0]]
-    // Opener and closer in one entry, e.g. "(clicking)" or "[BLANK_AUDIO]".
-    if (!closer || text.slice(1).includes(closer)) continue
+    if (selfContained(text)) continue
     const limit = Math.min(spoken.length, n + MAX_ANNOTATION_ENTRIES)
     for (let m = n + 1; m < limit; m++) {
-      if (!texts[spoken[m]].includes(closer)) continue
-      for (let k = n + 1; k <= m; k++) drop[spoken[k]] = true
-      n = m
-      break
+      const t = at(m)
+      if (bracketCloser(t) === CLOSER[open]) {
+        dropRange(n, m)
+        n = m
+        break
+      }
+      if (bracketOpener(t) || isNote(t)) break // another annotation starts: this opener was stray
     }
+  }
+
+  // ♪ marks, in runs whose neighbours are within reach of each other.
+  const notes: number[] = []
+  for (let n = 0; n < spoken.length; n++) {
+    const text = at(n)
+    if (!isNote(text)) continue
+    drop[spoken[n]] = true
+    if (!selfContained(text)) notes.push(n)
+  }
+  let start = 0
+  while (start < notes.length) {
+    let end = start + 1
+    while (end < notes.length && notes[end] - notes[end - 1] < MAX_ANNOTATION_ENTRIES) end++
+    const run = notes.slice(start, end)
+    start = end
+    // Candidate strays: none for an even run; an even index for an odd one
+    // (removing it leaves the rest paired in order).
+    const strays = run.length % 2 === 0 ? [-1] : run.map((_, i) => i).filter((i) => i % 2 === 0)
+    const pairsWithout = (stray: number): [number, number][] => {
+      const rest = run.filter((_, i) => i !== stray)
+      return rest.flatMap((a, i) => (i % 2 === 0 ? [[a, rest[i + 1]] as [number, number]] : []))
+    }
+    const cost = (stray: number): number => pairsWithout(stray).reduce((sum, [a, b]) => sum + b - a + 1, 0)
+    let best = strays[strays.length - 1]
+    for (const s of strays) if (cost(s) < cost(best)) best = s
+    for (const [a, b] of pairsWithout(best)) dropRange(a, b)
   }
   return drop
 }

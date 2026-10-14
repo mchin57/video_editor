@@ -431,7 +431,10 @@ on `-map 0:a:0 -vn -f null -`: 0.35 s for a 3:13, 950 MB 4K HEVC recording.
   3.01 dB LOWER (−17.49 vs −14.48). The export mixes an extracted video clip's
   ORIGINAL (`audioProxyIfReady` only exists for audio assets), and an all-mono
   mix stays mono, so the source's own peak is the safe bound for a cap.
-  By contrast a duplicated-to-both-channels signal (`pan=stereo|c0=c0|c1=c0`)
+  For an imported mono AUDIO file that bound is ~3 dB conservative: the export
+  mixes its stereo proxy (`audio.m4a`, `-ac 2`), whose peak is 3.01 dB below
+  the mono source the series measured, so a peak-capped clip lands ~3 dB short
+  of what the ceiling would allow (see "Volume levels" below). By contrast a duplicated-to-both-channels signal (`pan=stereo|c0=c0|c1=c0`)
   IS 3 LU louder (−33.9) — which is why a one-sided stereo source must be
   measured AFTER the mono-fold pan (`e2e/loudness.spec.ts`: folded ≈ +3 LU).
 - **Print file on Windows: pass a bare file name and run ffmpeg with that
@@ -623,12 +626,18 @@ looking for an `-ss` in the transcription path.
   their own); `♪` `I` `could` `break` `you` `to` `say` `the` `last` `♪` followed
   by `(dramatic` `music)`. A whole-string noise regex matched none of them, so
   they became caption words. Fixed in the parser (`annotationMask`,
-  `whisperParse.ts`), on both the DTW and segment paths: an entry opening with
-  `(`, `[` or `♪` starts a span, and the first later entry holding the matching
-  closer ends it; everything between is dropped. A span that does not close
-  within `MAX_ANNOTATION_ENTRIES` (12; the longest real one is the 10-entry
-  lyric line) is treated as a stray mark, and only the entries that themselves
-  hold a bracket or `♪` are dropped, so speech is never swallowed. Dropped
+  `whisperParse.ts`), on both the DTW and segment paths. Only marks at an
+  entry's edge count (`friend(s)` is a word). An entry opening with `(` or `[`
+  starts a span and the first later entry ending with the matching closer ends
+  it; everything between is dropped. The search gives up at the next opener or
+  after `MAX_ANNOTATION_ENTRIES` (12; the longest real span is the 10-entry
+  lyric line), and then only the stray opener goes — it never pairs with a
+  later annotation's mark across the speech between. `♪` opens and closes
+  alike, so a run of them is paired in order, and an odd run drops the one
+  stray whose pairing swallows the fewest entries. Speech between two real
+  annotations is kept; what the parser cannot tell apart from an annotation
+  (two strays that happen to pair up, or a stray `♪` beside a lyric line whose
+  pairing is a tie) can still be dropped. Dropped
   entries keep their DTW time, so they still end the word before them. Rerun on
   the four clips: only the annotation entries above went (plus `(clicking)`),
   and every spoken word on the DTW path was kept.
@@ -830,9 +839,11 @@ clip read by `ffmpeg -re -i clip.mp4 -f null -`:
   case-only change alike. ffmpeg opens its inputs without
   `FILE_SHARE_DELETE`, so Windows refuses the move. After ffmpeg exits the same
   rename succeeds. `renameFailureMessage` maps `EBUSY` (and `EPERM`/`EACCES`,
-  what other locking or protected files give) to a plain "another program is
-  using it" message; `renameMedia` also refuses up front while a job that
-  registered the media in `createJob(…, { uses })` is running.
+  what other locking or protected files give) to a plain "in use — by another
+  program, or the editor is still reading it" message (the editor's own
+  thumbnail/waveform/mono-fold/silence passes read originals without a job);
+  `renameMedia` also refuses up front while a job that registered the media in
+  `createJob(…, { uses })` is running, or a loudness pass is measuring it.
 - **A file Node itself has open does NOT block a rename** (libuv opens with
   `FILE_SHARE_DELETE`): a `fs.open` handle held across the call didn't stop it.
 - **`fs.rename` silently REPLACES an existing target on Windows** (libuv uses

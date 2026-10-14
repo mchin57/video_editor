@@ -16,6 +16,7 @@ import {
 } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { activeComp, useProject } from '@/state/projectStore'
+import { useLoudness } from '@/state/loudness'
 import { idle } from '@/lib/interaction'
 
 const LIBRARY_KEY = 'library'
@@ -238,6 +239,7 @@ export function useRenameMedia(): (id: string, stem: string) => Promise<void> {
     }
     const store = useProject.getState()
     store.markLibraryChanged()
+    useLoudness.getState().refresh() // a Rename isn't broadcast: retry series that failed under the old name
     void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] })
     try {
       await store.save()

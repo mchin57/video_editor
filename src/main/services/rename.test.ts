@@ -30,12 +30,19 @@ vi.mock('./audio', () => ({
   generateWaveform: vi.fn(async () => {})
 }))
 
+// The real loudness module, except whether a pass is reading a file right now.
+vi.mock('./loudness', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./loudness')>()),
+  loudnessPassReading: vi.fn(() => false)
+}))
+
 import { createProject, openProject } from './projectStore'
 import { makeVideoLayer } from '@shared/layers'
 import { createEmptyProject } from '@shared/project'
 import { importFile, importGenerated, renameFailureMessage, renameMedia } from './mediaStore'
 import { getEntry } from './library'
 import { createJob, finishJob } from './jobs'
+import { loudnessPassReading } from './loudness'
 
 const reels = join(scratch, 'Reels')
 let root: string
@@ -110,6 +117,16 @@ describe('library Rename (docs/MEDIA-POINTERS.md "Rename")', () => {
     expect(readdirSync(join(root, 'busy'))).toEqual(['later.wav'])
   })
 
+  it('refuses while a loudness pass is measuring the file (ffmpeg holds it open)', async () => {
+    const m = await importFile(file(join(root, 'measuring'), 'm.wav', 'clip M 2s'))
+    vi.mocked(loudnessPassReading).mockImplementation((_root, id) => id === m.id)
+    await expect(renameMedia(m.id, 'later')).rejects.toThrow('still being measured for volume levels')
+    expect(readdirSync(join(root, 'measuring'))).toEqual(['m.wav'])
+    vi.mocked(loudnessPassReading).mockImplementation(() => false)
+    await renameMedia(m.id, 'later')
+    expect(readdirSync(join(root, 'measuring'))).toEqual(['later.wav'])
+  })
+
   it('refuses a missing clip', async () => {
     const f = await importFile(file(join(root, 'gone'), 'f.wav', 'clip F 2s'))
     rmSync(join(root, 'gone', 'f.wav'))
@@ -137,9 +154,13 @@ describe('library Rename (docs/MEDIA-POINTERS.md "Rename")', () => {
 
 describe('renameFailureMessage', () => {
   const err = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code })
-  it('puts Windows in-use / permission errors in plain words', () => {
+  it('puts Windows in-use / permission errors in plain words, naming the editor as a possible holder', () => {
     for (const code of ['EBUSY', 'EPERM', 'EACCES']) {
-      expect(renameFailureMessage(err(code), 'IMG_1.MOV')).toMatch(/another program is using it/)
+      const text = renameFailureMessage(err(code), 'IMG_1.MOV')
+      // The editor's own thumbnail/waveform/silence passes read originals
+      // without a job: the message must not blame only "another program".
+      expect(text).toMatch(/in use — by another program, or the editor is still reading it/)
+      expect(text).toMatch(/Try again in a moment/)
     }
     expect(renameFailureMessage(err('ENOENT'), 'IMG_1.MOV')).toMatch(/no longer where it was/)
     expect(renameFailureMessage(err('EIO'), 'IMG_1.MOV')).toMatch(/Couldn't rename “IMG_1.MOV”: EIO/)

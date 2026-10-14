@@ -123,8 +123,11 @@ describe('clipGain — a clip in a level', () => {
     const c = clip({ volumeLevelId: 'default', gainDb: 5 })
     const measuring = clipGain(c, [c], ctxWith({}))
     expect(measuring).toMatchObject({ gainDb: 0, status: { kind: 'measuring' } })
+    // No series (measuring failed / original missing) is NOT silence: the
+    // status must not claim there was nothing to match.
     const none = clipGain(c, [c], ctxWith({ m1: null }))
-    expect(none).toMatchObject({ gainDb: 0, status: { kind: 'silent' } })
+    expect(none).toMatchObject({ gainDb: 0, status: { kind: 'unmeasured' } })
+    expect(levelStatusText(none.status, none.gainDb)).toMatch(/Couldn’t measure/)
   })
 
   it('measures only the clip’s own in..out window', () => {

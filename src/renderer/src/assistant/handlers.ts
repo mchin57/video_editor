@@ -11,6 +11,7 @@ import { activeComp, useProject } from '@/state/projectStore'
 import { expandSelection, timelineTiles } from '@/lib/links'
 import { assistantRespond, onAssistantRequest } from '@/ipc/client'
 import { interactionOpen, whenIdle } from '@/lib/interaction'
+import { exportSaveSkipReason } from '@/lib/exportSave'
 
 type Handlers = {
   [K in keyof AssistantOps]: (args: AssistantOps[K]['args']) => AssistantOps[K]['result'] | Promise<AssistantOps[K]['result']>
@@ -53,11 +54,13 @@ const handlers: Handlers = {
     return { undone: useProject.getState().past.length < before, timeline: summarizeTimeline(comp()) }
   },
   getProject: () => project(),
-  saveProject: async () => {
-    project()
+  saveProject: async ({ projectId }) => {
+    // Checked and saved with no await between: the project can't change in between.
+    const reason = exportSaveSkipReason({ id: projectId }, useProject.getState())
+    if (reason) return { saved: false, reason }
     if (!useProject.getState().filePath) throw new Error('The project has no save file')
     await useProject.getState().save()
-    return null
+    return { saved: true }
   }
 }
 

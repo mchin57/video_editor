@@ -1,5 +1,51 @@
 import { describe, it, expect } from 'vitest'
-import { buildLoudnessArgs, parseLoudnessPrint } from './loudness'
+import { buildLoudnessArgs, createLimiter, parseLoudnessPrint } from './loudness'
+
+describe('createLimiter', () => {
+  const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+    let resolve!: () => void
+    const promise = new Promise<void>((r) => (resolve = r))
+    return { promise, resolve }
+  }
+  const ticks = async (n: number): Promise<void> => {
+    for (let i = 0; i < n; i++) await Promise.resolve()
+  }
+
+  it('never runs more than `max` at once, even when a newcomer arrives as a slot is handed over', async () => {
+    // Sweep the newcomer's arrival across every microtask offset around the
+    // moment a finishing task wakes the one waiting: one offset lands between
+    // the wake-up and the woken task taking its slot.
+    for (let offset = 0; offset < 12; offset++) {
+      const limit = createLimiter(2)
+      let active = 0
+      let most = 0
+      const task = (gate: Promise<void>) => (): Promise<void> => {
+        active++
+        most = Math.max(most, active)
+        return gate.finally(() => active--)
+      }
+      const gates = [deferred(), deferred(), deferred(), deferred()]
+      const runs = [limit(task(gates[0].promise)), limit(task(gates[1].promise)), limit(task(gates[2].promise))]
+      await ticks(3)
+      expect(active).toBe(2)
+      gates[0].resolve()
+      await ticks(offset)
+      runs.push(limit(task(gates[3].promise)))
+      await ticks(12)
+      expect(most, `newcomer at microtask offset ${offset}`).toBeLessThanOrEqual(2)
+      for (const g of gates) g.resolve()
+      await Promise.all(runs)
+      expect(active).toBe(0)
+    }
+  })
+
+  it('runs every task, in arrival order once slots free up', async () => {
+    const limit = createLimiter(1)
+    const order: number[] = []
+    await Promise.all([1, 2, 3, 4].map((n) => limit(async () => void order.push(n))))
+    expect(order).toEqual([1, 2, 3, 4])
+  })
+})
 
 describe('buildLoudnessArgs', () => {
   it('measures the first audio stream at 48 kHz in 0.1 s frames, printing to a bare file name', () => {
