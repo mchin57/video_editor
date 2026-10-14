@@ -5,7 +5,9 @@
  */
 
 import type { Project, TimelineItemRef } from '../project'
+import type { CompPath } from '../compositions'
 import type { TimelineSummary } from './timelineSummary'
+import type { OnScreenText, TextEdit, TextEditResult, TextQuery } from './onScreenText'
 
 /** One clip in a rough cut. In/out are SOURCE seconds. */
 export interface SequenceItem {
@@ -48,6 +50,22 @@ export interface AssistantOps {
   /** The store's `save` (File > Save): writes the open project to its `.reel` —
    *  only if it is still project `projectId` (the one an export came from). */
   saveProject: { args: { projectId: string }; result: { saved: true } | { saved: false; reason: string } }
+  /** The project plus the path to the composition the editor shows (empty = the
+   *  root; else the compound clip / layout cell the user entered) — what get_text /
+   *  get_timeline / set_playhead times refer to. One snapshot, so the two agree. */
+  getRenderTarget: { args: NoArgs; result: { project: Project; editPath: CompPath } }
+  /** `sourceDurations` as for setPlayhead: the edit's length decides which captions can show. */
+  getText: { args: TextQuery & { sourceDurations: Record<string, number> }; result: OnScreenText }
+  /** All edits are ONE undo step; any invalid edit throws and nothing changes. */
+  applyTextEdits: { args: { edits: TextEdit[]; sourceDurations: Record<string, number> }; result: TextEditResult[] }
+  /**
+   * Move the playhead (view state; no undo step). `sourceDurations` (main fills
+   * it from the library) lets the renderer measure open-ended audio for the clamp.
+   */
+  setPlayhead: {
+    args: { timeSec: number; sourceDurations: Record<string, number> }
+    result: { timeSec: number; durationSec: number }
+  }
 }
 
 export type AssistantOp = keyof AssistantOps

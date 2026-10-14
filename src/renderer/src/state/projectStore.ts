@@ -18,6 +18,7 @@ import type { AudioFx } from '@shared/audioFx'
 import {
   MAX_COMP_DEPTH,
   compDepth,
+  compositionDuration,
   makeCompFromCell,
   makeCompFromLayer,
   resetMediaCuts,
@@ -47,6 +48,9 @@ import { extractAudioPieces } from '@/lib/timeline'
 import * as links from '@/lib/links'
 import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
 import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
+import type { TextEdit, TextEditResult } from '@shared/assistant/onScreenText'
+import { applyTextEdits } from '@/lib/textEdits'
+import { captionWithText } from '@/lib/captions'
 import { replaceAt, updateById } from '@/lib/arrays'
 import { primaryRef, useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
@@ -197,6 +201,10 @@ interface ProjectState {
    *  undo step and return what was placed. Throws — changing nothing — when
    *  there is no project or an item is unusable. */
   addVideoSequence: (plan: SequencePlan) => PlacedClip[]
+  /** Apply the assistant's `set_text` edits (create/patch text layers and
+   *  captions, restyle the caption lane) as ONE undo step. Throws — changing
+   *  nothing — when there is no project or any edit is invalid. */
+  applyTextEdits: (edits: TextEdit[], srcDur?: links.SourceDuration) => TextEditResult[]
   /** Add an empty multi-clip layout layer (front) at `startSec`. */
   addLayoutLayer: (id: string, presetId: string, startSec: number) => void
   /** Re-shape a layout to another preset (cells keep media/trim by index). */
@@ -590,6 +598,16 @@ export const useProject = create<ProjectState>((set, get) => {
       return result.placed
     },
 
+    applyTextEdits: (edits, srcDur) => {
+      const comp = activeComp(get())
+      if (!comp) throw new Error('Editor has no project open')
+      // Same measure as get_text's durationSec (whole-source audio needs `srcDur`).
+      const durationSec = compositionDuration(comp, srcDur)
+      const result = applyTextEdits(comp, edits, { frame: projectFormat(get()).frame, newId, durationSec })
+      commitComp(() => result.comp)
+      return result.results
+    },
+
     addLayoutLayer: (id, presetId, startSec) =>
       commitComp((p) => ({ ...p, layers: [...p.layers, makeLayoutLayer(id, presetId, startSec)] })),
 
@@ -915,7 +933,16 @@ export const useProject = create<ProjectState>((set, get) => {
     updateCaption: (id, patch) =>
       commitComp((p) => ({
         ...p,
-        captions: { ...p.captions, segments: updateById(p.captions.segments, id, (s) => ({ ...s, ...patch })) }
+        captions: {
+          ...p.captions,
+          // New text without new words re-times them (captionWithText): a split
+          // rebuilds text FROM the words, so stale words would revert the edit.
+          segments: updateById(p.captions.segments, id, (s) =>
+            patch.text !== undefined && patch.words === undefined
+              ? { ...s, ...patch, words: captionWithText(s, patch.text).words }
+              : { ...s, ...patch }
+          )
+        }
       })),
 
     removeCaption: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'caption', id }])),

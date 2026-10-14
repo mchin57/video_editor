@@ -1,12 +1,14 @@
 ---
 name: edit-video
-description: Edit a video in the running Reel Editor through its MCP tools (reel-editor) — rough cuts from raw footage in an order you choose or the user dictates, checking the timeline, exporting on request, and filing feature requests for abilities the editor lacks. Use when the user runs /edit-video or asks to cut, assemble, trim or export a reel in the editor.
+description: Edit a video in the running Reel Editor through its MCP tools (reel-editor) — rough cuts from raw footage in an order you choose or the user dictates, captions and on-screen text, checking the timeline, an independent read-only audit of the result, exporting on request, and filing feature requests for abilities the editor lacks. Use when the user runs /edit-video or asks to cut, assemble, trim, caption, title or export a reel in the editor.
 ---
 
 # Edit a video in Reel Editor
 
 You are driving the Reel Editor desktop app on this computer. Every change you
 make appears live in the user's timeline and is undoable with Ctrl+Z.
+
+**Keep the user's request word for word.** You'll hand it to the auditor in step 6.
 
 ## 0. Check the connection first
 
@@ -44,12 +46,71 @@ images, captions and music stay; `"append"`, the default, adds after the last cl
 It is one undo step. Then `get_timeline` and check the clips, order and total length.
 Fix mistakes with `undo` or `remove_items` and place again.
 
-## 4. Report
+## 4. Text and captions
 
-Give the user a short list: each clip, its source window, its timeline position, and
-the total length. Mention anything you were unsure about.
+- `get_text` lists every text layer and caption (TIMELINE seconds) with the style it
+  actually renders with; the caption lane is id `"captions"`.
+- `set_text` takes a list of edits in ONE undo step, all or nothing:
+  - **fix or restyle:** `{id, …only the fields to change}`, e.g. `{id, text: "…"}`;
+  - **create:** no id — `{text, startSec, endSec}` makes a text layer on top; add
+    `kind: "caption"` for a caption;
+  - **the lane:** `{id: "captions", visible, …style}` turns captions on/off or restyles
+    all captions that don't have their own style.
+- Timing can't change on a linked item (a caption linked to its clip) — fix its text
+  and style, or tell the user.
+- `render_frame` shows the finished picture at up to 4 TIMELINE times — use it to see
+  how text really sits on screen.
+- Only the open composition is covered: text inside nested compositions or layout
+  cells isn't listed or editable yet.
 
-## 5. Export only when asked
+## 5. Report what you did
+
+A short list: each clip with its source window and timeline position, text you added
+or changed, and the total length. Mention anything you were unsure about.
+
+## 6. Audit — after every edit
+
+After any change to the cut or to text (skip it for requests that only list, look or
+export), start the **`reel-auditor`** agent (Agent tool, `subagent_type: "reel-auditor"`,
+`run_in_background: false` — you need its findings before you report, and its read-only
+tool list is only guaranteed in the foreground). It can only read. Give it exactly this brief:
+
+```
+USER GOAL (verbatim):
+<the user's request, word for word>
+
+This is the goal — did the editor achieve it? Check the result in the editor,
+especially every caption and on-screen text.
+
+WHAT CHANGED (facts only):
+- <id> <kind> <timeline start–end> <added / changed / removed>
+- ...
+```
+
+List facts only. Don't include your reasoning or why you chose things, so the
+auditor's judgement stays independent.
+
+Then triage its findings:
+
+- **clear-error you agree with** → fix it with `set_text` (batch them into one call).
+- **clear-error you disagree with**, and **every judgement call** → don't apply it;
+  it goes to the user (below).
+- If you changed any text, run the auditor **once more** with the same brief plus the
+  new changes. Never more than two audits per request.
+
+## 7. Report to the user
+
+Report what you did as in step 5, then:
+
+- **Fixed after audit:** each auto-applied fix as `mm:ss.s "old" → "new"`.
+- **Needs your call:** each disagreement or judgement call, in timeline order:
+  `mm:ss.s — I thought <X>; the auditor thought <Y>.` (or, for a judgement call you
+  had no view on, `the auditor suggests <Y>`).
+- Then call `set_playhead` on the **first** item that needs the user's call, and say
+  so ("the playhead is at 0:12.4, the first one"). Offer to jump to the next.
+- If the auditor found nothing, say so in one line.
+
+## 8. Export only when asked
 
 `export_video` (optional `fileName`; optional `folder`, an absolute path to an
 existing folder, only when the user names where it should go — otherwise it uses the
@@ -59,12 +120,15 @@ result has `saved: true`, or a `saveError` to pass on (the export itself still s
 
 ## When an ability is missing
 
-If the job needs something these tools cannot do (captions, music, transitions, speed
-changes, cutting on beats…), do NOT approximate it with tools that don't fit. Call
-`request_feature` with a clear `title`, the `problem`, a concrete `proposal` (tool name
-and arguments), and any `workaround` you used — then tell the user what you filed.
+If the job needs something these tools cannot do (music, transitions, speed changes,
+cutting on beats, text inside nested comps…), do NOT approximate it with tools that
+don't fit. Call `request_feature` with a clear `title`, the `problem`, a concrete
+`proposal` (tool name and arguments), and any `workaround` you used — then tell the
+user what you filed.
 
 ## Time bases
 
 SOURCE seconds = position inside a media file (transcripts, frames, `inSec`/`outSec`).
-TIMELINE seconds = position in the edit (`atSec`, `startSec`/`endSec` in `get_timeline`).
+TIMELINE seconds = position in the edit (`atSec`, `startSec`/`endSec` in `get_timeline`
+and `get_text`, `render_frame` and `set_playhead` times). Write times for the user as
+mm:ss.s on the timeline.

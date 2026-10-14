@@ -855,6 +855,48 @@ clip read by `ffmpeg -re -i clip.mp4 -f null -`:
   `ino`). So "the target exists" is true for a case-only change; `renameMedia`
   compares `ino` (bigint stat) to tell "the same file" from "another file".
 
+## Single-frame renders of the export graph (verified ffmpeg 8.1.1, 2026-10)
+
+`render_frame` (`buildFrameArgs`) runs the export's own inputs and chains and
+keeps single frames of the final composite. It was checked against a miniature
+of the real graph: a 60 s base, a trimmed overlaid clip with `setpts` and
+`eof_action=repeat`, an ASS burn with `fontsdir` holding a `\fad` line and a
+`\k` line, a PNG top overlay and an aac mix. Every candidate frame was
+hash-compared (`framemd5`, yuv420p) against a lossless full render.
+
+- **Frame index.** Output frame n has pts n/30, and `ass` and `enable` see
+  t = n/30. So the frame on screen at T is **floor(T·30)** (`frameIndexAt` adds
+  1e-6 for float noise). The base `color=…:d=D` emits **ceil(D·30)** frames, so
+  later times clamp to frame ceil(D·30) − 1.
+- **Use `trim=start_frame=N:end_frame=N+1` on the final label.** It is an
+  exact integer index, and the existing `-r 30 -fps_mode cfr` stays. With
+  `split` you get several frames in one pass, each with its own
+  `-map … -frames:v 1 … out.jpg`. Hashes matched the reference at frames 150,
+  307, 630 and 1650. That covers the `\fad` mid-ramp (307 and 308 differ) and
+  karaoke state: `\k` lights a word at its start.
+- **Output `-ss` rounds to the NEAREST frame.** `-ss 10.25 -frames:v 1` gave
+  frame 308, but 307 is the one on screen at 10.25.
+- **`select` duplicates under `-fps_mode cfr`.** `select='eq(n,150)+…'` gave
+  frame 150 four times. It needs `-fps_mode passthrough`, and `-r 30` with
+  passthrough is an error.
+- **An unmapped audio graph is fatal**: "Filter 'anull:default' has output 1
+  (aout) unconnected". Stills mode drops the audio inputs and graph entirely
+  (`audio: []`). Video hashes are unchanged without them.
+- **JPEG output.** mjpeg with `-pix_fmt yuv420p` writes yuvj420p with the range
+  converted (black Y=0). At `-q:v 2` the JPEG is about 46 dB from lossless
+  frame n, and about 25 dB from n±1, so the right frame is unambiguous. A trim
+  past the end yields zero frames, and ffmpeg fails with exit −22 ("Non
+  full-range YUV is non-standard"), which is why the index is clamped.
+- **Downscale after the trim.** `render_frame` appends `,scale=W:H:flags=bicubic`
+  to each trimmed branch, fitting 1280 px on the long side (`STILL_MAX_SIDE`).
+  Checked in e2e: a 1080×1920 project gives a 720×1280 JPEG with the caption
+  where the lane puts it.
+- **Cost** (median of 3, 20 Mb/s 1080×1920 source): about 0.35 s at t=5 and
+  about 1.7 s at t=55; four frames in one pass take about 1.7 s. The full
+  render took 10.3 s. Decoding up to t dominates, so late frames cost the most.
+  Text layout (Chromium) and nested-comp pre-renders come on top, the same as
+  for an export. The stabilization pre-pass is skipped for stills.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

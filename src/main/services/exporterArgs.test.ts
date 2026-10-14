@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   buildExportArgs,
   exportAudioClips,
+  buildFrameArgs,
+  frameIndexAt,
   buildVidstabDetectArgs,
   buildVidstabTransformArgs,
   escapeFilterPath,
@@ -650,5 +652,58 @@ describe('nested-composition intermediates (alpha)', () => {
     expect(s).toContain('-c:a libopus')
     expect(s).not.toContain('-c:a aac')
     expect(s).not.toContain('+faststart') // no moov atom in WebM
+  })
+})
+
+describe('stills mode (render_frame)', () => {
+  const music = [{ path: 'm.m4a', inSec: 0, outSec: 8, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }]
+
+  it('frameIndexAt: the frame on screen at t is floor(t*30), clamped to the last frame', () => {
+    expect(frameIndexAt(5, 60)).toBe(150)
+    expect(frameIndexAt(10.25, 60)).toBe(307) // output -ss would round this to 308
+    expect(frameIndexAt(1 / 30, 60)).toBe(1) // float noise must not drop a frame
+    expect(frameIndexAt(-1, 60)).toBe(0)
+    expect(frameIndexAt(99, 10)).toBe(299)
+    expect(frameIndexAt(99, 10.01)).toBe(300) // the base canvas emits ceil(d*30) frames
+  })
+
+  it('keeps every input and chain, cuts one frame by index, and writes a JPEG without audio', () => {
+    const p = plan({ visuals: [{ kind: 'video', video: vid }], audio: music, captionsAss: 'captions.ass' })
+    const video = buildExportArgs(p, 'out.mp4')
+    const still = buildFrameArgs(p, [{ index: 150, path: 'f0.jpg' }])
+    const fc = (a: string[]): string => a[a.indexOf('-filter_complex') + 1]
+    // Same composite as the export, minus the audio graph, plus the trim.
+    const videoChains = fc(video).split(';').filter((c) => !c.includes('[1:a]') && !c.includes('aout') && !c.includes(':a]'))
+    expect(fc(still)).toBe([...videoChains, '[v1]trim=start_frame=150:end_frame=151,scale=720:1280:flags=bicubic[vf0]'].join(';'))
+    expect(still).not.toContain('m.m4a')
+    expect(still.join(' ')).toMatch(
+      /-progress pipe:1 -nostats -map \[vf0\] -frames:v 1 -r 30 -fps_mode cfr -pix_fmt yuv420p -an -q:v 2 f0\.jpg$/
+    )
+  })
+
+  it('several frames come out of one pass through a split', () => {
+    const still = buildFrameArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), [
+      { index: 30, path: 'a.jpg' },
+      { index: 90, path: 'b.jpg' }
+    ])
+    const fc = still[still.indexOf('-filter_complex') + 1]
+    expect(fc.endsWith('[v0]split=2[s0][s1];[s0]trim=start_frame=30:end_frame=31,scale=720:1280:flags=bicubic[vf0];[s1]trim=start_frame=90:end_frame=91,scale=720:1280:flags=bicubic[vf1]')).toBe(true)
+    expect(still.filter((a) => a.endsWith('.jpg'))).toEqual(['a.jpg', 'b.jpg'])
+    expect(still.filter((a) => a === '-map')).toHaveLength(2)
+  })
+
+  it('scales stills to fit 1280 on the long side, whatever the format', () => {
+    const fc = (t: ReturnType<typeof targetForPreset>): string => {
+      const a = buildFrameArgs(plan({ target: t, visuals: [{ kind: 'video', video: vid }] }), [{ index: 0, path: 'f.jpg' }])
+      return a[a.indexOf('-filter_complex') + 1]
+    }
+    expect(fc(targetForPreset('landscape'))).toContain(',scale=1280:720:flags=bicubic[vf0]')
+    expect(fc(targetForPreset('cinematic'))).toContain(',scale=1280:548:flags=bicubic[vf0]') // 2520x1080
+    expect(fc({ width: 720, height: 720 })).toMatch(/trim=start_frame=0:end_frame=1\[vf0\]$/) // already small: no scale
+  })
+
+  it('leaves the ordinary export untouched', () => {
+    const p = plan({ visuals: [{ kind: 'video', video: vid }], audio: music })
+    expect(buildExportArgs(p, 'out.mp4').join(' ')).not.toMatch(/trim=start_frame|-q:v/)
   })
 })

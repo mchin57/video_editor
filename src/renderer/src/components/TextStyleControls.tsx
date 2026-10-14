@@ -1,6 +1,7 @@
 import { useEffect, type JSX } from 'react'
 import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
+import { TEXT_FONT_SIZE_MIN } from '@shared/textStyle'
 import { useBrandColors } from '@/state/brandColors'
 import { FontPicker } from './FontPicker'
 import { Check, Field, NumberInput, Slider, colorCls, inputCls } from './ui'
@@ -12,7 +13,6 @@ export type TextStylePatch = Partial<TextStyleLike>
 
 /** Font size range in logical px. The number field has no upper cap; past the
  *  slider's end the thumb just parks there. */
-const FONT_SIZE_MIN = 12
 const FONT_SIZE_SLIDER_MAX = 400
 
 const GRADIENT_PRESETS: { name: string; from: string; to: string; angle: number }[] = [
@@ -100,7 +100,7 @@ export function TextStyleControls({
           <Slider
             ariaLabel="Font size"
             className="min-w-0 flex-1"
-            min={FONT_SIZE_MIN}
+            min={TEXT_FONT_SIZE_MIN}
             max={FONT_SIZE_SLIDER_MAX}
             step={1}
             value={style.fontSizePx}
@@ -109,7 +109,7 @@ export function TextStyleControls({
           <NumberInput
             ariaLabel="Font size"
             step="2"
-            min={FONT_SIZE_MIN}
+            min={TEXT_FONT_SIZE_MIN}
             value={style.fontSizePx}
             onCommit={(v) => onPatch({ fontSizePx: v })}
             className={inputCls.replace('w-full', 'w-16 shrink-0')}

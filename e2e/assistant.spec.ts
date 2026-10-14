@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { ElectronApplication } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { test, expect } from './fixtures'
@@ -18,7 +18,7 @@ const MCP = join(ROOT, 'out', 'main', 'mcp.js')
 const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
 const FFMPEG = join(BIN, 'ffmpeg.exe')
 const FFPROBE = join(BIN, 'ffprobe.exe')
-const TOOLS = ['export_video', 'get_frames', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'request_feature', 'undo']
+const TOOLS = ['export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -298,4 +298,292 @@ test('an edit that reaches a blocked editor after the timeout is dropped, not ap
     return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
   })
   expect(after).toEqual(before)
+})
+
+// --- On-screen text: get_text / set_text / set_playhead -----------------------
+
+/** A text layer "t1" (0–3 s) and a caption "c1" (2–4 s, "helo wrld") with word timings. */
+async function seedText(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addLayer({
+      id: 't1',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 600,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'Helo there',
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 76,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 }
+      }
+    })
+    const captions = window.__reelStores.useProject.getState().project!.captions
+    s.setCaptions({
+      ...captions,
+      enabled: true,
+      segments: [
+        {
+          id: 'c1',
+          startSec: 2,
+          endSec: 4,
+          text: 'helo wrld',
+          words: [
+            { text: 'helo', startSec: 2, endSec: 2.8 },
+            { text: 'wrld', startSec: 3, endSec: 3.8 }
+          ],
+          enabled: true
+        }
+      ]
+    })
+  })
+}
+
+type TextState = { past: number; layers: { id: string; text?: string; color?: string }[]; captions: { id: string; text: string }[] }
+const textState = (page: Page): Promise<TextState> =>
+  page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    const p = s.project!
+    return {
+      past: s.past.length,
+      layers: p.layers.map((l) =>
+        l.content.kind === 'text' ? { id: l.id, text: l.content.text, color: l.content.color } : { id: l.id }
+      ),
+      captions: p.captions.segments.map((c) => ({ id: c.id, text: c.text }))
+    }
+  })
+
+/** An MCP call that may be refused by schema validation (thrown) or by the editor (isError). */
+async function refusal(c: Client, name: string, args: Record<string, unknown>): Promise<string> {
+  try {
+    const r = await call(c, name, args)
+    expect(r.isError).toBe(true)
+    return textOf(r)
+  } catch (e) {
+    return (e as Error).message
+  }
+}
+
+test('get_text lists text layers and captions; set_text creates and fixes them in one undo step', async ({
+  electronApp,
+  appPage: page
+}) => {
+  await seedText(page)
+  const c = await connect(await pipeOf(electronApp))
+
+  const listed = JSON.parse(textOf(await call(c, 'get_text'))) as {
+    captionLane: { id: string; visible: boolean }
+    items: { id: string; kind: string; text: string; styleFrom?: string; visible: boolean }[]
+  }
+  expect(listed.captionLane).toMatchObject({ id: 'captions', visible: true })
+  expect(listed.items.map((i) => [i.id, i.kind, i.text])).toEqual([
+    ['t1', 'text', 'Helo there'],
+    ['c1', 'caption', 'helo wrld']
+  ])
+  expect(listed.items[1].styleFrom).toBe('lane')
+  // What is on screen at 1 s: only the title.
+  const at1 = JSON.parse(textOf(await call(c, 'get_text', { fromSec: 1, toSec: 1 }))) as { items: { id: string }[] }
+  expect(at1.items.map((i) => i.id)).toEqual(['t1'])
+
+  const before = await textState(page)
+  const r = await call(c, 'set_text', {
+    edits: [
+      { id: 'c1', text: 'hello world' },
+      { id: 't1', text: 'Hello there', color: '#ff0000' },
+      { text: 'Day one', startSec: 1, endSec: 2 }
+    ]
+  })
+  expect(r.isError).toBeFalsy()
+  const { results } = JSON.parse(textOf(r)) as { results: { id: string; kind: string; created: boolean }[] }
+  expect(results.map((x) => [x.kind, x.created])).toEqual([
+    ['caption', false],
+    ['text', false],
+    ['text', true]
+  ])
+  const created = results[2].id
+  await expect(page.getByTestId(`tile-layer-${created}`)).toBeVisible()
+  const after = await textState(page)
+  expect(after.past).toBe(before.past + 1)
+  expect(after.captions).toEqual([{ id: 'c1', text: 'hello world' }])
+  expect(after.layers.find((l) => l.id === 't1')).toMatchObject({ text: 'Hello there', color: '#ff0000' })
+  expect(after.layers.find((l) => l.id === created)).toMatchObject({ text: 'Day one' })
+
+  // One undo reverts the whole batch.
+  await call(c, 'undo')
+  expect(await textState(page)).toEqual(before)
+  await expect(page.getByTestId(`tile-layer-${created}`)).toHaveCount(0)
+})
+
+test('set_text refuses bad edits and changes nothing', async ({ electronApp, appPage: page }) => {
+  await seedText(page)
+  // Link the caption to the title so its timing is locked.
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().linkItems([
+      { kind: 'layer', id: 't1' },
+      { kind: 'caption', id: 'c1' }
+    ])
+  )
+  const c = await connect(await pipeOf(electronApp))
+  const before = await textState(page)
+
+  expect(await refusal(c, 'set_text', { edits: [{ id: 't1', colour: '#ffffff' }] })).toMatch(/colour/)
+  expect(await refusal(c, 'set_text', { edits: [{ id: 't1', fontFamily: 'comic-sans' }] })).toMatch(/fontFamily|comic-sans/)
+  // A good edit in the same batch as a bad one is not applied either.
+  const mixed = await refusal(c, 'set_text', { edits: [{ id: 't1', text: 'Fine' }, { id: 'nope', text: 'x' }] })
+  expect(mixed).toMatch(/Nothing was changed[\s\S]*edit 2 \(id "nope"\): no text layer or caption has this id/)
+  expect(await refusal(c, 'set_text', { edits: [{ id: 'c1', startSec: 2.5 }] })).toMatch(/linked to another timeline item/)
+  expect(await refusal(c, 'set_text', { edits: [{ text: 'no window' }] })).toMatch(/needs startSec and endSec/)
+
+  expect(await textState(page)).toEqual(before)
+  // Text on a linked caption is still fine.
+  expect((await call(c, 'set_text', { edits: [{ id: 'c1', text: 'hello world' }] })).isError).toBeFalsy()
+})
+
+test('a caption fixed through set_text keeps the fix when it is split', async ({ electronApp, appPage: page }) => {
+  await seedText(page)
+  const c = await connect(await pipeOf(electronApp))
+  expect((await call(c, 'set_text', { edits: [{ id: 'c1', text: 'hello world' }] })).isError).toBeFalsy()
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().splitItemsAt([{ kind: 'caption', id: 'c1' }], 2.9, () => 0)
+  )
+  expect((await textState(page)).captions.map((x) => x.text)).toEqual(['hello', 'world'])
+})
+
+test('set_playhead parks the playhead, paused, clamped to the edit', async ({ electronApp, appPage: page }) => {
+  await seedText(page) // the edit is 3 s long: the title ends at 3 (captions do not extend it)
+  const c = await connect(await pipeOf(electronApp))
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setPlaying(true))
+  expect(textOf(await call(c, 'set_playhead', { timeSec: 2.5 }))).toMatch(/^Playhead at 2\.5s\. Playback is paused/)
+  expect(await page.evaluate(() => window.__reelStores.usePlayback.getState())).toMatchObject({ time: 2.5, playing: false })
+  expect(textOf(await call(c, 'set_playhead', { timeSec: 99 }))).toMatch(/^Playhead at 3s \(clamped; the edit is 3s long\)/)
+  expect(await page.evaluate(() => window.__reelStores.usePlayback.getState().time)).toBe(3)
+})
+
+/** A 3 s black 540×960 clip, synthesized with the real ffmpeg. */
+function blackClip(dir: string): string {
+  const clip = join(dir, 'black.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=540x960:r=30:d=3',
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+  ])
+  return clip
+}
+
+/** Mean luma of the caption band (the lane's default spot, centre y 1340 of 1920) of a
+ *  returned JPEG, measured by the real ffmpeg. Relative crop: stills are downscaled. */
+function captionLuma(dir: string, b64: string, name: string): number {
+  const jpg = join(dir, name)
+  writeFileSync(jpg, Buffer.from(b64, 'base64'))
+  const raw = execFileSync(FFMPEG, ['-v', 'error', '-i', jpg, '-vf', 'crop=iw*0.74:ih*0.083:iw*0.13:ih*0.656,format=gray', '-f', 'rawvideo', '-'])
+  return raw.reduce((s, v) => s + v, 0) / raw.length
+}
+
+const images = (r: ToolResult): string[] => r.content.filter((x) => x.type === 'image').map((x) => x.data!)
+
+test('render_frame returns the finished picture, caption burned in at the right moment', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG) || !existsSync(FFPROBE), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
+  expect((await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }] })).isError).toBeFalsy()
+  // A white caption 0–1 s, in the lane's default spot.
+  expect(
+    (await call(c, 'set_text', { edits: [{ id: 'captions', visible: true }, { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }] }))
+      .isError
+  ).toBeFalsy()
+
+  const r = await call(c, 'render_frame', { times: [0.5, 2.5, 99] })
+  expect(r.isError).toBeFalsy()
+  expect(textOf(r)).toMatch(/Finished frame @ 0\.5s \(timeline\)\n[\s\S]*Finished frame @ 2\.5s \(timeline\)\n/)
+  // Past the end: the label says which frame it really is.
+  expect(textOf(r)).toContain('Finished frame @ 2.97s (timeline) — asked for 99s, which is past the end of the edit; this is its last frame')
+  const [during, after] = images(r)
+  expect(captionLuma(dir, during, 'during.jpg')).toBeGreaterThan(20) // white glyphs over black
+  expect(captionLuma(dir, after, 'after.jpg')).toBeLessThan(5) // the caption has ended
+  // Downscaled to 1280 on the long side.
+  const size = execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', join(dir, 'during.jpg')])
+    .toString()
+    .trim()
+  expect(size).toBe('720,1280')
+
+  // Same moment with the lane off: the band goes dark, so it really was the caption.
+  await call(c, 'set_text', { edits: [{ id: 'captions', visible: false }] })
+  const off = images(await call(c, 'render_frame', { times: [0.5] }))
+  expect(off).toHaveLength(1)
+  expect(captionLuma(dir, off[0], 'off.jpg')).toBeLessThan(5)
+  // Rendering frames is not an export: no export job appeared (it never blocks the Export button).
+  const jobTypes = await page.evaluate(() => Object.values(window.__reelStores.useEditor.getState().jobs).map((j) => j.type))
+  expect(jobTypes).not.toContain('export')
+})
+
+test('inside a compound clip, render_frame uses the same local times as get_text', async ({ electronApp, appPage: page }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
+  // The clip sits at 2–5 s on the root, then becomes a compound clip the user enters.
+  const { placed } = JSON.parse(
+    textOf(await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }], atSec: 2 }))
+  ) as { placed: { layerId: string }[] }
+  const layerId = placed[0].layerId
+  await page.evaluate((id) => {
+    const s = window.__reelStores.useProject.getState()
+    s.convertLayerToComp(id)
+    s.enterComposition({ layerId: id })
+  }, layerId)
+  // A caption at LOCAL 0–1 s (root 2–3 s).
+  await call(c, 'set_text', { edits: [{ id: 'captions', visible: true }, { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }] })
+  const listed = JSON.parse(textOf(await call(c, 'get_text'))) as { items: { text: string; startSec: number }[] }
+  expect(listed.items).toEqual([expect.objectContaining({ text: 'HELLO WORLD', startSec: 0 })])
+
+  const r = await call(c, 'render_frame', { times: [0.5] })
+  expect(r.isError).toBeFalsy()
+  expect(textOf(r)).toContain('inside a nested composition')
+  // At local 0.5 s the caption shows (rendering the root at 0.5 s would be black: the clip starts at 2 s).
+  expect(captionLuma(dir, images(r)[0], 'nested.jpg')).toBeGreaterThan(20)
+})
+
+test('a render that fails half-way does not leave its text-layout window behind', async ({ electronApp, appPage: page }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  // A gradient text layer (rasterised by the hidden Chromium window during the walk),
+  // then a clip whose media isn't in the library: the render throws after the window exists.
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addLayer({
+      id: 'grad',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 600,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'Gradient',
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 76,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 },
+        gradient: { from: '#ff0000', to: '#0000ff', angle: 90 }
+      }
+    })
+    s.addVideoLayer('ghost', 'no-such-media', 0, 2, false)
+  })
+  const windows = (): Promise<number> => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  const before = await windows()
+  const c = await connect(await pipeOf(electronApp))
+  const r = await call(c, 'render_frame', { times: [0.5] })
+  expect(r.isError).toBe(true)
+  expect(textOf(r)).toContain('Missing source media')
+  await expect.poll(windows).toBe(before)
 })

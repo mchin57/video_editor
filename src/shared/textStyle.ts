@@ -28,6 +28,9 @@ export type CssLength = (px: number) => string
 /** Leading, as a multiple of the font size. (Was Tailwind `leading-tight`.) */
 export const TEXT_LINE_HEIGHT = 1.25
 
+/** Smallest font size a text block may have (logical px) — the Inspector's and `set_text`'s floor. */
+export const TEXT_FONT_SIZE_MIN = 12
+
 /** Auto-wrap width as a fraction of the FRAME width, for text and captions. */
 export const TEXT_WRAP_FRAC = 0.92
 
