@@ -1,7 +1,8 @@
 /**
  * Clip descriptions (`MediaRecord.description`): hovering a library thumbnail
- * shows the preview pop-out with the description beside it, and hovering a
- * video tile on the timeline shows it above the tile. Both are editable in
+ * shows the preview pop-out (video, image, or nothing for audio) with the
+ * description beside it, and hovering a media tile on the timeline (video,
+ * image, audio) shows it above the tile. Both are editable in
  * place, both stay open while the cursor travels from the thumbnail / tile
  * into them (and while their text box has focus), and both show the same
  * per-file text. Typing never reaches the app's shortcuts; the text is saved
@@ -132,6 +133,73 @@ test('library pop-out and timeline tile show the same editable description; it s
   await page.evaluate(() => window.__reelStores.useProject.getState().save())
   const reel = JSON.parse(readFileSync(join(root, 'E2E.reel'), 'utf8')) as { library: { id: string; description?: string }[] }
   expect(reel.library.find((r) => r.id === id)?.description).toBe('Wave 2 start, goggles fogged')
+})
+
+test('image and audio clips: a description panel in the library and above their timeline tiles', async ({
+  appPage: page,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(120_000)
+  const root = join(projectsDir, 'E2E')
+  execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x480', '-frames:v', '1', join(root, 'finish.png')])
+  execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', join(root, 'horn.wav')])
+  const img = await importClip(page, join(root, 'finish.png'))
+  const aud = await importClip(page, join(root, 'horn.wav'))
+
+  // Library, image: the picture beside its description.
+  await page.mouse.move(5, 5)
+  await page.getByRole('button', { name: /^finish\.png / }).locator('img').first().hover()
+  await expect(page.getByTestId('preview-image')).toBeVisible()
+  await expect(page.getByTestId('preview-popout')).toHaveCount(0)
+  let input = page.getByTestId('library-description').getByTestId('description-input')
+  await glide(page, await centre(page.getByRole('button', { name: /^finish\.png / }).locator('img').first()), await centre(input))
+  await input.click()
+  await page.keyboard.type('Finish arch, wide')
+  await input.press('Enter')
+  await expect.poll(async () => (await media(page, img)).description).toBe('Finish arch, wide')
+
+  // Library, audio: the description alone; clicking in it doesn't play the clip.
+  await page.mouse.move(5, 5)
+  await expect(page.getByTestId('library-description')).toHaveCount(0)
+  const glyph = page.getByTitle('Play preview') // the audio card's ♪ glyph (its only audio card)
+  await glyph.hover()
+  const panel = page.getByTestId('library-description')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('preview-image')).toHaveCount(0)
+  await expect(page.getByTestId('preview-popout')).toHaveCount(0)
+  input = panel.getByTestId('description-input')
+  await glide(page, await centre(glyph), await centre(input))
+  await panel.click({ position: { x: 20, y: 8 } }) // the panel's header, outside the text box
+  await input.click()
+  await page.keyboard.type('Start horn')
+  await input.press('Enter')
+  await expect.poll(async () => (await media(page, aud)).description).toBe('Start horn')
+  const paused = await page.evaluate(() => [...document.querySelectorAll('audio')].every((a) => a.paused))
+  expect(paused).toBe(true)
+
+  // Timeline: an image tile and an audio tile each show theirs above the tile.
+  await page.evaluate(
+    ({ img, aud }) => {
+      const s = window.__reelStores.useProject.getState()
+      s.addLayer({ id: 'I1', hidden: false, startSec: 0, endSec: 3, x: 540, y: 960, scale: 0.5, content: { kind: 'image', mediaId: img, opacity: 1 } })
+      s.addAudioClip({ id: 'A1', mediaId: aud, startSec: 0, inSec: 0, outSec: 2, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'audio' })
+    },
+    { img, aud }
+  )
+  await page.mouse.move(5, 5)
+  for (const [tile, text] of [
+    ['tile-layer-I1', 'Finish arch, wide'],
+    ['tile-audio-A1', 'Start horn']
+  ] as const) {
+    await page.getByTestId(tile).hover() // scrolls the lane into view first
+    const above = page.getByTestId('timeline-description')
+    await expect(above).toBeVisible()
+    await expect(above.getByTestId('description-input')).toHaveValue(text)
+    expect((await above.boundingBox())!.y).toBeLessThan((await page.getByTestId(tile).boundingBox())!.y)
+    await page.mouse.move(5, 5)
+    await expect(above).toHaveCount(0)
+  }
 })
 
 test('a quick pass across a tile does not open its description', async ({ appPage: page, projectsDir }) => {

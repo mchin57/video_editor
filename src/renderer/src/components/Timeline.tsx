@@ -24,7 +24,7 @@ import { assetAspect, assetKind, type MediaAsset } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { createPortal } from 'react-dom'
 import { useLibrary } from '@/hooks/useMedia'
-import { useHoverIntent } from '@/hooks/useHoverIntent'
+import { useHoverGuard, useHoverIntent } from '@/hooks/useHoverIntent'
 import { interactionOpen } from '@/lib/interaction'
 import type { HoverIntent } from '@/lib/hoverIntent'
 import { DescriptionBox } from '@/components/DescriptionBox'
@@ -116,16 +116,18 @@ function TileThumb({ asset }: { asset: MediaAsset }): JSX.Element | null {
   )
 }
 
-/** Where a hovered video tile is, for its description box. */
+/** Where a hovered media tile (video, image, audio) is, for its description box. */
 interface TileDescriptionAt {
   mediaId: string
+  /** The tile itself (a member of the hover group) and where it was on entering. */
+  el: HTMLElement
   rect: DOMRect
   /** Cursor x on entering: the box centres there, so moving straight up reaches it. */
   x: number
 }
 
 /**
- * The hovered video tile's clip description, floating just above the tile
+ * The hovered media tile's clip description, floating just above the tile
  * (below it when there's no room) and editable in place (`DescriptionBox`). Tile,
  * box and the bridge over the gap form one hover group (`HoverIntent`), so the
  * cursor can travel from the tile up into the box; typing pins it open.
@@ -150,9 +152,19 @@ function TileDescription({
   const bridgeTop = below ? at.rect.bottom - 1 : at.rect.top - GAP - 1
   const group = { onMouseEnter: () => intent.enter(), onMouseLeave: () => intent.leave() }
   const boxRef = useRef<HTMLDivElement>(null)
+  const bridgeRef = useRef<HTMLDivElement>(null)
+  useHoverGuard(
+    { enter: () => intent.enter(), leave: () => intent.leave() },
+    () => [at.el, boxRef.current, bridgeRef.current]
+  )
   return createPortal(
     <>
-      <div style={{ position: 'fixed', left, width: W, top: bridgeTop, height: GAP + 2 }} className="z-[499]" {...group} />
+      <div
+        ref={bridgeRef}
+        style={{ position: 'fixed', left, width: W, top: bridgeTop, height: GAP + 2 }}
+        className="z-[499]"
+        {...group}
+      />
       <div
         ref={boxRef}
         data-testid="timeline-description"
@@ -307,9 +319,25 @@ export function Timeline(): JSX.Element {
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
-  // Hovering a video tile shows its clip's description above it (TileDescription).
-  // A short open delay, so sweeping across tiles doesn't flash a box over each.
+  // Hovering a media tile (video, image, audio) shows its clip's description above
+  // it (TileDescription). A short open delay, so sweeping across tiles doesn't
+  // flash a box over each.
   const descHover = useHoverIntent<TileDescriptionAt>({ openMs: 400 })
+  /** The hover wiring for a tile showing library clip `asset` (none without one). */
+  const descHoverProps = (asset: MediaAsset | undefined): Partial<JSX.IntrinsicElements['div']> =>
+    asset
+      ? {
+          // A press (select, drag, trim) closes it.
+          onPointerDownCapture: () => descHover.intent.close(),
+          onMouseEnter: (e) => {
+            // Not mid-drag (any drag: a tile, a trim, the playhead).
+            if (interactionOpen()) return
+            const el = e.currentTarget
+            descHover.intent.enter({ mediaId: asset.id, el, rect: el.getBoundingClientRect(), x: e.clientX })
+          },
+          onMouseLeave: () => descHover.intent.leave()
+        }
+      : {}
   const descAsset = descHover.target ? assetById.get(descHover.target.mediaId) : undefined
   // The tiles move under a scroll or zoom: drop the box rather than leave it floating.
   useEffect(() => {
@@ -1012,14 +1040,8 @@ export function Timeline(): JSX.Element {
       <div
         key={l.id}
         data-testid={`tile-layer-${l.id}`}
-        onPointerDownCapture={() => descHover.intent.close()}
         onPointerDown={(e) => startTileDrag(e, { kind: 'layer', id: l.id })}
-        onMouseEnter={(e) => {
-          // Not mid-drag (any drag: a tile, a trim, the playhead).
-          if (l.content.kind !== 'video' || !asset || interactionOpen()) return
-          descHover.intent.enter({ mediaId: asset.id, rect: e.currentTarget.getBoundingClientRect(), x: e.clientX })
-        }}
-        onMouseLeave={() => descHover.intent.leave()}
+        {...descHoverProps(asset)}
         title={linked ? `${layerLabel(l)} · linked` : layerLabel(l)}
         className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
           selected ? st.sel : st.block
@@ -1145,6 +1167,7 @@ export function Timeline(): JSX.Element {
         data-testid={`tile-audio-${a.id}`}
         onPointerDown={(e) => startTileDrag(e, { kind: 'audio', id: a.id })}
         onContextMenu={(e) => tileMenu.open(e, audioTileMenu(a))}
+        {...descHoverProps(asset)}
         title={
           [fxName ? `${fxName} track` : null, asset?.fileName ?? a.mediaId, linked ? 'linked' : null]
             .filter(Boolean)

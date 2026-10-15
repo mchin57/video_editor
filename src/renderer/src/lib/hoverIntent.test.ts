@@ -90,6 +90,16 @@ describe('HoverIntent', () => {
     expect(h.current).toBeNull()
   })
 
+  it('repeated leaves (a move-by-move guard) do not postpone the close', () => {
+    const { h } = make()
+    h.enter('a')
+    for (let i = 0; i < 10; i++) {
+      h.leave()
+      vi.advanceTimersByTime(20)
+    }
+    expect(h.current).toBeNull()
+  })
+
   it('close() closes now, pinned or not', () => {
     const { h } = make()
     h.enter('a')

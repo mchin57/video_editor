@@ -47,8 +47,11 @@ export class HoverIntent<T> {
     else this.timer = this.timers.set(() => this.set(target), this.opts.openMs)
   }
 
-  /** The cursor left the target, the panel or the bridge. */
+  /** The cursor left the target, the panel or the bridge. Idempotent: a close
+   *  already counting down isn't pushed back (`useHoverGuard` calls this on
+   *  every move outside). */
   leave(): void {
+    if (!this.inside && this.timer !== null) return
     this.inside = false
     this.cancel()
     if (this.pinned) return

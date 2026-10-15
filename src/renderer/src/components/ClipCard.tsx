@@ -16,42 +16,35 @@ import type { MediaAsset } from '@shared/media'
 import { isImageAsset } from '@shared/media'
 import { formatDuration } from '@/lib/format'
 import { startPointerDrag } from '@/lib/pointerDrag'
-import { audioUrl, proxyUrl, thumbUrl } from '@/ipc/client'
-import { useHoverIntent } from '@/hooks/useHoverIntent'
+import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
+import { useHoverGuard, useHoverIntent } from '@/hooks/useHoverIntent'
 import { DescriptionBox } from './DescriptionBox'
 
 /** Width of the description panel beside the preview pop-out. */
 const DESC_W = 220
+/** Height of an audio clip's pop-out, which is its description alone. */
+const AUDIO_POPOUT_H = 170
+
+/** What a pop-out shows beside the description: the playing video, the
+ *  picture, or nothing (audio). */
+type PopoutMedia = 'video' | 'image' | 'none'
 
 /**
- * Large floating video preview, portaled to <body> so the timeline/library
- * overflow can't clip it. Anchored beside the hovered card (flips to the other
- * side near the viewport edge), sized to the clip's aspect, and plays with sound.
- * The clip's description sits beside it, on the far side from the card, as an
- * editable box (`DescriptionBox`).
- *
- * Interactive: the card + popout form one hover group (`HoverIntent`), so the
- * cursor can travel onto the popout to grab the scrub bar or type a description
- * without dismissing it. An invisible "bridge" spans the gap between card and
- * popout so the crossing never reads as a leave at all; a focused description
- * pins the group open (`onPin`).
+ * The video pane of a pop-out: plays the proxy with sound, looping, with a
+ * click/drag scrub bar. The loop pauses while scrubbing and resumes on
+ * release; a release outside the hover group closes it (`onScrubEnd`) — the
+ * drag swallowed the mouseleave the group would have seen.
  */
-function PreviewPopout({
+function VideoPane({
   asset,
-  anchor,
-  onEnter,
-  onLeave,
-  onPin
+  width,
+  onScrubEnd
 }: {
   asset: MediaAsset
-  anchor: HTMLElement
-  onEnter: () => void
-  onLeave: () => void
-  /** The description's focus; `hovered` = the cursor is over the card or popout right now. */
-  onPin: (pinned: boolean, hovered: boolean) => void
+  width: number
+  onScrubEnd: (at: Element | null) => void
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const [dur, setDur] = useState(0)
   const [cur, setCur] = useState(0)
@@ -72,34 +65,6 @@ function PreviewPopout({
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  const v = asset.probe.video
-  const aspect = v && v.displayWidth > 0 && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 9 / 16
-  const margin = 12
-  const maxH = Math.min(560, window.innerHeight - 16)
-  let width = 300
-  let height = Math.round(width / aspect)
-  if (height > maxH) {
-    height = maxH
-    width = Math.round(height * aspect)
-  }
-  const rect = anchor.getBoundingClientRect()
-  const total = width + DESC_W
-  let left = rect.right + margin
-  // Flip to the left near the viewport edge; the description stays on the far side.
-  const onRight = left + total <= window.innerWidth - 8
-  if (!onRight) left = rect.left - margin - total
-  left = Math.max(8, left)
-  const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, window.innerHeight - height - 8))
-
-  // Invisible strip covering the card→popout gap, tall enough to span both.
-  const bridgeLeft = left >= rect.right ? rect.right : left + total
-  const bridgeWidth = left >= rect.right ? left - rect.right : rect.left - (left + total)
-  const bridgeTop = Math.min(top, rect.top)
-  const bridgeHeight = Math.max(top + height, rect.bottom) - bridgeTop
-
-  // Click/drag on the bar seeks; the loop pauses while scrubbing and resumes on
-  // release. If the release lands outside the hover group, close (with the usual
-  // grace delay) — the drag swallowed the mouseleave the group would have seen.
   const seekTo = (clientX: number): void => {
     const vid = ref.current
     const bar = barRef.current
@@ -118,17 +83,123 @@ function PreviewPopout({
       (ev) => seekTo(ev.clientX),
       (ev) => {
         void ref.current?.play().catch(() => {})
-        const at = document.elementFromPoint(ev.clientX, ev.clientY)
-        if (!at || !rootRef.current?.contains(at)) onLeave()
+        onScrubEnd(document.elementFromPoint(ev.clientX, ev.clientY))
       }
     )
   }
 
   const frac = dur > 0 ? Math.min(1, cur / dur) : 0
+  return (
+    <div data-testid="preview-popout" className="relative h-full shrink-0 bg-black" style={{ width }}>
+      <video
+        ref={ref}
+        src={proxyUrl(asset)}
+        loop
+        autoPlay
+        playsInline
+        onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+        className="h-full w-full object-contain"
+      />
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5">
+        <div className="mb-0.5 flex justify-between font-mono text-[9px] text-zinc-300">
+          <span data-testid="popout-time">{formatDuration(cur)}</span>
+          <span>{formatDuration(dur)}</span>
+        </div>
+        <div
+          ref={barRef}
+          data-testid="popout-scrub"
+          onPointerDown={onBarDown}
+          title="Click or drag to seek"
+          className="relative h-3 cursor-pointer"
+        >
+          <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25" />
+          <div
+            className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded bg-sky-400"
+            style={{ width: `${frac * 100}%` }}
+          />
+          <div
+            className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300 shadow"
+            style={{ left: `${frac * 100}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A library clip's hover pop-out, portaled to <body> so the timeline/library
+ * overflow can't clip it: the media (`VideoPane` for a video, the picture for
+ * an image, nothing for audio) with the clip's description beside it, on the
+ * far side from the card, as an editable box (`DescriptionBox`). Anchored
+ * beside the hovered thumbnail (flips to the other side near the viewport
+ * edge), sized to the clip's aspect.
+ *
+ * Interactive: the thumbnail + popout form one hover group (`HoverIntent`), so
+ * the cursor can travel onto the popout to scrub or type a description without
+ * dismissing it. An invisible "bridge" spans the gap between card and popout
+ * so the crossing never reads as a leave at all; a focused description pins
+ * the group open (`onPin`).
+ */
+function HoverPopout({
+  asset,
+  anchor,
+  media,
+  onEnter,
+  onLeave,
+  onPin
+}: {
+  asset: MediaAsset
+  anchor: HTMLElement
+  media: PopoutMedia
+  onEnter: () => void
+  onLeave: () => void
+  /** The description's focus; `hovered` = the cursor is over the card or popout right now. */
+  onPin: (pinned: boolean, hovered: boolean) => void
+}): JSX.Element {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const bridgeRef = useRef<HTMLDivElement>(null)
+  useHoverGuard({ enter: onEnter, leave: onLeave }, () => [anchor, rootRef.current, bridgeRef.current])
+
+  // An image's pane follows the decoded picture once it loads: the probe's size
+  // ignores a JPEG's EXIF orientation (TODO.md ▸ Bugs ▸ "EXIF orientation").
+  const [loadedAspect, setLoadedAspect] = useState<number | null>(null)
+  const v = asset.probe.video
+  const probed = v && v.displayWidth > 0 && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 9 / 16
+  const aspect = media === 'image' && loadedAspect ? loadedAspect : probed
+  const margin = 12
+  const maxH = Math.min(560, window.innerHeight - 16)
+  let width = 0
+  let height = AUDIO_POPOUT_H
+  if (media !== 'none') {
+    width = 300
+    height = Math.round(width / aspect)
+    if (height > maxH) {
+      height = maxH
+      width = Math.round(height * aspect)
+    }
+  }
+  const rect = anchor.getBoundingClientRect()
+  const total = width + DESC_W
+  let left = rect.right + margin
+  // Flip to the left near the viewport edge; the description stays on the far side.
+  const onRight = left + total <= window.innerWidth - 8
+  if (!onRight) left = rect.left - margin - total
+  left = Math.max(8, left)
+  const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, window.innerHeight - height - 8))
+
+  // Invisible strip covering the card→popout gap, tall enough to span both.
+  const bridgeLeft = left >= rect.right ? rect.right : left + total
+  const bridgeWidth = left >= rect.right ? left - rect.right : rect.left - (left + total)
+  const bridgeTop = Math.min(top, rect.top)
+  const bridgeHeight = Math.max(top + height, rect.bottom) - bridgeTop
+
+  const divider = media === 'none' ? '' : onRight ? 'border-l border-white/10' : 'border-r border-white/10'
   return createPortal(
     <>
       {bridgeWidth > 0 && (
         <div
+          ref={bridgeRef}
           style={{ position: 'fixed', left: bridgeLeft, top: bridgeTop, width: bridgeWidth, height: bridgeHeight }}
           className="z-[499]"
           onMouseEnter={onEnter}
@@ -143,45 +214,33 @@ function PreviewPopout({
         }`}
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
+        // Portaled, but React events still bubble to the thumbnail: a click here
+        // must not toggle an audio card's playback.
+        onClick={(e) => e.stopPropagation()}
       >
-        <div data-testid="preview-popout" className="relative h-full shrink-0 bg-black" style={{ width }}>
-          <video
-            ref={ref}
-            src={proxyUrl(asset)}
-            loop
-            autoPlay
-            playsInline
-            onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
-            className="h-full w-full object-contain"
+        {media === 'video' && (
+          <VideoPane
+            asset={asset}
+            width={width}
+            onScrubEnd={(at) => {
+              if (!at || !rootRef.current?.contains(at)) onLeave()
+            }}
           />
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5">
-            <div className="mb-0.5 flex justify-between font-mono text-[9px] text-zinc-300">
-              <span data-testid="popout-time">{formatDuration(cur)}</span>
-              <span>{formatDuration(dur)}</span>
-            </div>
-            <div
-              ref={barRef}
-              data-testid="popout-scrub"
-              onPointerDown={onBarDown}
-              title="Click or drag to seek"
-              className="relative h-3 cursor-pointer"
-            >
-              <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25" />
-              <div
-                className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded bg-sky-400"
-                style={{ width: `${frac * 100}%` }}
-              />
-              <div
-                className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300 shadow"
-                style={{ left: `${frac * 100}%` }}
-              />
-            </div>
+        )}
+        {media === 'image' && (
+          <div data-testid="preview-image" className="h-full shrink-0 bg-black" style={{ width }}>
+            <img
+              src={imageUrl(asset)}
+              alt=""
+              onLoad={(e) => {
+                const { naturalWidth: w, naturalHeight: h } = e.currentTarget
+                if (w > 0 && h > 0) setLoadedAspect(w / h)
+              }}
+              className="h-full w-full object-contain"
+            />
           </div>
-        </div>
-        <div
-          data-testid="library-description"
-          className={`flex min-w-0 flex-1 flex-col gap-1.5 p-2 ${onRight ? 'border-l' : 'border-r'} border-white/10`}
-        >
+        )}
+        <div data-testid="library-description" className={`flex min-w-0 flex-1 flex-col gap-1.5 p-2 ${divider}`}>
           <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-zinc-400" title={asset.fileName}>
             Description
           </div>
@@ -198,12 +257,14 @@ function PreviewPopout({
 }
 
 /**
- * First-frame thumbnail with a ▶ fallback until/if the jpg is available. Hovering
- * a video clip pops out a large preview beside the card (with sound), so a clip
- * can be reviewed without placing it on the timeline. The popout is interactive
- * (scrub bar), so dismissal is a shared hover group with a short close delay:
- * it stays while the cursor is over the card OR the popout, and a leave only
- * closes it after a grace period a re-enter cancels (no card→popout flicker).
+ * First-frame thumbnail with a ▶ fallback until/if the jpg is available.
+ * Hovering pops out a large preview beside the card — a video plays (with
+ * sound), an image shows whole — with the clip's description beside it, so a
+ * clip can be reviewed and described without placing it on the timeline. The
+ * popout is interactive (scrub bar, description), so dismissal is a shared
+ * hover group with a short close delay: it stays while the cursor is over the
+ * card OR the popout, and a leave only closes it after a grace period a
+ * re-enter cancels (no card→popout flicker).
  */
 export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   // The ▶ fallback is tied to the asset data the thumb failed FOR: each library
@@ -214,7 +275,8 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   const failed = failedFor === asset
   const { target: hover, intent } = useHoverIntent<true>()
   const wrapRef = useRef<HTMLDivElement>(null)
-  const canPreview = asset.proxyReady && !!asset.probe.video && !isImageAsset(asset)
+  // An image's "proxy" is its display PNG; a video's, the playable proxy.
+  const canPreview = asset.proxyReady && !!asset.probe.video
   return (
     <div
       ref={wrapRef}
@@ -233,9 +295,10 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
         />
       )}
       {hover && canPreview && wrapRef.current && (
-        <PreviewPopout
+        <HoverPopout
           asset={asset}
           anchor={wrapRef.current}
+          media={isImageAsset(asset) ? 'image' : 'video'}
           onEnter={() => intent.enter()}
           onLeave={() => intent.leave()}
           onPin={(on, hovered) => intent.pin(on, hovered)}
@@ -245,18 +308,28 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   )
 }
 
-/** Audio card glyph: click to play/pause the proxy inline (▶/⏸ on hover). */
+/** Audio card glyph: click to play/pause the proxy inline (▶/⏸ on hover).
+ *  Hovering also pops out the clip's description beside the card. */
 export function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const wrapRef = useRef<HTMLSpanElement>(null)
   const [playing, setPlaying] = useState(false)
   const [hover, setHover] = useState(false)
+  const { target: popout, intent } = useHoverIntent<true>()
   const glyph = !asset.proxyReady ? '♪' : playing ? '⏸' : hover ? '▶' : '♪'
   return (
     <span
+      ref={wrapRef}
       role="button"
       tabIndex={-1}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={() => {
+        setHover(true)
+        intent.enter(true)
+      }}
+      onMouseLeave={() => {
+        setHover(false)
+        intent.leave()
+      }}
       onClick={(e) => {
         e.stopPropagation()
         const el = audioRef.current
@@ -275,6 +348,16 @@ export function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
       />
+      {popout && wrapRef.current && (
+        <HoverPopout
+          asset={asset}
+          anchor={wrapRef.current}
+          media="none"
+          onEnter={() => intent.enter()}
+          onLeave={() => intent.leave()}
+          onPin={(on, hovered) => intent.pin(on, hovered)}
+        />
+      )}
     </span>
   )
 }
