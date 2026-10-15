@@ -8,7 +8,8 @@ export interface VideoStreamInfo {
   /** Display dimensions after applying rotation metadata. */
   displayWidth: number
   displayHeight: number
-  /** Rotation in degrees from displaymatrix side data (0, 90, 180, 270). */
+  /** Rotation in degrees from displaymatrix side data (0, 90, 180, 270): the
+   *  stream's (video), or the first frame's (a still's EXIF orientation). */
   rotationDeg: number
   /** avg_frame_rate as a number (frames per second). */
   avgFps: number
@@ -51,6 +52,10 @@ export interface ProbeInfo {
   container: string
   video: VideoStreamInfo | null
   audio: AudioStreamInfo | null
+  /** Which parser made this probe (`PROBE_VERSION` in main's ffprobeParse);
+   *  absent = before versions. Records whose probe is stale are re-probed on
+   *  open. */
+  version?: number
 }
 
 export type MediaKind = 'video' | 'audio' | 'image'

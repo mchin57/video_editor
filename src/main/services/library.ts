@@ -54,6 +54,13 @@ export function addOpeningRecords(records: MediaRecord[]): void {
   for (const record of records) if (!entries.has(record.id)) entries.set(record.id, { record, path: null })
 }
 
+/** Correct a record quietly while a project is opening (a stale probe —
+ *  reprobe.ts): the opener reports the change, as `resolveAll` does. */
+export function patchOpeningRecord(id: string, patch: Partial<MediaRecord>): void {
+  const entry = entries.get(id)
+  if (entry) entry.record = { ...entry.record, ...patch }
+}
+
 /** Replace the library with a newly opened project's records (paths unchecked). */
 export function openLibrary(projectRoot: string, records: MediaRecord[]): void {
   root = projectRoot

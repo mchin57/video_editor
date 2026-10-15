@@ -504,6 +504,33 @@ Things the check showed:
   (the AAC encode overshoots the −1 dBFS ceiling by ~0.07 dB — still well
   clear of 0).
 
+## EXIF orientation — only on the first FRAME (verified ffmpeg 8.1.1, 2026-10)
+
+- **An iPhone JPEG is stored landscape; its orientation is frame side data,
+  not stream side data.** `IMG_8432.JPG` (iPhone 14 Pro, upright portrait):
+  `-show_streams` gives 4032×3024, no `side_data_list`, no `rotate` tag. Only
+  the decoded frame carries it: `3x3 displaymatrix`, `rotation=-90`.
+- **ffmpeg applies it when decoding** (autorotate), so the display PNG, the
+  thumbnail and any filter graph fed the original see the upright 3024×4032
+  picture. A probe that reads only the stream is wrong for these files, and
+  every size taken from it (layer box, thumb, export box) squashes the photo.
+  Before the fix the export drew the 3:4 PNG into a 540×406 (4:3) box.
+- **All eight EXIF orientations** (APP1 tag 0x0112 spliced into a lavfi
+  64×48 JPEG): 1→0, 2→−180, 3→−180, 4→0, 5→−90, 6→−90, 7→90, 8→90; 5–8 decode
+  48×64, 1–4 decode 64×48. A mirrored orientation reports a rotation too, and
+  ±90 always means "swap width and height".
+- **How the probe reads it:** add `-read_intervals %+#1 -show_entries
+  frame_side_data=side_data_type,rotation` to `-show_format -show_streams`.
+  The streams/format JSON is unchanged (only `refs` and `nb_read_frames` are
+  added). Do **not** use `-show_frames`: it prints every EXIF tag, iPhone
+  MakerNote included (~10 KB). PNG, GIF, WebP, BMP, TIFF and AVIF probe fine
+  with the same args (exit 0, a frame with no display matrix). HEIC was not
+  tested (no sample; it goes through the mov demuxer, where rotation is stream
+  side data).
+- Only stills get the frame read (by extension, `kindFromExt`); videos keep the
+  stream-only probe. Whether ffmpeg also honours a FRAME display matrix on video
+  was not checked.
+
 ## Progress parsing
 
 - `-progress pipe:1` emits `out_time_us` AND `out_time_ms` — **both are
