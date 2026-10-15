@@ -6,9 +6,12 @@
  *   - rotation: stored landscape + a 90/270° display matrix → portrait display
  *   - VFR: avg_frame_rate differs from r_frame_rate
  *   - HDR: PQ (smpte2084) / HLG (arib-std-b67) transfer needs tone-mapping
+ *   - photos: an iPhone JPEG is stored landscape and its EXIF orientation shows
+ *     up only as the FIRST FRAME's display matrix, never on the stream — and
+ *     ffmpeg applies it when decoding (docs/FFMPEG-NOTES.md "EXIF orientation")
  */
 
-import type { ProbeInfo, VideoStreamInfo, AudioStreamInfo } from '@shared/media'
+import type { MediaRecord, ProbeInfo, VideoStreamInfo, AudioStreamInfo } from '@shared/media'
 import { pixFmtHasAlpha } from '@shared/media'
 
 interface RawSideData {
@@ -34,6 +37,12 @@ interface RawStream {
   tags?: Record<string, string>
 }
 
+/** A decoded frame, as `-show_entries frame_side_data=…` prints it (the probe
+ *  asks for a still's first frame only). */
+interface RawFrame {
+  side_data_list?: RawSideData[]
+}
+
 interface RawFormat {
   duration?: string
   format_name?: string
@@ -42,6 +51,20 @@ interface RawFormat {
 export interface FfprobeJson {
   streams?: RawStream[]
   format?: RawFormat
+  frames?: RawFrame[]
+}
+
+/**
+ * Bumped when the parser learns something records already saved lack; those
+ * records are re-probed on open (`needsReprobe`). 2 = stills read their EXIF
+ * orientation (2026-10-14).
+ */
+export const PROBE_VERSION = 2
+
+/** A saved record whose probe predates what its kind needs: an image probed
+ *  before v2 may hold landscape dimensions for a portrait photo. */
+export function needsReprobe(r: Pick<MediaRecord, 'kind' | 'probe'>): boolean {
+  return r.kind === 'image' && (r.probe.version ?? 1) < 2
 }
 
 /** Parse an ffprobe rational like "30000/1001" into fps. Returns 0 when unknown. */
@@ -58,17 +81,24 @@ export function normalizeRotation(deg: number): 0 | 90 | 180 | 270 {
   return n as 0 | 90 | 180 | 270
 }
 
-function extractRotation(stream: RawStream): number {
-  const sd = stream.side_data_list?.find(
-    (s) => typeof s.rotation === 'number' && Number.isFinite(s.rotation)
-  )
-  if (sd && typeof sd.rotation === 'number') return normalizeRotation(sd.rotation)
+/** A display-matrix rotation in a side-data list, snapped; null when none. */
+function sideDataRotation(list: RawSideData[] | undefined): number | null {
+  const sd = list?.find((s) => typeof s.rotation === 'number' && Number.isFinite(s.rotation))
+  return sd && typeof sd.rotation === 'number' ? normalizeRotation(sd.rotation) : null
+}
+
+/** The stream's rotation (side data, then the legacy `rotate` tag), else the
+ *  first frame's display matrix (a still's EXIF orientation; mirrored
+ *  orientations report a rotation too, and ±90 still means "swap"). */
+function extractRotation(stream: RawStream, frame: RawFrame | undefined): number {
+  const sd = sideDataRotation(stream.side_data_list)
+  if (sd !== null) return sd
   const tag = stream.tags?.rotate ?? stream.tags?.['rotate']
   if (tag !== undefined) {
     const n = Number(tag)
     if (Number.isFinite(n)) return normalizeRotation(n)
   }
-  return 0
+  return sideDataRotation(frame?.side_data_list) ?? 0
 }
 
 const HDR_TRANSFERS = new Set(['smpte2084', 'smptest2084', 'arib-std-b67'])
@@ -86,10 +116,10 @@ function detectVfr(avgFps: number, rFps: number): boolean {
   return diff / Math.max(avgFps, rFps) > 0.02
 }
 
-function parseVideo(s: RawStream): VideoStreamInfo {
+function parseVideo(s: RawStream, frame: RawFrame | undefined): VideoStreamInfo {
   const width = s.width ?? 0
   const height = s.height ?? 0
-  const rotationDeg = extractRotation(s)
+  const rotationDeg = extractRotation(s, frame)
   const swap = rotationDeg === 90 || rotationDeg === 270
   const avgFps = parseRate(s.avg_frame_rate)
   const rFps = parseRate(s.r_frame_rate)
@@ -137,7 +167,8 @@ export function parseFfprobeJson(json: FfprobeJson): ProbeInfo {
   return {
     durationSec,
     container: json.format?.format_name ?? 'unknown',
-    video: videoStream ? parseVideo(videoStream) : null,
-    audio: audioStream ? parseAudio(audioStream) : null
+    video: videoStream ? parseVideo(videoStream, json.frames?.[0]) : null,
+    audio: audioStream ? parseAudio(audioStream) : null,
+    version: PROBE_VERSION
   }
 }

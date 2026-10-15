@@ -41,6 +41,7 @@ import {
 } from './library'
 import { fromRelativePath, samePath } from './mediaRef'
 import { unknownRecords } from './unknownMedia'
+import { reprobeStale } from './reprobe'
 import { currentProjectRoot, getProjectRoot, setProjectRoot } from './projectRoot'
 import {
   autosavePath,
@@ -257,6 +258,7 @@ async function readFolder(root: string): Promise<LoadedProject> {
     }
   }
   if (await resolveAll()) dirty = true
+  if (await reprobeStale(root)) dirty = true
   openId = project.id
   return { project, path: doc, dirty }
 }

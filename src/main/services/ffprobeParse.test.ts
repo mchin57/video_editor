@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
+import type { ProbeInfo } from '@shared/media'
 import {
+  needsReprobe,
   parseFfprobeJson,
   parseRate,
   normalizeRotation,
+  PROBE_VERSION,
   type FfprobeJson
 } from './ffprobeParse'
 
@@ -149,5 +152,70 @@ describe('parseFfprobeJson — VFR detection + legacy rotate tag', () => {
   it('normalizes "unknown" transfer to null and not HDR', () => {
     expect(p.video?.colorTransfer).toBeNull()
     expect(p.video?.isHdr).toBe(false)
+  })
+})
+
+describe('parseFfprobeJson — iPhone JPEG, EXIF orientation only on the first frame', () => {
+  // Captured from IMG_8432.JPG (iPhone 14 Pro, upright portrait) with the
+  // probe's own args, trimmed: the stream has no rotation; the frame does.
+  const json: FfprobeJson = {
+    frames: [
+      {
+        side_data_list: [
+          { side_data_type: 'ICC profile' },
+          { side_data_type: '3x3 displaymatrix', rotation: -90 },
+          { side_data_type: 'EXIF metadata' }
+        ]
+      }
+    ],
+    streams: [
+      { codec_type: 'video', codec_name: 'mjpeg', width: 4032, height: 3024, pix_fmt: 'yuvj420p', avg_frame_rate: '25/1', r_frame_rate: '25/1' }
+    ],
+    format: { duration: '0.040000', format_name: 'image2' }
+  }
+
+  it('reports the oriented (portrait) display size and keeps the stored size', () => {
+    const v = parseFfprobeJson(json).video!
+    expect({ w: v.width, h: v.height }).toEqual({ w: 4032, h: 3024 })
+    expect({ w: v.displayWidth, h: v.displayHeight, rot: v.rotationDeg }).toEqual({ w: 3024, h: 4032, rot: 270 })
+  })
+  it('swaps for every quarter-turn orientation, mirrored ones included (EXIF 5–8 → ±90)', () => {
+    for (const rotation of [90, -90]) {
+      const v = parseFfprobeJson({ ...json, frames: [{ side_data_list: [{ side_data_type: '3x3 displaymatrix', rotation }] }] }).video!
+      expect({ w: v.displayWidth, h: v.displayHeight }).toEqual({ w: 3024, h: 4032 })
+    }
+  })
+  it('does not swap for upside-down or mirrored-only orientations (EXIF 2–4 → 0/±180)', () => {
+    for (const rotation of [0, 180, -180]) {
+      const v = parseFfprobeJson({ ...json, frames: [{ side_data_list: [{ side_data_type: '3x3 displaymatrix', rotation }] }] }).video!
+      expect({ w: v.displayWidth, h: v.displayHeight }).toEqual({ w: 4032, h: 3024 })
+    }
+  })
+  it('a frame with no display matrix (no EXIF orientation) stays as stored', () => {
+    const v = parseFfprobeJson({ ...json, frames: [{ side_data_list: [{ side_data_type: 'ICC profile' }] }] }).video!
+    expect({ w: v.displayWidth, h: v.displayHeight, rot: v.rotationDeg }).toEqual({ w: 4032, h: 3024, rot: 0 })
+  })
+  it("the stream's own rotation wins over the frame's", () => {
+    const withStream: FfprobeJson = {
+      ...json,
+      streams: [{ ...json.streams![0], side_data_list: [{ side_data_type: 'Display Matrix', rotation: 180 }] }]
+    }
+    expect(parseFfprobeJson(withStream).video!.rotationDeg).toBe(180)
+  })
+  it('stamps the probe version', () => {
+    expect(parseFfprobeJson(json).version).toBe(PROBE_VERSION)
+  })
+})
+
+describe('needsReprobe', () => {
+  const probe = (version?: number): ProbeInfo => ({ ...parseFfprobeJson({ streams: [] }), version })
+  it('re-probes images saved before orientation was read', () => {
+    expect(needsReprobe({ kind: 'image', probe: probe(undefined) })).toBe(true)
+    expect(needsReprobe({ kind: 'image', probe: probe(1) })).toBe(true)
+  })
+  it('leaves current images and every video/audio record alone', () => {
+    expect(needsReprobe({ kind: 'image', probe: probe(PROBE_VERSION) })).toBe(false)
+    expect(needsReprobe({ kind: 'video', probe: probe(undefined) })).toBe(false)
+    expect(needsReprobe({ kind: 'audio', probe: probe(undefined) })).toBe(false)
   })
 })
