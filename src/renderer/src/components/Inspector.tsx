@@ -540,23 +540,19 @@ function LayerEditor(): JSX.Element | null {
       )}
       <div className="flex gap-2">
         <Field label="Position X">
-          <input
-            type="number"
+          <NumberInput
             step="5"
             value={Math.round(layer.x - frame.x)}
             disabled={posKeyframed}
-            onChange={(e) => update(id, { x: Number(e.target.value) + frame.x })}
-            className={inputCls}
+            onCommit={(v) => update(id, { x: v + frame.x })}
           />
         </Field>
         <Field label="Position Y">
-          <input
-            type="number"
+          <NumberInput
             step="5"
             value={Math.round(layer.y - frame.y)}
             disabled={posKeyframed}
-            onChange={(e) => update(id, { y: Number(e.target.value) + frame.y })}
-            className={inputCls}
+            onCommit={(v) => update(id, { y: v + frame.y })}
           />
         </Field>
       </div>
@@ -1046,16 +1042,12 @@ function KeyframesSection({
                 <span className="flex-1 truncate text-zinc-500">
                   x{Math.round(k.x - frame.x)} y{Math.round(k.y - frame.y)} · {Math.round((k.scale / zoomBase) * 100)}%
                 </span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   max={100}
                   step={5}
                   value={Math.round(kfOpacity(k) * 100)}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    if (Number.isFinite(v)) setKfOpacity(layer.id, i, v / 100)
-                  }}
+                  onCommit={(v) => setKfOpacity(layer.id, i, v / 100)}
                   className={`${inputCls} w-12 flex-none`}
                   title="Layer opacity at this keyframe (%) — fades linearly between keyframes"
                 />
@@ -1156,19 +1148,13 @@ function SpeedControl({
               {v}×
             </button>
           ))}
-          <input
-            type="number"
+          <NumberInput
             min={MIN_VIDEO_SPEED}
             max={MAX_VIDEO_SPEED}
             step={0.05}
             value={cur}
             disabled={ramped}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              if (Number.isFinite(v) && v > 0) {
-                setSpeed(layerId, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
-              }
-            }}
+            onCommit={(v) => setSpeed(layerId, v)}
             className={`${inputCls} w-16 flex-none`}
           />
         </div>
@@ -1197,18 +1183,12 @@ function SpeedControl({
                     ▸
                   </button>
                   <span className="w-10 font-mono">{k.atSec.toFixed(2)}s</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={MIN_VIDEO_SPEED}
                     max={MAX_VIDEO_SPEED}
                     step={0.05}
                     value={k.speed}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      if (Number.isFinite(v) && v > 0) {
-                        updateRampKf(layerId, i, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
-                      }
-                    }}
+                    onCommit={(v) => updateRampKf(layerId, i, v)}
                     className={`${inputCls} w-14 flex-none`}
                     title="Playback speed at this source point"
                   />
@@ -1356,22 +1336,10 @@ function CaptionStyleFields({
       <TextStyleControls style={style} onPatch={onPatch} />
       <div className="flex gap-2">
         <Field label="Position X">
-          <input
-            type="number"
-            step="5"
-            value={Math.round(style.x)}
-            onChange={(e) => onPatch({ x: Number(e.target.value) })}
-            className={inputCls}
-          />
+          <NumberInput step="5" value={Math.round(style.x)} onCommit={(x) => onPatch({ x })} />
         </Field>
         <Field label="Position Y">
-          <input
-            type="number"
-            step="5"
-            value={Math.round(style.y)}
-            onChange={(e) => onPatch({ y: Number(e.target.value) })}
-            className={inputCls}
-          />
+          <NumberInput step="5" value={Math.round(style.y)} onCommit={(y) => onPatch({ y })} />
         </Field>
       </div>
       <AngleField value={style.rotationDeg} onChange={(rotationDeg) => onPatch({ rotationDeg })} />
