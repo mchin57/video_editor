@@ -129,6 +129,14 @@ checklist into guarantees a refactor can't silently break.
   protection — the owner reviews and merges. Enforced server-side by the
   `protect-main` GitHub ruleset (PR required, no force-push, no deletion, no bypass
   actors) and locally by the allow/deny rules in `.claude/settings.json`.
+- **Worktrees need no links — never junction or symlink anything into one.** A
+  worktree under `.claude/worktrees/` finds the main checkout's `node_modules` by
+  Node's normal parent-directory lookup, and the app + e2e specs find the main
+  checkout's `resources/bin` via `findDevBinDir` (`main/devBinDir.ts`). A junction
+  is a hazard: `git worktree remove` / a recursive delete follows it and wipes the
+  target (main's `node_modules` and the ffmpeg binaries, 2026-10-14). A branch
+  that adds dependencies runs `npm ci` in its worktree: that creates a real local
+  `node_modules` that shadows main's, which is deleted safely with the worktree.
 - **Auto-fix is on by default for every PR you open.** Right after `gh pr create`,
   turn on the desktop app's CI monitor for it (`ccd_pr` `set_monitor` with
   `auto_fix: true` and the PR's url) without asking. The owner has pre-approved this. Then fix the

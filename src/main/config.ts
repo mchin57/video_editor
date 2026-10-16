@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
+import { findDevBinDir } from './devBinDir'
 
 /**
  * On-disk layout for media, projects, exports and scratch. Created lazily.
@@ -37,14 +38,15 @@ export const FFPROBE_PATH_OVERRIDE = process.env.FFPROBE_PATH ?? null
  * electron-builder `extraResources` (ffmpeg/ and whisper/ subdirs). In a
  * packaged app these live under <resources>/bin. In dev they're absent unless
  * `npm run collect-binaries` has staged them under resources/bin, in which case
- * we use that so the bundled engines can be exercised before packaging. Returns
- * null when no bundle is present, so discovery falls back to the system install.
+ * we use that so the bundled engines can be exercised before packaging (a git
+ * worktree uses its main checkout's — `findDevBinDir`). Returns null when no
+ * bundle is present, so discovery falls back to the system install.
  */
 export function getBundledBinDir(): string | null {
   if (app.isPackaged) return join(process.resourcesPath, 'bin')
   for (const base of [app.getAppPath(), process.cwd()]) {
-    const dir = join(base, 'resources', 'bin')
-    if (existsSync(dir)) return dir
+    const dir = findDevBinDir(base)
+    if (dir) return dir
   }
   return null
 }

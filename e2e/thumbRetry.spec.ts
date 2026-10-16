@@ -11,10 +11,9 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 /** The app's fingerprint of a small file (≤ 3 samples: hashed whole) and its id. */
 function fingerprintOf(path: string): { fp: { size: number; start: string; middle: string; end: string }; id: string } {

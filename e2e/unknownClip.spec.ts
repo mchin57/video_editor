@@ -6,11 +6,11 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { MediaAsset } from '../src/shared/media'
 import { test, expect } from './fixtures'
+import { FFMPEG } from './bin'
 
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
 const ID = 'cccccccccccc'
 
 test('an unknown clip shows a Missing card, and Relink fills it in keeping the cut', async ({

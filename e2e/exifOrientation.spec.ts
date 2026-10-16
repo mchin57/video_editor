@@ -12,14 +12,12 @@
  */
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { MediaAsset, MediaRecord } from '../src/shared/media'
 import { test, expect } from './fixtures'
+import { FFMPEG, FFPROBE } from './bin'
 
-const BIN = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg')
-const FFMPEG = join(BIN, 'ffmpeg.exe')
-const FFPROBE = join(BIN, 'ffprobe.exe')
 const W = 1080
 const H = 1920
 

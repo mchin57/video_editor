@@ -12,12 +12,10 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { test, expect } from './fixtures'
+import { FFMPEG, FFPROBE } from './bin'
 
 const ROOT = resolve(__dirname, '..')
 const MCP = join(ROOT, 'out', 'main', 'mcp.js')
-const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
-const FFMPEG = join(BIN, 'ffmpeg.exe')
-const FFPROBE = join(BIN, 'ffprobe.exe')
 const TOOLS = ['add_description', 'export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'merge_clips', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }

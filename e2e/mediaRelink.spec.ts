@@ -12,13 +12,12 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { MediaAsset } from '../src/shared/media'
 import type { VideoContent } from '../src/shared/project'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 const media = (page: Page, ids: string[]): Promise<MediaAsset[]> =>
   page.evaluate((ids) => window.api.listProjectMedia(ids), ids)

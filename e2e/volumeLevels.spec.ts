@@ -15,14 +15,13 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { AudioClip } from '../src/shared/project'
 import type { LoudnessSeries } from '../src/shared/loudness'
 import { clipGain } from '../src/shared/volumeLevels'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 /** A mono 48 kHz WAV from a lavfi source (+ an optional filter). */
 function synth(out: string, src: string, af?: string): void {

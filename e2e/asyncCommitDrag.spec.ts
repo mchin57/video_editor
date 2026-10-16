@@ -7,10 +7,9 @@
  */
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test, expect } from './fixtures'
-
-const FFMPEG = join(resolve(__dirname, '..'), 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 /** 4 s mono WAV: tone, 1 s of silence at 1.5–2.5 s, tone — two speech pieces. */
 function makeGappedWav(path: string): void {

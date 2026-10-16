@@ -8,12 +8,11 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test, expect } from './fixtures'
 import type { Page } from '@playwright/test'
 import type { Composition, LayoutContent } from '../src/shared/project'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 /** Root: one Split L|R layout at t=0 whose cell 0 holds a (fake) clip. */
 async function arrangeLayoutWithCell(page: Page): Promise<void> {

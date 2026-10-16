@@ -20,11 +20,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { JobProgressEvent } from '../src/shared/jobs'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 type Probe = { __jobs: JobProgressEvent[]; __second: Promise<boolean> }
 
