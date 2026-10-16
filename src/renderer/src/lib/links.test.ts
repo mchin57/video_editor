@@ -18,6 +18,7 @@ import {
   snapToPreviousDelta,
   splitItemsAt,
   splittableAt,
+  toggleMuteItems,
   timelineTiles,
   trimItemsBy,
   unlinkItems
@@ -516,5 +517,32 @@ describe('snapToPreviousDelta', () => {
     expect(snapToPreviousDelta(p, [A('A1')])).toBeCloseTo(-9)
     // With the duration known, it becomes a real target.
     expect(snapToPreviousDelta(p, [A('A1')], () => 5)).toBeCloseTo(-4)
+  })
+})
+
+describe('toggleMuteItems (the M key)', () => {
+  const muted = (p: Composition): boolean[] => [
+    ...p.layers.map((l) => l.content.kind === 'video' && l.content.mute),
+    ...p.audioClips.map((a) => !!a.mute)
+  ]
+
+  it('toggles a video layer and an audio clip together, and back', () => {
+    const p = project({ layers: [layer('L1', 0, 10)], audioClips: [audio('A1', 2, 6)] })
+    const once = toggleMuteItems(p, [L('L1'), A('A1')])
+    expect(muted(once)).toEqual([true, true])
+    expect(muted(toggleMuteItems(once, [L('L1'), A('A1')]))).toEqual([false, false])
+  })
+
+  it('a mixed selection mutes all first, then unmutes all', () => {
+    const p = project({ layers: [layer('L1', 0, 10)], audioClips: [{ ...audio('A1', 2, 6), mute: true }] })
+    const once = toggleMuteItems(p, [L('L1'), A('A1')])
+    expect(muted(once)).toEqual([true, true])
+    expect(muted(toggleMuteItems(once, [L('L1'), A('A1')]))).toEqual([false, false])
+  })
+
+  it('leaves unselected tiles alone and ignores tiles without sound', () => {
+    const p = project({ layers: [layer('L1', 0, 10), textLayer('T1', 0, 3)], audioClips: [audio('A1', 2, 6)] })
+    expect(muted(toggleMuteItems(p, [A('A1')]))).toEqual([false, false, true])
+    expect(toggleMuteItems(p, [L('T1'), C('nope')])).toBe(p)
   })
 })

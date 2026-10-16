@@ -483,7 +483,7 @@ export function hookCovered(layers: Layer[]): boolean {
 
 // --- Factories --------------------------------------------------------------
 
-const DEFAULT_PILL: PillStyle = { enabled: true, color: '#000000cc', padPx: 18 }
+const DEFAULT_PILL: PillStyle = { enabled: true, color: '#000000ff', padPx: 18 }
 
 /** Where a new media layer lands: the output frame, and the media's aspect (w/h)
  *  so it can start fitted to that frame. Absent = the 9:16 frame / scale 1. */

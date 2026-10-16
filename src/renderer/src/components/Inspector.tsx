@@ -490,6 +490,7 @@ function LayerEditor(): JSX.Element | null {
           <NumberInput
             step="0.1"
             min={0}
+            max={layer.endSec - 0.2}
             value={layer.startSec}
             format={(v) => v.toFixed(1)}
             disabled={linked}
@@ -721,7 +722,7 @@ function LayerEditor(): JSX.Element | null {
           </CollapsibleSection>
 
           <SoundEffectsSection
-            key={layer.id}
+            key={`sfx-${layer.id}`}
             sourceMediaId={c.mediaId}
             inSec={c.inSec}
             outSec={c.outSec}
@@ -823,7 +824,7 @@ function LayerEditor(): JSX.Element | null {
 
           {/* Background removal → this clip's segment, matted and swapped in
               place. An already-transparent clip just says so. */}
-          <RemoveBackground key={id} layerId={id} content={c} asset={asset} />
+          <RemoveBackground key={`matte-${id}`} layerId={id} content={c} asset={asset} />
         </>
       )}
 
@@ -1441,6 +1442,7 @@ function CaptionEditor(): JSX.Element | null {
           <NumberInput
             step="0.1"
             min={0}
+            max={seg.endSec - 0.1}
             value={seg.startSec}
             format={(v) => v.toFixed(1)}
             disabled={linked}

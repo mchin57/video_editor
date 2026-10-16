@@ -575,3 +575,12 @@ describe('windowCoversVideo', () => {
     expect(windowCoversVideo({ mediaId: 'other', inSec: 12.5, outSec: 20.5 }, 'src', win)).toBe(false)
   })
 })
+
+describe('background pill defaults', () => {
+  it('a new text layer and the default caption style start with a fully opaque pill', async () => {
+    const { DEFAULT_CAPTION_STYLE } = await import('./project')
+    const t = makeTextLayer('t', 0, 3)
+    expect(t.content.kind === 'text' && t.content.pill.color).toBe('#000000ff')
+    expect(DEFAULT_CAPTION_STYLE.pill.color).toBe('#000000ff')
+  })
+})

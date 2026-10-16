@@ -107,7 +107,7 @@ export default function App(): JSX.Element {
   }, [queryClient])
 
   // Keyboard shortcuts: space play/pause, Ctrl+Z/Y undo/redo, Del delete, S split,
-  // N snap-to-previous, T text layer.
+  // N snap-to-previous, T text layer, M mute/unmute.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey
@@ -171,6 +171,10 @@ export default function App(): JSX.Element {
             assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
           )
         }
+      } else if (!mod && e.key.toLowerCase() === 'm') {
+        // Mute / unmute the selection's sound (audio clips, video layers' own audio).
+        const { selection } = useUi.getState()
+        if (selection.length) project.toggleMuteItems(selection)
       } else if (e.key.toLowerCase() === 't') {
         const id = crypto.randomUUID()
         const start = usePlayback.getState().time
@@ -233,7 +237,8 @@ export default function App(): JSX.Element {
       onDragLeave={fileDrag.onDragLeave}
       onDrop={onDrop}
     >
-      <header className="flex items-center gap-3 border-b border-white/10 px-4 py-2">
+      {/* One line always: labels never wrap; a running job's indicator truncates instead (JobsIndicator). */}
+      <header className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2">
         <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
         <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
         <FileMenu />

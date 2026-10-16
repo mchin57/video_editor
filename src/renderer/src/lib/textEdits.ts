@@ -22,7 +22,7 @@ import {
   type TextEdit,
   type TextEditResult
 } from '@shared/assistant/onScreenText'
-import { captionInWindow, captionWithText } from './captions'
+import { captionInWindow, captionWithText, makeCaption } from './captions'
 import { isLinked } from './links'
 
 const KNOWN_KEYS = new Set<keyof TextEdit>([
@@ -195,8 +195,7 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
         results.push({ id, kind: 'text', created: true })
       } else {
         if (e.widthPx !== undefined) return fail('widthPx is for text layers only')
-        const blank: CaptionSegment = { id, startSec, endSec, text: '', words: [], enabled: e.visible ?? true }
-        let seg = captionWithText(blank, e.text)
+        let seg: CaptionSegment = { ...makeCaption(id, startSec, endSec, e.text), enabled: e.visible ?? true }
         if (touchesStyle(e)) seg = { ...seg, style: withCaptionStyle(c.captions.style, e) }
         const segments = [...c.captions.segments, seg].sort((a, b) => a.startSec - b.startSec)
         c = { ...c, captions: { ...c.captions, segments } }

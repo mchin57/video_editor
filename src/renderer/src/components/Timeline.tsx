@@ -64,6 +64,7 @@ import {
 import { edgeAutoScroll, startPointerDrag } from '@/lib/pointerDrag'
 import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
+import { makeCaption } from '@/lib/captions'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
 import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/components/ui'
@@ -161,6 +162,7 @@ function TileDescription({
     <>
       <div
         ref={bridgeRef}
+        data-description-panel
         style={{ position: 'fixed', left, width: W, top: bridgeTop, height: GAP + 2 }}
         className="z-[499]"
         {...group}
@@ -168,6 +170,7 @@ function TileDescription({
       <div
         ref={boxRef}
         data-testid="timeline-description"
+        data-description-panel
         style={{ position: 'fixed', left, width: W, ...box }}
         className="z-[500] rounded-lg border border-white/15 bg-zinc-900/95 p-2 shadow-2xl"
         {...group}
@@ -298,6 +301,8 @@ export function Timeline(): JSX.Element {
     selKeys.has(refKey({ kind, id }))
 
   const addLayer = useProject((s) => s.addLayer)
+  const addCaption = useProject((s) => s.addCaption)
+  const selectCaption = useUi((s) => s.selectCaption)
   const addVideoLayer = useProject((s) => s.addVideoLayer)
   const addAudioClip = useProject((s) => s.addAudioClip)
   const removeItems = useProject((s) => s.removeItems)
@@ -340,13 +345,19 @@ export function Timeline(): JSX.Element {
       : {}
   const descAsset = descHover.target ? assetById.get(descHover.target.mediaId) : undefined
   // The tiles move under a scroll or zoom: drop the box rather than leave it floating.
+  // A wheel inside the box scrolls its text instead (the box is portaled, so the
+  // tiles don't move under it); it closes only when the mouse leaves.
   useEffect(() => {
     if (!descHover.target) return undefined
     const close = (): void => descHover.intent.close()
-    window.addEventListener('wheel', close, { capture: true, passive: true })
+    const onWheel = (e: WheelEvent): void => {
+      if (e.target instanceof Element && e.target.closest('[data-description-panel]')) return
+      close()
+    }
+    window.addEventListener('wheel', onWheel, { capture: true, passive: true })
     window.addEventListener('resize', close)
     return () => {
-      window.removeEventListener('wheel', close, { capture: true })
+      window.removeEventListener('wheel', onWheel, { capture: true })
       window.removeEventListener('resize', close)
     }
   }, [descHover.target, descHover.intent])
@@ -1027,6 +1038,14 @@ export function Timeline(): JSX.Element {
     selectLayer(id)
   }
 
+  /** A caption at the playhead, in the lane-wide caption style like every other. */
+  const addCaptionAtPlayhead = (): void => {
+    const id = crypto.randomUUID()
+    const start = usePlayback.getState().time
+    addCaption(makeCaption(id, start, start + 2))
+    selectCaption(id)
+  }
+
   // Render one layer block within its lane.
   const layerBlock = (l: Layer, laneKey: 'clips' | 'layout' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
     const left = l.startSec * pxPerSec
@@ -1043,43 +1062,46 @@ export function Timeline(): JSX.Element {
         onPointerDown={(e) => startTileDrag(e, { kind: 'layer', id: l.id })}
         {...descHoverProps(asset)}
         title={linked ? `${layerLabel(l)} · linked` : layerLabel(l)}
-        className={`group absolute flex cursor-move items-center gap-1 overflow-hidden rounded border pl-1 ${
+        className={`group absolute flex cursor-move items-start gap-1 overflow-hidden rounded border pl-1 ${
           selected ? st.sel : st.block
         } ${l.hidden ? 'opacity-40' : ''}`}
         style={{ left, width, top: laneTop(laneKey) + (rows.get(l.id) ?? 0) * rowH, height: rowH - 2 }}
       >
         {asset && <TileThumb asset={asset} />}
-        <span className="truncate text-[9px] font-medium text-zinc-100">
-          {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : l.content.kind === 'compound' ? '🧩' : '🎬'}&nbsp;
-          {asset?.fileName ?? layerLabel(l)}
-        </span>
-        {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
-          <span
-            className="pointer-events-none absolute left-8 top-0.5 rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
-            title={`Speed ramp (${sortedRamp(l.content)
-              .map((k) => `${k.speed}×`)
-              .join(' → ')})`}
-          >
-            ×~
+        {/* The title row sits top-left (every tile kind does), its badges beside it. */}
+        <div className="pointer-events-none flex min-w-0 flex-1 items-center gap-1 pr-2 pt-0.5">
+          <span className="min-w-0 truncate text-[9px] font-medium leading-tight text-zinc-100">
+            {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : l.content.kind === 'compound' ? '🧩' : '🎬'}&nbsp;
+            {asset?.fileName ?? layerLabel(l)}
           </span>
-        ) : l.content.kind === 'video' && videoSpeed(l.content) !== 1 ? (
-          <span
-            className="pointer-events-none absolute left-8 top-0.5 rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
-            title={`Playback speed ${videoSpeed(l.content)}×`}
-          >
-            {videoSpeed(l.content)}×
-          </span>
-        ) : null}
-        {l.content.kind === 'video' && stabilizeOverridden(l.content) && (
-          <span
-            className={`pointer-events-none absolute right-2 top-0.5 rounded px-1 text-[8px] font-bold leading-tight ${
-              l.content.stabilize ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
-            }`}
-            title={`Stabilization forced ${l.content.stabilize ? 'on' : 'off'} for this clip (overrides the project default)`}
-          >
-            S
-          </span>
-        )}
+          {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
+            <span
+              className="shrink-0 rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
+              title={`Speed ramp (${sortedRamp(l.content)
+                .map((k) => `${k.speed}×`)
+                .join(' → ')})`}
+            >
+              ×~
+            </span>
+          ) : l.content.kind === 'video' && videoSpeed(l.content) !== 1 ? (
+            <span
+              className="shrink-0 rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
+              title={`Playback speed ${videoSpeed(l.content)}×`}
+            >
+              {videoSpeed(l.content)}×
+            </span>
+          ) : null}
+          {l.content.kind === 'video' && stabilizeOverridden(l.content) && (
+            <span
+              className={`ml-auto shrink-0 rounded px-1 text-[8px] font-bold leading-tight ${
+                l.content.stabilize ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
+              }`}
+              title={`Stabilization forced ${l.content.stabilize ? 'on' : 'off'} for this clip (overrides the project default)`}
+            >
+              S
+            </span>
+          )}
+        </div>
         <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
         <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
       </div>
@@ -1194,47 +1216,49 @@ export function Timeline(): JSX.Element {
             }}
           />
         )}
-        <span
-          className={`pointer-events-none absolute left-1.5 truncate text-[9px] font-medium ${
-            a.mute ? 'text-zinc-400 line-through' : 'text-sky-50'
-          }`}
-        >
-          {linked ? '🔗' : fxName ? '✧' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;
-          {fxName ?? asset?.fileName ?? a.mediaId}
-        </span>
-        {/* Badges share one right-aligned row so a clip carrying both doesn't
-            stack them on top of each other. */}
-        {(a.mute || denoiseOverridden(a) || level) && (
-          <span className="pointer-events-none absolute right-1.5 top-0.5 flex items-center gap-1">
-            {level && (
-              <span
-                data-testid={`tile-level-${a.id}`}
-                className="max-w-[6rem] truncate rounded bg-violet-500/80 px-1 text-[8px] font-bold leading-tight text-violet-50"
-                title={`In the “${level.name}” volume level (${level.targetLufs} LUFS)`}
-              >
-                ◎ {level.name}
-              </span>
-            )}
-            {a.mute && (
-              <span
-                className="rounded bg-zinc-900/80 px-1 text-[8px] font-bold leading-tight text-zinc-100"
-                title="Muted — silent in the preview and left out of the export"
-              >
-                🔇
-              </span>
-            )}
-            {denoiseOverridden(a) && (
-              <span
-                className={`rounded px-1 text-[8px] font-bold leading-tight ${
-                  a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
-                }`}
-                title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
-              >
-                N
-              </span>
-            )}
+        {/* The title row sits top-left (every tile kind does); the badges share it,
+            right-aligned, so a clip carrying several doesn't stack them. */}
+        <div className="pointer-events-none absolute inset-x-1.5 top-0.5 flex min-w-0 items-center gap-1">
+          <span
+            className={`min-w-0 truncate text-[9px] font-medium leading-tight ${
+              a.mute ? 'text-zinc-400 line-through' : 'text-sky-50'
+            }`}
+          >
+            {linked ? '🔗' : fxName ? '✧' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;
+            {fxName ?? asset?.fileName ?? a.mediaId}
           </span>
-        )}
+          {(a.mute || denoiseOverridden(a) || level) && (
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              {level && (
+                <span
+                  data-testid={`tile-level-${a.id}`}
+                  className="max-w-[6rem] truncate rounded bg-violet-500/80 px-1 text-[8px] font-bold leading-tight text-violet-50"
+                  title={`In the “${level.name}” volume level (${level.targetLufs} LUFS)`}
+                >
+                  ◎ {level.name}
+                </span>
+              )}
+              {a.mute && (
+                <span
+                  className="rounded bg-zinc-900/80 px-1 text-[8px] font-bold leading-tight text-zinc-100"
+                  title="Muted — silent in the preview and left out of the export"
+                >
+                  🔇
+                </span>
+              )}
+              {denoiseOverridden(a) && (
+                <span
+                  className={`rounded px-1 text-[8px] font-bold leading-tight ${
+                    a.denoise ? 'bg-emerald-500/80 text-emerald-50' : 'bg-zinc-500/80 text-zinc-100 line-through'
+                  }`}
+                  title={`Noise filter forced ${a.denoise ? 'on' : 'off'} for this clip (overrides the project default)`}
+                >
+                  N
+                </span>
+              )}
+            </span>
+          )}
+        </div>
         <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
         <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
       </div>
@@ -1294,6 +1318,9 @@ export function Timeline(): JSX.Element {
         </ToolbarButton>
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
+        </ToolbarButton>
+        <ToolbarButton title="Add a caption at the playhead, in the caption style (turns the caption lane on)" onClick={addCaptionAtPlayhead}>
+          ＋ Caption
         </ToolbarButton>
         <ToolbarButton title="Delete the selection — every selected tile (Del)" onClick={deleteSelected} disabled={!canDelete}>
           🗑 Delete
@@ -1451,12 +1478,12 @@ export function Timeline(): JSX.Element {
                   data-testid={`tile-caption-${seg.id}`}
                   onPointerDown={(e) => startTileDrag(e, { kind: 'caption', id: seg.id })}
                   title={linked ? `${seg.text} · linked` : seg.text}
-                  className={`group absolute flex cursor-move items-center overflow-hidden rounded border px-1.5 ${
+                  className={`group absolute flex cursor-move items-start overflow-hidden rounded border px-1.5 pt-0.5 ${
                     selected ? LANE_STYLE.caption.sel : seg.enabled ? LANE_STYLE.caption.block : 'border-zinc-500/40 bg-zinc-600/30'
                   }`}
                   style={{ left, width, top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * rowH, height: rowH - 2 }}
                 >
-                  <span className="truncate text-[9px] font-medium text-emerald-100">
+                  <span className="truncate text-[9px] font-medium leading-tight text-emerald-100">
                     {linked ? '🔗' : 'CC'}&nbsp;&nbsp;{seg.text}
                   </span>
                   <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />

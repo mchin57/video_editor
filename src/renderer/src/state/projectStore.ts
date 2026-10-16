@@ -243,6 +243,9 @@ interface ProjectState {
   unlinkItems: (refs: TimelineItemRef[]) => void
   /** Delete every tile in `refs` (any lane) as one undo step. */
   removeItems: (refs: TimelineItemRef[]) => void
+  /** Toggle mute on every audio clip / video layer in `refs` as one undo step
+   *  (the M key; a mixed selection mutes all first). */
+  toggleMuteItems: (refs: TimelineItemRef[]) => void
   /** Shift every tile in `refs` by `delta` seconds as one undo step, preserving
    *  their relative offsets and durations (the timeline drag applies the same
    *  helper live, then commits once). */
@@ -311,6 +314,9 @@ interface ProjectState {
   removeScriptLine: (id: string) => void
   updateCaption: (id: string, patch: Partial<import('@shared/project').CaptionSegment>) => void
   removeCaption: (id: string) => void
+  /** Add a caption segment (＋ Caption), kept in start order, and turn the
+   *  caption lane on so it shows. One undo step. */
+  addCaption: (seg: import('@shared/project').CaptionSegment) => void
   /** Patch the lane-wide caption style (applies to every non-overridden segment). */
   setCaptionStyle: (patch: Partial<import('@shared/project').CaptionStyle>) => void
   /** Patch one segment's style override (seeded from the effective style), exempting
@@ -387,11 +393,14 @@ export const useProject = create<ProjectState>((set, get) => {
     commit((p) => updateCompAtPath(p, get().editPath, transform))
   }
 
-  /** Switch to a different project document, resetting history and selection.
+  /** Switch to a different project document, resetting history, selection and the playhead.
    *  No autosave: main already holds this document's state (an autosave exists
    *  only once there are unsaved edits). */
   function adopt(project: Project, filePath: string, dirty = false): void {
     useUi.getState().clearSelection()
+    // The playhead belongs to the old document: a new or opened project starts at 0.
+    usePlayback.getState().setPlaying(false)
+    usePlayback.getState().setTime(0)
     gestureBefore = null // a gesture can't span documents
     set({ project: migrateProject(project), past: [], future: [], filePath, dirty, editPath: [], launchMessage: null })
   }
@@ -722,6 +731,8 @@ export const useProject = create<ProjectState>((set, get) => {
       useUi.getState().clearSelection() // everything selected is gone
     },
 
+    toggleMuteItems: (refs) => commitComp((p) => links.toggleMuteItems(p, refs)),
+
     moveItemsBy: (refs, delta) => commitComp((p) => links.moveItemsBy(p, refs, delta)),
 
     snapItemsToPrevious: (refs, srcDur) => {
@@ -946,6 +957,16 @@ export const useProject = create<ProjectState>((set, get) => {
       })),
 
     removeCaption: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'caption', id }])),
+
+    addCaption: (seg) =>
+      commitComp((p) => ({
+        ...p,
+        captions: {
+          ...p.captions,
+          enabled: true,
+          segments: [...p.captions.segments, seg].sort((a, b) => a.startSec - b.startSec)
+        }
+      })),
 
     setCaptionStyle: (patch) =>
       commitComp((p) => ({ ...p, captions: { ...p.captions, style: { ...p.captions.style, ...patch } } })),

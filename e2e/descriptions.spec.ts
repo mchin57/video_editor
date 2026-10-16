@@ -219,3 +219,40 @@ test('a quick pass across a tile does not open its description', async ({ appPag
   await page.waitForTimeout(600)
   await expect(page.getByTestId('timeline-description')).toHaveCount(0)
 })
+
+test('scrolling inside the timeline description box scrolls it and keeps it open', async ({ appPage: page, projectsDir }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(60_000)
+  const clip = join(projectsDir, 'E2E', 'long.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'color=c=blue:s=320x568:r=30:d=2',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip
+  ])
+  const id = await importClip(page, clip)
+  const long = Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of a long description`).join('\n')
+  await page.evaluate((id) => window.__reelStores.useProject.getState().addVideoLayer('L1', id, 0, 2, false), id)
+
+  const tile = page.getByTestId('tile-layer-L1')
+  const t = await centre(tile)
+  await page.mouse.move(5, 5)
+  await page.mouse.move(t.x, t.y)
+  const above = page.getByTestId('timeline-description')
+  await expect(above).toBeVisible()
+  const input = above.getByTestId('description-input')
+  await glide(page, t, await centre(input))
+  await input.fill(long)
+  await input.press('Enter')
+  await expect.poll(async () => (await media(page, id)).description).toBe(long)
+
+  // A wheel over the box scrolls its text; the box stays.
+  await input.evaluate((el) => (el.scrollTop = 0))
+  await page.mouse.wheel(0, 120)
+  await expect.poll(() => input.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+  await page.waitForTimeout(400)
+  await expect(above).toBeVisible()
+
+  // Leaving it closes it.
+  await page.mouse.move(5, 5)
+  await expect(above).toHaveCount(0)
+})
