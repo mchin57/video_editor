@@ -35,8 +35,7 @@ Instagram Reels. Read this before adding code.
   `window.__reelStores` (real store actions), ACT via real events, ASSERT on
   store + DOM — see `e2e/fixtures.ts`. Keep it small and high-value; pure logic
   still goes in `src/**/*.test.ts`.
-- `npm run dev` — launch the app (visual polish and ffmpeg-dependent flows still
-  need a human smoke-test here).
+- `npm run dev` — launch the app.
 
 ## Reuse, don't duplicate
 
@@ -77,12 +76,15 @@ and add an entry whenever you verify something new.
 
 ## Definition of done
 
-A feature touching preview or export is NOT done — and must not be marked `[x]`
-in `docs/TODO.md` — until exercised end-to-end in `npm run dev` with real media.
-Tests + typecheck green is necessary, not sufficient (the suite cannot see
-ffmpeg runtime behavior or pointer interaction). If you implemented but could
-not smoke-test, mark it `[~]` and state exactly what remains unverified. Docs
-must never assert untested behavior as fact.
+There is no manual smoke test. A fix or feature is done when it has its tests
+(a regression spec for a bug, unit and/or e2e coverage for a feature, plus a
+real-ffmpeg check for new media behavior, per the section above) and
+`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. Then
+mark it `[x]` and MOVE it out of its open section into `## Done` in
+`docs/TODO.md`: bugs go under `### Bugs fixed`, features under the matching
+Done subsection. Say there which tests cover it. `[~]` is only for work that is
+built but not yet passing or not yet tested. Docs must never assert untested
+behavior as fact.
 
 Interaction features (drags, keybinds, drop targets) should land with a
 Playwright spec in `e2e/` where practical — and every interaction BUG you fix
