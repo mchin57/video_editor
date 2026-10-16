@@ -95,6 +95,27 @@ export function registerTools(server: McpServer, call: CallEditor): void {
   )
 
   server.registerTool(
+    'merge_clips',
+    {
+      description:
+        'Join two or more videos (or SOURCE windows of them), in the order given, into ONE new library clip saved in the project folder (re-encode; takes a few seconds). The same clip may appear more than once, e.g. to cut out a middle and keep both ends as one clip. Clips of different sizes are fitted inside the first one\'s frame; a clip without audio adds silence. The originals and the timeline are left alone. Returns {created: [the new library entry]}. Each window must be at least 0.1s.',
+      inputSchema: {
+        items: z
+          .array(
+            z.object({
+              mediaId: z.string(),
+              inSec: z.number().min(0).optional().describe('SOURCE second to start at (default 0)'),
+              outSec: z.number().positive().optional().describe('SOURCE second to end at (default: the clip\'s end)')
+            })
+          )
+          .min(2)
+          .max(50)
+      }
+    },
+    async (args) => result(await call('merge_clips', args))
+  )
+
+  server.registerTool(
     'add_description',
     {
       description:

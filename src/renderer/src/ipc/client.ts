@@ -21,6 +21,7 @@ export const {
   ensureProxy,
   relinkMediaDialog,
   quickCut,
+  mergeClips,
   setMediaDescription,
   renameMedia,
   loadProject,

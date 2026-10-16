@@ -424,6 +424,41 @@ Backing for `services/quickCut.ts` (`buildCutArgs`): `-ss in` BEFORE `-i`,
   0.9 s, ~36 Mbps (source 23); a 2.8 s 30 fps cut ~21 Mbps (source 16). A cut
   is a new original, so it errs large.
 
+## Merge clips — per-segment inputs + concat filter (verified ffmpeg 8.1.1, 2026-10-16)
+
+Backing for `services/merge.ts` (`buildMergeArgs`): one input per segment
+(`-ss in -t len -i file`, the libvpx decoder first for an alpha WebM), each
+normalized `scale…decrease,pad,setsar=1,fps=F,format=…,setpts=PTS-STARTPTS,
+trim=duration=len`; audio `aresample=48000,aformat=fltp/stereo,apad,
+asetpts,atrim=duration=len`, or `anullsrc…,atrim` for a clip without audio;
+then `concat=n=N:v=1:a=1`. Synthetic lavfi sources, 2026-10-16:
+
+- **Lengths add up exactly.** rot.mp4 [0.5, 2.5) + a silent 60 fps clip
+  [0, 2) + rot.mp4 [1, 3) → video and audio both 6.000 s, 360 frames at 60
+  fps. Volume per second: tone, tone, −91 dB, −91 dB, tone, tone — the
+  silence lands exactly on the silent clip.
+- **Windows are frame-exact.** The merge's first frame matched the source's
+  0.5 s frame at PSNR 58 dB (26 dB against the next frame); the third
+  segment's first frame matched source 1.0 s at 61 dB.
+- **Rotation is baked in by the filter graph.** A 1920×1080 `rotation=90`
+  source comes out 1080×1920 with no display matrix (autorotate applies to
+  `-filter_complex` inputs too).
+- **Alpha:** an alpha WebM (left half opaque) + an opaque H.264 clip, out as
+  VP9 `yuva420p`: `alpha_mode=1`; alphaextract 255/0 on the WebM's halves,
+  255 across the opaque clip; a landscape clip letterboxed into the portrait
+  frame with `pad=…:color=black@0` has alpha 0 in the bars and 255 in the
+  picture.
+- **HDR + SDR:** a tagged HLG HEVC 10-bit clip through `hdrToSdrChain`, then
+  the normal chain, concatenated with an SDR clip → 8-bit bt709 H.264, 4.000 s,
+  black (Y 16) letterbox. **All HLG:** `format=yuv420p10le` + `hevc_nvenc
+  main10 p010le` with the tags passed → `Main 10`, `bt2020 / arib-std-b67 /
+  bt2020nc` kept.
+- **Trap:** a synthetic 10-bit HEVC made WITHOUT x265 VUI tags (ffprobe shows
+  transfer/primaries `unknown`) made the tone-map's `zscale` fail with "no path
+  between colorspaces" even though `tin/pin/min` are given; tagged via
+  `-x265-params colorprim=…:transfer=…:colormatrix=…:range=limited` it worked.
+  Real iPhone HDR is tagged; this only matters for synthetic test media.
+
 ## Loudness series — momentary loudness + per-step peak in one pass (verified ffmpeg 8.1.1, 2026-10)
 
 Backing for `cache/<id>/loudness.json` (`services/loudness.ts` →

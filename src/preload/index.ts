@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type QuickCutRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset } from '@shared/media'
+import type { MergeSegment } from '@shared/merge'
 import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
 import type { PresetId } from '@shared/formats'
@@ -32,6 +33,9 @@ const api = {
   /** Library Quick cut: one new clip in `generated/` per piece, in order (the
    *  original is untouched). Rejects with a reason before any encode. */
   quickCut: (req: QuickCutRequest): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.quickCut, req),
+  /** Merge clips: ONE new clip in `generated/` joining the segments in order
+   *  (the sources are untouched). Rejects with a reason before any encode. */
+  mergeClips: (segments: MergeSegment[]): Promise<MediaAsset> => ipcRenderer.invoke(IPC.mergeClips, segments),
   /** A library item's description ('' clears); an unsaved change until Save. */
   setMediaDescription: (id: string, text: string): Promise<void> => ipcRenderer.invoke(IPC.setMediaDescription, id, text),
 
