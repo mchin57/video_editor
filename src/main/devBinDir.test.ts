@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { findDevBinDir, mainCheckoutOf } from './devBinDir'
@@ -16,7 +16,9 @@ const git = (cwd: string, ...args: string[]): void => {
 }
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'reel-devbin-'))
+  // Canonical long path: tmpdir() can be an 8.3 short name (CI's RUNNER~1),
+  // while git writes the long one into its pointer files — same folder.
+  dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'reel-devbin-')))
   main = join(dir, 'main')
   mkdirSync(main)
   git(main, 'init', '-q')
