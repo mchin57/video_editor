@@ -121,9 +121,12 @@ checklist into guarantees a refactor can't silently break.
 
 ## House rules
 
-- **Git flow: `main` is protected; everything lands via pull request.** Work in a
-  worktree under `.claude/worktrees/<name>` on its own branch (never edit the main
-  checkout). Agents may `git push` that branch and open a PR with `gh pr create`
+- **Git flow: `main` is protected; everything lands via pull request.** ALL work
+  happens in a worktree under `.claude/worktrees/<name>` on its own branch — never
+  edit the main checkout. Before creating the worktree, update `main`
+  (`git pull --ff-only origin main` in the main checkout) so the branch starts from
+  the latest code, then `git worktree add -b <branch> .claude/worktrees/<name> main`.
+  Agents may `git push` that branch and open a PR with `gh pr create`
   (put `Closes #N` in the body). Agents never push to `main`, force-push, delete
   remote branches, merge or close PRs, or touch the repo's rulesets/branch
   protection — the owner reviews and merges. Enforced server-side by the
