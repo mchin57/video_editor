@@ -22,8 +22,9 @@ import { btnCls, disabledCls } from './ui'
  * Library ▸ right-click ▸ Quick cut… (docs/QUICK-CUT.md): the clip over a mini
  * timeline of its own SOURCE time. Trim a piece's front/back by its handles,
  * split at the playhead (S), delete a piece (Del) down to one — never zero.
- * Save writes one new library clip per piece to `generated/`; the original and
- * the edit are untouched. The editing rules are `shared/quickCut.ts`; this is
+ * Save writes one new library clip per piece to `generated/`; Save as one clip
+ * joins the pieces into a single new clip (docs/MERGE-CLIPS.md). The original
+ * and the edit are untouched. The editing rules are `shared/quickCut.ts`; this is
  * the view over them, with its own undo (Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y).
  *
  * Playback plays only what will be saved, jumping the gaps. Keys pressed while
@@ -32,12 +33,15 @@ import { btnCls, disabledCls } from './ui'
 export function QuickCutDialog({
   asset,
   onClose,
-  onSave
+  onSave,
+  onSaveOne
 }: {
   asset: MediaAsset
   onClose: () => void
   /** Encode and add the clips; reject with a reason (shown inline, dialog stays). */
   onSave: (pieces: CutPiece[]) => Promise<unknown>
+  /** Save as one clip: join the pieces into ONE new clip (Merge clips). Same contract. */
+  onSaveOne: (pieces: CutPiece[]) => Promise<unknown>
 }): JSX.Element {
   const dur = asset.probe.durationSec
   const frame = 1 / (asset.probe.video?.avgFps || 30)
@@ -198,12 +202,12 @@ export function QuickCutDialog({
     )
   }
 
-  const save = (): void => {
-    if (busy || isUncut(hist.now, dur)) return
+  const save = (asOne = false): void => {
+    if (busy || isUncut(hist.now, dur) || (asOne && hist.now.length < 2)) return
     setPlaying(false)
     setBusy(true)
     setError(null)
-    onSave(hist.now).then(
+    ;(asOne ? onSaveOne : onSave)(hist.now).then(
       () => setBusy(false),
       (err: unknown) => {
         setBusy(false)
@@ -376,9 +380,20 @@ export function QuickCutDialog({
           >
             Cancel
           </button>
+          {n > 1 && (
+            <button
+              data-testid="quickcut-save-one"
+              onClick={() => save(true)}
+              disabled={busy}
+              title="Join the pieces back together, without the gaps, as one new clip"
+              className={`${btnCls} px-4 ${disabledCls}`}
+            >
+              Save as one clip
+            </button>
+          )}
           <button
             data-testid="quickcut-save"
-            onClick={save}
+            onClick={() => save()}
             disabled={busy || uncut}
             title={uncut ? 'Nothing to save yet: trim or split first' : undefined}
             className="rounded-md bg-sky-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-sky-500/90"

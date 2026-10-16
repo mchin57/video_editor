@@ -23,6 +23,7 @@ import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
 import { cutToLibrary } from '../services/quickCut'
+import { mergeToLibrary } from '../services/merge'
 import { hdrToSdrChain } from '../services/proxy'
 import { exportProject, renderFrames, suggestedExportName } from '../services/exporter'
 import { listJobs } from '../services/jobs'
@@ -156,6 +157,20 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
   split_clip: async ({ mediaId, times }) => {
     const asset = requireVideo(await projectAssets(), mediaId)
     return cutClip(asset, splitPieces(asset.probe.durationSec, times))
+  },
+
+  merge_clips: async ({ items }) => {
+    const assets = await projectAssets()
+    const segments = items.map(({ mediaId, inSec, outSec }) => {
+      const asset = requireVideo(assets, mediaId)
+      return { mediaId, inSec: inSec ?? 0, outSec: outSec ?? Math.round(asset.probe.durationSec * 1000) / 1000 }
+    })
+    const made = await mergeToLibrary(segments)
+    await callRenderer('addMedia', { ids: [made.id] })
+    return json({
+      created: [{ ...describeAsset(made), fromSources: segments }],
+      note: 'One new clip; the originals and the timeline are unchanged.'
+    })
   },
 
   add_description: async ({ mediaId, description }) => {

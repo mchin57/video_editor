@@ -15,6 +15,7 @@ export const IPC = {
   relinkMediaDialog: 'media:relinkDialog',
   renameMedia: 'media:rename',
   quickCut: 'media:quickCut',
+  mergeClips: 'media:merge',
   setMediaDescription: 'media:setDescription',
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read and write the working copy (autosave.json:

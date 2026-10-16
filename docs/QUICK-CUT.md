@@ -66,6 +66,6 @@ Details and the measurements behind them: FFMPEG-NOTES "Quick cut".
 
 ## Not in this version
 
-- **Joining pieces back into one clip** (cut out the middle, keep both ends as one) is part of
-  TODO.md ▸ "Merge clips".
+- Joining pieces back into one clip is **Save as one clip** (shown once there are two or more
+  pieces): see docs/MERGE-CLIPS.md.
 - Cancel during an encode. Cuts take about a second each on NVENC; the window just shows Saving….

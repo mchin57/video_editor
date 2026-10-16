@@ -1,7 +1,8 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect, assetKind, isImageAsset, isUnknownClip } from '@shared/media'
-import { useLibrary, useImportMedia, useQuickCut, useRenameMedia, useRepairMedia } from '@/hooks/useMedia'
+import { useLibrary, useImportMedia, useMergeClips, useQuickCut, useRenameMedia, useRepairMedia } from '@/hooks/useMedia'
+import { MergeClipsDialog } from '@/components/MergeClipsDialog'
 import { revealFile } from '@/ipc/client'
 import { RenameMediaDialog } from '@/components/RenameMediaDialog'
 import { QuickCutDialog } from '@/components/QuickCutDialog'
@@ -19,7 +20,7 @@ import { btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/co
  * as its trailing slot. The layout-cell card (FormatMenu) reuses the same
  * `ClipCard` parent without these actions.
  */
-function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
+function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsset[] }): JSX.Element {
   const selectedId = useEditor((s) => s.selectedId)
   const select = useEditor((s) => s.select)
   const job = useEditor((s) => latestJob(s.jobs, 'proxy', asset.id))
@@ -38,6 +39,8 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
   const [renaming, setRenaming] = useState(false)
   const [cutting, setCutting] = useState(false)
   const quickCut = useQuickCut()
+  const [merging, setMerging] = useState(false)
+  const mergeClips = useMergeClips()
   // A missing original can't be added (its proxy, if any, may describe a file
   // that's gone) until it is relinked below.
   const status = asset.status ?? 'ok'
@@ -59,8 +62,18 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
       : !asset.proxyReady
         ? 'The preview is still being prepared.'
         : undefined)
+  // Merge clips (docs/MERGE-CLIPS.md) reads the originals, so no proxy is needed,
+  // but it needs another video to join this one to.
+  const noMerge =
+    noFile ??
+    (assetKind(asset) !== 'video'
+      ? 'Merge works on video clips.'
+      : mergeable.length < 2
+        ? 'The library needs another video clip to merge with.'
+        : undefined)
   const menuItems = (): ContextMenuEntry[] => [
     { label: 'Quick cut…', testId: 'ctx-quickcut', disabled: !!noCut, reason: noCut, onSelect: () => setCutting(true) },
+    { label: 'Merge clips…', testId: 'ctx-merge', disabled: !!noMerge, reason: noMerge, onSelect: () => setMerging(true) },
     { label: 'Rename…', testId: 'ctx-rename', disabled: !!noFile, reason: noFile, onSelect: () => setRenaming(true) },
     {
       label: 'Reveal in Explorer',
@@ -91,6 +104,21 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
           onSave={async (pieces) => {
             await quickCut.mutateAsync({ mediaId: asset.id, pieces })
             setCutting(false)
+          }}
+          onSaveOne={async (pieces) => {
+            await mergeClips.mutateAsync(pieces.map((p) => ({ mediaId: asset.id, ...p })))
+            setCutting(false)
+          }}
+        />
+      )}
+      {merging && (
+        <MergeClipsDialog
+          clips={mergeable}
+          firstId={asset.id}
+          onClose={() => setMerging(false)}
+          onMerge={async (segments) => {
+            await mergeClips.mutateAsync(segments)
+            setMerging(false)
           }}
         />
       )}
@@ -253,6 +281,8 @@ function ClipRow({ asset }: { asset: MediaAsset }): JSX.Element {
 export function Library(): JSX.Element {
   const { data: assets = [], isLoading } = useLibrary()
   const importMedia = useImportMedia()
+  // Videos Merge clips can read: a known file that is not Missing.
+  const mergeable = assets.filter((a) => assetKind(a) === 'video' && !isUnknownClip(a) && (a.status ?? 'ok') === 'ok')
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -275,7 +305,7 @@ export function Library(): JSX.Element {
           </p>
         )}
         {assets.map((asset) => (
-          <ClipRow key={asset.id} asset={asset} />
+          <ClipRow key={asset.id} asset={asset} mergeable={mergeable} />
         ))}
       </div>
     </div>

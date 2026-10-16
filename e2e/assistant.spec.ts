@@ -18,7 +18,7 @@ const MCP = join(ROOT, 'out', 'main', 'mcp.js')
 const BIN = join(ROOT, 'resources', 'bin', 'ffmpeg')
 const FFMPEG = join(BIN, 'ffmpeg.exe')
 const FFPROBE = join(BIN, 'ffprobe.exe')
-const TOOLS = ['add_description', 'export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
+const TOOLS = ['add_description', 'export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'merge_clips', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -246,6 +246,44 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
   // All four are in the project's library; the original stays, and the edit is untouched.
   const now = await mediaIds()
   expect(now).toEqual(expect.arrayContaining([id, ...parts.map((p) => p.id), trim.created[0].id]))
+  expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(0)
+})
+
+test('merge_clips joins windows into ONE new clip in generated/; a bad window changes nothing', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG) || !existsSync(FFPROBE), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const src = join(dir, 'clip.mp4')
+  execFileSync(FFMPEG, [
+    '-y', '-v', 'error',
+    '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=30:d=4',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+    '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', src
+  ])
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [src] }))) as { imported: { id: string }[] }
+  const id = imported[0].id
+  const mediaIds = (): Promise<string[]> => page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)
+
+  const before = await mediaIds()
+  expect(textOf(await call(c, 'merge_clips', { items: [{ mediaId: id }, { mediaId: id, inSec: 3, outSec: 9 }] }))).toContain(
+    "can't be after the clip's 4s (clip 2)"
+  )
+  expect(await mediaIds()).toEqual(before)
+
+  // Keep both ends, drop the middle: [0, 1) + [3, 4) → one 2 s clip.
+  const res = await call(c, 'merge_clips', { items: [{ mediaId: id, outSec: 1 }, { mediaId: id, inSec: 3 }] })
+  expect(res.isError).toBeFalsy()
+  const { created } = JSON.parse(textOf(res)) as { created: { id: string; fileName: string; path: string }[] }
+  expect(created.map((m) => m.fileName)).toEqual(['clip (cut).mp4'])
+  expect(created[0].path).toBe(join(projectsDir, 'E2E', 'generated', 'clip (cut).mp4'))
+  const dur = Number(execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', created[0].path]).toString().trim())
+  expect(dur).toBeCloseTo(2, 1)
+  expect(await mediaIds()).toContain(created[0].id)
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(0)
 })
 
