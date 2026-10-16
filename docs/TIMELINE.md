@@ -79,7 +79,7 @@ it can be deleted silently). Push it back into `lib/`.
 - **Link groups (visuals + the paths e2e can't reach):** the 🔗 badge and
   `· linked` tooltip on a linked tile; the Inspector's "Linked to N other tiles"
   banner with its greyed-out re-timing controls (start/end, trim in/out, speed,
-  freeze, extract audio, split on silence); a linked audio clip's **Start (s)**
+  freeze, extract audio); a linked audio clip's **Start (s)**
   field moving the whole group; Ctrl-clicking a **layout** tile selecting it alone
   (layouts can't be linked); selecting a linked layer on the **stage** or in the
   **Layers panel** highlighting its whole group in the timeline.
