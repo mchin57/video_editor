@@ -5,7 +5,7 @@ import { useLibrary } from '@/hooks/useMedia'
 import { useProject } from '@/state/projectStore'
 import { ClipCard } from './ClipCard'
 import { LayoutPickerModal } from './LayoutPickerModal'
-import { inputCls } from './ui'
+import { inputCls, NumberInput } from './ui'
 
 /** Matches the Library drag payload and the Timeline's `DND_MIME`. */
 const DND_MIME = 'application/x-reel-asset'
@@ -164,34 +164,26 @@ export function LayoutCells({
                   <div className="mt-1.5 flex flex-col gap-1">
                     <div className="flex items-center gap-1.5">
                       <span className="w-6 shrink-0 text-[10px] text-zinc-500">in</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         step={0.1}
                         min={0}
-                        value={cell.inSec.toFixed(1)}
-                        onChange={(e) => {
-                          const v = Number(e.target.value)
-                          if (Number.isFinite(v)) {
-                            updateCell(layerId, i, { inSec: Math.max(0, Math.min(v, cell.outSec - 0.1)) })
-                          }
-                        }}
+                        max={cell.outSec - 0.1}
+                        value={cell.inSec}
+                        format={(v) => v.toFixed(1)}
+                        onCommit={(inSec) => updateCell(layerId, i, { inSec })}
                         className={`${inputCls} min-w-0 flex-1`}
                         title="Source in-point (s)"
                       />
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-6 shrink-0 text-[10px] text-zinc-500">out</span>
-                      <input
-                        type="number"
+                      <NumberInput
                         step={0.1}
-                        value={cell.outSec.toFixed(1)}
-                        onChange={(e) => {
-                          const v = Number(e.target.value)
-                          if (Number.isFinite(v)) {
-                            const cap = cellAsset.probe.durationSec
-                            updateCell(layerId, i, { outSec: Math.max(cell.inSec + 0.1, Math.min(v, cap)) })
-                          }
-                        }}
+                        min={cell.inSec + 0.1}
+                        max={cellAsset.probe.durationSec}
+                        value={cell.outSec}
+                        format={(v) => v.toFixed(1)}
+                        onCommit={(outSec) => updateCell(layerId, i, { outSec })}
                         className={`${inputCls} min-w-0 flex-1`}
                         title="Source out-point (s)"
                       />
