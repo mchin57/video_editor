@@ -15,8 +15,7 @@ export const CAPTION_LANE_ID = 'captions'
 
 /** `set_text` limits, shared by the MCP schema and the renderer's validation. */
 export const MIN_TEXT_SEC = 0.1
-export { TEXT_FONT_SIZE_MIN } from '../textStyle'
-export const TEXT_FONT_SIZE_MAX = 1000
+export { TEXT_FONT_SIZE_MIN, TEXT_FONT_SIZE_MAX, TEXT_PILL_PAD_MAX } from '../textStyle'
 /** How far past the current end of the edit text may reach (catches ms-for-seconds slips). */
 export const MAX_TEXT_PAST_END_SEC = 60
 /** The latest an item may end in an edit `durationSec` long: `set_text`'s limit

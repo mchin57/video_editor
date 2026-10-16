@@ -30,6 +30,12 @@ export const TEXT_LINE_HEIGHT = 1.25
 
 /** Smallest font size a text block may have (logical px) — the Inspector's and `set_text`'s floor. */
 export const TEXT_FONT_SIZE_MIN = 12
+/** Largest font size — the Inspector's and `set_text`'s cap (a 1e99 size once
+ *  exported ~10x slower). */
+export const TEXT_FONT_SIZE_MAX = 1000
+/** Largest pill padding — the Inspector's and `set_text`'s cap. At ~30000 the
+ *  export silently dropped the layer, pill and text both. */
+export const TEXT_PILL_PAD_MAX = 200
 
 /** Auto-wrap width as a fraction of the FRAME width, for text and captions. */
 export const TEXT_WRAP_FRAC = 0.92

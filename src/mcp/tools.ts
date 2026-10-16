@@ -12,7 +12,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { FONTS } from '@shared/fonts'
-import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN } from '@shared/assistant/onScreenText'
+import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN, TEXT_PILL_PAD_MAX } from '@shared/assistant/onScreenText'
 
 export type CallEditor = <K extends ToolName>(tool: K, args: ToolArgs[K]) => Promise<ToolContent[]>
 
@@ -195,7 +195,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     fontSizePx: z.number().min(TEXT_FONT_SIZE_MIN).max(TEXT_FONT_SIZE_MAX).optional(),
     color: color.optional(),
     pill: z
-      .strictObject({ enabled: z.boolean().optional(), color: color.optional(), padPx: z.number().min(0).max(200).optional() })
+      .strictObject({ enabled: z.boolean().optional(), color: color.optional(), padPx: z.number().min(0).max(TEXT_PILL_PAD_MAX).optional() })
       .optional()
       .describe('Box behind the text; fields merge into the current pill'),
     stroke: z.strictObject({ widthPx: z.number().min(0).max(100), color }).nullable().optional().describe('Glyph outline (ignored while the pill is on); null removes'),
