@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { alphaInputDecoder, DESCRIPTION_MAX, normalizeDescription, pixFmtHasAlpha } from './media'
+import {
+  alphaInputDecoder,
+  assetKind,
+  DESCRIPTION_MAX,
+  kindOfFile,
+  normalizeDescription,
+  pixFmtHasAlpha,
+  reconcileKind,
+  type MediaAsset,
+  type ProbeInfo,
+  type VideoStreamInfo
+} from './media'
 
 describe('pixFmtHasAlpha', () => {
   it('recognises the alpha pixel-format families', () => {
@@ -33,5 +44,48 @@ describe('normalizeDescription', () => {
     expect(normalizeDescription('  swim start\r\nwave 2  ')).toBe('swim start\nwave 2')
     expect(normalizeDescription(' \n ')).toBe('')
     expect(normalizeDescription('x'.repeat(DESCRIPTION_MAX + 50))).toHaveLength(DESCRIPTION_MAX)
+  })
+})
+
+describe('media kind: extension checked against the probe', () => {
+  const picture: VideoStreamInfo = {
+    codec: 'h264', width: 1080, height: 1920, displayWidth: 1080, displayHeight: 1920, rotationDeg: 0,
+    avgFps: 30, rFps: 30, isVfr: false, pixFmt: 'yuv420p', colorTransfer: null, colorPrimaries: null,
+    colorSpace: null, isHdr: false
+  }
+  const sound = { codec: 'aac', sampleRate: 48000, channels: 2 }
+  const probe = (p: Partial<ProbeInfo>): ProbeInfo => ({ durationSec: 2, container: 'mov,mp4,m4a,3gp,3g2,mj2', video: null, audio: null, ...p })
+
+  it('an audio-only .mp4 (AAC, or an MP3 renamed .mp4) is audio, not video', () => {
+    expect(kindOfFile('C:/a/song.mp4', probe({ audio: sound }))).toBe('audio')
+    expect(kindOfFile('C:/a/renamed.MP4', probe({ container: 'mp3', audio: { ...sound, codec: 'mp3' } }))).toBe('audio')
+    expect(kindOfFile('C:/a/voice.mov', probe({ audio: sound }))).toBe('audio')
+  })
+
+  it('a video with a picture stays video, with or without sound', () => {
+    expect(kindOfFile('C:/a/clip.mp4', probe({ video: picture, audio: sound }))).toBe('video')
+    expect(kindOfFile('C:/a/silent.mp4', probe({ video: picture }))).toBe('video')
+  })
+
+  it('an extension that probes to nothing keeps its claim (a failed or empty probe)', () => {
+    expect(kindOfFile('C:/a/broken.mp4', probe({ durationSec: 0 }))).toBe('video')
+  })
+
+  it('audio and image extensions keep their class', () => {
+    expect(kindOfFile('C:/a/song.m4a', probe({ audio: sound }))).toBe('audio')
+    expect(kindOfFile('C:/a/cover.mp3', probe({ video: { ...picture, codec: 'mjpeg' }, audio: sound }))).toBe('audio')
+    expect(kindOfFile('C:/a/photo.jpg', probe({ durationSec: 0.04, video: { ...picture, codec: 'mjpeg' } }))).toBe('image')
+  })
+
+  it('an unknown extension falls back to the probe', () => {
+    expect(kindOfFile('C:/a/file.xyz', probe({ audio: sound }))).toBe('audio')
+    expect(kindOfFile('C:/a/file.xyz', probe({ video: picture }))).toBe('video')
+    expect(reconcileKind(null, probe({ video: picture, durationSec: 0 }))).toBe('image')
+  })
+
+  it('a record saved as video with no picture reads back as audio (saved before the fix)', () => {
+    const saved = { kind: 'video', probe: probe({ audio: sound }) } as MediaAsset
+    expect(assetKind(saved)).toBe('audio')
+    expect(assetKind({ ...saved, probe: probe({ video: picture, audio: sound }) })).toBe('video')
   })
 })

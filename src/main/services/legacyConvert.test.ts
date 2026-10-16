@@ -19,7 +19,13 @@ const scratch = vi.hoisted(() => {
 })
 vi.mock('electron', () => ({ app: { getPath: () => scratch } }))
 vi.mock('./ffprobe', () => ({
-  probeFile: vi.fn(async () => ({ durationSec: 4, container: 'mp4', video: null, audio: { codec: 'aac', sampleRate: 48000, channels: 2 } }))
+  // Footage: a picture and sound (an .mp4 with no picture would class as audio).
+  probeFile: vi.fn(async () => ({
+    durationSec: 4,
+    container: 'mp4',
+    video: { codec: 'h264', width: 1080, height: 1920, displayWidth: 1080, displayHeight: 1920, rotationDeg: 0 },
+    audio: { codec: 'aac', sampleRate: 48000, channels: 2 }
+  }))
 }))
 
 import { fingerprintFile } from './fingerprint'

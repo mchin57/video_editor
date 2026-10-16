@@ -15,7 +15,7 @@ import { app } from 'electron'
 import { existsSync, promises as fsp, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, join, normalize } from 'node:path'
 import type { MediaRecord, ProbeInfo, MediaKind } from '@shared/media'
-import { deriveKind, kindFromExt } from '@shared/media'
+import { kindOfFile, reconcileKind } from '@shared/media'
 import { migrateProject, PROJECT_VERSION } from '@shared/project'
 import { getDataDir } from '../config'
 import { replaceFile } from './atomicWrite'
@@ -209,7 +209,7 @@ async function unrecordedRecord(ctx: Ctx, id: string): Promise<MediaRecord | nul
     fileName: basename(path),
     importedAt: new Date().toISOString(),
     probe,
-    kind: kindFromExt(path) ?? deriveKind(probe)
+    kind: kindOfFile(path, probe)
   }
   return pointingAt(ctx, base, path)
 }
@@ -269,7 +269,7 @@ export async function convertLegacyProject(
         fileName: rec.fileName,
         importedAt: rec.importedAt,
         probe: rec.probe,
-        kind: rec.kind ?? deriveKind(rec.probe)
+        kind: reconcileKind(rec.kind, rec.probe)
       }
       const ownRec = { ...rec, id }
       record = isGeneratedPath(rec.originalPath, dataDir)
