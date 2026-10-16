@@ -53,6 +53,7 @@ export const {
   pathForFile,
   onJobProgress,
   onLibraryChanged,
+  onImportSkipped,
   onAssistantRequest,
   assistantRespond,
   assistantStatus

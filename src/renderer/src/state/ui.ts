@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Composition, TimelineItemRef } from '@shared/project'
+import type { ImportSkip } from '@shared/media'
 import { expandGroup } from '@/lib/links'
 
 /** What the volume-level dialog is doing. */
@@ -68,6 +69,10 @@ interface UiState {
   /** Whether the script panel is open. */
   scriptOpen: boolean
   setScriptOpen: (v: boolean) => void
+  /** The files the latest import could not take, with why — the import notice
+   *  (components/ImportFailures.tsx) shows them until dismissed. Empty = none. */
+  importSkipped: ImportSkip[]
+  setImportSkipped: (v: ImportSkip[]) => void
   /** Clear every selection (clip/caption/audio). */
   clearSelection: () => void
 }
@@ -147,6 +152,8 @@ export const useUi = create<UiState>((set) => ({
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,
   setScriptOpen: (v) => set({ scriptOpen: v }),
+  importSkipped: [],
+  setImportSkipped: (v) => set({ importSkipped: v }),
   clearSelection: () =>
     set({
       selection: [],

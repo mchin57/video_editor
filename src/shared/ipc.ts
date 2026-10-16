@@ -142,5 +142,8 @@ export const IPC_EVENT = {
   /** A library record changed after the project opened (import, relink, a
    *  path fixed by a re-check): the project now has unsaved changes. */
   libraryChanged: 'library:changed',
+  /** An import the user started had files that failed (`ImportSkip[]`): the
+   *  renderer shows which and why. */
+  importSkipped: 'media:importSkipped',
   assistantRequest: 'assistant:request'
 } as const

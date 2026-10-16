@@ -10,7 +10,7 @@ import type { PresetId } from '@shared/formats'
 import { getCapabilities } from './services/ffmpeg'
 import { getDataDir } from './config'
 import { generateStill } from './services/still'
-import { importMany } from './services/importMany'
+import { importManyReport } from './services/importMany'
 import { hdrToSdrChain } from './services/proxy'
 import { cropFilter, eqFilter } from './services/ffmpegFilters'
 import {
@@ -106,6 +106,19 @@ function relinkMismatchDetail(c: RelinkCheck): string {
   )
 }
 
+/**
+ * An import the user started (dialog, drop, folder): the imported assets go
+ * back as the call's result, and the files that failed go to that window as
+ * `importSkipped` for its import notice (it would otherwise just not appear).
+ * An event rather than a wider return type keeps `importPaths` returning the
+ * assets, which every e2e spec builds on.
+ */
+async function importForUi(sender: Electron.WebContents, paths: string[]): Promise<MediaAsset[]> {
+  const { assets, skipped } = await importManyReport(paths)
+  if (skipped.length && !sender.isDestroyed()) sender.send(IPC_EVENT.importSkipped, skipped)
+  return assets
+}
+
 export function registerIpcHandlers(): void {
   registerAssistantBridge()
   ipcMain.handle(IPC.getCapabilities, () => getCapabilities())
@@ -128,13 +141,13 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled) return []
-    return importMany(result.filePaths)
+    return importForUi(event.sender, result.filePaths)
   })
 
-  ipcMain.handle(IPC.importPaths, (_event, paths: string[]) => importMany(paths))
+  ipcMain.handle(IPC.importPaths, (event, paths: string[]) => importForUi(event.sender, paths))
 
   // File ▸ Import folder… — same pipeline, the picker just yields directories.
-  // (Dropping a folder on the window needs no separate channel: importMany
+  // (Dropping a folder on the window needs no separate channel: importManyReport
   // expands whatever it is handed.)
   ipcMain.handle(IPC.importFolderDialog, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -147,7 +160,7 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled) return []
-    return importMany(result.filePaths)
+    return importForUi(event.sender, result.filePaths)
   })
 
   // Pick a video (or any media) file and pull its audio track into the library as

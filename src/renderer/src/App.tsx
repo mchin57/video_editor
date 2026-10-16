@@ -19,11 +19,12 @@ import { StatusFooter } from '@/components/StatusFooter'
 import { NewProjectDialog } from '@/components/NewProjectDialog'
 import { StartScreen } from '@/components/StartScreen'
 import { VolumeLevelDialog } from '@/components/VolumeLevelDialog'
+import { ImportFailures } from '@/components/ImportFailures'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
 import { refetchFresh } from '@/lib/refetchFresh'
-import { chooseProjectLocation, defaultProjectLocation, onJobProgress, onLibraryChanged, pathForFile } from '@/ipc/client'
+import { chooseProjectLocation, defaultProjectLocation, onImportSkipped, onJobProgress, onLibraryChanged, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -168,6 +169,9 @@ export default function App(): JSX.Element {
       }),
     [queryClient]
   )
+
+  // Files an import couldn't take: the import notice (ImportFailures) names them.
+  useEffect(() => onImportSkipped((skipped) => useUi.getState().setImportSkipped(skipped)), [])
 
   // Subscribe to background job progress; refresh library when a proxy lands.
   useEffect(() => {
@@ -374,6 +378,7 @@ export default function App(): JSX.Element {
         <ScriptModal />
         <NewProjectWindow />
         <VolumeLevelDialog />
+        <ImportFailures />
       </Section>
 
       {fileDrag.active && (

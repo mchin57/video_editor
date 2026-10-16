@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type QuickCutRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
-import type { MediaAsset } from '@shared/media'
+import type { ImportSkip, MediaAsset } from '@shared/media'
 import type { MergeSegment } from '@shared/merge'
 import type { JobProgressEvent } from '@shared/jobs'
 import type { Project } from '@shared/project'
@@ -64,6 +64,12 @@ const api = {
     const handler = (): void => cb()
     ipcRenderer.on(IPC_EVENT.libraryChanged, handler)
     return () => ipcRenderer.removeListener(IPC_EVENT.libraryChanged, handler)
+  },
+  /** Files an import the user started couldn't take, with why (main's `importForUi`). */
+  onImportSkipped: (cb: (skipped: ImportSkip[]) => void): (() => void) => {
+    const handler = (_e: unknown, skipped: ImportSkip[]): void => cb(skipped)
+    ipcRenderer.on(IPC_EVENT.importSkipped, handler)
+    return () => ipcRenderer.removeListener(IPC_EVENT.importSkipped, handler)
   },
   /** File ▸ Convert old projects…: summary lines, or null if canceled. */
   convertLegacyFolderDialog: (): Promise<string[] | null> => ipcRenderer.invoke(IPC.convertLegacyFolderDialog),

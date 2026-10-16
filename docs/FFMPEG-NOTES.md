@@ -991,6 +991,25 @@ clip read by `ffmpeg -re -i clip.mp4 -f null -`:
   `ino`). So "the target exists" is true for a case-only change; `renameMedia`
   compares `ino` (bigint stat) to tell "the same file" from "another file".
 
+## Unreadable imports — what ffprobe says (verified ffmpeg 8.1.1 / Node 24, 2026-10-16)
+
+What `probeFile` (`-v error -print_format json -show_format -show_streams`)
+rejects with for bad input, through promisified `execFile`: `code` 1, the
+message `Command failed: <whole command line>`, and the useful part in
+`stderr`. `services/importFailure.ts` turns it into the reason the import
+notice shows (`importFailure.test.ts` pins these lines).
+
+- **Zero-byte `.mp4` and random bytes named `.mp4`** give the SAME two lines:
+  `moov atom not found`, then `<path>: Invalid data found when processing input`.
+  Only the file's size tells "empty" apart, so the import stats it.
+- **A real MP4 cut to its first 3000 bytes**: `error reading header`, then
+  `<path>: End of file`. (A recording cut off before its trailing moov — the
+  usual iPhone case — is the `moov atom not found` pair instead.)
+- **A text file**: just `<path>: Invalid data found when processing input`.
+- **A missing file** never reaches ffprobe: the fingerprint's `open` throws
+  first, with `code: 'ENOENT'`. (ffprobe itself would say
+  `<path>: No such file or directory`.)
+
 ## Single-frame renders of the export graph (verified ffmpeg 8.1.1, 2026-10)
 
 `render_frame` (`buildFrameArgs`) runs the export's own inputs and chains and

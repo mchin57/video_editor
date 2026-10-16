@@ -127,6 +127,19 @@ export const UNKNOWN_CLIP_NAME = 'Unknown clip'
  *  file it was (an empty absolute path). Relink fills it in. */
 export const isUnknownClip = (r: Pick<MediaRecord, 'absolutePath'>): boolean => r.absolutePath === ''
 
+/** A file an import could not take, and why (in words for the user). The
+ *  assistant's import_media returns these as `skipped`; the UI shows them. */
+export interface ImportSkip {
+  path: string
+  reason: string
+}
+
+/** Last path segment, handling both Windows and POSIX separators. */
+export function fileNameOf(path: string): string {
+  const m = /[^\\/]*$/.exec(path)
+  return m?.[0] || path
+}
+
 /** A library item as the app uses it: the saved record plus runtime facts. */
 export interface MediaAsset extends MediaRecord {
   /** Absolute path of the original to READ: where it was found this session,
