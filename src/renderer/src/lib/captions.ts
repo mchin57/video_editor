@@ -5,7 +5,7 @@
  * readable chunks (reel-style). Pure + tested.
  */
 
-import type { CaptionSegment, CaptionWord } from '@shared/project'
+import type { AudioClip, CaptionSegment, CaptionWord } from '@shared/project'
 
 /** An audio source on the timeline that captions are derived from. */
 export interface CaptionSource {
@@ -173,4 +173,22 @@ export const NEW_CAPTION_TEXT = 'Your caption here'
  */
 export function makeCaption(id: string, startSec: number, endSec: number, text = NEW_CAPTION_TEXT): CaptionSegment {
   return captionWithText({ id, startSec, endSec, text: '', words: [], enabled: true }, text)
+}
+
+/** The audio-clip fields a caption run depends on: which clip, which media, and
+ *  where its words land on the timeline. */
+type CaptionedClip = Pick<AudioClip, 'id' | 'mediaId' | 'startSec' | 'inSec' | 'outSec'>
+
+/**
+ * Whether the clips a caption run transcribed are still on the timeline exactly
+ * as they were when it started. "Caption audio" takes seconds; if the user undid
+ * (or moved, trimmed, deleted) those clips meanwhile, its captions describe audio
+ * that is no longer there — and committing them would also wipe the redo history
+ * that holds the user's work (#5). Order-insensitive; style edits don't count.
+ */
+export function captionedClipsUnchanged(started: CaptionedClip[], now: CaptionedClip[]): boolean {
+  const key = (c: CaptionedClip): string => JSON.stringify([c.id, c.mediaId, c.startSec, c.inSec, c.outSec])
+  const a = started.map(key).sort()
+  const b = now.map(key).sort()
+  return a.length === b.length && a.every((k, i) => k === b[i])
 }

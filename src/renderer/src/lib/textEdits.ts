@@ -18,6 +18,7 @@ import {
   maxItemEndSec,
   MIN_TEXT_SEC,
   TEXT_FONT_SIZE_MAX,
+  TEXT_PILL_PAD_MAX,
   TEXT_TIME_EPS,
   TEXT_FONT_SIZE_MIN,
   type TextEdit,
@@ -73,7 +74,7 @@ function styleProblems(e: TextEdit): string[] {
     if (e.pill === null || typeof e.pill !== 'object') p.push('pill must be an object')
     else {
       color('pill.color', e.pill.color)
-      inRange('pill.padPx', e.pill.padPx, 0, 200)
+      inRange('pill.padPx', e.pill.padPx, 0, TEXT_PILL_PAD_MAX)
       if (e.pill.enabled !== undefined && typeof e.pill.enabled !== 'boolean') p.push('pill.enabled must be true or false')
     }
   }

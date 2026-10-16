@@ -1,7 +1,7 @@
 import { useEffect, type JSX } from 'react'
 import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
-import { TEXT_FONT_SIZE_MIN } from '@shared/textStyle'
+import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN, TEXT_PILL_PAD_MAX } from '@shared/textStyle'
 import { useBrandColors } from '@/state/brandColors'
 import { FontPicker } from './FontPicker'
 import { Check, Field, NumberInput, Slider, colorCls, inputCls } from './ui'
@@ -11,8 +11,9 @@ import { Check, Field, NumberInput, Slider, colorCls, inputCls } from './ui'
 export type TextStyleLike = TextStyleBase
 export type TextStylePatch = Partial<TextStyleLike>
 
-/** Font size range in logical px. The number field has no upper cap; past the
- *  slider's end the thumb just parks there. */
+/** Font size range in logical px. The number field goes up to
+ *  `TEXT_FONT_SIZE_MAX` (set_text's cap); past the slider's end the thumb just
+ *  parks there. */
 const FONT_SIZE_SLIDER_MAX = 400
 
 const GRADIENT_PRESETS: { name: string; from: string; to: string; angle: number }[] = [
@@ -110,6 +111,7 @@ export function TextStyleControls({
             ariaLabel="Font size"
             step="2"
             min={TEXT_FONT_SIZE_MIN}
+            max={TEXT_FONT_SIZE_MAX}
             value={style.fontSizePx}
             onCommit={(v) => onPatch({ fontSizePx: v })}
             className={inputCls.replace('w-full', 'w-16 shrink-0')}
@@ -200,6 +202,7 @@ export function TextStyleControls({
                 <NumberInput
                   step="2"
                   min={0}
+                  max={TEXT_PILL_PAD_MAX}
                   value={pill.padPx}
                   format={(v) => String(Math.round(v))}
                   onCommit={(v) => onPatch({ pill: { ...pill, padPx: v } })}

@@ -19,6 +19,7 @@ import { resolveCompAtPath } from '@shared/compositions'
 import { splitPieces, trimPieces, type CutPiece } from '@shared/quickCut'
 import { getSubdir } from '../config'
 import { ensureProxy, getProjectMedia, setMediaDescription } from '../services/mediaStore'
+import { describeUndo } from '@shared/assistant/undoSummary'
 import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
@@ -197,7 +198,18 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
 
   remove_items: async ({ ids }) => json(await callRenderer('removeItems', { ids })),
 
-  undo: async () => json(await callRenderer('undo', {})),
+  undo: async () => {
+    // Imports, trims and splits are undo steps too, and their undo leaves the
+    // timeline as it was — so say what went, naming library clips by file.
+    // Names come from the library as it was (removed clips) and as it is now
+    // (restored ones), so nothing outside the project is read.
+    const was = await projectAssets()
+    const { undone, changes, timeline } = await callRenderer('undo', {})
+    if (!undone || !changes) return json({ undone, note: 'Nothing to undo.', timeline })
+    const names = new Map([...was.values()].map((a) => [a.id, a.fileName]))
+    for (const a of await getProjectMedia(changes.library.restored)) names.set(a.id, a.fileName)
+    return json({ undone, note: describeUndo(changes, (id) => names.get(id) ?? id), changes, timeline })
+  },
 
   export_video: async ({ fileName, folder }) => {
     const project = await callRenderer('getProject', {})

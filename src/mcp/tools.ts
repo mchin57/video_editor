@@ -12,7 +12,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { FONTS } from '@shared/fonts'
-import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN } from '@shared/assistant/onScreenText'
+import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN, TEXT_PILL_PAD_MAX } from '@shared/assistant/onScreenText'
 
 export type CallEditor = <K extends ToolName>(tool: K, args: ToolArgs[K]) => Promise<ToolContent[]>
 
@@ -141,7 +141,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'place_sequence',
     {
       description:
-        'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0. Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut.',
+        'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0. Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut. Refused: an outSec more than 0.5s past its clip\'s end, or an atSec more than 60s past the end of the edit (times are seconds, not milliseconds).',
       inputSchema: {
         items: z
           .array(z.object({ mediaId: z.string(), inSec: z.number().min(0), outSec: z.number().positive() }))
@@ -166,7 +166,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
 
   server.registerTool(
     'undo',
-    { description: "Undo the last edit (yours or the user's) — one step. Returns the timeline after undoing." },
+    { description: "Undo the last edit (yours or the user's) — one step. Imports, trim_clip and split_clip are steps too: undoing one removes clips from the LIBRARY, not the timeline. Returns a note saying what was undone (relay a library change to the user), the changes, and the timeline after undoing." },
     async () => result(await call('undo', {}))
   )
 
@@ -216,7 +216,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     fontSizePx: z.number().min(TEXT_FONT_SIZE_MIN).max(TEXT_FONT_SIZE_MAX).optional(),
     color: color.optional(),
     pill: z
-      .strictObject({ enabled: z.boolean().optional(), color: color.optional(), padPx: z.number().min(0).max(200).optional() })
+      .strictObject({ enabled: z.boolean().optional(), color: color.optional(), padPx: z.number().min(0).max(TEXT_PILL_PAD_MAX).optional() })
       .optional()
       .describe('Box behind the text; fields merge into the current pill'),
     stroke: z.strictObject({ widthPx: z.number().min(0).max(100), color }).nullable().optional().describe('Glyph outline (ignored while the pill is on); null removes'),
