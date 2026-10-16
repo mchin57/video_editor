@@ -119,7 +119,14 @@ checklist into guarantees a refactor can't silently break.
 
 ## House rules
 
-- **Never push.** Commit locally only — the owner runs every `git push`.
+- **Git flow: `main` is protected; everything lands via pull request.** Work in a
+  worktree under `.claude/worktrees/<name>` on its own branch (never edit the main
+  checkout). Agents may `git push` that branch and open a PR with `gh pr create`
+  (put `Closes #N` in the body). Agents never push to `main`, force-push, delete
+  remote branches, merge or close PRs, or touch the repo's rulesets/branch
+  protection — the owner reviews and merges. Enforced server-side by the
+  `protect-main` GitHub ruleset (PR required, no force-push, no deletion, no bypass
+  actors) and locally by the allow/deny rules in `.claude/settings.json`.
 - Behavior-preserving refactors must keep `npm test` + `npm run typecheck` green at
   every step.
 - **Don't let untested behavior get refactored away.** `npm test` only guards the
