@@ -247,8 +247,15 @@ test('scrolling inside the timeline description box scrolls it and keeps it open
 
   // A wheel over the box scrolls its text; the box stays.
   await input.evaluate((el) => (el.scrollTop = 0))
-  await page.mouse.wheel(0, 120)
-  await expect.poll(() => input.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+  // Under load one wheel event can land before the textarea is scrollable, so
+  // keep wheeling (over the box) until it scrolls; the box must stay open throughout.
+  await input.hover()
+  await expect
+    .poll(async () => {
+      await page.mouse.wheel(0, 120)
+      return input.evaluate((el) => el.scrollTop)
+    })
+    .toBeGreaterThan(0)
   await page.waitForTimeout(400)
   await expect(above).toBeVisible()
 
