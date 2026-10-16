@@ -247,6 +247,14 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
   const now = await mediaIds()
   expect(now).toEqual(expect.arrayContaining([id, ...parts.map((p) => p.id), trim.created[0].id]))
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(0)
+
+  // #16: undoing the trim takes its clip out of the LIBRARY while the timeline is
+  // unchanged — the reply must say so, naming the file.
+  const undo = JSON.parse(textOf(await call(c, 'undo'))) as { undone: boolean; note: string; changes: { library: { removed: string[] } } }
+  expect(undo.undone).toBe(true)
+  expect(undo.changes.library.removed).toEqual([trim.created[0].id])
+  expect(undo.note).toBe('Undid: removed 1 clip from the library (clip (cut).mp4).')
+  expect(await mediaIds()).not.toContain(trim.created[0].id)
 })
 
 test('add_description sets, shows and clears a clip description; list_media returns it', async ({

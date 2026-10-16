@@ -145,7 +145,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
 
   server.registerTool(
     'undo',
-    { description: "Undo the last edit (yours or the user's) — one step. Returns the timeline after undoing." },
+    { description: "Undo the last edit (yours or the user's) — one step. Imports, trim_clip and split_clip are steps too: undoing one removes clips from the LIBRARY, not the timeline. Returns a note saying what was undone (relay a library change to the user), the changes, and the timeline after undoing." },
     async () => result(await call('undo', {}))
   )
 

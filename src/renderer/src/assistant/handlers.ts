@@ -8,6 +8,7 @@ import type { AssistantOps, AssistantRequest, AssistantResponse } from '@shared/
 import type { Composition, Project } from '@shared/project'
 import { summarizeTimeline } from '@shared/assistant/timelineSummary'
 import { summarizeText } from '@shared/assistant/onScreenText'
+import { undoChanges } from '@shared/assistant/undoSummary'
 import { compositionDuration } from '@shared/compositions'
 import { activeComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -53,8 +54,10 @@ const handlers: Handlers = {
   },
   undo: () => {
     const before = useProject.getState().past.length
+    const from = project()
     useProject.getState().undo()
-    return { undone: useProject.getState().past.length < before, timeline: summarizeTimeline(comp()) }
+    const undone = useProject.getState().past.length < before
+    return { undone, changes: undone ? undoChanges(from, project()) : null, timeline: summarizeTimeline(comp()) }
   },
   getProject: () => project(),
   saveProject: async ({ projectId }) => {
