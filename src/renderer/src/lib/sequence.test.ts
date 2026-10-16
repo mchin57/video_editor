@@ -52,9 +52,36 @@ describe('applySequence', () => {
     expect(placed[0]).toMatchObject({ mediaId: 'b', startSec: 0 })
   })
 
-  it('clamps in/out to the source', () => {
-    const { placed } = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', -1, 99)] }, ctx())
+  it('clamps in/out to the source when out overshoots by a rounding margin', () => {
+    const { placed } = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', -1, 20.4)] }, ctx())
     expect(placed[0]).toMatchObject({ inSec: 0, outSec: 20, startSec: 0, endSec: 20 })
+  })
+
+  // #17: outSec 60 or 5000 (ms) on a short clip used to clamp silently.
+  for (const outSec of [60, 5000]) {
+    it(`refuses outSec ${outSec} on a 20 s source, saying times are in seconds`, () => {
+      const start = createEmptyComposition()
+      expect(() => applySequence(start, { mode: 'append', items: [item('a', 0, outSec)] }, ctx())).toThrow(
+        /item 0 \(a\): outSec .* past the end of the 20\.00s source; times are in seconds/
+      )
+      expect(start.layers).toEqual([])
+    })
+  }
+
+  // #8: atSec 1e9 was accepted and the export then encoded ~forever.
+  it('refuses an atSec more than 60 s past the end of the edit', () => {
+    const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 3)] }, ctx()).comp
+    for (const atSec of [1e9, 5000, 63.01]) {
+      expect(() => applySequence(first, { mode: 'append', atSec, items: [item('b', 0, 1)] }, ctx())).toThrow(
+        /more than 60s past the end of the edit \(3s\); times are in seconds/
+      )
+    }
+    expect(applySequence(first, { mode: 'append', atSec: 63, items: [item('b', 0, 1)] }, ctx()).placed[0].startSec).toBe(63)
+  })
+
+  it('measures the atSec bound after replace removes the old video', () => {
+    const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 20)] }, ctx()).comp
+    expect(() => applySequence(first, { mode: 'replace', atSec: 70, items: [item('b', 0, 1)] }, ctx())).toThrow(/past the end/)
   })
 
   it('rejects an item that clamps to (almost) nothing, naming it', () => {

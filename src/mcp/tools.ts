@@ -120,7 +120,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'place_sequence',
     {
       description:
-        'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0. Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut.',
+        'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0. Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut. Refused: an outSec more than 0.5s past its clip\'s end, or an atSec more than 60s past the end of the edit (times are seconds, not milliseconds).',
       inputSchema: {
         items: z
           .array(z.object({ mediaId: z.string(), inSec: z.number().min(0), outSec: z.number().positive() }))
