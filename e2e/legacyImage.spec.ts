@@ -6,10 +6,9 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 test('a converted project’s JPEG card shows its thumbnail', async ({ electronApp, appPage: page, scratchDir, projectsDir }) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')

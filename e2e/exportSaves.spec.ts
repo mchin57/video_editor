@@ -13,10 +13,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { MediaAsset } from '../src/shared/media'
 import { test, expect } from './fixtures'
+import { FFMPEG } from './bin'
 
 const ROOT = resolve(__dirname, '..')
 const MCP = join(ROOT, 'out', 'main', 'mcp.js')
-const FFMPEG = join(ROOT, 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
 
 type ToolResult = { content: { type: string; text?: string }[]; isError?: boolean }
 const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')

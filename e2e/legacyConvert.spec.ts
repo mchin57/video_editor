@@ -13,12 +13,11 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { MediaAsset, MediaRecord } from '../src/shared/media'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 const media = (page: Page, ids: string[]): Promise<MediaAsset[]> =>
   page.evaluate((ids) => window.api.listProjectMedia(ids), ids)

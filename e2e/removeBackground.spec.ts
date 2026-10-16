@@ -21,9 +21,9 @@ import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { VideoContent } from '../src/shared/project'
 import { test, expect } from './fixtures'
+import { FFMPEG } from './bin'
 
 const root = resolve(__dirname, '..')
-const FFMPEG = join(root, 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
 
 function findModel(): string | null {
   const dirs = [join(root, 'resources', 'models'), join(homedir(), 'Documents', 'VideoEditor', 'bin', 'models')]

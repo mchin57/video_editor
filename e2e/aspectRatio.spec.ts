@@ -11,13 +11,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
-
-const BIN = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg')
-const FFMPEG = join(BIN, 'ffmpeg.exe')
-const FFPROBE = join(BIN, 'ffprobe.exe')
+import { FFMPEG, FFPROBE } from './bin'
 
 const layersJson = (page: Page): Promise<string> =>
   page.evaluate(() => JSON.stringify(window.__reelStores.useProject.getState().project!.layers))

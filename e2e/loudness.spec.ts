@@ -12,11 +12,10 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { windowLoudness, type LoudnessSeries } from '../src/shared/loudness'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 /** A 6 s 1 kHz tone at 44.1 kHz: full level (−18 dBFS peak) for 3 s, then 14 dB down. */
 const TONE = 'sine=frequency=1000:sample_rate=44100:duration=6'

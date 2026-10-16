@@ -11,14 +11,11 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import type { MediaAsset } from '../src/shared/media'
 import { test, expect } from './fixtures'
-
-const BIN = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg')
-const FFMPEG = join(BIN, 'ffmpeg.exe')
-const FFPROBE = join(BIN, 'ffprobe.exe')
+import { FFMPEG, FFPROBE } from './bin'
 
 const media = (page: Page, ids: string[]): Promise<MediaAsset[]> =>
   page.evaluate((ids) => window.api.listProjectMedia(ids), ids)

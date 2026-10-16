@@ -12,11 +12,10 @@
  */
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { test, expect } from './fixtures'
-
-const FFMPEG = join(resolve(__dirname, '..'), 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 /** A 3 s 16-bit mono sine WAV. */
 function makeWav(path: string): void {

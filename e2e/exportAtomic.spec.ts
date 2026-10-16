@@ -7,14 +7,11 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { MediaAsset } from '../src/shared/media'
 import { test, expect } from './fixtures'
-
-const ROOT = resolve(__dirname, '..')
-const FFMPEG = join(ROOT, 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
-const FFPROBE = join(ROOT, 'resources', 'bin', 'ffmpeg', 'ffprobe.exe')
+import { FFMPEG, FFPROBE } from './bin'
 
 /** A clip long enough that the export is still encoding when we kill it. */
 async function arrange(page: Page, projectsDir: string, durationSec: number): Promise<void> {

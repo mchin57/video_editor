@@ -16,10 +16,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test, expect } from './fixtures'
+import { FFMPEG } from './bin'
 
-const FFMPEG = join(resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg'), 'ffmpeg.exe')
 const W = 1080
 const H = 1920
 

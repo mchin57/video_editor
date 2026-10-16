@@ -5,10 +5,9 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test, expect } from './fixtures'
-
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+import { FFMPEG } from './bin'
 
 test('a new project starts with the playhead at 0', async ({ appPage: page, projectsDir }) => {
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(3))
