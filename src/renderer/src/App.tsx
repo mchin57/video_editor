@@ -21,6 +21,7 @@ import { VolumeLevelDialog } from '@/components/VolumeLevelDialog'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
+import { refetchFresh } from '@/lib/refetchFresh'
 import { chooseProjectLocation, defaultProjectLocation, onJobProgress, onLibraryChanged, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
@@ -98,7 +99,9 @@ export default function App(): JSX.Element {
     return onJobProgress((ev) => {
       applyJobEvent(ev)
       if (ev.type === 'proxy' && ev.status === 'done') {
-        void queryClient.invalidateQueries({ queryKey: ['library'] })
+        // Not a plain invalidate: a library fetch already running read the
+        // asset before its proxy existed (lib/refetchFresh.ts).
+        void refetchFresh(queryClient, ['library'])
       }
     })
   }, [queryClient])
