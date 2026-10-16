@@ -40,6 +40,7 @@ import type {
 } from '@shared/project'
 import { audioClipEnd } from '@shared/project'
 import {
+  audioTimelineAt,
   splitAudioClip,
   splitCaptionSegment,
   splitStaticLayer,
@@ -578,6 +579,63 @@ export function splitItemsAt(
   // No cut, no edit — the re-grouping above only means anything around a cut.
   if (!changed) return p
   return pruneLinkGroups({ ...p, layers, captions: { ...p.captions, segments }, audioClips })
+}
+
+/**
+ * "Split on silence" for an audio clip in a link group: the clip is cut at the
+ * start and end of every speech range (`ranges`, SOURCE seconds of the clip,
+ * from `speechSegments`), and every partner the same TIMELINE second crosses is
+ * cut there too, through the same per-kind splitters as the playhead ✂ Split
+ * (`splitItemsAt`), so freezes/speed on a video member map correctly. Each cut
+ * starts a new group for what lies after it, so the slices stay linked
+ * pairwise: speech slice N of the audio ↔ the partners' slice N.
+ *
+ * Then, as for an unlinked clip, the audio's SILENT slices are dropped (they
+ * were silent; nothing audible changes). The partners keep theirs: dropping a
+ * video's slice would leave a black gap. Left without a partner, such a slice
+ * is simply unlinked. One transform, so one undo step. Returns `p` unchanged
+ * when nothing was cut.
+ */
+export function splitGroupOnSilence(
+  p: Composition,
+  audioId: string,
+  ranges: { start: number; end: number }[],
+  srcDur: SourceDuration,
+  makeId: () => string
+): Composition {
+  const clip = p.audioClips.find((a) => a.id === audioId)
+  if (!clip || ranges.length === 0) return p
+  const end = audioTimelineAt(clip, sourceOut(clip, srcDur))
+  const cuts = [...new Set(ranges.flatMap((r) => [r.start, r.end]).map((s) => audioTimelineAt(clip, s)))]
+    .filter((t) => t > clip.startSec + EPS && t < end - EPS)
+    .sort((a, b) => a - b)
+
+  let c = p
+  // The audio slice still ahead of the cuts; each cut's tiles are its group.
+  let tail = audioId
+  const pieces = [audioId]
+  for (const t of cuts) {
+    const before = new Set(c.audioClips.map((a) => a.id))
+    c = splitItemsAt(c, expandGroup(c, { kind: 'audio', id: tail }), t, srcDur, makeId)
+    const right = c.audioClips.find((a) => !before.has(a.id))
+    if (!right) continue
+    tail = right.id
+    pieces.push(right.id)
+  }
+
+  const speaks = (a: AudioClip): boolean => {
+    const mid = (a.inSec + sourceOut(a, srcDur)) / 2
+    return ranges.some((r) => mid > r.start && mid < r.end)
+  }
+  const silent = c.audioClips.filter((a) => pieces.includes(a.id) && !speaks(a))
+  return removeItems(c, silent.map((a) => ({ kind: 'audio' as const, id: a.id })))
+}
+
+/** An audio clip's source out-point, by `splitAudioClip`'s rule: its explicit
+ *  `outSec`, else (0 = "to the end") the file's length — unclamped, so an
+ *  unknown duration (0) can't collapse a clip that has an explicit out. */
+function sourceOut(a: AudioClip, srcDur: SourceDuration): number {
+  return a.outSec > 0 ? a.outSec : srcDur(a.mediaId)
 }
 
 /** Delete every tile in `refs`, pruning any group left with a single member. */

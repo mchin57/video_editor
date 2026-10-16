@@ -1512,7 +1512,9 @@ function AudioClipEditor(): JSX.Element | null {
       const silences = await detectSilence(clip.mediaId)
       const ranges = speechSegments(silences, clip.inSec, effectiveOut(clip, dur), 0.4)
       await idle() // detection can finish mid-drag; the split waits for the release
-      if (ranges.length > 1) splitOnSilence(clip.id, ranges)
+      // A linked clip cuts its partners too, at the same timeline seconds.
+      const srcDur = (mediaId: string): number => assets.find((a) => a.id === mediaId)?.probe.durationSec ?? 0
+      if (ranges.length > 1) splitOnSilence(clip.id, ranges, srcDur)
       else setSplitNote('No silence gaps found to split on.')
     } finally {
       setSplitting(false)
@@ -1588,11 +1590,11 @@ function AudioClipEditor(): JSX.Element | null {
 
       <button
         onClick={() => void runSplitOnSilence()}
-        disabled={splitting || linked}
+        disabled={splitting}
         className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50 ${disabledCls}`}
         title={
           linked
-            ? 'Not available on a linked tile — the pieces would cut only this one (unlink first)'
+            ? 'Detect silence and split this clip into its speech segments; its linked tiles are cut at the same points'
             : 'Detect silence and split this clip into its speech segments'
         }
       >
