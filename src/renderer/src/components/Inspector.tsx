@@ -76,6 +76,7 @@ import {
   Check,
   Field,
   NumberInput,
+  useTypingGesture,
   Row,
   Slider,
   btnCls,
@@ -876,7 +877,7 @@ function LayerEditor(): JSX.Element | null {
       {c.kind === 'text' && (
         <CollapsibleSection id="text" title="Text">
           <Field label="Text">
-            <textarea value={c.text} rows={2} onChange={(e) => updateContent(id, { text: e.target.value })} className={inputCls} />
+            <LayerTextInput value={c.text} onChange={(text) => updateContent(id, { text })} />
           </Field>
           <TextStyleControls style={c} onPatch={(patch) => updateContent(id, patch)} />
           <TextAnimationFields content={c} onPatch={(patch) => updateContent(id, patch)} />
@@ -1410,6 +1411,12 @@ function CaptionStyleEditor(): JSX.Element | null {
  * box got focus, so intermediate keystrokes (a half-typed word, a stray space)
  * never wear the original timings down.
  */
+/** A text layer's Text box: one undo step per typing session (`useTypingGesture`). */
+function LayerTextInput({ value, onChange }: { value: string; onChange: (text: string) => void }): JSX.Element {
+  const typing = useTypingGesture()
+  return <textarea value={value} rows={2} {...typing} onChange={(e) => onChange(e.target.value)} className={inputCls} />
+}
+
 function CaptionTextInput({
   seg,
   onChange
@@ -1418,6 +1425,7 @@ function CaptionTextInput({
   onChange: (next: CaptionSegment) => void
 }): JSX.Element {
   const origin = useRef<CaptionSegment | null>(null)
+  const typing = useTypingGesture()
   // The focus-time words, unless the caption has since moved (then they'd be in the wrong place).
   const base = (): CaptionSegment => {
     const o = origin.current
@@ -1427,8 +1435,14 @@ function CaptionTextInput({
     <textarea
       value={seg.text}
       rows={2}
-      onFocus={() => (origin.current = seg)}
-      onBlur={() => (origin.current = null)}
+      onFocus={() => {
+        origin.current = seg
+        typing.onFocus()
+      }}
+      onBlur={() => {
+        origin.current = null
+        typing.onBlur()
+      }}
       onChange={(e) => onChange(captionWithText(base(), e.target.value))}
       className={inputCls}
     />

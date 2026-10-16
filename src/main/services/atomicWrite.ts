@@ -92,3 +92,27 @@ export async function replaceFile(path: string, data: string): Promise<void> {
     }
   }
 }
+
+/**
+ * Throw a plain-language error when `dir` can't take a new file. An export
+ * into a folder it may not write used to run the whole render and then fail
+ * with ffmpeg's log tail and a raw exit code, "Permission denied" buried at
+ * the very end. Probes by creating (and removing) a file, since on Windows the
+ * folder's ACLs are what decide, not its mode bits.
+ */
+export async function assertWritableDir(dir: string): Promise<void> {
+  const probe = join(dir, `.reel-write-check-${process.pid}-${Date.now()}`)
+  try {
+    await fsp.writeFile(probe, '', { flag: 'wx' })
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    const why =
+      code === 'ENOENT' ? 'the folder does not exist'
+      : code === 'EPERM' || code === 'EACCES' ? 'permission denied'
+      : code === 'EROFS' ? 'the drive is read-only'
+      : code === 'ENOTDIR' ? 'it is not a folder'
+      : (code ?? String(error))
+    throw new Error(`Can't write to ${dir}: ${why}. Choose another folder.`)
+  }
+  await fsp.rm(probe, { force: true }).catch(() => {})
+}

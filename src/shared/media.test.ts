@@ -67,6 +67,16 @@ describe('media kind: extension checked against the probe', () => {
     expect(kindOfFile('C:/a/silent.mp4', probe({ video: picture }))).toBe('video')
   })
 
+  it('a still renamed to a video extension is an image (one picture, no duration, no sound)', () => {
+    // ffprobe on a JPEG renamed .mp4: format jpeg_pipe, codec mjpeg, no duration at all (#19).
+    const still = { ...picture, codec: 'mjpeg', avgFps: 25, rFps: 25 }
+    expect(kindOfFile('C:/a/photo.mp4', probe({ container: 'jpeg_pipe', durationSec: 0, video: still }))).toBe('image')
+    expect(kindOfFile('C:/a/logo.mov', probe({ container: 'png_pipe', durationSec: 0, video: { ...still, codec: 'png' } }))).toBe('image')
+    // A picture with sound, or with a duration, is still a video.
+    expect(kindOfFile('C:/a/clip.mp4', probe({ durationSec: 0, video: picture, audio: sound }))).toBe('video')
+    expect(kindOfFile('C:/a/clip.mp4', probe({ durationSec: 0.04, video: picture }))).toBe('video')
+  })
+
   it('an extension that probes to nothing keeps its claim (a failed or empty probe)', () => {
     expect(kindOfFile('C:/a/broken.mp4', probe({ durationSec: 0 }))).toBe('video')
   })
