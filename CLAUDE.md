@@ -79,7 +79,9 @@ and add an entry whenever you verify something new.
 There is no manual smoke test. A fix or feature is done when it has its tests
 (a regression spec for a bug, unit and/or e2e coverage for a feature, plus a
 real-ffmpeg check for new media behavior, per the section above) and
-`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. Then
+`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. GitHub CI
+(`.github/workflows/ci.yml`: typecheck + `npm test` on every PR) gates merging, but
+e2e does not run there — it stays a local gate. Then
 close its GitHub issue with a comment naming the tests that cover it (commit
 messages can say `Closes #N`). Leave the issue open, labelled `needs-verification`,
 for work that is built but not yet passing or not yet tested. Docs must never
@@ -119,7 +121,14 @@ checklist into guarantees a refactor can't silently break.
 
 ## House rules
 
-- **Never push.** Commit locally only — the owner runs every `git push`.
+- **Git flow: `main` is protected; everything lands via pull request.** Work in a
+  worktree under `.claude/worktrees/<name>` on its own branch (never edit the main
+  checkout). Agents may `git push` that branch and open a PR with `gh pr create`
+  (put `Closes #N` in the body). Agents never push to `main`, force-push, delete
+  remote branches, merge or close PRs, or touch the repo's rulesets/branch
+  protection — the owner reviews and merges. Enforced server-side by the
+  `protect-main` GitHub ruleset (PR required, no force-push, no deletion, no bypass
+  actors) and locally by the allow/deny rules in `.claude/settings.json`.
 - Behavior-preserving refactors must keep `npm test` + `npm run typecheck` green at
   every step.
 - **Don't let untested behavior get refactored away.** `npm test` only guards the
