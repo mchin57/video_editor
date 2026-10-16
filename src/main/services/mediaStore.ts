@@ -17,7 +17,7 @@ import { createReadStream, existsSync, promises as fsp } from 'node:fs'
 import { basename, dirname, join, parse } from 'node:path'
 import type { FingerprintField, MediaAsset, MediaKind, MediaRecord } from '@shared/media'
 import type { RelinkResult } from '@shared/ipc'
-import { deriveKind, isAudioAsset, isImageAsset, isUnknownClip, kindFromExt, normalizeDescription } from '@shared/media'
+import { isAudioAsset, isImageAsset, isUnknownClip, kindOfFile, normalizeDescription } from '@shared/media'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
@@ -312,7 +312,7 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
     cutsReset = lengthKnown && Math.abs(probe.durationSec - entry.record.probe.durationSec) > 0.01
     // A placeholder takes the file's name and kind; a known clip keeps its own.
     const identity = isUnknownClip(entry.record)
-      ? { fileName: basename(srcPath), kind: kindFromExt(srcPath) ?? deriveKind(probe) }
+      ? { fileName: basename(srcPath), kind: kindOfFile(srcPath, probe) }
       : {}
     // The cache is disposable — rebuild it from the new file now. The
     // transcript isn't: hide it, and let Save delete it (not saving brings
@@ -452,7 +452,7 @@ async function register(
   if (probe.audio?.channels === 2) {
     probe.audio.monoFoldChannel = await detectMonoFoldChannel(path)
   }
-  const kind: MediaKind = kindFromExt(path) ?? deriveKind(probe)
+  const kind: MediaKind = kindOfFile(path, probe)
   const record: MediaRecord = {
     id,
     fileName,

@@ -167,9 +167,29 @@ export function deriveKind(probe: ProbeInfo): MediaKind {
   return 'video'
 }
 
-/** The asset's class, using the stored kind when present, else derived. */
+/**
+ * A class claimed by name (the extension, or a stored kind) checked against
+ * the probed streams. A video container with no picture is audio: an `.mp4`
+ * can hold only AAC (or an MP3 renamed `.mp4`), and the video proxy's
+ * `-map 0:v:0` fails on it (docs/FFMPEG-NOTES.md "Audio-only video
+ * containers"). Anything else keeps its claim, and no claim falls back to the
+ * probe alone.
+ */
+export function reconcileKind(claimed: MediaKind | null | undefined, probe: ProbeInfo): MediaKind {
+  if (claimed === 'video' && !probe.video && probe.audio) return 'audio'
+  return claimed ?? deriveKind(probe)
+}
+
+/** The class of a newly probed file: its extension, checked against the probe. */
+export function kindOfFile(path: string, probe: ProbeInfo): MediaKind {
+  return reconcileKind(kindFromExt(path), probe)
+}
+
+/** The asset's class: the stored kind checked against the probe (which also
+ *  corrects records saved as 'video' before the probe was consulted), else
+ *  derived. */
 export function assetKind(a: MediaAsset): MediaKind {
-  return a.kind ?? deriveKind(a.probe)
+  return reconcileKind(a.kind, a.probe)
 }
 
 /** Whether an ffprobe pixel-format name carries an alpha channel. Covers the

@@ -382,6 +382,26 @@ anything ffmpeg writes straight to its final name is a trap:
   was encoded"). `writeAtomically` checks the partial exists before renaming
   and says so, instead of failing the rename with ENOENT on `*.part.*`.
 
+## Audio-only video containers (verified ffmpeg 8.1.1, 2026-10-16)
+
+- **An `.mp4` can hold no picture.** AAC in an MP4 and MP3 in an MP4 both
+  probe as one `audio` stream, `format_name=mov,mp4,m4a,3gp,3g2,mj2`. A raw
+  MP3 renamed `.mp4` probes as `format_name=mp3`: ffmpeg goes by content, not
+  by the extension. So the extension says "video" and the probe says audio.
+- **The video proxy fails on them.** `-map 0:v:0` exits non-zero with
+  "Stream map '' matches no streams" before encoding anything (issue #12).
+  The audio proxy (`buildAudioProxyArgs`: `-vn`, AAC 48 kHz stereo) works on
+  all three. So the kind comes from the extension checked against the probe
+  (`kindOfFile` / `reconcileKind` in `shared/media.ts`): a video container
+  with no video stream is audio.
+- **Cover art is a video stream too.** An AAC `.mp4` with an embedded
+  picture probes a second stream, `codec_type=video` (png here) with
+  `disposition.attached_pic=1`, and the parser counts it as the picture, so
+  that file is still classed as video. Its video proxy fails as well: the
+  `attached_pic` disposition is carried to the output, and the mp4 muxer
+  refuses it ("Could not find tag for codec h264 in stream #0"). Adding
+  `-disposition:v:0 0` makes the same encode succeed, with one frame. Not fixed.
+
 ## Stills: no input seek (verified ffmpeg 8.1.1, 2026-10)
 
 - **`-ss 0` before `-i` on a JPEG still drops its only frame.** On iPhone
