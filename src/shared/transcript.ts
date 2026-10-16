@@ -20,8 +20,10 @@ export type TimingSource = 'dtw' | 'segment'
  *      sentence is no longer dropped after a click or a long lead-in.
  *  3 — annotations split across entries (`(birds` `chirping)`, `[` `Pause` `]`)
  *      and `♪ … ♪` lyric spans are dropped, not captioned.
+ *  4 — the wav is mono-folded and a quiet source boosted before whisper and
+ *      silencedetect read it, so quiet speech is no longer skipped as silence.
  */
-export const TRANSCRIPT_VERSION = 3
+export const TRANSCRIPT_VERSION = 4
 
 /** A media file's transcription, cached as media/<id>/transcript.json. */
 export interface Transcript {

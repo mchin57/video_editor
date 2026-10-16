@@ -80,6 +80,59 @@ export function decodeStartSec(
   return Math.max(0, onset - LEAD_IN_SEC)
 }
 
+/** The level (LUFS, on the loudness series' scale) a quiet source is lifted
+ *  to before transcription. */
+export const TRANSCRIBE_TARGET_LUFS = -20
+/** The most a source is ever lifted: enough for the quietest real teleprompter
+ *  take (−40.7 LUFS), low enough that a clip with no speech stays a noise
+ *  floor whisper ignores rather than hiss it invents words for. */
+export const TRANSCRIBE_MAX_BOOST_DB = 24
+/** The limiter's ceiling (linear; −1 dBFS): a boosted peak lands here instead
+ *  of clipping the s16 wav. */
+const LIMIT_LINEAR = 0.891
+
+/**
+ * How many dB to lift a source's audio before transcription, from its gated
+ * integrated loudness (`windowLoudness(...).lufs`). Only ever boosts: a quiet
+ * source's speech falls under silencedetect's −30 dB gate, and `decodeStartSec`
+ * then skips real sentences (measured: a −37.7 LUFS take started decoding at
+ * 22.85s and lost its first 23 seconds). A source already at or above the
+ * target is left alone; null (silence, or no measurement) is 0.
+ */
+export function transcribeGainDb(lufs: number | null): number {
+  if (lufs == null || !Number.isFinite(lufs)) return 0
+  const gain = Math.min(TRANSCRIBE_TARGET_LUFS - lufs, TRANSCRIBE_MAX_BOOST_DB)
+  return gain > 0 ? Math.round(gain * 100) / 100 : 0
+}
+
+/**
+ * ffmpeg args that write the 16 kHz mono s16 wav whisper and silencedetect
+ * read. `foldPan` is the source's mono-fold (`monoFoldPan`, or null): without
+ * it `-ac 1` AVERAGES a one-sided stereo source with its dead channel and
+ * loses 6 dB. `gainDb` comes from `transcribeGainDb`; a boost always rides
+ * with `alimiter` (`level=0`: no make-up gain of its own) so peaks top out at
+ * −1 dBFS. See FFMPEG-NOTES "whisper input level".
+ */
+export function buildTranscribeExtractArgs(
+  input: string,
+  wav: string,
+  foldPan: string | null,
+  gainDb: number
+): string[] {
+  const chain = [
+    ...(foldPan ? [foldPan] : []),
+    ...(gainDb > 0 ? [`volume=${gainDb}dB`, `alimiter=limit=${LIMIT_LINEAR}:level=0`] : [])
+  ]
+  return [
+    '-y', '-hide_banner', '-nostdin',
+    '-i', input,
+    '-vn',
+    ...(chain.length > 0 ? ['-af', chain.join(',')] : []),
+    '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+    wav
+  ]
+}
+
 /**
  * whisper-cli args for a word-level transcription.
  *

@@ -8,7 +8,9 @@
  * .bin model alongside).
  *
  * The whole ORIGINAL is transcribed, never a per-clip slice; clip trims are
- * applied afterwards in the renderer (renderer/lib/captions.ts). One
+ * applied afterwards in the renderer (renderer/lib/captions.ts). The wav is
+ * mono-folded like the mix and a quiet source is lifted toward a target level
+ * first (whisperArgs.ts `transcribeGainDb`). One
  * silencedetect pass over the wav serves two fixes: decoding starts just before
  * the first speech (whisper drops a file's opening sentence after leading
  * junk), and each word ends where its sound stops.
@@ -26,7 +28,16 @@ import { requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
 import { clearStaleTranscript, getEntry } from './library'
 import { singleFlight } from './atomicWrite'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
-import { buildWhisperArgs, decodeStartSec, dtwPreset } from './whisperArgs'
+import {
+  buildTranscribeExtractArgs,
+  buildWhisperArgs,
+  decodeStartSec,
+  dtwPreset,
+  transcribeGainDb
+} from './whisperArgs'
+import { windowLoudness } from '@shared/loudness'
+import { monoFoldPan } from './audio'
+import { ensureLoudness } from './loudness'
 import { detectSilence } from './silence'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 
@@ -147,12 +158,17 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
   const rawPrefix = join(dir, 'transcript_raw')
   try {
     const { ffmpeg } = await getBinaries()
-    await runFfmpeg(ffmpeg, [
-      '-y', '-hide_banner', '-nostdin',
-      '-i', asset.originalPath,
-      '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
-      wav
-    ], 0)
+    // Lift a quiet source first: whisper and silencedetect both read this wav,
+    // and the −30 dB silence gate otherwise hears quiet speech as silence. The
+    // level comes from the volume-match loudness series (usually cached); no
+    // series just means no boost.
+    const series = await ensureLoudness(mediaId)
+    const level = series ? windowLoudness(series, 0, asset.probe.durationSec) : null
+    const gainDb = transcribeGainDb(level?.status === 'ok' ? level.lufs : null)
+    const fold = asset.probe.audio?.monoFoldChannel
+    await runFfmpeg(ffmpeg, buildTranscribeExtractArgs(
+      asset.originalPath, wav, fold != null ? monoFoldPan(fold) : null, gainDb
+    ), 0)
     setProgress(job.id, 0.25)
 
     // Skip whatever precedes the first speech: whisper drops the opening
