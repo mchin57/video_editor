@@ -80,11 +80,22 @@ There is no manual smoke test. A fix or feature is done when it has its tests
 (a regression spec for a bug, unit and/or e2e coverage for a feature, plus a
 real-ffmpeg check for new media behavior, per the section above) and
 `npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. Then
-mark it `[x]` and MOVE it out of its open section into `## Done` in
-`docs/TODO.md`: bugs go under `### Bugs fixed`, features under the matching
-Done subsection. Say there which tests cover it. `[~]` is only for work that is
-built but not yet passing or not yet tested. Docs must never assert untested
-behavior as fact.
+close its GitHub issue with a comment naming the tests that cover it (commit
+messages can say `Closes #N`). Leave the issue open, labelled `needs-verification`,
+for work that is built but not yet passing or not yet tested. Docs must never
+assert untested behavior as fact.
+
+## Backlog = GitHub Issues
+
+The backlog is **GitHub Issues** on `mchin57/video_editor` (`gh issue list`,
+`gh issue create`). There is no `docs/TODO.md`: never create one, and never
+write backlog entries into a file. Labels: `bug`, `enhancement`, `tech-debt`,
+`assistant` (the editor's AI assistant), `manual-step` (hands-on owner steps),
+`needs-verification` (built, not yet seen working), `out-of-scope-v1`. A bug
+issue is symptom + repro only, no suspected cause or fix. The in-app assistant's
+`request_feature` tool files issues itself (`main/assistant/issueFile.ts`).
+`docs/archived/TODO-done-2026-10-16.md` is the history of work finished before
+the move.
 
 Interaction features (drags, keybinds, drop targets) should land with a
 Playwright spec in `e2e/` where practical — and every interaction BUG you fix

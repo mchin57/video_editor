@@ -153,7 +153,7 @@ Shape: Claude Code launches **reel-mcp** (`node out/main/mcp.js`, stdio) → JSO
 | `renderFrames(project, preset, times, dir)`, `buildFrameArgs(plan, frames)` / `frameIndexAt(t, totalDur)` | `main/services/exporter.ts`, `exporterArgs.ts` | grabbing a picture of the FINISHED edit any other way (a preview screenshot, output `-ss`). Stills mode runs the export's own graph and cuts exact frames by index (`trim=start_frame`); see FFMPEG-NOTES "Single-frame renders" for why not `-ss`/`select` |
 | `sanitizeExportName`, `uniqueExportPath`, `exportRefusal` | `main/services/exportTarget.ts` | ad-hoc output naming for a dialog-less export (never overwrites; a name can't leave the export folder) |
 | `exportSaveSkipReason(origin, now)` | `renderer/src/lib/exportSave.ts` | saving after an export without checking WHICH project is open. The Export button and the assistant's `saveProject` op both capture the project's identity before the export and check it here (synchronously, right before `save`): another project opened meanwhile is not saved — the button shows a note, `export_video` returns `saved: false` + `reason`. Pinned by `e2e/exportSaves.spec.ts` |
-| `appendAssistantRequest` / `fileFeatureRequest` | `main/assistant/todoAppend.ts`, `todoFile.ts` | editing docs/TODO.md from code (serialized; `REEL_TODO_PATH` overrides) |
+| `fileFeatureRequest` / `formatIssue` | `main/assistant/issueFile.ts` | filing a GitHub issue from code (`gh issue create`, serialized, skips an open issue with the same title; `REEL_ISSUES_SINK` redirects to a JSONL file for tests). The backlog lives in GitHub Issues, not a file |
 
 ## Shared model — `src/shared/project.ts`, `src/shared/layers.ts`
 

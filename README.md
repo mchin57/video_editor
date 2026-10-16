@@ -6,7 +6,7 @@ A local, offline desktop video editor for Windows, purpose-built for creating In
 > installer that bundles everything an end user needs. See
 > [Installing (end users)](#installing-end-users) and
 > [Building the installer](#building-the-installer-distribution). Open work and
-> known bugs are tracked in [`docs/TODO.md`](docs/TODO.md).
+> known bugs are tracked in [GitHub Issues](https://github.com/mchin57/video_editor/issues).
 
 ## What it does
 
@@ -158,7 +158,7 @@ A plain `npm run build:win` never uploads — it only embeds the feed URL.
 
 ## Documentation
 
-- [`docs/TODO.md`](docs/TODO.md): the live backlog, with known bugs and what is or isn't verified
+- [GitHub Issues](https://github.com/mchin57/video_editor/issues): the live backlog, with known bugs and what is or isn't verified (the finished-work history is [`docs/archived/TODO-done-2026-10-16.md`](docs/archived/TODO-done-2026-10-16.md))
 - [`docs/SHARED.md`](docs/SHARED.md): catalog of shared helpers (check before adding code)
 - [`docs/FFMPEG-NOTES.md`](docs/FFMPEG-NOTES.md): verified ffmpeg/whisper behaviors and traps
 - [`docs/TIMELINE.md`](docs/TIMELINE.md): timeline interaction checklist

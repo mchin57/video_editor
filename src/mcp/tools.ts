@@ -243,7 +243,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'request_feature',
     {
       description:
-        "File a feature request in the editor's TODO list when you need an ability these tools don't have (instead of approximating with tools that don't fit). Then tell the user what you filed.",
+        "File a feature request as a GitHub issue on the editor's repo when you need an ability these tools don't have (instead of approximating with tools that don't fit). Then tell the user what you filed.",
       inputSchema: {
         title: z.string().min(3).max(120).describe('Short name of the missing ability'),
         problem: z.string().min(10).describe('What you were trying to do and why the current tools could not'),

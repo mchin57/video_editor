@@ -68,16 +68,17 @@ test('says plainly when the editor is not running', async () => {
   expect(textOf(r)).toContain("Reel Editor isn't running")
 })
 
-test('files a feature request into the TODO list once', async ({ electronApp, appPage: _page }) => {
-  const todo = await electronApp.evaluate(() => process.env.REEL_TODO_PATH as string)
-  writeFileSync(todo, '# TODO\n\n## Open\n\n- [ ] x\n')
+test('files a feature request as an issue once', async ({ electronApp, appPage: _page }) => {
+  const sink = await electronApp.evaluate(() => process.env.REEL_ISSUES_SINK as string)
   const c = await connect(await pipeOf(electronApp))
   const req = { title: 'Beat snap', problem: 'Wanted cuts on the beat of the music.', proposal: 'detect_beats tool' }
-  expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Filed in/)
+  expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Filed as a GitHub issue/)
   expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Already requested/)
-  expect(readFileSync(todo, 'utf8')).toMatch(
-    /## Assistant requests\n\n- \[ \] \*\*Beat snap\*\* — Wanted cuts on the beat of the music\. _Proposal:_ detect_beats tool _\(requested by assistant, \d{4}-\d{2}-\d{2}\)_\n\n## Open/
-  )
+  const rows = readFileSync(sink, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  expect(rows).toHaveLength(1)
+  expect(rows[0].title).toBe('Beat snap')
+  expect(rows[0].labels).toEqual(['enhancement', 'assistant'])
+  expect(rows[0].body).toContain('**Proposal.** detect_beats tool')
 })
 
 test('the Settings toggle disconnects and reconnects Claude Code', async ({ electronApp, appPage: page }) => {
