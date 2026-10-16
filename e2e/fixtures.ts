@@ -64,10 +64,10 @@ export const test = base.extend<{
         ...process.env,
         VIDEO_EDITOR_DATA: join(scratch, 'data'),
         REEL_USER_DATA_DIR: join(scratch, 'profile'),
-        // Never collide with a dev app's pipe; never touch the repo's TODO.
+        // Never collide with a dev app's pipe; never file issues on the real repo.
         REEL_ASSISTANT_PIPE:
           process.platform === 'win32' ? `\\\\.\\pipe\\${basename(scratch)}` : join(scratch, 'reel.sock'),
-        REEL_TODO_PATH: join(scratch, 'TODO.md')
+        REEL_ISSUES_SINK: join(scratch, 'issues.jsonl')
       }
     })
     await app.evaluate(({ dialog }) => {

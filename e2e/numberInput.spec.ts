@@ -130,3 +130,15 @@ test('Enter commits and clamps', async ({ appPage: page }) => {
   await page.keyboard.press('Enter')
   expect(await fontSizeInDoc(page)).toBe(12)
 })
+
+test('Start (s) cannot be set past End (s) — the layer never inverts', async ({ appPage: page }) => {
+  // Regression (chaos QA 2026-10-15): with End = 4, typing Start = 50 stored start 50 / end 4.
+  await addTextLayer(page)
+  const start = page.getByRole('spinbutton', { name: 'Start (s)' })
+  await start.fill('50')
+  await start.press('Enter')
+  const l = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'T1')!)
+  expect(l.endSec).toBe(4)
+  expect(l.startSec).toBeLessThan(l.endSec)
+  expect(l.startSec).toBeCloseTo(3.8)
+})

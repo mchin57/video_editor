@@ -58,6 +58,8 @@ import { removeLayerBackground } from '@/lib/backgroundRemoval'
 import { latestJob, useEditor } from '@/state/store'
 import { CancelJobButton, jobProgressText, useNow } from './JobsIndicator'
 import { expandGroup } from '@/lib/links'
+import { compositionDuration } from '@shared/compositions'
+import { maxItemEndSec } from '@shared/assistant/onScreenText'
 import { speechSegments } from '@/lib/silence'
 import { captionWithText } from '@/lib/captions'
 import { activeComp, projectFormat, useProject } from '@/state/projectStore'
@@ -106,6 +108,22 @@ type TriMode = 'default' | 'on' | 'off'
  */
 function useLinkGroupSize(kind: TimelineItemKind, id: string | null): number {
   return useProject((s) => { const c = activeComp(s); return c && id ? expandGroup(c, { kind, id }).length : 1 })
+}
+
+/** The latest a layer or caption may end via its End (s) field: the assistant's
+ *  `set_text` rule (`maxItemEndSec`) over the same measure (`compositionDuration`
+ *  of the comp being edited), but WITHOUT the layer being edited — End commits
+ *  live while typing, so a bound that counted the layer itself would move with
+ *  every keystroke. Without it a typo like `1e999` or `300000` crashed or froze
+ *  the timeline. */
+function useMaxEndSec(editedLayerId: string | null): number {
+  const { data: assets = [] } = useLibrary()
+  return useProject((s) => {
+    const c = activeComp(s)
+    if (!c) return Number.POSITIVE_INFINITY
+    const rest = { ...c, layers: c.layers.filter((l) => l.id !== editedLayerId) }
+    return maxItemEndSec(compositionDuration(rest, (mid) => assets.find((a) => a.id === mid)?.probe.durationSec ?? 0))
+  })
 }
 
 /** The banner explaining why this panel's timing controls are greyed out. */
@@ -445,6 +463,7 @@ function LayerEditor(): JSX.Element | null {
   const format = useProject(projectFormat)
   const setVideoCrop = useProject((s) => s.setVideoCrop)
   const { data: assets = [] } = useLibrary()
+  const maxEnd = useMaxEndSec(selectedLayerId)
   if (!layer) return null
   const id = layer.id
   const mut = setLayer(id)
@@ -490,6 +509,7 @@ function LayerEditor(): JSX.Element | null {
           <NumberInput
             step="0.1"
             min={0}
+            max={layer.endSec - 0.2}
             value={layer.startSec}
             format={(v) => v.toFixed(1)}
             disabled={linked}
@@ -501,6 +521,7 @@ function LayerEditor(): JSX.Element | null {
           <NumberInput
             step="0.1"
             min={layer.startSec + 0.2}
+            max={Math.max(layer.startSec + 0.2, maxEnd)}
             value={layer.endSec}
             format={(v) => v.toFixed(1)}
             disabled={linked}
@@ -721,7 +742,7 @@ function LayerEditor(): JSX.Element | null {
           </CollapsibleSection>
 
           <SoundEffectsSection
-            key={layer.id}
+            key={`sfx-${layer.id}`}
             sourceMediaId={c.mediaId}
             inSec={c.inSec}
             outSec={c.outSec}
@@ -823,7 +844,7 @@ function LayerEditor(): JSX.Element | null {
 
           {/* Background removal → this clip's segment, matted and swapped in
               place. An already-transparent clip just says so. */}
-          <RemoveBackground key={id} layerId={id} content={c} asset={asset} />
+          <RemoveBackground key={`matte-${id}`} layerId={id} content={c} asset={asset} />
         </>
       )}
 
@@ -1425,6 +1446,7 @@ function CaptionEditor(): JSX.Element | null {
   const setSegStyle = useProject((s) => s.setCaptionSegmentStyle)
   const clearSegStyle = useProject((s) => s.clearCaptionSegmentStyle)
   const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
+  const maxEnd = useMaxEndSec(null) // captions don't count toward the edit's length
   if (!seg || !captions) return null
   const overridden = !!seg.style
   const style = effectiveCaptionStyle(captions, seg)
@@ -1441,6 +1463,7 @@ function CaptionEditor(): JSX.Element | null {
           <NumberInput
             step="0.1"
             min={0}
+            max={seg.endSec - 0.1}
             value={seg.startSec}
             format={(v) => v.toFixed(1)}
             disabled={linked}
@@ -1452,6 +1475,7 @@ function CaptionEditor(): JSX.Element | null {
           <NumberInput
             step="0.1"
             min={seg.startSec + 0.1}
+            max={Math.max(seg.startSec + 0.1, maxEnd)}
             value={seg.endSec}
             format={(v) => v.toFixed(1)}
             disabled={linked}

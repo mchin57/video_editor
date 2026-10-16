@@ -15,6 +15,7 @@ import { makeTextLayer } from '@shared/layers'
 import {
   CAPTION_LANE_ID,
   MAX_TEXT_PAST_END_SEC,
+  maxItemEndSec,
   MIN_TEXT_SEC,
   TEXT_FONT_SIZE_MAX,
   TEXT_TIME_EPS,
@@ -22,7 +23,7 @@ import {
   type TextEdit,
   type TextEditResult
 } from '@shared/assistant/onScreenText'
-import { captionInWindow, captionWithText } from './captions'
+import { captionInWindow, captionWithText, makeCaption } from './captions'
 import { isLinked } from './links'
 
 const KNOWN_KEYS = new Set<keyof TextEdit>([
@@ -136,7 +137,7 @@ function windowOf(
   if (!Number.isFinite(s) || !Number.isFinite(t)) return 'startSec and endSec must be numbers'
   if (s < 0) return 'startSec must be 0 or more'
   if (t - s < MIN_TEXT_SEC) return `endSec must be at least ${MIN_TEXT_SEC}s after startSec`
-  const limit = durationSec + MAX_TEXT_PAST_END_SEC
+  const limit = maxItemEndSec(durationSec)
   if (t > limit) {
     return `endSec ${t} is more than ${MAX_TEXT_PAST_END_SEC}s past the end of the edit (${Math.round(durationSec * 100) / 100}s); times are in seconds`
   }
@@ -195,8 +196,7 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
         results.push({ id, kind: 'text', created: true })
       } else {
         if (e.widthPx !== undefined) return fail('widthPx is for text layers only')
-        const blank: CaptionSegment = { id, startSec, endSec, text: '', words: [], enabled: e.visible ?? true }
-        let seg = captionWithText(blank, e.text)
+        let seg: CaptionSegment = { ...makeCaption(id, startSec, endSec, e.text), enabled: e.visible ?? true }
         if (touchesStyle(e)) seg = { ...seg, style: withCaptionStyle(c.captions.style, e) }
         const segments = [...c.captions.segments, seg].sort((a, b) => a.startSec - b.startSec)
         c = { ...c, captions: { ...c.captions, segments } }

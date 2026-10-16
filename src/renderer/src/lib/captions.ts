@@ -162,3 +162,15 @@ export function captionInWindow(seg: CaptionSegment, startSec: number, endSec: n
   const words = (seg.words ?? []).map((w) => ({ ...w, startSec: map(w.startSec), endSec: map(w.endSec) }))
   return { ...seg, startSec, endSec, words }
 }
+
+/** The text a hand-added caption starts with (＋ Caption). */
+export const NEW_CAPTION_TEXT = 'Your caption here'
+
+/**
+ * A new caption over [startSec, endSec): no style of its own, so it follows the
+ * lane-wide caption style like every other caption, with its words spread
+ * evenly over the window (`captionWithText`) so splits and edits behave the same.
+ */
+export function makeCaption(id: string, startSec: number, endSec: number, text = NEW_CAPTION_TEXT): CaptionSegment {
+  return captionWithText({ id, startSec, endSec, text: '', words: [], enabled: true }, text)
+}

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Dock } from '@/components/Dock'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { CropEditor } from '@/components/CropEditor'
 import { StillsPopout } from '@/components/StillsPopout'
 import { ImageEditPopout } from '@/components/ImageEditPopout'
@@ -21,6 +22,7 @@ import { VolumeLevelDialog } from '@/components/VolumeLevelDialog'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
+import { refetchFresh } from '@/lib/refetchFresh'
 import { chooseProjectLocation, defaultProjectLocation, onJobProgress, onLibraryChanged, pathForFile } from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
@@ -53,6 +55,81 @@ function NewProjectWindow(): JSX.Element {
         close()
       }}
     />
+  )
+}
+
+/**
+ * One part of the window outside the dock (header, footer, the modals and
+ * popouts), behind its own error boundary: a render error there shows a strip
+ * in its place and leaves the dock and the key handler (Ctrl+Z) running,
+ * instead of unmounting the window. Retries on any project change, like
+ * `DockPanel`. `floating` puts the strip over the window, for the overlays.
+ */
+function Section({ name, floating, children }: { name: string; floating?: boolean; children: ReactNode }): JSX.Element {
+  const project = useProject((s) => s.project)
+  return (
+    <ErrorBoundary
+      label={name}
+      resetKey={project}
+      fallback={(error, retry) => (
+        <div
+          role="alert"
+          data-testid="section-error"
+          className={`flex items-center gap-3 whitespace-nowrap border-rose-500/40 bg-rose-950/60 px-4 py-1.5 text-xs ${
+            floating ? 'fixed bottom-10 left-1/2 z-50 -translate-x-1/2 rounded border' : 'border-y'
+          }`}
+        >
+          <span className="text-rose-200">The {name} hit an error and stopped drawing.</span>
+          <span className="min-w-0 truncate font-mono text-[10px] text-zinc-400">{error.message}</span>
+          <span className="text-zinc-400">Undo (Ctrl+Z) the last change, or</span>
+          <button onClick={retry} className="rounded bg-white/10 px-2 py-0.5 text-zinc-200 hover:bg-white/20">
+            Try again
+          </button>
+        </div>
+      )}
+    >
+      {children}
+    </ErrorBoundary>
+  )
+}
+
+/**
+ * The last-resort boundary around the whole app (main.tsx), for a render error
+ * no section caught (the start screen, App itself). App's key handler is gone
+ * with it, so the fallback offers Undo as a button. Unmounting the dock here
+ * leaves its saved layout alone (e2e/rootCrash.spec.ts).
+ */
+export function AppErrorBoundary({ children }: { children: ReactNode }): JSX.Element {
+  const project = useProject((s) => s.project)
+  return (
+    <ErrorBoundary
+      label="App"
+      resetKey={project}
+      fallback={(error, retry) => (
+        <div
+          role="alert"
+          data-testid="app-error"
+          className="flex h-full flex-col items-center justify-center gap-3 bg-[#0b0b0f] p-8 text-center text-sm text-zinc-300"
+        >
+          <p className="text-rose-300">Reel Editor hit an error and stopped drawing.</p>
+          <p className="max-w-xl break-words font-mono text-xs text-zinc-500">{error.message}</p>
+          <p className="text-zinc-400">Your project is still open. Undo the last change, or try again.</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => useProject.getState().undo()}
+              className="rounded-md bg-white/10 px-3 py-1 text-xs text-zinc-200 hover:bg-white/20"
+            >
+              Undo
+            </button>
+            <button onClick={retry} className="rounded-md bg-white/10 px-3 py-1 text-xs text-zinc-200 hover:bg-white/20">
+              Try again
+            </button>
+          </div>
+        </div>
+      )}
+    >
+      {children}
+    </ErrorBoundary>
   )
 }
 
@@ -98,13 +175,15 @@ export default function App(): JSX.Element {
     return onJobProgress((ev) => {
       applyJobEvent(ev)
       if (ev.type === 'proxy' && ev.status === 'done') {
-        void queryClient.invalidateQueries({ queryKey: ['library'] })
+        // Not a plain invalidate: a library fetch already running read the
+        // asset before its proxy existed (lib/refetchFresh.ts).
+        void refetchFresh(queryClient, ['library'])
       }
     })
   }, [queryClient])
 
   // Keyboard shortcuts: space play/pause, Ctrl+Z/Y undo/redo, Del delete, S split,
-  // N snap-to-previous, T text layer.
+  // N snap-to-previous, T text layer, M mute/unmute.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey
@@ -168,6 +247,10 @@ export default function App(): JSX.Element {
             assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
           )
         }
+      } else if (!mod && e.key.toLowerCase() === 'm') {
+        // Mute / unmute the selection's sound (audio clips, video layers' own audio).
+        const { selection } = useUi.getState()
+        if (selection.length) project.toggleMuteItems(selection)
       } else if (e.key.toLowerCase() === 't') {
         const id = crypto.randomUUID()
         const start = usePlayback.getState().time
@@ -230,61 +313,68 @@ export default function App(): JSX.Element {
       onDragLeave={fileDrag.onDragLeave}
       onDrop={onDrop}
     >
-      <header className="flex items-center gap-3 border-b border-white/10 px-4 py-2">
-        <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
-        <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
-        <FileMenu />
-        <ViewMenu />
-        <FormatMenu />
-        <ProjectSettingsMenu />
-        <JobsIndicator />
-        <div className="flex-1" />
-        <button
-          onClick={() => importMedia.mutate(undefined)}
-          disabled={importMedia.isPending}
-          className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20 disabled:opacity-50"
-        >
-          {importMedia.isPending ? 'Importing…' : 'Import video'}
-        </button>
-        <CaptionAudioButton />
-        <button
-          onClick={() => useUi.getState().setScriptOpen(!useUi.getState().scriptOpen)}
-          title="Script / talking points"
-          className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
-        >
-          📝 Script
-        </button>
-        <button
-          onClick={() => useUi.getState().setChecklistOpen(true)}
-          title="Reel checklist — score this reel against Instagram best practices"
-          className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
-        >
-          ✓ Checklist
-        </button>
-        <ExportButton />
-        <button
-          onClick={() => useUi.getState().setSettingsOpen(true)}
-          title="Settings"
-          className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
-        >
-          ⚙
-        </button>
-      </header>
+      <Section name="header">
+        {/* One line always: labels never wrap; a running job's indicator truncates instead (JobsIndicator). */}
+        <header className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2">
+          <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
+          <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
+          <FileMenu />
+          <ViewMenu />
+          <FormatMenu />
+          <ProjectSettingsMenu />
+          <JobsIndicator />
+          <div className="flex-1" />
+          <button
+            onClick={() => importMedia.mutate(undefined)}
+            disabled={importMedia.isPending}
+            className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20 disabled:opacity-50"
+          >
+            {importMedia.isPending ? 'Importing…' : 'Import video'}
+          </button>
+          <CaptionAudioButton />
+          <button
+            onClick={() => useUi.getState().setScriptOpen(!useUi.getState().scriptOpen)}
+            title="Script / talking points"
+            className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
+          >
+            📝 Script
+          </button>
+          <button
+            onClick={() => useUi.getState().setChecklistOpen(true)}
+            title="Reel checklist — score this reel against Instagram best practices"
+            className="rounded-md bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200 hover:bg-white/20"
+          >
+            ✓ Checklist
+          </button>
+          <ExportButton />
+          <button
+            onClick={() => useUi.getState().setSettingsOpen(true)}
+            title="Settings"
+            className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+          >
+            ⚙
+          </button>
+        </header>
+      </Section>
 
       <div className="min-h-0 flex-1">
         <Dock />
       </div>
 
-      <StatusFooter />
+      <Section name="status bar">
+        <StatusFooter />
+      </Section>
 
-      <CropEditor />
-      <StillsPopout />
-      <ImageEditPopout />
-      <SettingsModal />
-      <ChecklistModal />
-      <ScriptModal />
-      <NewProjectWindow />
-      <VolumeLevelDialog />
+      <Section name="popouts and dialogs" floating>
+        <CropEditor />
+        <StillsPopout />
+        <ImageEditPopout />
+        <SettingsModal />
+        <ChecklistModal />
+        <ScriptModal />
+        <NewProjectWindow />
+        <VolumeLevelDialog />
+      </Section>
 
       {fileDrag.active && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-sky-500/10 backdrop-blur-sm">

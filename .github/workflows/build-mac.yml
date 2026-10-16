@@ -4,7 +4,7 @@
 # The build is UNSIGNED and ships NO engines: collect-binaries.mjs is Windows-
 # only (ffmpeg.exe / *.dll / whisper-cli.exe), so build:mac skips it. The Mac app
 # therefore discovers a system ffmpeg at runtime — the end user runs
-# `brew install ffmpeg`. See docs/TODO.md "Manual TODO" for the handoff steps.
+# `brew install ffmpeg`. See the `manual-step` GitHub issues for the handoff steps.
 name: Build macOS
 
 on:

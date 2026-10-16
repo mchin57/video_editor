@@ -96,9 +96,9 @@ export function JobsIndicator(): JSX.Element | null {
       : `⚠ ${failed.length} job${failed.length > 1 ? 's' : ''} failed`
 
   return (
-    <div ref={ref} className="relative" data-testid="jobs-indicator">
+    <div ref={ref} className="relative min-w-0" data-testid="jobs-indicator">
       <div
-        className={`flex items-center gap-2 rounded-md px-2 py-1 text-xs ${
+        className={`flex min-w-0 items-center gap-2 rounded-md px-2 py-0.5 text-xs ${
           active.length ? 'bg-sky-500/15 text-sky-200' : 'bg-rose-500/15 text-rose-200'
         }`}
       >

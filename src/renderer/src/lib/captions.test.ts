@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTimelineCaptions, type CaptionSource } from './captions'
+import { buildTimelineCaptions, makeCaption, NEW_CAPTION_TEXT, type CaptionSource } from './captions'
 import type { CaptionWord } from '@shared/project'
 
 const src = (mediaId: string, startSec: number, inSec: number, outSec: number): CaptionSource => ({
@@ -86,5 +86,16 @@ describe('buildTimelineCaptions', () => {
     const words = [w('one', 0, 0.3), w('two', 2.0, 2.3)]
     const segs = buildTimelineCaptions([src('m', 0, 0, 5)], { m: words }, { gapSec: 0.7 })
     expect(segs.map((s) => s.text)).toEqual(['one', 'two'])
+  })
+})
+
+describe('makeCaption (＋ Caption)', () => {
+  it('follows the lane style (no override) and spreads its words over the window', () => {
+    const seg = makeCaption('c1', 4, 6)
+    expect(seg).toMatchObject({ id: 'c1', startSec: 4, endSec: 6, text: NEW_CAPTION_TEXT, enabled: true })
+    expect(seg.style).toBeUndefined()
+    expect(seg.words.map((w) => w.text)).toEqual(['Your', 'caption', 'here'])
+    expect(seg.words[0].startSec).toBe(4)
+    expect(seg.words[2].endSec).toBeCloseTo(6)
   })
 })

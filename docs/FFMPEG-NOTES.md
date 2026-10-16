@@ -615,6 +615,30 @@ bug above was fixed and rasterised text actually reached the output.
   1.598, against a preview of 1.596.
 
 
+## whisper input level — fold + boost before transcribing (verified ffmpeg 8.1.1 / whisper-cli ggml-small.en, 2026-10-15)
+
+The transcription wav (`whisper.ts`, args from `buildTranscribeExtractArgs`)
+is read by BOTH whisper and the `silencedetect=noise=-30dB` pass behind
+`decodeStartSec` / `endAtSilence`, so its level matters even though whisper's
+own log-mel is fairly level-invariant.
+
+- **A quiet source loses whole sentences.** Real teleprompter take at
+  −37.7 LUFS (series scale), peak −19 dBFS: plain `-ac 1` gave a wav peaking at
+  −25 dBFS, silencedetect chopped the speech into sub-0.15s bursts, and
+  `decodeStartSec` returned 22.85s — whisper decoded only the last 8s
+  (16 words). Folded + boosted 17.7 dB: first silence_end 2.97s, decoding from
+  2.47s, 69 entries — the whole script.
+- **`-ac 1` averages a one-sided stereo source with its dead channel** (−6 dB).
+  Fold first with `monoFoldPan` (as the mix does); the identical pair then
+  averages to the channel's own level.
+- **Gain is static, from the loudness series** (`transcribeGainDb`: target
+  −20 LUFS, boost only, capped at +24 dB; no series / silence = no boost).
+  Not `dynaudnorm`: it lifts the gaps between words, which silencedetect needs.
+- **`alimiter=limit=0.891:level=0`** holds a boosted peak at −1.1 dBFS
+  (without it: 0.0 dBFS, clipped in s16). `level=0` matters — the default
+  auto-level adds its own make-up gain. Verified `level=0` adds none: −19.19 +
+  17.7 dB → −1.55 dBFS out.
+
 ## whisper word timings (verified whisper.cpp / whisper-cli, ggml-small.en, 2026-09)
 
 The caption pipeline transcribes the WHOLE original once per media asset

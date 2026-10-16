@@ -437,7 +437,7 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   fontSizePx: 64,
   color: '#ffffff',
   rotationDeg: 0,
-  pill: { enabled: false, color: '#000000cc', padPx: 18 }
+  pill: { enabled: false, color: '#000000ff', padPx: 18 }
 }
 
 export interface CaptionSegment {

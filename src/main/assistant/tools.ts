@@ -29,7 +29,7 @@ import { listJobs } from '../services/jobs'
 import { getSettings } from '../services/settings'
 import { exportRefusal, sanitizeExportName, uniqueExportPath } from '../services/exportTarget'
 import { callRenderer } from './bridge'
-import { fileFeatureRequest } from './todoFile'
+import { fileFeatureRequest } from './issueFile'
 
 const text = (t: string): ToolContent[] => [{ type: 'text', text: t }]
 const json = (v: unknown): ToolContent[] => text(JSON.stringify(v, null, 2))
@@ -264,7 +264,7 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
 
   request_feature: async (req) => {
     const r = await fileFeatureRequest(req)
-    return text(r.status === 'duplicate' ? `Already requested: "${req.title}" is in ${r.path}` : `Filed in ${r.path}:\n${r.entry}`)
+    return text(r.status === 'duplicate' ? `Already requested: "${req.title}" is open at ${r.where}` : `Filed as a GitHub issue: ${r.where}\n${r.entry}`)
   }
 }
 

@@ -598,3 +598,28 @@ export function removeItems(p: Composition, refs: TimelineItemRef[]): Compositio
   }
   return pruneLinkGroups({ ...p, layers, captions: { ...p.captions, segments }, audioClips })
 }
+
+/**
+ * The `M` key: toggle mute on every tile in `refs` that has sound of its own (an
+ * audio clip, or a video layer's own audio); other tiles are ignored. A mixed
+ * selection mutes everything first; only an all-muted one unmutes. Returns `p`
+ * unchanged when nothing in `refs` can be muted.
+ */
+export function toggleMuteItems(p: Composition, refs: TimelineItemRef[]): Composition {
+  const keys = refKeys(refs)
+  const layerHit = (l: Layer): boolean => l.content.kind === 'video' && keys.has(refKey({ kind: 'layer', id: l.id }))
+  const audioHit = (a: AudioClip): boolean => keys.has(refKey({ kind: 'audio', id: a.id }))
+  const states = [
+    ...p.layers.filter(layerHit).map((l) => l.content.kind === 'video' && l.content.mute),
+    ...p.audioClips.filter(audioHit).map((a) => !!a.mute)
+  ]
+  if (states.length === 0) return p
+  const mute = states.some((m) => !m)
+  return {
+    ...p,
+    layers: p.layers.map((l) =>
+      layerHit(l) && l.content.kind === 'video' ? { ...l, content: { ...l.content, mute } } : l
+    ),
+    audioClips: p.audioClips.map((a) => (audioHit(a) ? { ...a, mute } : a))
+  }
+}

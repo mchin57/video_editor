@@ -35,8 +35,7 @@ Instagram Reels. Read this before adding code.
   `window.__reelStores` (real store actions), ACT via real events, ASSERT on
   store + DOM — see `e2e/fixtures.ts`. Keep it small and high-value; pure logic
   still goes in `src/**/*.test.ts`.
-- `npm run dev` — launch the app (visual polish and ffmpeg-dependent flows still
-  need a human smoke-test here).
+- `npm run dev` — launch the app.
 
 ## Reuse, don't duplicate
 
@@ -77,12 +76,26 @@ and add an entry whenever you verify something new.
 
 ## Definition of done
 
-A feature touching preview or export is NOT done — and must not be marked `[x]`
-in `docs/TODO.md` — until exercised end-to-end in `npm run dev` with real media.
-Tests + typecheck green is necessary, not sufficient (the suite cannot see
-ffmpeg runtime behavior or pointer interaction). If you implemented but could
-not smoke-test, mark it `[~]` and state exactly what remains unverified. Docs
-must never assert untested behavior as fact.
+There is no manual smoke test. A fix or feature is done when it has its tests
+(a regression spec for a bug, unit and/or e2e coverage for a feature, plus a
+real-ffmpeg check for new media behavior, per the section above) and
+`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. Then
+close its GitHub issue with a comment naming the tests that cover it (commit
+messages can say `Closes #N`). Leave the issue open, labelled `needs-verification`,
+for work that is built but not yet passing or not yet tested. Docs must never
+assert untested behavior as fact.
+
+## Backlog = GitHub Issues
+
+The backlog is **GitHub Issues** on `mchin57/video_editor` (`gh issue list`,
+`gh issue create`). There is no `docs/TODO.md`: never create one, and never
+write backlog entries into a file. Labels: `bug`, `enhancement`, `tech-debt`,
+`assistant` (the editor's AI assistant), `manual-step` (hands-on owner steps),
+`needs-verification` (built, not yet seen working), `out-of-scope-v1`. A bug
+issue is symptom + repro only, no suspected cause or fix. The in-app assistant's
+`request_feature` tool files issues itself (`main/assistant/issueFile.ts`).
+`docs/archived/TODO-done-2026-10-16.md` is the history of work finished before
+the move.
 
 Interaction features (drags, keybinds, drop targets) should land with a
 Playwright spec in `e2e/` where practical — and every interaction BUG you fix
@@ -106,7 +119,14 @@ checklist into guarantees a refactor can't silently break.
 
 ## House rules
 
-- **Never push.** Commit locally only — the owner runs every `git push`.
+- **Git flow: `main` is protected; everything lands via pull request.** Work in a
+  worktree under `.claude/worktrees/<name>` on its own branch (never edit the main
+  checkout). Agents may `git push` that branch and open a PR with `gh pr create`
+  (put `Closes #N` in the body). Agents never push to `main`, force-push, delete
+  remote branches, merge or close PRs, or touch the repo's rulesets/branch
+  protection — the owner reviews and merges. Enforced server-side by the
+  `protect-main` GitHub ruleset (PR required, no force-push, no deletion, no bypass
+  actors) and locally by the allow/deny rules in `.claude/settings.json`.
 - Behavior-preserving refactors must keep `npm test` + `npm run typecheck` green at
   every step.
 - **Don't let untested behavior get refactored away.** `npm test` only guards the

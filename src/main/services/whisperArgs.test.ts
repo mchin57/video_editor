@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { buildWhisperArgs, decodeStartSec, dtwPreset, LEAD_IN_SEC } from './whisperArgs'
+import {
+  buildTranscribeExtractArgs,
+  buildWhisperArgs,
+  decodeStartSec,
+  dtwPreset,
+  LEAD_IN_SEC,
+  transcribeGainDb,
+  TRANSCRIBE_MAX_BOOST_DB,
+  TRANSCRIBE_TARGET_LUFS
+} from './whisperArgs'
 
 describe('dtwPreset', () => {
   it('maps the bundled model to its preset', () => {
@@ -101,5 +110,49 @@ describe('decodeStartSec', () => {
       { start: 6.116, end: 6.574125 }
     ]
     expect(decodeStartSec(silences, 25.43)).toBeCloseTo(4.553875, 6)
+  })
+})
+
+describe('transcribeGainDb', () => {
+  it('lifts a quiet source to the target', () => {
+    // The real take that lost its first 23 seconds of captions.
+    expect(transcribeGainDb(-37.7)).toBeCloseTo(TRANSCRIBE_TARGET_LUFS + 37.7, 6)
+  })
+
+  it('never cuts a source already at or above the target', () => {
+    expect(transcribeGainDb(TRANSCRIBE_TARGET_LUFS)).toBe(0)
+    expect(transcribeGainDb(-14)).toBe(0)
+  })
+
+  it('caps the boost so a speechless clip stays a quiet noise floor', () => {
+    expect(transcribeGainDb(-69)).toBe(TRANSCRIBE_MAX_BOOST_DB)
+  })
+
+  it('does nothing without a measurement', () => {
+    expect(transcribeGainDb(null)).toBe(0)
+    expect(transcribeGainDb(Number.NaN)).toBe(0)
+  })
+})
+
+describe('buildTranscribeExtractArgs', () => {
+  const tail = ['-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', 'a.wav']
+
+  it('writes a plain 16k mono wav when there is nothing to fold or boost', () => {
+    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', null, 0)).toEqual([
+      '-y', '-hide_banner', '-nostdin', '-i', 'in.mp4', '-vn', ...tail
+    ])
+  })
+
+  it('folds first, then boosts behind a no-make-up limiter', () => {
+    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c1|c1=c1', 17.7)).toEqual([
+      '-y', '-hide_banner', '-nostdin', '-i', 'in.mp4', '-vn',
+      '-af', 'pan=stereo|c0=c1|c1=c1,volume=17.7dB,alimiter=limit=0.891:level=0',
+      ...tail
+    ])
+  })
+
+  it('folds without a limiter when there is no boost', () => {
+    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c0|c1=c0', 0)).toContain('pan=stereo|c0=c0|c1=c0')
+    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c0|c1=c0', 0).join(' ')).not.toContain('alimiter')
   })
 })

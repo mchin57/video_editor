@@ -19,6 +19,13 @@ export { TEXT_FONT_SIZE_MIN } from '../textStyle'
 export const TEXT_FONT_SIZE_MAX = 1000
 /** How far past the current end of the edit text may reach (catches ms-for-seconds slips). */
 export const MAX_TEXT_PAST_END_SEC = 60
+/** The latest an item may end in an edit `durationSec` long: `set_text`'s limit
+ *  and the Inspector's End (s) bound for layers and captions. One rule, so a
+ *  typed End can't store a time the assistant would reject (an unbounded End
+ *  once crashed the timeline). */
+export function maxItemEndSec(durationSec: number): number {
+  return durationSec + MAX_TEXT_PAST_END_SEC
+}
 /** Half of get_text's 1 ms rounding: a time this close to the current one is "unchanged". */
 export const TEXT_TIME_EPS = 0.0005
 
