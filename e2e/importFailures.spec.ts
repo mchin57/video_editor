@@ -10,11 +10,12 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+// The shared lookup (`e2e/bin.ts`): a worktree finds the main checkout's binaries.
+import { FFMPEG } from './bin'
 
 /** The next Open picker returns `filePaths`. */
 const pickNext = (app: ElectronApplication, filePaths: string[]): Promise<void> =>
