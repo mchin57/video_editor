@@ -18,6 +18,7 @@ import {
 } from '@/ipc/client'
 import { normalizeDescription } from '@shared/media'
 import { useEditor } from '@/state/store'
+import { useUi } from '@/state/ui'
 import { activeComp, useProject } from '@/state/projectStore'
 import { useLoudness } from '@/state/loudness'
 import { idle } from '@/lib/interaction'
@@ -54,6 +55,7 @@ export function useImportMedia(): ReturnType<
   const qc = useQueryClient()
   const select = useEditor((s) => s.select)
   return useMutation<MediaAsset[], Error, string[] | undefined>({
+    onMutate: clearImportNotice,
     mutationFn: (paths) => (paths && paths.length ? importPaths(paths) : importDialog()),
     onSuccess: (assets) => onImported(assets, qc, select)
   })
@@ -64,9 +66,16 @@ export function useImportFolder(): ReturnType<typeof useMutation<MediaAsset[], E
   const qc = useQueryClient()
   const select = useEditor((s) => s.select)
   return useMutation<MediaAsset[], Error, void>({
+    onMutate: clearImportNotice,
     mutationFn: () => importFolderDialog(),
     onSuccess: (assets) => onImported(assets, qc, select)
   })
+}
+
+/** A new import starts: the notice about the last one's failed files goes
+ *  (main re-sends this import's own, if any, before the import returns). */
+function clearImportNotice(): void {
+  useUi.getState().setImportSkipped([])
 }
 
 /** Shared post-import step for every import route: scope the new assets to the

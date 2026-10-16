@@ -5,13 +5,8 @@ import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { useExtractAudio, useImportFolder } from '@/hooks/useMedia'
 import { convertLegacyFolderDialog } from '@/ipc/client'
+import { fileNameOf } from '@shared/media'
 import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from './ui'
-
-/** Last path segment, handling both Windows and POSIX separators. */
-function basename(path: string): string {
-  const m = /[^\\/]*$/.exec(path)
-  return m ? m[0] : path
-}
 
 function MenuItem({
   label,
@@ -115,7 +110,7 @@ export function FileMenu(): JSX.Element {
   }
 
   // Every open project has a folder and a .reel (there is no untitled state).
-  const label = filePath ? basename(filePath) : (project?.name ?? '')
+  const label = filePath ? fileNameOf(filePath) : (project?.name ?? '')
 
   return (
     <div ref={ref} className="relative flex items-center gap-2">

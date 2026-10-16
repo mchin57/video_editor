@@ -1,18 +1,22 @@
-import type { MediaAsset } from '@shared/media'
+import { stat } from 'node:fs/promises'
+import type { ImportSkip, MediaAsset } from '@shared/media'
+import { importFailureReason } from './importFailure'
 import { expandImportPaths } from './importScan'
 import { ensureProxy, importFile } from './mediaStore'
 
 export interface ImportReport {
   assets: MediaAsset[]
   /** Files that failed to import, with why (e.g. missing, or not media ffprobe can read). */
-  skipped: { path: string; reason: string }[]
+  skipped: ImportSkip[]
 }
 
 /**
  * Import each path (fast hash+probe), then kick proxy generation in the
  * background. Any directory in `paths` is expanded to the media files inside it
  * first, so a picked or dropped FOLDER imports its contents. A file that fails
- * is reported in `skipped` rather than sinking the rest.
+ * is reported in `skipped` rather than sinking the rest. Every import route
+ * goes through here: the UI's (ipc.ts shows `skipped` in the import notice) and
+ * the assistant's import_media (returns it).
  */
 export async function importManyReport(paths: string[]): Promise<ImportReport> {
   const report: ImportReport = { assets: [], skipped: [] }
@@ -25,13 +29,9 @@ export async function importManyReport(paths: string[]): Promise<ImportReport> {
       }
     } catch (err) {
       console.error('import failed for', path, err)
-      report.skipped.push({ path, reason: err instanceof Error ? err.message : String(err) })
+      const size = await stat(path).then((s) => s.size, () => undefined)
+      report.skipped.push({ path, reason: importFailureReason(err, size) })
     }
   }
   return report
-}
-
-/** `importManyReport` for the UI paths, which only need what was imported. */
-export async function importMany(paths: string[]): Promise<MediaAsset[]> {
-  return (await importManyReport(paths)).assets
 }
