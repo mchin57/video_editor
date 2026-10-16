@@ -15,6 +15,7 @@ import { makeTextLayer } from '@shared/layers'
 import {
   CAPTION_LANE_ID,
   MAX_TEXT_PAST_END_SEC,
+  maxItemEndSec,
   MIN_TEXT_SEC,
   TEXT_FONT_SIZE_MAX,
   TEXT_TIME_EPS,
@@ -136,7 +137,7 @@ function windowOf(
   if (!Number.isFinite(s) || !Number.isFinite(t)) return 'startSec and endSec must be numbers'
   if (s < 0) return 'startSec must be 0 or more'
   if (t - s < MIN_TEXT_SEC) return `endSec must be at least ${MIN_TEXT_SEC}s after startSec`
-  const limit = durationSec + MAX_TEXT_PAST_END_SEC
+  const limit = maxItemEndSec(durationSec)
   if (t > limit) {
     return `endSec ${t} is more than ${MAX_TEXT_PAST_END_SEC}s past the end of the edit (${Math.round(durationSec * 100) / 100}s); times are in seconds`
   }

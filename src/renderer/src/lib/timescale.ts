@@ -13,11 +13,21 @@ export function niceTimeStep(pxPerSec: number, minPx = 64): number {
   return STEPS[STEPS.length - 1]
 }
 
-/** Tick times from 0 up to and including `total` at `step` spacing. */
+/** Most ticks `scaleTicks` returns, whatever the span. Every tick is a DOM node,
+ *  and an absurd End (300000 s, 1e9 s) once froze or crashed the timeline. */
+export const MAX_SCALE_TICKS = 2000
+
+/** Tick times from 0 up to and including `total` at `step` spacing. A span
+ *  that would need more than `MAX_SCALE_TICKS` ticks keeps every n-th one (still
+ *  multiples of `step`, still spanning 0…`total`). */
 export function scaleTicks(total: number, step: number): number[] {
-  if (step <= 0) return [0]
+  if (!(step > 0) || !(total >= 0)) return [0]
+  const span = Math.min(total, Number.MAX_SAFE_INTEGER)
+  const stride = Math.max(1, Math.ceil((span + 1e-6) / step / (MAX_SCALE_TICKS - 1)))
+  const every = step * stride
+  const count = Math.floor((span + 1e-6) / every)
   const ticks: number[] = []
-  for (let t = 0; t <= total + 1e-6; t += step) ticks.push(Math.round(t * 1000) / 1000)
+  for (let i = 0; i <= count; i++) ticks.push(Math.round(i * every * 1000) / 1000)
   return ticks
 }
 
