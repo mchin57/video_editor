@@ -79,7 +79,9 @@ and add an entry whenever you verify something new.
 There is no manual smoke test. A fix or feature is done when it has its tests
 (a regression spec for a bug, unit and/or e2e coverage for a feature, plus a
 real-ffmpeg check for new media behavior, per the section above) and
-`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. Then
+`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. GitHub CI
+(`.github/workflows/ci.yml`: typecheck + `npm test` on every PR) gates merging, but
+e2e does not run there — it stays a local gate. Then
 close its GitHub issue with a comment naming the tests that cover it (commit
 messages can say `Closes #N`). Leave the issue open, labelled `needs-verification`,
 for work that is built but not yet passing or not yet tested. Docs must never
