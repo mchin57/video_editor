@@ -9,12 +9,16 @@ import type { AudioClip, Composition, Layer, VideoContent } from '@shared/projec
 import type { FrameRect } from '@shared/frame'
 import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import { makeVideoLayer, visualDuration } from '@shared/layers'
+import { compositionDuration } from '@shared/compositions'
+import { MAX_TEXT_PAST_END_SEC, maxItemEndSec } from '@shared/assistant/onScreenText'
 import { extractedAudioClip } from '@shared/volumeLevels'
 import { trimVideoEnd, trimVideoStart } from './timeline'
 import { expandSelection, removeItems } from './links'
 
 /** Shortest source span an item may keep (seconds). */
 export const MIN_SEQUENCE_ITEM_SEC = 0.1
+/** How far an outSec may run past its source and still just clamp (rounding). */
+export const MAX_SOURCE_OVERSHOOT_SEC = 0.5
 
 export interface SequenceCtx {
   frame: FrameRect
@@ -66,6 +70,14 @@ export function applySequence(
           )
         )
       : comp
+  // Same bound as set_text: an atSec far past the end is a ms-for-seconds slip
+  // (or worse — 1e9 made the export encode ~31 years of black).
+  const editEnd = compositionDuration(base)
+  if (plan.atSec !== undefined && plan.atSec > maxItemEndSec(editEnd)) {
+    throw new Error(
+      `atSec ${plan.atSec} is more than ${MAX_TEXT_PAST_END_SEC}s past the end of the edit (${Math.round(editEnd * 100) / 100}s); times are in seconds`
+    )
+  }
   let cursor = Math.max(0, plan.atSec ?? (plan.mode === 'replace' ? 0 : visualDuration(base.layers)))
   const layers: Layer[] = []
   const audioClips: AudioClip[] = []
@@ -73,6 +85,13 @@ export function applySequence(
 
   plan.items.forEach((item, i) => {
     const src = item.sourceDurationSec
+    // A rounding overshoot clamps to the clip end; more is a wrong window
+    // (often milliseconds for seconds), so say so instead of silently clamping.
+    if (item.outSec > src + MAX_SOURCE_OVERSHOOT_SEC) {
+      throw new Error(
+        `item ${i} (${item.mediaId}): outSec ${item.outSec} is past the end of the ${src.toFixed(2)}s source; times are in seconds`
+      )
+    }
     const inSec = Math.min(Math.max(0, item.inSec), src)
     const outSec = Math.min(Math.max(0, item.outSec), src)
     if (outSec - inSec < MIN_SEQUENCE_ITEM_SEC) {

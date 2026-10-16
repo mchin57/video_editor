@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTimelineCaptions, makeCaption, NEW_CAPTION_TEXT, type CaptionSource } from './captions'
+import { buildTimelineCaptions, captionedClipsUnchanged, makeCaption, NEW_CAPTION_TEXT, type CaptionSource } from './captions'
 import type { CaptionWord } from '@shared/project'
 
 const src = (mediaId: string, startSec: number, inSec: number, outSec: number): CaptionSource => ({
@@ -97,5 +97,24 @@ describe('makeCaption (＋ Caption)', () => {
     expect(seg.words.map((w) => w.text)).toEqual(['Your', 'caption', 'here'])
     expect(seg.words[0].startSec).toBe(4)
     expect(seg.words[2].endSec).toBeCloseTo(6)
+  })
+})
+
+describe('captionedClipsUnchanged', () => {
+  const clip = (id: string, startSec = 0) => ({ id, mediaId: `m-${id}`, startSec, inSec: 0, outSec: 5 })
+
+  it('is true for the same clips in any order', () => {
+    expect(captionedClipsUnchanged([clip('a'), clip('b')], [clip('b'), clip('a')])).toBe(true)
+  })
+
+  // #5: undoing back past the clip while whisper ran, then committing, wiped redo.
+  it('is false once a captioned clip is gone (undone or deleted)', () => {
+    expect(captionedClipsUnchanged([clip('a')], [])).toBe(false)
+    expect(captionedClipsUnchanged([clip('a'), clip('b')], [clip('a')])).toBe(false)
+  })
+
+  it('is false when a clip moved or a new one appeared', () => {
+    expect(captionedClipsUnchanged([clip('a')], [clip('a', 2)])).toBe(false)
+    expect(captionedClipsUnchanged([clip('a')], [clip('a'), clip('c')])).toBe(false)
   })
 })

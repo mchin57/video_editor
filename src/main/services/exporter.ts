@@ -66,6 +66,7 @@ import type { LaidOutLine } from './textLayout'
 import { decorationScale, scaledPill, scaledShadow, scaledStroke } from './textScale'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
+import { writeAtomically } from './atomicWrite'
 import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
 
 /** Canonical logical → output px for one render (`frameToOutput`). */
@@ -158,7 +159,11 @@ export async function exportProject(
     // Missing or changed originals block the export, naming every file — never
     // render a clip from different bytes than the user edited.
     await assertMediaUsable(mediaIds)
-    await runExport(project, opts, job.id, outputPath)
+    // Encode to `<name>.part.mp4` and rename on success: a failed or killed run
+    // never leaves a torn file at the chosen name, nor replaces one already there.
+    await writeAtomically(outputPath, async (part) => {
+      await runExport(project, opts, job.id, part)
+    })
     finishJob(job.id, outputPath)
     return outputPath
   } catch (error) {

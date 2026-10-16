@@ -19,10 +19,12 @@ import { resolveCompAtPath } from '@shared/compositions'
 import { splitPieces, trimPieces, type CutPiece } from '@shared/quickCut'
 import { getSubdir } from '../config'
 import { ensureProxy, getProjectMedia, setMediaDescription } from '../services/mediaStore'
+import { describeUndo } from '@shared/assistant/undoSummary'
 import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { generateStill } from '../services/still'
 import { cutToLibrary } from '../services/quickCut'
+import { mergeToLibrary } from '../services/merge'
 import { hdrToSdrChain } from '../services/proxy'
 import { exportProject, renderFrames, suggestedExportName } from '../services/exporter'
 import { listJobs } from '../services/jobs'
@@ -158,6 +160,20 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
     return cutClip(asset, splitPieces(asset.probe.durationSec, times))
   },
 
+  merge_clips: async ({ items }) => {
+    const assets = await projectAssets()
+    const segments = items.map(({ mediaId, inSec, outSec }) => {
+      const asset = requireVideo(assets, mediaId)
+      return { mediaId, inSec: inSec ?? 0, outSec: outSec ?? Math.round(asset.probe.durationSec * 1000) / 1000 }
+    })
+    const made = await mergeToLibrary(segments)
+    await callRenderer('addMedia', { ids: [made.id] })
+    return json({
+      created: [{ ...describeAsset(made), fromSources: segments }],
+      note: 'One new clip; the originals and the timeline are unchanged.'
+    })
+  },
+
   add_description: async ({ mediaId, description }) => {
     // No file is read, so a Missing clip can be described too (no requireAsset).
     const asset = findAsset(await projectAssets(), mediaId)
@@ -182,7 +198,18 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
 
   remove_items: async ({ ids }) => json(await callRenderer('removeItems', { ids })),
 
-  undo: async () => json(await callRenderer('undo', {})),
+  undo: async () => {
+    // Imports, trims and splits are undo steps too, and their undo leaves the
+    // timeline as it was — so say what went, naming library clips by file.
+    // Names come from the library as it was (removed clips) and as it is now
+    // (restored ones), so nothing outside the project is read.
+    const was = await projectAssets()
+    const { undone, changes, timeline } = await callRenderer('undo', {})
+    if (!undone || !changes) return json({ undone, note: 'Nothing to undo.', timeline })
+    const names = new Map([...was.values()].map((a) => [a.id, a.fileName]))
+    for (const a of await getProjectMedia(changes.library.restored)) names.set(a.id, a.fileName)
+    return json({ undone, note: describeUndo(changes, (id) => names.get(id) ?? id), changes, timeline })
+  },
 
   export_video: async ({ fileName, folder }) => {
     const project = await callRenderer('getProject', {})

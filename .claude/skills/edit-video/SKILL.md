@@ -53,7 +53,9 @@ A cut on the timeline does NOT need new files: `inSec`/`outSec` already trim. Us
 `trim_clip` (one window) or `split_clip` (cut at one or more SOURCE seconds) only when
 the user wants trimmed or split clips **in the library** — they write new clips to the
 project folder (a few seconds each), return their new ids in order, and change neither
-the original nor the timeline. `undo` does not remove them.
+the original nor the timeline. `undo` does not remove them. `merge_clips` is the reverse:
+it joins two or more clips (or SOURCE windows of them, the same clip allowed twice) into ONE
+new library clip — again only when the user wants a joined clip in the library.
 
 ## 4. Text and captions
 

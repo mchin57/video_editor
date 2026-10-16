@@ -16,7 +16,7 @@
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import type { FfmpegEncoders } from '@shared/ffmpeg'
-import { alphaInputDecoder, assetKind, type MediaAsset, type ProbeInfo } from '@shared/media'
+import { alphaInputDecoder, assetKind, type MediaAsset, type ProbeInfo, type VideoStreamInfo } from '@shared/media'
 import { cutDisplayNames, cutProblem, sliceWords, type CutPiece } from '@shared/quickCut'
 import type { Transcript } from '@shared/transcript'
 import { f3 } from './ffmpegFilters'
@@ -39,10 +39,14 @@ export function cutExt(probe: ProbeInfo): 'webm' | 'mp4' {
   return probe.video?.hasAlpha ? 'webm' : 'mp4'
 }
 
-function videoArgs(probe: ProbeInfo, enc: FfmpegEncoders): string[] {
-  const v = probe.video!
+/** A 10- or 12-bit source (HDR iPhone footage). */
+export const isTenBit = (v: Pick<VideoStreamInfo, 'pixFmt'>): boolean => /1[02]/.test(v.pixFmt) || /p010/.test(v.pixFmt)
+
+/** Encoder args that keep a source's character: shared by Quick cut and
+ *  Merge clips (`services/merge.ts`). */
+export function videoArgs(v: VideoStreamInfo, enc: FfmpegEncoders): string[] {
   if (v.hasAlpha) return ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '20', '-row-mt', '1']
-  const tenBit = /1[02]/.test(v.pixFmt) || /p010/.test(v.pixFmt)
+  const tenBit = isTenBit(v)
   const hevc = tenBit || v.codec === 'hevc'
   const color = [
     ...(colorTag(v.colorPrimaries) ? ['-color_primaries', v.colorPrimaries] : []),
@@ -105,7 +109,7 @@ export function buildCutArgs(
     '0',
     '-fps_mode',
     'passthrough',
-    ...videoArgs(probe, enc),
+    ...videoArgs(probe.video, enc),
     ...audio,
     ...(alpha ? [] : ['-movflags', '+faststart']),
     '-progress',

@@ -7,6 +7,7 @@
 import type { Project, TimelineItemRef } from '../project'
 import type { CompPath } from '../compositions'
 import type { TimelineSummary } from './timelineSummary'
+import type { UndoChanges } from './undoSummary'
 import type { OnScreenText, TextEdit, TextEditResult, TextQuery } from './onScreenText'
 
 /** One clip in a rough cut. In/out are SOURCE seconds. */
@@ -45,7 +46,8 @@ export interface AssistantOps {
   getTimeline: { args: NoArgs; result: TimelineSummary }
   placeSequence: { args: SequencePlan; result: PlacedClip[] }
   removeItems: { args: { ids: string[] }; result: { removed: TimelineItemRef[] } }
-  undo: { args: NoArgs; result: { undone: boolean; timeline: TimelineSummary } }
+  /** `changes`: what the step reverted (null when there was nothing to undo). */
+  undo: { args: NoArgs; result: { undone: boolean; changes: UndoChanges | null; timeline: TimelineSummary } }
   getProject: { args: NoArgs; result: Project }
   /** The store's `save` (File > Save): writes the open project to its `.reel` —
    *  only if it is still project `projectId` (the one an export came from). */

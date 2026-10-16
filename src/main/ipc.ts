@@ -56,6 +56,8 @@ import { detectSilence, type Interval } from './services/silence'
 import { ensureLoudness } from './services/loudness'
 import { removeBackgroundToLibrary, segmentAvailable } from './services/removeBackground'
 import { cutToLibrary } from './services/quickCut'
+import { mergeToLibrary } from './services/merge'
+import type { MergeSegment } from '@shared/merge'
 import { cancelJob, createJob, finishJob, setProgress } from './services/jobs'
 import { registerAssistantBridge } from './assistant/bridge'
 import { assistantStatus, startAssistant } from './assistant/service'
@@ -234,6 +236,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.renameMedia, (_event, id: string, stem: string) => renameMedia(id, stem))
   // Quick cut: one new clip in generated/ per piece (the original stays as it is).
   ipcMain.handle(IPC.quickCut, (_event, req: QuickCutRequest) => cutToLibrary(req.mediaId, req.pieces))
+  // Merge clips: one new clip in generated/ joining the segments in order.
+  ipcMain.handle(IPC.mergeClips, (_event, segments: MergeSegment[]) => mergeToLibrary(segments))
   ipcMain.handle(IPC.setMediaDescription, (_event, id: string, text: string) => setMediaDescription(id, text))
 
   // A library record changed after the project opened (import, relink, a path

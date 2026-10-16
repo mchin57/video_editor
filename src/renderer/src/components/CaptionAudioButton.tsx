@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from 'react'
 import { effectiveOut } from '@shared/project'
 import type { CaptionSegment } from '@shared/project'
 import { transcribeMedia, whisperAvailable } from '@/ipc/client'
-import { buildTimelineCaptions, type CaptionSource } from '@/lib/captions'
+import { buildTimelineCaptions, captionedClipsUnchanged, type CaptionSource } from '@/lib/captions'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, useProject } from '@/state/projectStore'
 import { idle } from '@/lib/interaction'
@@ -52,6 +52,13 @@ export function CaptionAudioButton(): JSX.Element | null {
         all.push(...segs)
       }
       await idle() // transcription can finish mid-drag; the commit waits for the release
+      // The clips were undone, moved or deleted while whisper ran: these captions
+      // fit audio that is gone, and committing them would wipe the redo history.
+      const nowClips = (activeComp(useProject.getState())?.audioClips ?? []).filter((a) => !a.excludeFromCaptions)
+      if (!captionedClipsUnchanged(clips, nowClips)) {
+        setErr('The audio changed while captioning; run it again')
+        return
+      }
       // Re-read the track: a style edit made while whisper ran must not be reverted.
       const current = activeComp(useProject.getState())?.captions ?? captions
       setCaptions({ ...current, enabled: true, segments: all.sort((a, b) => a.startSec - b.startSec) })

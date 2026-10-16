@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
 import type { QuickCutRequest, RelinkResult } from '@shared/ipc'
+import type { MergeSegment } from '@shared/merge'
 import {
   ensureProxy,
   extractAudioDialog,
@@ -10,6 +11,7 @@ import {
   importPaths,
   listProjectMedia,
   ipcErrorMessage,
+  mergeClips,
   quickCut,
   relinkMediaDialog,
   renameMedia,
@@ -104,6 +106,20 @@ export function useQuickCut(): ReturnType<typeof useMutation<MediaAsset[], Error
   return useMutation<MediaAsset[], Error, QuickCutRequest>({
     mutationFn: (req) => quickCut(req),
     onSuccess: (assets) => onImported(assets, qc, select)
+  })
+}
+
+/**
+ * Merge clips (Library ▸ Merge clips…, Quick cut ▸ Save as one clip): encode
+ * the segments into ONE new clip and add it to the library like an import —
+ * it is selected. Errors reject so the dialog can show them inline.
+ */
+export function useMergeClips(): ReturnType<typeof useMutation<MediaAsset, Error, MergeSegment[]>> {
+  const qc = useQueryClient()
+  const select = useEditor((s) => s.select)
+  return useMutation<MediaAsset, Error, MergeSegment[]>({
+    mutationFn: (segments) => mergeClips(segments),
+    onSuccess: (asset) => onImported([asset], qc, select)
   })
 }
 
