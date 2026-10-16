@@ -129,6 +129,11 @@ checklist into guarantees a refactor can't silently break.
   protection — the owner reviews and merges. Enforced server-side by the
   `protect-main` GitHub ruleset (PR required, no force-push, no deletion, no bypass
   actors) and locally by the allow/deny rules in `.claude/settings.json`.
+- **Auto-fix is on by default for every PR you open.** Right after `gh pr create`,
+  turn on the desktop app's CI monitor for it (`ccd_pr` `set_monitor` with
+  `auto_fix: true` and the PR's url) without asking. The owner has pre-approved this. Then fix the
+  CI failures, merge conflicts and review comments it reports by pushing to the
+  same branch. Merging is still the owner's. Turn it off only if the owner asks.
 - Behavior-preserving refactors must keep `npm test` + `npm run typecheck` green at
   every step.
 - **Don't let untested behavior get refactored away.** `npm test` only guards the
