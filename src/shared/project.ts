@@ -271,7 +271,8 @@ export interface TextContent extends TextStyleBase {
    *  when the user drags a side resize handle; text re-wraps within it. */
   widthPx?: number
   /** Entrance/exit animation (absent/null = static). Not honored while the
-   *  overlay burns as a rasterised PNG (gradient / explicit wrap width) — see
+   *  overlay burns as a rasterised PNG (gradient / explicit wrap width / colour
+   *  emoji) — see
    *  `effectiveTextAnimation` (shared/textAnim.ts), which both preview and
    *  export resolve through. */
   animation?: TextAnimation | null

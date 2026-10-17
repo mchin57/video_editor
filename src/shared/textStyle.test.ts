@@ -4,6 +4,7 @@ import {
   assFontSize,
   assOutlineWidth,
   cssText,
+  hasColorEmoji,
   textBoxCss,
   textFillCss,
   textPillCss,
@@ -90,5 +91,14 @@ describe('libass corrections', () => {
 
   it('outline: half the CSS stroke width', () => {
     expect(assOutlineWidth(8)).toBe(4)
+  })
+})
+
+describe('hasColorEmoji', () => {
+  it('finds default-emoji characters, FE0F-made emoji, ZWJ sequences, flags and keycaps', () => {
+    for (const t of ['Hi 😀', '🔥', 'love ❤️', '👨‍👩‍👧', '🇺🇸', '1️⃣ drill', '🏊‍♂️ swim']) expect(hasColorEmoji(t), t).toBe(true)
+  })
+  it('leaves plain text and text-presentation symbols on libass', () => {
+    for (const t of ['SWIM START', '70.3 IRONMAN', '© 2026', 'Pro™', 'a bare ❤', '#1', '*', '']) expect(hasColorEmoji(t), t).toBe(false)
   })
 })
