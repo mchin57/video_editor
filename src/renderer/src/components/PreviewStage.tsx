@@ -40,6 +40,7 @@ import {
   type ResizeBox,
   type ResizeHandle
 } from '@shared/layers'
+import { kindInfo, type ResizeHandleSet } from '@shared/layerKinds'
 import { clampAnimWindows, effectiveTextAnimation, KARAOKE_DIM_OPACITY, textAnimStateAt } from '@shared/textAnim'
 import { isSimpleMotion, motionPosAt, shiftKeyframes, simpleMotion, textMotion } from '@shared/motion'
 import {
@@ -65,11 +66,12 @@ import { clamp } from '@shared/math'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
 
-/** The layer with its keyframed transform baked in for rendering at time `t`
- *  (text layers ignore keyframes — they animate via `TextContent.animation`;
- *  layout layers ignore them too — the export has no keyframe path for them). */
+/** The layer with its keyframed transform baked in for rendering at time `t`,
+ *  for kinds whose keyframes drive the transform (`LAYER_KINDS`): text follows
+ *  its keyframes as a position path instead, and layouts / compound clips
+ *  ignore them — the export has no keyframe path for those. */
 function withKeyframedTransform(l: Layer, t: number): Layer {
-  if (!l.keyframes?.length || l.content.kind === 'text' || l.content.kind === 'layout') return l
+  if (!l.keyframes?.length || kindInfo(l).keyframes !== 'transform') return l
   const tr = layerTransformAt(l, t)
   return { ...l, x: tr.x, y: tr.y, scale: tr.scale }
 }
@@ -314,16 +316,11 @@ function mediaBox(layer: Layer, aspect: number): CSSProperties {
   }
 }
 
-/** Layers the rotate handle is offered on. Layouts and compound clips render
- *  as frame-shaped comps and ignore `rotationDeg` (backlogged). */
-const canRotate = (layer: Layer): boolean =>
-  layer.content.kind === 'video' || layer.content.kind === 'image' || layer.content.kind === 'text'
-
 /** A layer that moves as a PATH on the canvas: a simple two-keyframe move, or
  *  a text layer with any keyframes (text only ever follows its motion). Drags
  *  and resizes shift the whole path instead of writing a keyframe. */
 const onPath = (l: Layer): boolean =>
-  !!l.keyframes?.length && (isSimpleMotion(l.keyframes) || l.content.kind === 'text')
+  !!l.keyframes?.length && (isSimpleMotion(l.keyframes) || kindInfo(l).keyframes === 'path')
 
 /** `l` with its whole path — base position and every keyframe — moved by
  *  (dx, dy) from the drag-start snapshot `raw`. */
@@ -414,6 +411,12 @@ function measureSelectedBox(stage: HTMLElement): MeasuredBox | null {
 const MEDIA_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 const TEXT_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw', 'e', 'w']
 const CORNER_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw']
+/** Each kind's handle set (`LayerKindInfo.handles`). */
+const HANDLE_SETS: Record<ResizeHandleSet, ResizeHandle[]> = {
+  media: MEDIA_HANDLES,
+  text: TEXT_HANDLES,
+  corners: CORNER_HANDLES
+}
 /** Resize cursor for a handle on a box rotated by `deg`: the handle's outward
  *  direction, turned with the box, picks the nearest of the four cursors. */
 const HANDLE_DIR_DEG: Record<ResizeHandle, number> = { n: 0, ne: 45, e: 90, se: 135, s: 180, sw: 225, w: 270, nw: 315 }
@@ -1420,7 +1423,7 @@ export function PreviewStage(): JSX.Element {
     // `layer.x/y` are already the effective values at `time`.
     const raw = getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
     const path = onPath(raw)
-    const kfd = !path && !!layer.keyframes?.length && layer.content.kind !== 'text'
+    const kfd = !path && !!layer.keyframes?.length && kindInfo(layer).keyframes !== 'path'
     const t0 = usePlayback.getState().time
     const kfT = clamp(t0 - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
     const tr0 = layerTransformAt(layer, t0)
@@ -1765,7 +1768,7 @@ export function PreviewStage(): JSX.Element {
         {/* Edge/corner resize handles on the selected layer (corners scale
             uniformly, edges stretch media / re-wrap text) — OUTSIDE the frame's
             clip so a handle on the frame edge stays whole and grabbable. */}
-        {selectedLayer && canRotate(selectedLayer) && isSimpleMotion(selectedLayer.keyframes) && (
+        {selectedLayer && kindInfo(selectedLayer).motion && isSimpleMotion(selectedLayer.keyframes) && (
           <MotionPath
             motion={simpleMotion(selectedLayer.keyframes)}
             frame={frame}
@@ -1776,15 +1779,9 @@ export function PreviewStage(): JSX.Element {
           <ResizeHandles
             box={handleBox}
             frame={frame}
-            handles={
-              selectedLayer.content.kind === 'text'
-                ? TEXT_HANDLES
-                : selectedLayer.content.kind === 'layout'
-                  ? CORNER_HANDLES
-                  : MEDIA_HANDLES
-            }
+            handles={HANDLE_SETS[kindInfo(selectedLayer).handles]}
             onStart={(e, handle) => startLayerResize(e, withKeyframedTransform(selectedLayer, time), handle)}
-            onRotateStart={canRotate(selectedLayer) ? (e) => startLayerRotate(e, selectedLayer) : undefined}
+            onRotateStart={kindInfo(selectedLayer).rotatable ? (e) => startLayerRotate(e, selectedLayer) : undefined}
           />
         )}
         {/* Captions are text: they get the same rotate handle (no resize —

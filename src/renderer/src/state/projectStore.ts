@@ -71,6 +71,7 @@ import {
   saveProjectFile
 } from '@/ipc/client'
 import { newId } from '@shared/ids'
+import { kindInfo } from '@shared/layerKinds'
 
 const HISTORY_LIMIT = 50
 
@@ -822,8 +823,9 @@ export const useProject = create<ProjectState>((set, get) => {
     addLayerKeyframe: (id, atSec) =>
       commitComp((p) =>
         mapLayer(p, id, (l) => {
-          // Text animates via its own presets; layouts have no export keyframe path.
-          if (l.content.kind === 'text' || l.content.kind === 'layout') return l
+          // Only kinds whose keyframes drive the transform (LAYER_KINDS): text
+          // moves along a path, layouts and compound clips have no export keyframe path.
+          if (kindInfo(l).keyframes !== 'transform') return l
           const tSec = Math.max(0, Math.min(atSec - l.startSec, Math.max(0, l.endSec - l.startSec)))
           // Full opacity is stored as ABSENCE so untouched keyframes keep the
           // plain (opaque) pipeline on export.

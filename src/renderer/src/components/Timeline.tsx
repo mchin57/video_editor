@@ -70,6 +70,7 @@ import { thumbUrl, waveformUrl } from '@/ipc/client'
 import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 import { levelOf } from '@shared/volumeLevels'
 import { clamp } from '@shared/math'
+import { kindInfo, layerMediaId } from '@shared/layerKinds'
 import { enumPref, numberPref, objectPref } from '@/lib/persisted'
 import { usePersistedState } from '@/hooks/usePersistedState'
 import { newId } from '@shared/ids'
@@ -1081,8 +1082,8 @@ export function Timeline(): JSX.Element {
     const width = Math.max(12, (l.endSec - l.startSec) * pxPerSec)
     const selected = isSelected('layer', l.id)
     const linked = isLinkedTile(l.linkGroupId)
-    const asset =
-      l.content.kind === 'video' || l.content.kind === 'image' ? assetById.get(l.content.mediaId) : undefined
+    const mediaId = layerMediaId(l.content)
+    const asset = mediaId ? assetById.get(mediaId) : undefined
     const st = LANE_STYLE[laneKey]
     const rowH = laneRowHeight(laneKey)
     return (
@@ -1101,17 +1102,7 @@ export function Timeline(): JSX.Element {
         {/* The title row sits top-left (every tile kind does), its badges beside it. */}
         <div className="pointer-events-none flex min-w-0 flex-1 items-center gap-1 pr-2 pt-0.5">
           <span className="min-w-0 truncate text-[9px] font-medium leading-tight text-zinc-100">
-            {linked
-              ? '🔗'
-              : l.content.kind === 'text'
-                ? '🅣'
-                : l.content.kind === 'image'
-                  ? '🖼'
-                  : l.content.kind === 'layout'
-                    ? '▦'
-                    : l.content.kind === 'compound'
-                      ? '🧩'
-                      : '🎬'}
+            {linked ? '🔗' : kindInfo(l).icon}
             &nbsp;
             {asset?.fileName ?? layerLabel(l)}
           </span>
