@@ -1,4 +1,11 @@
-/** IPC channel names shared between main (handlers) and preload (invokers). */
+/**
+ * IPC between main and the renderer: channel names (`IPC`, `IPC_EVENT`), the
+ * request/response shapes, and the contract (`IpcInvoke`, `IpcSend`,
+ * `IpcEvents`, at the bottom) that both sides are typed against. Adding a
+ * call: a contract entry + its channel name here, its argument schema in
+ * `main/ipc/schemas.ts`, its handler in `main/ipc/`, and its name in the
+ * renderer's `ipc/client.ts` destructure. The preload needs one line.
+ */
 
 import type { AudioFxSettings } from './audioFx'
 
@@ -57,7 +64,7 @@ export const IPC = {
   // AI assistant: main ⇄ renderer bridge + status for Settings
   assistantResponse: 'assistant:response',
   assistantStatus: 'assistant:status'
-} as const
+} as const satisfies Record<InvokeName | keyof IpcSend, string>
 
 /** Payload describing which frame to grab and how to correct it. */
 export interface StillRequest {
@@ -146,4 +153,122 @@ export const IPC_EVENT = {
    *  renderer shows which and why. */
   importSkipped: 'media:importSkipped',
   assistantRequest: 'assistant:request'
-} as const
+} as const satisfies Record<keyof IpcEvents, string>
+
+// ---------------------------------------------------------------------------
+// The contract. Each invoke channel's arguments and result, declared ONCE:
+// the preload builds `window.api` from it (`invoke('importPaths')`) and main
+// registers handlers against it (`handle('importPaths', …)`), so a signature
+// can't drift between the two sides. Main also checks the arguments at
+// runtime (`main/ipc/schemas.ts`, typed against this) before a handler runs.
+// ---------------------------------------------------------------------------
+
+/** Options for an export from the Export button. */
+export interface ExportOptions {
+  preset: import('./formats').PresetId
+  preferNvenc: boolean
+}
+
+type Fn<A extends unknown[], R> = { args: A; result: R }
+type MediaAsset = import('./media').MediaAsset
+type Project = import('./project').Project
+type Settings = import('./settings').Settings
+type Transcript = import('./transcript').Transcript
+
+export interface IpcInvoke {
+  getCapabilities: Fn<[], import('./ffmpeg').FfmpegCapabilities>
+  getDataDir: Fn<[], string>
+
+  // Media library
+  importDialog: Fn<[], MediaAsset[]>
+  importPaths: Fn<[paths: string[]], MediaAsset[]>
+  importFolderDialog: Fn<[], MediaAsset[]>
+  extractAudioDialog: Fn<[], MediaAsset | null>
+  listProjectMedia: Fn<[ids: string[]], MediaAsset[]>
+  ensureProxy: Fn<[id: string], void>
+  /** Pick a file holding a missing asset's original (null = canceled). */
+  relinkMediaDialog: Fn<[id: string], RelinkResult | null>
+  /** Library Rename: the original on disk and the item get `stem` + the file's
+   *  own extension (rejects with a reason; nothing changes then). */
+  renameMedia: Fn<[id: string, stem: string], MediaAsset>
+  /** Library Quick cut: one new clip in `generated/` per piece, in order (the
+   *  original is untouched). Rejects with a reason before any encode. */
+  quickCut: Fn<[req: QuickCutRequest], MediaAsset[]>
+  /** Merge clips: ONE new clip in `generated/` joining the segments in order
+   *  (the sources are untouched). Rejects with a reason before any encode. */
+  mergeClips: Fn<[segments: import('./merge').MergeSegment[]], MediaAsset>
+  /** A library item's description ('' clears); an unsaved change until Save. */
+  setMediaDescription: Fn<[id: string, text: string], void>
+
+  // Project — a project is a folder (docs/MEDIA-POINTERS.md). loadProject /
+  // saveProject read and write its working copy (autosave); the *File* calls
+  // create, open and save it.
+  /** What to open at launch: the last project, or none (start screen). */
+  loadProject: Fn<[], LaunchState>
+  saveProject: Fn<[project: Project], void>
+  openProjectFile: Fn<[], LoadedProject | null>
+  saveProjectAs: Fn<[project: Project], { path: string; project: Project } | null>
+  saveProjectFile: Fn<[project: Project], Project>
+  /** File ▸ New: create `<location>/<name>/` and open it (rejects with a reason). */
+  createProject: Fn<[name: string, location: string], LoadedProject>
+  /** The New window's "Choose location…" folder picker (null = canceled). */
+  chooseProjectLocation: Fn<[current: string], string | null>
+  /** Where the New window starts: the Settings export folder. */
+  defaultProjectLocation: Fn<[], string>
+  /** The open project's folder (null when none is open). */
+  getProjectDir: Fn<[], string | null>
+  /** File ▸ Convert old projects…: summary lines, or null if canceled. */
+  convertLegacyFolderDialog: Fn<[], string[] | null>
+
+  // Export — the output path, or null if the Save dialog was canceled.
+  exportProject: Fn<[project: Project, opts: ExportOptions], string | null>
+  revealFile: Fn<[path: string], boolean>
+
+  // Settings
+  getSettings: Fn<[], Settings>
+  updateSettings: Fn<[patch: Partial<Settings>], Settings>
+  chooseExportDir: Fn<[], Settings>
+
+  // Captions and audio analysis
+  whisperAvailable: Fn<[], boolean>
+  transcribeMedia: Fn<[mediaId: string], Transcript>
+  getTranscript: Fn<[mediaId: string], Transcript | null>
+  detectSilence: Fn<[mediaId: string], { start: number; end: number }[]>
+  /** The asset's loudness series (measured first if not cached yet); null = no
+   *  audio, original missing, or the measurement failed. */
+  getLoudness: Fn<[mediaId: string], import('./loudness').LoudnessSeries | null>
+  renderAudioFx: Fn<[req: AudioFxRequest], MediaAsset>
+
+  // Background removal — matte one clip segment into a new transparent library
+  // asset (a VP9 WebM with the segment's audio), gated on the segmentation
+  // model being present. Resolves null when the job was canceled.
+  segmentAvailable: Fn<[], boolean>
+  removeBackground: Fn<[req: RemoveBackgroundRequest], MediaAsset | null>
+  /** Ask a cancelable background job to stop (false = nothing to cancel). */
+  cancelJob: Fn<[jobId: string], boolean>
+
+  // Stills — capture a frame from a clip into the library, or save it to disk.
+  captureStillToLibrary: Fn<[req: StillRequest], MediaAsset>
+  captureStillToDisk: Fn<[req: StillRequest, suggestedName: string], string | null>
+
+  /** The AI assistant's pipe server status, for Settings. */
+  assistantStatus: Fn<[], import('./assistant/protocol').AssistantStatus>
+}
+
+/** One-way renderer → main messages (`ipcRenderer.send`). */
+export interface IpcSend {
+  /** The renderer's answer to an `assistantRequest`. */
+  assistantResponse: [res: import('./assistant/protocol').AssistantResponse]
+}
+
+/** Main → renderer pushes, by `IPC_EVENT` key: the payload each carries. */
+export interface IpcEvents {
+  jobProgress: [ev: import('./jobs').JobProgressEvent]
+  libraryChanged: []
+  importSkipped: [skipped: import('./media').ImportSkip[]]
+  assistantRequest: [req: import('./assistant/protocol').AssistantRequest]
+}
+
+export type InvokeName = keyof IpcInvoke
+export type InvokeArgs<K extends InvokeName> = IpcInvoke[K]['args']
+export type InvokeResult<K extends InvokeName> = IpcInvoke[K]['result']

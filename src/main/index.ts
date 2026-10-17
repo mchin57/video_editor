@@ -28,7 +28,10 @@ function createWindow(): void {
     title: 'Reel Editor',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // The renderer runs sandboxed: no Node in the page or its preload. The
+      // preload uses only contextBridge / ipcRenderer / webUtils (shared code is
+      // bundled into it), and main checks every request (main/ipc/schemas.ts).
+      sandbox: true,
       // Let library hover-previews play with sound without a prior click gesture.
       autoplayPolicy: 'no-user-gesture-required'
     }

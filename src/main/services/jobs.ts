@@ -1,9 +1,8 @@
 /** In-memory job registry that broadcasts progress to all renderer windows. */
 
-import { BrowserWindow } from 'electron'
-import { IPC_EVENT } from '@shared/ipc'
 import type { Job, JobType, JobProgressEvent } from '@shared/jobs'
 import { newId } from '@shared/ids'
+import { broadcast as broadcastEvent } from '../ipc/events'
 
 const jobs = new Map<string, Job>()
 /** Abort controllers of cancelable jobs still in flight, by job id. */
@@ -24,9 +23,7 @@ function broadcast(job: Job): void {
     cancelable: job.cancelable,
     startedAt: job.startedAt
   }
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send(IPC_EVENT.jobProgress, ev)
-  }
+  broadcastEvent('jobProgress', ev)
 }
 
 /** Finished jobs kept for listJobs history; older ones are evicted. */

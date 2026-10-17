@@ -4,10 +4,11 @@
  * its undo history and its invariants live.
  */
 
-import { BrowserWindow, ipcMain } from 'electron'
-import { IPC, IPC_EVENT } from '@shared/ipc'
-import type { AssistantOp, AssistantOps, AssistantRequest, AssistantResponse } from '@shared/assistant/protocol'
+import { BrowserWindow } from 'electron'
+import type { AssistantOp, AssistantOps, AssistantRequest } from '@shared/assistant/protocol'
 import { newId } from '@shared/ids'
+import { sendTo } from '../ipc/events'
+import { onSend } from '../ipc/handle'
 
 export const RENDERER_TIMEOUT_MS = 10_000
 /** How far ahead of the timeout a request expires in the renderer (see `AssistantRequest.deadline`). */
@@ -22,7 +23,7 @@ const pending = new Map<string, Pending>()
 
 /** Listen for renderer answers. Call once, from registerIpcHandlers. */
 export function registerAssistantBridge(): void {
-  ipcMain.on(IPC.assistantResponse, (_e, res: AssistantResponse) => {
+  onSend('assistantResponse', (res) => {
     const p = pending.get(res.id)
     if (!p) return
     pending.delete(res.id)
@@ -57,6 +58,6 @@ export function callRenderer<K extends AssistantOp>(
     }, RENDERER_TIMEOUT_MS)
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
     const req: AssistantRequest<K> = { id, op, args, deadline: Date.now() + RENDERER_TIMEOUT_MS - EXPIRY_MARGIN_MS }
-    win.webContents.send(IPC_EVENT.assistantRequest, req)
+    sendTo(win.webContents, 'assistantRequest', req)
   })
 }
