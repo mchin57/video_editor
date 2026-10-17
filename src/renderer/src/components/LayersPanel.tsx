@@ -8,6 +8,7 @@ import { useUi } from '@/state/ui'
 import { startPointerDrag } from '@/lib/pointerDrag'
 
 const ROW_H = 30 // px — must match the row height below for drag math
+const NO_LAYERS: Layer[] = [] // a stable empty stack, so the memos below don't recompute every render
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 const kindIcon = (l: Layer): string =>
@@ -39,13 +40,12 @@ export function LayersPanel(): JSX.Element {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectTile = useUi((s) => s.selectTile)
   // Selecting a row picks the layer's whole link group, like the timeline does.
-  const selectLayer = (id: string): void =>
-    selectTile(useProject.getState().project, { kind: 'layer', id })
+  const selectLayer = (id: string): void => selectTile(useProject.getState().project, { kind: 'layer', id })
   const time = usePlayback((s) => s.time)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
-  const stack = layers ?? []
+  const stack = layers ?? NO_LAYERS
 
   // Visible layers (those whose span covers the playhead), front → back. Every
   // one of them is draggable.

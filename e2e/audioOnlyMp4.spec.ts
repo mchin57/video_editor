@@ -24,9 +24,16 @@ type Probe = { __jobs: JobProgressEvent[] }
 
 const tone = (codec: string, out: string): void => {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
-    '-c:a', codec,
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=2',
+    '-c:a',
+    codec,
     out
   ])
 }
@@ -67,9 +74,9 @@ for (const variant of ['AAC in an MP4', 'an MP3 renamed .mp4'] as const) {
     )
     expect(jobs.map((e) => e.status)).not.toContain('error')
     expect(jobs.map((e) => e.status)).toContain('done')
-    expect(
-      await page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0].proxyReady, asset.id)
-    ).toBe(true)
+    expect(await page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0].proxyReady, asset.id)).toBe(
+      true
+    )
     await expect(page.getByText('proxy failed')).toHaveCount(0)
 
     await addAudio.click()

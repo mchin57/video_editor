@@ -13,25 +13,25 @@ extraResources:
   - from: resources/bin
     to: bin
     filter:
-      - "**/*"
+      - '**/*'
   # Bundled text-overlay fonts (OFL/Apache, redistributable, committed to the
   # repo — tiny). Passed to libass via `fontsdir` on export and served to the
   # renderer for @font-face previews. See resources/fonts/LICENSES.md.
   - from: resources/fonts
     to: fonts
     filter:
-      - "**/*"
+      - '**/*'
   # Background-removal model (RVM ONNX, ~15 MB) staged by `npm run collect-binaries`.
   # Discovered at runtime under <resources>/models. Optional — a build without it
   # simply leaves the "Remove background" feature unavailable (gated on presence).
   - from: resources/models
     to: models
     filter:
-      - "**/*"
+      - '**/*'
 # onnxruntime-node ships a prebuilt native addon (.node + runtime dll); it must be
 # unpacked from the asar so it can be loaded at runtime.
 asarUnpack:
-  - "**/node_modules/onnxruntime-node/**"
+  - '**/node_modules/onnxruntime-node/**'
 win:
   target: nsis
   artifactName: ${productName}-${version}-setup.${ext}
@@ -52,4 +52,3 @@ publish:
   provider: github
   owner: mchin57
   repo: video_editor
-

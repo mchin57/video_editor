@@ -27,16 +27,11 @@ export function decorationScale(layerScale: number, outputScale: number): number
 }
 
 /** Stroke width in output px. */
-export const scaledStroke = (
-  s: StrokeStyle | null | undefined,
-  k: number
-): StrokeStyle | null | undefined => (s ? { widthPx: s.widthPx * k, color: s.color } : s)
+export const scaledStroke = (s: StrokeStyle | null | undefined, k: number): StrokeStyle | null | undefined =>
+  s ? { widthPx: s.widthPx * k, color: s.color } : s
 
 /** Shadow offset + blur in output px. */
-export const scaledShadow = (
-  s: ShadowStyle | null | undefined,
-  k: number
-): ShadowStyle | null | undefined =>
+export const scaledShadow = (s: ShadowStyle | null | undefined, k: number): ShadowStyle | null | undefined =>
   s ? { distancePx: s.distancePx * k, color: s.color, blur: s.blur * k } : s
 
 /** Pill padding in output px (the radius is derived from it downstream). */

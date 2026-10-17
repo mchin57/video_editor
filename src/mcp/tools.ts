@@ -98,14 +98,14 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'merge_clips',
     {
       description:
-        'Join two or more videos (or SOURCE windows of them), in the order given, into ONE new library clip saved in the project folder (re-encode; takes a few seconds). The same clip may appear more than once, e.g. to cut out a middle and keep both ends as one clip. Clips of different sizes are fitted inside the first one\'s frame; a clip without audio adds silence. The originals and the timeline are left alone. Returns {created: [the new library entry]}. Each window must be at least 0.1s.',
+        "Join two or more videos (or SOURCE windows of them), in the order given, into ONE new library clip saved in the project folder (re-encode; takes a few seconds). The same clip may appear more than once, e.g. to cut out a middle and keep both ends as one clip. Clips of different sizes are fitted inside the first one's frame; a clip without audio adds silence. The originals and the timeline are left alone. Returns {created: [the new library entry]}. Each window must be at least 0.1s.",
       inputSchema: {
         items: z
           .array(
             z.object({
               mediaId: z.string(),
               inSec: z.number().min(0).optional().describe('SOURCE second to start at (default 0)'),
-              outSec: z.number().positive().optional().describe('SOURCE second to end at (default: the clip\'s end)')
+              outSec: z.number().positive().optional().describe("SOURCE second to end at (default: the clip's end)")
             })
           )
           .min(2)
@@ -166,7 +166,10 @@ export function registerTools(server: McpServer, call: CallEditor): void {
 
   server.registerTool(
     'undo',
-    { description: "Undo the last edit (yours or the user's) — one step. Imports, trim_clip and split_clip are steps too: undoing one removes clips from the LIBRARY, not the timeline. Returns a note saying what was undone (relay a library change to the user), the changes, and the timeline after undoing." },
+    {
+      description:
+        "Undo the last edit (yours or the user's) — one step. Imports, trim_clip and split_clip are steps too: undoing one removes clips from the LIBRARY, not the timeline. Returns a note saying what was undone (relay a library change to the user), the changes, and the timeline after undoing."
+    },
     async () => result(await call('undo', {}))
   )
 
@@ -201,9 +204,15 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     async (args) => result(await call('get_text', args))
   )
 
-  const color = z.string().regex(/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/).describe('#rrggbb or #rrggbbaa')
+  const color = z
+    .string()
+    .regex(/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/)
+    .describe('#rrggbb or #rrggbbaa')
   const textEdit = z.strictObject({
-    id: z.string().optional().describe('Item to patch (from get_text). Leave out to CREATE a new item. "captions" = the caption lane.'),
+    id: z
+      .string()
+      .optional()
+      .describe('Item to patch (from get_text). Leave out to CREATE a new item. "captions" = the caption lane.'),
     kind: z.enum(['text', 'caption']).optional().describe('Only when creating; default "text" (a text layer on top)'),
     text: z.string().min(1).optional(),
     startSec: z.number().min(0).optional().describe('TIMELINE second'),
@@ -216,18 +225,39 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     fontSizePx: z.number().min(TEXT_FONT_SIZE_MIN).max(TEXT_FONT_SIZE_MAX).optional(),
     color: color.optional(),
     pill: z
-      .strictObject({ enabled: z.boolean().optional(), color: color.optional(), padPx: z.number().min(0).max(TEXT_PILL_PAD_MAX).optional() })
+      .strictObject({
+        enabled: z.boolean().optional(),
+        color: color.optional(),
+        padPx: z.number().min(0).max(TEXT_PILL_PAD_MAX).optional()
+      })
       .optional()
       .describe('Box behind the text; fields merge into the current pill'),
-    stroke: z.strictObject({ widthPx: z.number().min(0).max(100), color }).nullable().optional().describe('Glyph outline (ignored while the pill is on); null removes'),
+    stroke: z
+      .strictObject({ widthPx: z.number().min(0).max(100), color })
+      .nullable()
+      .optional()
+      .describe('Glyph outline (ignored while the pill is on); null removes'),
     shadow: z
       .strictObject({ distancePx: z.number().min(0).max(100), color, blur: z.number().min(0).max(50) })
       .nullable()
       .optional()
       .describe('null removes'),
-    gradient: z.strictObject({ from: color, to: color, angle: z.number() }).nullable().optional().describe('Fill gradient, overrides color; null removes'),
-    widthPx: z.number().min(40).max(4000).nullable().optional().describe('Text layers only: wrap width; null = hug the text'),
-    followLaneStyle: z.boolean().optional().describe('Captions only: true drops its own style so it follows the lane again')
+    gradient: z
+      .strictObject({ from: color, to: color, angle: z.number() })
+      .nullable()
+      .optional()
+      .describe('Fill gradient, overrides color; null removes'),
+    widthPx: z
+      .number()
+      .min(40)
+      .max(4000)
+      .nullable()
+      .optional()
+      .describe('Text layers only: wrap width; null = hug the text'),
+    followLaneStyle: z
+      .boolean()
+      .optional()
+      .describe('Captions only: true drops its own style so it follows the lane again')
   })
 
   server.registerTool(

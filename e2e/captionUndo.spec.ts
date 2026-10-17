@@ -66,10 +66,16 @@ const release = (app: ElectronApplication): Promise<void> =>
 const history = (page: Page): Promise<{ past: number; future: number; clips: number; captionsOn: boolean }> =>
   page.evaluate(() => {
     const s = window.__reelStores.useProject.getState()
-    return { past: s.past.length, future: s.future.length, clips: s.project!.audioClips.length, captionsOn: s.project!.captions.enabled }
+    return {
+      past: s.past.length,
+      future: s.future.length,
+      clips: s.project!.audioClips.length,
+      captionsOn: s.project!.captions.enabled
+    }
   })
 
-const captionButton = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('button', { name: /Caption audio|Captioning/ })
+const captionButton = (page: Page): ReturnType<Page['getByRole']> =>
+  page.getByRole('button', { name: /Caption audio|Captioning/ })
 
 async function arrange(page: Page): Promise<void> {
   const wav = join(mkdtempSync(join(tmpdir(), 'reel-capundo-')), 'voice.wav')

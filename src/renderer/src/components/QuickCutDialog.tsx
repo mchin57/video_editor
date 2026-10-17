@@ -68,7 +68,9 @@ export function QuickCutDialog({
     setError(null)
   }, [])
   const undo = (): void =>
-    setHist((h) => (h.past.length ? { past: h.past.slice(0, -1), now: h.past[h.past.length - 1], future: [h.now, ...h.future] } : h))
+    setHist((h) =>
+      h.past.length ? { past: h.past.slice(0, -1), now: h.past[h.past.length - 1], future: [h.now, ...h.future] } : h
+    )
   const redo = (): void =>
     setHist((h) => (h.future.length ? { past: [...h.past, h.now], now: h.future[0], future: h.future.slice(1) } : h))
   // Undo can shrink the list under the selection.
@@ -280,7 +282,9 @@ export function QuickCutDialog({
             data-testid="quickcut-split"
             disabled={busy || !canSplit}
             onClick={split}
-            title={canSplit ? 'Split the clip at the playhead (S)' : 'Put the playhead inside a clip, away from its ends'}
+            title={
+              canSplit ? 'Split the clip at the playhead (S)' : 'Put the playhead inside a clip, away from its ends'
+            }
             className={`${btnCls} ${disabledCls}`}
           >
             ✂ Split
@@ -294,10 +298,20 @@ export function QuickCutDialog({
           >
             Delete clip
           </button>
-          <button disabled={busy || !hist.past.length} onClick={undo} title="Undo (Ctrl+Z)" className={`${btnCls} ${disabledCls}`}>
+          <button
+            disabled={busy || !hist.past.length}
+            onClick={undo}
+            title="Undo (Ctrl+Z)"
+            className={`${btnCls} ${disabledCls}`}
+          >
             ↶
           </button>
-          <button disabled={busy || !hist.future.length} onClick={redo} title="Redo (Ctrl+Shift+Z)" className={`${btnCls} ${disabledCls}`}>
+          <button
+            disabled={busy || !hist.future.length}
+            onClick={redo}
+            title="Redo (Ctrl+Shift+Z)"
+            className={`${btnCls} ${disabledCls}`}
+          >
             ↷
           </button>
         </div>

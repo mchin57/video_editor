@@ -141,11 +141,7 @@ function alphaTag(n: 1 | 3 | 4, hex: string): string[] {
 }
 
 function escapeText(text: string): string {
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/\{/g, '\\{')
-    .replace(/\}/g, '\\}')
-    .replace(/\r?\n/g, '\\N')
+  return text.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\r?\n/g, '\\N')
 }
 
 const f1 = (n: number): string => (Math.round(n * 10) / 10).toString()
@@ -188,11 +184,19 @@ function decoTags(o: AssOverlay): string[] {
   const tags: string[] = []
   const stroke = effectiveStroke(o)
   if (stroke) {
-    tags.push(`\\bord${f1(assOutlineWidth(stroke.widthPx))}`, `\\3c${assRgb(stroke.color)}&`, ...alphaTag(3, stroke.color))
+    tags.push(
+      `\\bord${f1(assOutlineWidth(stroke.widthPx))}`,
+      `\\3c${assRgb(stroke.color)}&`,
+      ...alphaTag(3, stroke.color)
+    )
   }
   const shadow = effectiveShadow(o)
   if (shadow) {
-    tags.push(`\\shad${f1(Math.max(0, shadow.distancePx))}`, `\\4c${assRgb(shadow.color)}&`, ...alphaTag(4, shadow.color))
+    tags.push(
+      `\\shad${f1(Math.max(0, shadow.distancePx))}`,
+      `\\4c${assRgb(shadow.color)}&`,
+      ...alphaTag(4, shadow.color)
+    )
     if (shadow.blur > 0) tags.push(`\\blur${f1(shadow.blur)}`)
   }
   return tags
@@ -277,7 +281,14 @@ const local = (d: { x: number; y: number }, deg: number): { x: number; y: number
  * t2 at the end, which is a straight move exactly. `deg` = the rotation the
  * anchor is turned by (`local`); 0 for things placed directly on screen.
  */
-function placeTag(x: number, y: number, travel: LinearMotion | null | undefined, t0: number, t1: number, deg: number): string {
+function placeTag(
+  x: number,
+  y: number,
+  travel: LinearMotion | null | undefined,
+  t0: number,
+  t1: number,
+  deg: number
+): string {
   if (!travel) return `\\pos(${Math.round(x)},${Math.round(y)})`
   const s = moveSlice(travel, t0, t1)
   const a = local(s.from, deg)
@@ -379,7 +390,14 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
     for (const l of laid) {
       if (!l.pill) continue
       const p = l.pill
-      pieces.push({ layer: 0, style: 'Plain', x: p.x + p.w / 2, y: p.y + p.h / 2, tags: fill, path: pillPath(p.w, p.h, radius) })
+      pieces.push({
+        layer: 0,
+        style: 'Plain',
+        x: p.x + p.w / 2,
+        y: p.y + p.h / 2,
+        tags: fill,
+        path: pillPath(p.w, p.h, radius)
+      })
     }
   }
   for (const l of laid) {
@@ -449,7 +467,15 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
       if (fad[1] > 0 && t > outStart) a = Math.max(a, 255 * ((t - outStart) / (fad[1] / 1000)))
       return Math.round(Math.max(0, Math.min(255, a)))
     }
-    const cuts = [t0, t1, slideEnd, travel.t0, travel.t1, ...(fad[0] > 0 ? [inEnd] : []), ...(fad[1] > 0 ? [outStart] : [])]
+    const cuts = [
+      t0,
+      t1,
+      slideEnd,
+      travel.t0,
+      travel.t1,
+      ...(fad[0] > 0 ? [inEnd] : []),
+      ...(fad[1] > 0 ? [outStart] : [])
+    ]
       .filter((t) => t >= t0 && t <= t1)
       .sort((a, b) => a - b)
       .filter((t, i, arr) => i === 0 || t - arr[i - 1] > 0.005)
@@ -526,7 +552,7 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
       for (const p of glyphs) {
         // One event per distinct revealed count of THIS line; a line still
         // waiting its turn emits nothing.
-        for (let k0 = 0; k0 < steps.length; ) {
+        for (let k0 = 0; k0 < steps.length;) {
           const shown = revealed(p, steps[k0])
           let k1 = k0
           while (k1 + 1 < steps.length && revealed(p, steps[k1 + 1]) === shown) k1++
@@ -569,7 +595,8 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
         const delay = perWordCs.slice(0, firstWord).reduce((a, b) => a + b, 0)
         let kara = delay > 0 ? `{\\k${delay}}` : ''
         for (const tk of mine) {
-          kara += tk.w < 0 ? escapeText(tk.t) : `{\\k${perWordCs[Math.min(tk.w, perWordCs.length - 1)]}}${escapeText(tk.t)}`
+          kara +=
+            tk.w < 0 ? escapeText(tk.t) : `{\\k${perWordCs[Math.min(tk.w, perWordCs.length - 1)]}}${escapeText(tk.t)}`
         }
         const tags = tailFade(at(p, o.startSec, winEnd, [`\\2c${assRgb(o.color)}&`, '\\2a&H99&']))
         events.push(ev(p, o.startSec, winEnd, tags, kara))
@@ -593,7 +620,8 @@ function blockEvents(o: AssOverlay, pxScale: number): string[] {
     case 'fadeIn':
     case 'none': {
       const enterMs = anim.in === 'fadeIn' ? inMs : 0
-      const fade = enterMs > 0 || (!splitExit && fadeOutMs > 0) ? [`\\fad(${enterMs},${splitExit ? 0 : fadeOutMs})`] : []
+      const fade =
+        enterMs > 0 || (!splitExit && fadeOutMs > 0) ? [`\\fad(${enterMs},${splitExit ? 0 : fadeOutMs})`] : []
       for (const p of pieces) events.push(ev(p, o.startSec, exitStart, at(p, o.startSec, exitStart, fade), body(p)))
       break
     }

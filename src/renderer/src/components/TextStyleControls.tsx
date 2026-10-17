@@ -36,7 +36,10 @@ const getAlpha = (c: string): number => {
   return h.length >= 8 ? parseInt(h.slice(6, 8), 16) : 255
 }
 const withAlpha = (c: string, a: number): string =>
-  hex6(c) + Math.max(0, Math.min(255, Math.round(a))).toString(16).padStart(2, '0')
+  hex6(c) +
+  Math.max(0, Math.min(255, Math.round(a)))
+    .toString(16)
+    .padStart(2, '0')
 
 /** Saved-brand-color swatches: click to apply, ＋ saves the current color,
  *  right-click removes a swatch. */
@@ -236,10 +239,7 @@ export function TextStyleControls({
 
       {/* Gradient fill (overrides the flat color) */}
       <div className="mb-2 rounded border border-white/5 bg-white/[0.02] p-2">
-        <Check
-          checked={!!gradient}
-          onChange={(v) => onPatch({ gradient: v ? { ...DEFAULT_GRADIENT } : null })}
-        >
+        <Check checked={!!gradient} onChange={(v) => onPatch({ gradient: v ? { ...DEFAULT_GRADIENT } : null })}>
           Gradient fill
         </Check>
         {gradient && (
@@ -299,7 +299,9 @@ export function TextStyleControls({
                 <input
                   type="color"
                   value={hex6(pill.color)}
-                  onChange={(e) => onPatch({ pill: { ...pill, color: withAlpha(e.target.value, getAlpha(pill.color)) } })}
+                  onChange={(e) =>
+                    onPatch({ pill: { ...pill, color: withAlpha(e.target.value, getAlpha(pill.color)) } })
+                  }
                   className={colorCls}
                 />
               </Field>
@@ -376,7 +378,9 @@ export function TextStyleControls({
                 <input
                   type="color"
                   value={hex6(shadow.color)}
-                  onChange={(e) => onPatch({ shadow: { ...shadow, color: withAlpha(e.target.value, getAlpha(shadow.color)) } })}
+                  onChange={(e) =>
+                    onPatch({ shadow: { ...shadow, color: withAlpha(e.target.value, getAlpha(shadow.color)) } })
+                  }
                   className={colorCls}
                 />
               </Field>

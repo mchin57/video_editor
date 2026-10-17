@@ -26,7 +26,34 @@ function orientedJpeg(out: string, o: number): void {
   const plain = `${out}.plain.jpg`
   execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=640x480', '-frames:v', '1', plain])
   const jpeg = readFileSync(plain)
-  const tiff = Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0])
+  const tiff = Buffer.from([
+    0x4d,
+    0x4d,
+    0,
+    0x2a,
+    0,
+    0,
+    0,
+    8,
+    0,
+    1,
+    0x01,
+    0x12,
+    0,
+    3,
+    0,
+    0,
+    0,
+    1,
+    0,
+    o,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ])
   const payload = Buffer.concat([Buffer.from('Exif\0\0', 'binary'), tiff])
   const len = payload.length + 2
   const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, len >> 8, len & 0xff]), payload])
@@ -34,7 +61,17 @@ function orientedJpeg(out: string, o: number): void {
 }
 
 const dims = (file: string): { w: number; h: number } => {
-  const [w, h] = execFileSync(FFPROBE, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file])
+  const [w, h] = execFileSync(FFPROBE, [
+    '-v',
+    'error',
+    '-select_streams',
+    'v:0',
+    '-show_entries',
+    'stream=width,height',
+    '-of',
+    'csv=p=0',
+    file
+  ])
     .toString()
     .trim()
     .split(',')
@@ -44,15 +81,25 @@ const dims = (file: string): { w: number; h: number } => {
 
 /** Bounding box of red pixels in one exported frame. */
 function redBox(file: string, t: number): { w: number; h: number } {
-  const buf = execFileSync(FFMPEG, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
-    maxBuffer: W * H * 3 + 1024
-  })
-  let x0 = W, x1 = -1, y0 = H, y1 = -1
+  const buf = execFileSync(
+    FFMPEG,
+    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    {
+      maxBuffer: W * H * 3 + 1024
+    }
+  )
+  let x0 = W,
+    x1 = -1,
+    y0 = H,
+    y1 = -1
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 3
       if (buf[i] > 150 && buf[i + 1] < 80 && buf[i + 2] < 80) {
-        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y)
+        x0 = Math.min(x0, x)
+        x1 = Math.max(x1, x)
+        y0 = Math.min(y0, y)
+        y1 = Math.max(y1, y)
       }
     }
   }
@@ -90,7 +137,9 @@ test('a portrait JPEG (EXIF orientation 6) is probed, previewed and exported por
     return a
   }, photo)
   const v = asset.probe.video!
-  expect.soft({ w: v.displayWidth, h: v.displayHeight, rot: v.rotationDeg }, 'probe').toEqual({ w: 480, h: 640, rot: 270 })
+  expect
+    .soft({ w: v.displayWidth, h: v.displayHeight, rot: v.rotationDeg }, 'probe')
+    .toEqual({ w: 480, h: 640, rot: 270 })
   expect.soft({ w: v.width, h: v.height }, 'stored size is unchanged').toEqual({ w: 640, h: 480 })
 
   // Thumbnail: the decoded (upright) picture at the probe's size — 270×360.
@@ -143,10 +192,24 @@ test('an image record probed before orientation was read is re-probed on open, k
   const doc = JSON.parse(readFileSync(reel, 'utf8')) as { library: MediaRecord[] }
   const before = doc.library[0]
   const { version: _v, ...probe } = before.probe as MediaRecord['probe'] & { version?: number }
-  doc.library[0] = { ...before, probe: { ...probe, video: { ...probe.video!, displayWidth: 640, displayHeight: 480, rotationDeg: 0 } } }
+  doc.library[0] = {
+    ...before,
+    probe: { ...probe, video: { ...probe.video!, displayWidth: 640, displayHeight: 480, rotationDeg: 0 } }
+  }
   writeFileSync(reel, JSON.stringify(doc))
   const staleThumb = join(moved, 'cache', id, 'thumb.jpg')
-  execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=360x270', '-frames:v', '1', staleThumb])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=red:s=360x270',
+    '-frames:v',
+    '1',
+    staleThumb
+  ])
 
   await electronApp.evaluate(({ dialog }, filePath) => {
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [filePath] })) as typeof dialog.showOpenDialog

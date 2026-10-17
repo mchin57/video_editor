@@ -26,10 +26,20 @@ import { FFMPEG } from './bin'
 /** A mono 48 kHz WAV from a lavfi source (+ an optional filter). */
 function synth(out: string, src: string, af?: string): void {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', src,
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    src,
     ...(af ? ['-af', af] : []),
-    '-ac', '1', '-c:a', 'pcm_s16le', out
+    '-ac',
+    '1',
+    '-c:a',
+    'pcm_s16le',
+    out
   ])
 }
 
@@ -37,8 +47,19 @@ function synth(out: string, src: string, af?: string): void {
 function measure(file: string, a: number, b: number): number {
   const run = spawnSync(
     FFMPEG,
-    ['-hide_banner', '-nostdin', '-nostats', '-i', file, '-vn',
-      '-af', `atrim=${a}:${b},asetpts=N/SR/TB,ebur128=framelog=quiet`, '-f', 'null', '-'],
+    [
+      '-hide_banner',
+      '-nostdin',
+      '-nostats',
+      '-i',
+      file,
+      '-vn',
+      '-af',
+      `atrim=${a}:${b},asetpts=N/SR/TB,ebur128=framelog=quiet`,
+      '-f',
+      'null',
+      '-'
+    ],
     { encoding: 'utf8' }
   )
   const m = /^\s+I:\s+(-?[\d.]+) LUFS/m.exec(run.stderr)
@@ -50,8 +71,19 @@ function measure(file: string, a: number, b: number): number {
 function peakOf(file: string, a: number, b: number): number {
   const run = spawnSync(
     FFMPEG,
-    ['-hide_banner', '-nostdin', '-nostats', '-i', file, '-vn',
-      '-af', `atrim=${a}:${b},astats=measure_perchannel=none:measure_overall=Peak_level`, '-f', 'null', '-'],
+    [
+      '-hide_banner',
+      '-nostdin',
+      '-nostats',
+      '-i',
+      file,
+      '-vn',
+      '-af',
+      `atrim=${a}:${b},astats=measure_perchannel=none:measure_overall=Peak_level`,
+      '-f',
+      'null',
+      '-'
+    ],
     { encoding: 'utf8' }
   )
   const m = /Peak level dB:\s*(-?[\d.]+)/.exec(run.stderr)
@@ -72,7 +104,9 @@ async function importAll(page: Page, paths: string[]): Promise<Record<string, st
   return Object.fromEntries(assets)
 }
 
-const audioClip = (over: Partial<AudioClip> & Pick<AudioClip, 'id' | 'mediaId' | 'startSec' | 'outSec'>): AudioClip => ({
+const audioClip = (
+  over: Partial<AudioClip> & Pick<AudioClip, 'id' | 'mediaId' | 'startSec' | 'outSec'>
+): AudioClip => ({
   inSec: 0,
   gainDb: 0,
   fadeInSec: 0,
@@ -151,7 +185,9 @@ test('a level matches two clips 15 dB apart; its slider moves them, not another 
   await selectTile(page, 'A') // the right-click selected B
 
   // Both land on −16 LUFS, so the quiet one gets ~15 dB more.
-  await expect.poll(async () => (await previewDb(page, 'B')) - (await previewDb(page, 'A')), { timeout: 30_000 }).toBeCloseTo(15, 0)
+  await expect
+    .poll(async () => (await previewDb(page, 'B')) - (await previewDb(page, 'A')), { timeout: 30_000 })
+    .toBeCloseTo(15, 0)
   const a0 = await previewDb(page, 'A')
   const b0 = await previewDb(page, 'B')
   const c0 = await previewDb(page, 'C')
@@ -240,7 +276,9 @@ test('File ▸ Volume levels: Default can’t be deleted or renamed; create, set
   expect((await clipOf(page, 'X'))?.volumeLevelId).toBe(voice.id)
 })
 
-test('auto-join setting: off → a new extracted clip joins no level; on → it joins Default', async ({ appPage: page }) => {
+test('auto-join setting: off → a new extracted clip joins no level; on → it joins Default', async ({
+  appPage: page
+}) => {
   const openSettings = async (): Promise<void> => {
     await page.getByTitle('Settings', { exact: true }).click()
   }
@@ -253,7 +291,13 @@ test('auto-join setting: off → a new extracted clip joins no level; on → it 
     }, layerId)
   // The drop / Library ＋ path: a clip with audio lands with its audio linked.
   const dropVideo = (id: string, at: number): Promise<void> =>
-    page.evaluate(([lid, t]) => window.__reelStores.useProject.getState().addVideoLayer(lid as string, 'no-media', t as number, 3, true, 9 / 16), [id, at] as const)
+    page.evaluate(
+      ([lid, t]) =>
+        window.__reelStores.useProject
+          .getState()
+          .addVideoLayer(lid as string, 'no-media', t as number, 3, true, 9 / 16),
+      [id, at] as const
+    )
 
   await openSettings()
   await expect(box).toBeChecked() // on by default
@@ -285,7 +329,22 @@ test('export: each levelled clip measures within 1 LU of the target, or short ex
 
   const dir = mkdtempSync(join(tmpdir(), 'reel-levels-export-'))
   const bg = join(dir, 'black.mp4')
-  execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=1080x1920:r=30:d=12', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', bg])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=1080x1920:r=30:d=12',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    bg
+  ])
   const loud = join(dir, 'loud.wav')
   const quiet = join(dir, 'quiet.wav')
   const pulses = join(dir, 'pulses.wav')
@@ -296,7 +355,10 @@ test('export: each levelled clip measures within 1 LU of the target, or short ex
   synth(pulses, "aevalsrc='0.25*sin(2*PI*1000*t)*lt(mod(t\\,0.4)\\,0.01)':s=48000:d=4")
   const ids = await importAll(page, [bg, loud, quiet, pulses])
 
-  await page.evaluate((bgId) => window.__reelStores.useProject.getState().addVideoLayer('BG', bgId, 0, 12, false), ids['black.mp4'])
+  await page.evaluate(
+    (bgId) => window.__reelStores.useProject.getState().addVideoLayer('BG', bgId, 0, 12, false),
+    ids['black.mp4']
+  )
   const clips = [
     audioClip({ id: 'L', mediaId: ids['loud.wav'], startSec: 0, outSec: 4, gainDb: -10, volumeLevelId: 'default' }),
     audioClip({ id: 'Q', mediaId: ids['quiet.wav'], startSec: 4, outSec: 4, volumeLevelId: 'default' }),
@@ -308,15 +370,15 @@ test('export: each levelled clip measures within 1 LU of the target, or short ex
   const series: Record<string, LoudnessSeries | null> = {}
   for (const c of clips) series[c.mediaId] = await page.evaluate((id) => window.api.getLoudness(id), c.mediaId)
   const levels = await page.evaluate(() => window.__reelStores.useProject.getState().project!.volumeLevels)
-  const predict = (c: AudioClip) =>
-    clipGain(c, clips, { levels, seriesOf: (id) => series[id], durationOf: () => 4 })
+  const predict = (c: AudioClip) => clipGain(c, clips, { levels, seriesOf: (id) => series[id], durationOf: () => 4 })
   expect(predict(clips[0]).status.kind).toBe('matched')
   expect(predict(clips[1]).status.kind).toBe('matched')
   const capped = predict(clips[2])
   expect(capped.status.kind).toBe('short')
 
   // The preview applies exactly the predicted gains (same helper)…
-  for (const c of clips) await expect.poll(() => previewDb(page, c.id), { timeout: 30_000 }).toBeCloseTo(predict(c).gainDb, 1)
+  for (const c of clips)
+    await expect.poll(() => previewDb(page, c.id), { timeout: 30_000 }).toBeCloseTo(predict(c).gainDb, 1)
   // …and the Inspector says the pulses are short.
   await selectTile(page, 'P')
   await expect(page.getByTestId('level-status')).toContainText('Short by')
@@ -335,7 +397,17 @@ test('export: each levelled clip measures within 1 LU of the target, or short ex
   const got = { L: measure(out, 0.2, 3.8), Q: measure(out, 4.2, 7.8), P: measure(out, 8.2, 11.8) }
   const src = { P: measure(pulses, 0.2, 3.8) }
   const peakP = peakOf(out, 8, 12)
-  console.log('[volumeLevels] export LUFS', JSON.stringify(got), 'pulses source', src.P, 'cap gain', capped.gainDb, capped.status, 'pulses peak out', peakP)
+  console.log(
+    '[volumeLevels] export LUFS',
+    JSON.stringify(got),
+    'pulses source',
+    src.P,
+    'cap gain',
+    capped.gainDb,
+    capped.status,
+    'pulses peak out',
+    peakP
+  )
   expect(Math.abs(got.L - -16)).toBeLessThanOrEqual(1)
   expect(Math.abs(got.Q - -16)).toBeLessThanOrEqual(1)
   // Capped: the source's loudness plus the capped gain — short of −16 by the predicted amount.

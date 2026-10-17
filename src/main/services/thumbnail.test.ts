@@ -49,7 +49,9 @@ describe('buildThumbnailArgs', () => {
     expect(still).not.toContain('-ss')
     expect(still.join(' ')).toContain('-i in.jpg -map 0:v:0 -frames:v 1')
     // Videos keep their exact command.
-    expect(buildThumbnailArgs('in.mov', 'out.jpg', probe())).toEqual(buildThumbnailArgs('in.mov', 'out.jpg', probe(), false))
+    expect(buildThumbnailArgs('in.mov', 'out.jpg', probe())).toEqual(
+      buildThumbnailArgs('in.mov', 'out.jpg', probe(), false)
+    )
     expect(buildThumbnailArgs('in.mov', 'out.jpg', probe()).join(' ')).toContain('-ss 0 -i in.mov')
   })
   it('tonemaps HDR sources only', () => {

@@ -73,19 +73,37 @@ describe('buildMergeArgs', () => {
   })
 
   it('HDR + SDR: the HDR clip is tone-mapped and the merge is 8-bit bt709 H.264', () => {
-    const hlg = { codec: 'hevc', pixFmt: 'yuv420p10le', isHdr: true, colorTransfer: 'arib-std-b67', colorPrimaries: 'bt2020', colorSpace: 'bt2020nc' }
+    const hlg = {
+      codec: 'hevc',
+      pixFmt: 'yuv420p10le',
+      isHdr: true,
+      colorTransfer: 'arib-std-b67',
+      colorPrimaries: 'bt2020',
+      colorSpace: 'bt2020nc'
+    }
     const a = args([input('h.mov', probe(hlg), 0, 1), input('s.mov', probe(), 0, 1)])
     expect(a).toContain('[0:v:0]zscale=tin=arib-std-b67:min=bt2020nc:pin=bt2020:t=linear,')
     expect(a).toContain(`[1:v:0]${NORM(1080, 1920, 30, 'yuv420p', '1.000')}[v1]`)
-    expect(a).toContain('-c:v h264_nvenc -preset p6 -tune hq -rc vbr -cq 18 -b:v 0 -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709')
+    expect(a).toContain(
+      '-c:v h264_nvenc -preset p6 -tune hq -rc vbr -cq 18 -b:v 0 -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709'
+    )
   })
 
-  it('all HDR: kept 10-bit HEVC with the first clip\'s tags', () => {
-    const hlg = { codec: 'hevc', pixFmt: 'yuv420p10le', isHdr: true, colorTransfer: 'arib-std-b67', colorPrimaries: 'bt2020', colorSpace: 'bt2020nc' }
+  it("all HDR: kept 10-bit HEVC with the first clip's tags", () => {
+    const hlg = {
+      codec: 'hevc',
+      pixFmt: 'yuv420p10le',
+      isHdr: true,
+      colorTransfer: 'arib-std-b67',
+      colorPrimaries: 'bt2020',
+      colorSpace: 'bt2020nc'
+    }
     const a = args([input('h.mov', probe(hlg), 0, 1), input('h.mov', probe(hlg), 2, 3)])
     expect(a).not.toContain('zscale')
     expect(a).toContain(`[0:v:0]${NORM(1080, 1920, 30, 'yuv420p10le', '1.000')}[v0]`)
-    expect(a).toContain('-c:v hevc_nvenc -preset p6 -tune hq -rc vbr -cq 18 -b:v 0 -profile:v main10 -pix_fmt p010le -color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc -tag:v hvc1')
+    expect(a).toContain(
+      '-c:v hevc_nvenc -preset p6 -tune hq -rc vbr -cq 18 -b:v 0 -profile:v main10 -pix_fmt p010le -color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc -tag:v hvc1'
+    )
   })
 
   it('any alpha clip: VP9 WebM with alpha, libvpx decoder before its -i, clear letterbox, Opus', () => {
@@ -93,7 +111,9 @@ describe('buildMergeArgs', () => {
     const inputs = [input('m.webm', alpha, 0, 2), input('b.mp4', probe(), 0, 1)]
     expect(mergeExt(mergePlan(inputs.map((i) => i.probe.video!)))).toBe('webm')
     const a = args(inputs)
-    expect(a).toMatch(/^-y -hide_banner -nostdin -c:v libvpx-vp9 -ss 0.000 -t 2.000 -i m.webm -ss 0.000 -t 1.000 -i b.mp4 /)
+    expect(a).toMatch(
+      /^-y -hide_banner -nostdin -c:v libvpx-vp9 -ss 0.000 -t 2.000 -i m.webm -ss 0.000 -t 1.000 -i b.mp4 /
+    )
     expect(a).toContain(
       '[1:v:0]format=yuva420p,scale=540:960:force_original_aspect_ratio=decrease,pad=540:960:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps=30,format=yuva420p,'
     )
@@ -102,6 +122,8 @@ describe('buildMergeArgs', () => {
   })
 
   it('refuses a source without a picture', () => {
-    expect(() => buildMergeArgs([input('a.wav', { ...probe(), video: null }, 0, 1), input('b.mov', probe(), 0, 1)], 'o.mp4', ALL)).toThrow(/video/)
+    expect(() =>
+      buildMergeArgs([input('a.wav', { ...probe(), video: null }, 0, 1), input('b.mov', probe(), 0, 1)], 'o.mp4', ALL)
+    ).toThrow(/video/)
   })
 })

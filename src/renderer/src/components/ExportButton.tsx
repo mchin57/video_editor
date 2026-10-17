@@ -61,8 +61,7 @@ export function ExportButton(): JSX.Element {
       const msg = e instanceof Error ? e.message : String(e)
       if (latestJob(useEditor.getState().jobs, 'export')?.status === 'canceled' || msg.includes('Export canceled')) {
         setCanceled(true)
-      }
-      else setError(msg)
+      } else setError(msg)
     } finally {
       setNotesFor(useProject.getState().project?.id ?? null)
       setBusy(false)
@@ -83,12 +82,20 @@ export function ExportButton(): JSX.Element {
         </button>
       )}
       {output && saveError && showNotes && (
-        <span className="max-w-[260px] truncate text-xs text-amber-400" title={saveError} data-testid="export-save-error">
+        <span
+          className="max-w-[260px] truncate text-xs text-amber-400"
+          title={saveError}
+          data-testid="export-save-error"
+        >
           Couldn't save the project: {saveError}
         </span>
       )}
       {output && saveSkipped && showNotes && (
-        <span className="max-w-[260px] truncate text-xs text-amber-400" title={saveSkipped} data-testid="export-save-skipped">
+        <span
+          className="max-w-[260px] truncate text-xs text-amber-400"
+          title={saveSkipped}
+          data-testid="export-save-skipped"
+        >
           {saveSkipped}
         </span>
       )}

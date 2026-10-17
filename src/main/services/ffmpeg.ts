@@ -94,8 +94,7 @@ export async function getCapabilities(force = false): Promise<FfmpegCapabilities
     execFileAsync(ffmpegPath, ['-hide_banner', '-filters'], { windowsHide: true }).then((r) => r.stdout)
   ])
 
-  const has = (text: string, name: string): boolean =>
-    new RegExp(`\\b${name}\\b`).test(text)
+  const has = (text: string, name: string): boolean => new RegExp(`\\b${name}\\b`).test(text)
 
   const encoders = {
     h264_nvenc: has(encodersOut, 'h264_nvenc'),

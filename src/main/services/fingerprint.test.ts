@@ -51,7 +51,12 @@ describe('fingerprintFile', () => {
     expect(empty.size).toBe(0)
     expect(empty.start).toBe(sha1(Buffer.alloc(0)))
     const b = bytes(3 * S)
-    expect(await fingerprintFile(fileOf('edge', b))).toEqual({ size: 3 * S, start: sha1(b), middle: sha1(b), end: sha1(b) })
+    expect(await fingerprintFile(fileOf('edge', b))).toEqual({
+      size: 3 * S,
+      start: sha1(b),
+      middle: sha1(b),
+      end: sha1(b)
+    })
   })
 
   it('samples a file just over 3 × S at start, floor((size - S) / 2) and the tail', async () => {
@@ -96,7 +101,12 @@ describe('sameFingerprint / fingerprintDiff', () => {
     expect(fingerprintDiff(fp, { ...fp })).toEqual([])
   })
   it('lists differing fields in the order size, start, middle, end', () => {
-    expect(fingerprintDiff(fp, { size: 11, start: 'x', middle: 'y', end: 'z' })).toEqual(['size', 'start', 'middle', 'end'])
+    expect(fingerprintDiff(fp, { size: 11, start: 'x', middle: 'y', end: 'z' })).toEqual([
+      'size',
+      'start',
+      'middle',
+      'end'
+    ])
     expect(fingerprintDiff(fp, { ...fp, end: 'z', start: 'x' })).toEqual(['start', 'end'])
   })
 })
@@ -109,7 +119,12 @@ describe('fingerprintId', () => {
   })
   it('same content → same id; any field change → a different id', () => {
     expect(fingerprintId({ ...fp })).toBe(fingerprintId(fp))
-    for (const other of [{ ...fp, size: 11 }, { ...fp, start: 'x' }, { ...fp, middle: 'x' }, { ...fp, end: 'x' }]) {
+    for (const other of [
+      { ...fp, size: 11 },
+      { ...fp, start: 'x' },
+      { ...fp, middle: 'x' },
+      { ...fp, end: 'x' }
+    ]) {
       expect(fingerprintId(other)).not.toBe(fingerprintId(fp))
     }
   })

@@ -163,10 +163,7 @@ export function buildMatteEncodeArgs(
  * Iterating the stream honours backpressure — the pipe is paused while the
  * consumer works. A trailing partial frame is dropped.
  */
-export async function* rawFrames(
-  chunks: AsyncIterable<Uint8Array>,
-  frameBytes: number
-): AsyncGenerator<Uint8Array> {
+export async function* rawFrames(chunks: AsyncIterable<Uint8Array>, frameBytes: number): AsyncGenerator<Uint8Array> {
   const frame = new Uint8Array(frameBytes)
   let filled = 0
   for await (const chunk of chunks) {

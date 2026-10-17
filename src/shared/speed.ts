@@ -30,9 +30,7 @@ export function hasSpeedRamp(c: Pick<VideoContent, 'speedRamp'>): boolean {
 }
 
 const clampSpeed = (v: number): number =>
-  typeof v === 'number' && Number.isFinite(v) && v > 0
-    ? Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v))
-    : 1
+  typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)) : 1
 
 /** The clip's ramp keyframes, sorted by source time with speeds clamped to the
  *  allowed range. Empty when no ramp. */
@@ -58,10 +56,7 @@ export function slowestSpeedBetween(c: Pick<VideoContent, 'speed' | 'speedRamp'>
  * Instantaneous speed at SOURCE second `s`: linear between ramp keyframes,
  * held flat outside them; the constant `videoSpeed` when no ramp.
  */
-export function videoSpeedAtSource(
-  c: Pick<VideoContent, 'speed' | 'speedRamp'>,
-  s: number
-): number {
+export function videoSpeedAtSource(c: Pick<VideoContent, 'speed' | 'speedRamp'>, s: number): number {
   const kfs = sortedRamp(c)
   if (kfs.length === 0) return videoSpeed(c)
   if (s <= kfs[0].atSec) return kfs[0].speed
@@ -95,11 +90,7 @@ export interface SpeedSegment {
  * boundaries at `a`, `b`, and every ramp keyframe strictly between them.
  * A constant-speed clip yields one flat segment.
  */
-export function speedSegments(
-  c: Pick<VideoContent, 'speed' | 'speedRamp'>,
-  a: number,
-  b: number
-): SpeedSegment[] {
+export function speedSegments(c: Pick<VideoContent, 'speed' | 'speedRamp'>, a: number, b: number): SpeedSegment[] {
   const lo = Math.min(a, b)
   const hi = Math.max(a, b)
   const bounds = [lo]
@@ -145,11 +136,7 @@ function segmentSource(seg: SpeedSegment, p: number): number {
  * (they're wall-clock additions layered on top by `shared/layers.ts`).
  * Returns a negative value when `b < a` (signed, so trim deltas compose).
  */
-export function playedBetween(
-  c: Pick<VideoContent, 'speed' | 'speedRamp'>,
-  a: number,
-  b: number
-): number {
+export function playedBetween(c: Pick<VideoContent, 'speed' | 'speedRamp'>, a: number, b: number): number {
   const total = speedSegments(c, a, b).reduce((sum, seg) => sum + segmentPlayed(seg, seg.s1), 0)
   return b >= a ? total : -total
 }

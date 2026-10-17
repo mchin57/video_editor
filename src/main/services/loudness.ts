@@ -40,14 +40,7 @@ export function buildLoudnessArgs(input: string, printFile: string, foldChannel:
     'ebur128=metadata=1',
     `ametadata=mode=print:file=${printFile}`
   ].join(',')
-  return [
-    '-hide_banner', '-nostdin', '-nostats',
-    '-i', input,
-    '-map', '0:a:0',
-    '-vn',
-    '-af', chain,
-    '-f', 'null', '-'
-  ]
+  return ['-hide_banner', '-nostdin', '-nostats', '-i', input, '-map', '0:a:0', '-vn', '-af', chain, '-f', 'null', '-']
 }
 
 /** A metadata value as a series number: finite and above ffmpeg's floor, rounded to 0.01 dB; else null. */
@@ -100,7 +93,11 @@ export function parseLoudnessPrint(text: string): LoudnessSeries {
 
 /** Measure `input` and write its series to `output` (atomically: the file only
  *  ever exists complete). The print log lives next to it and is always removed. */
-export async function generateLoudness(input: string, output: string, foldChannel: number | null = null): Promise<LoudnessSeries> {
+export async function generateLoudness(
+  input: string,
+  output: string,
+  foldChannel: number | null = null
+): Promise<LoudnessSeries> {
   const { ffmpeg } = await getBinaries()
   const dir = dirname(output)
   const printName = `${basename(output, '.json')}.print.txt`
@@ -166,7 +163,8 @@ export function createLimiter(max: number): <T>(run: () => Promise<T>) => Promis
       return await run()
     } finally {
       const next = waiting.shift()
-      if (next) next() // the slot passes straight to it: `active` is unchanged
+      if (next)
+        next() // the slot passes straight to it: `active` is unchanged
       else active--
     }
   }

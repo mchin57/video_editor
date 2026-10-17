@@ -79,7 +79,9 @@ function findAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset
 function requireAsset(assets: Map<string, MediaAsset>, mediaId: string): MediaAsset {
   const asset = findAsset(assets, mediaId)
   if (asset.status && asset.status !== 'ok') {
-    throw new Error(`Media "${mediaId}" (${asset.fileName}) is ${asset.status} on disk; the user has to fix it in the Library first.`)
+    throw new Error(
+      `Media "${mediaId}" (${asset.fileName}) is ${asset.status} on disk; the user has to fix it in the Library first.`
+    )
   }
   return asset
 }
@@ -100,7 +102,7 @@ async function cutClip(asset: MediaAsset, pieces: CutPiece[]): Promise<ToolConte
   })
 }
 
-export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<ToolContent[]> } = {
+export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<ToolContent[]> } = {
   list_media: async () => json([...(await projectAssets()).values()].map(describeAsset)),
 
   import_media: async ({ paths }) => {
@@ -178,7 +180,9 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
     // No file is read, so a Missing clip can be described too (no requireAsset).
     const asset = findAsset(await projectAssets(), mediaId)
     setMediaDescription(mediaId, description)
-    return text(description.trim() ? `Description saved for ${asset.fileName}.` : `Description removed from ${asset.fileName}.`)
+    return text(
+      description.trim() ? `Description saved for ${asset.fileName}.` : `Description removed from ${asset.fileName}.`
+    )
   },
 
   get_timeline: async () => json(await callRenderer('getTimeline', {})),
@@ -188,7 +192,12 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
     const enriched: SequenceItem[] = items.map((it) => {
       const asset = requireAsset(assets, it.mediaId)
       if (assetKind(asset) !== 'video') throw new Error(`${asset.fileName} is not a video clip`)
-      return { ...it, sourceDurationSec: asset.probe.durationSec, hasAudio: !!asset.probe.audio, aspect: assetAspect(asset) }
+      return {
+        ...it,
+        sourceDurationSec: asset.probe.durationSec,
+        hasAudio: !!asset.probe.audio,
+        aspect: assetAspect(asset)
+      }
     })
     // The preview plays proxies; wait for any still encoding (coalesced — cheap when ready).
     await Promise.all([...new Set(items.map((i) => i.mediaId))].map((id) => ensureProxy(id)))
@@ -273,15 +282,25 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
       const { frames, skippedStabilize } = await renderFrames(project, project.preset ?? 'reel', times, dir, comp)
       // Label + image per time, so each picture is captioned with its moment.
       const out: ToolContent[] = []
-      if (nested) out.push({ type: 'text', text: 'The user is inside a nested composition: these frames show it on its own, at its local times.' })
+      if (nested)
+        out.push({
+          type: 'text',
+          text: 'The user is inside a nested composition: these frames show it on its own, at its local times.'
+        })
       for (let k = 0; k < frames.length; k++) {
         const { path, shownSec } = frames[k]
-        const clamped = shownSec < times[k] - 1 / 30 ? ` — asked for ${r2(times[k])}s, which is past the end of the edit; this is its last frame` : ''
+        const clamped =
+          shownSec < times[k] - 1 / 30
+            ? ` — asked for ${r2(times[k])}s, which is past the end of the edit; this is its last frame`
+            : ''
         out.push({ type: 'text', text: `Finished frame @ ${r2(shownSec)}s (timeline)${clamped}` })
         out.push({ type: 'image', mimeType: 'image/jpeg', data: (await fsp.readFile(path)).toString('base64') })
       }
       if (skippedStabilize) {
-        out.push({ type: 'text', text: 'Note: stabilization is skipped in these frames, so stabilized clips may sit slightly differently than in the export.' })
+        out.push({
+          type: 'text',
+          text: 'Note: stabilization is skipped in these frames, so stabilized clips may sit slightly differently than in the export.'
+        })
       }
       return out
     } finally {
@@ -291,7 +310,11 @@ export const toolHandlers:{ [K in ToolName]: (args: ToolArgs[K]) => Promise<Tool
 
   request_feature: async (req) => {
     const r = await fileFeatureRequest(req)
-    return text(r.status === 'duplicate' ? `Already requested: "${req.title}" is open at ${r.where}` : `Filed as a GitHub issue: ${r.where}\n${r.entry}`)
+    return text(
+      r.status === 'duplicate'
+        ? `Already requested: "${req.title}" is open at ${r.where}`
+        : `Filed as a GitHub issue: ${r.where}\n${r.entry}`
+    )
   }
 }
 

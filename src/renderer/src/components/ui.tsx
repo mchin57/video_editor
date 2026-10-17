@@ -270,7 +270,15 @@ export function AngleField({
   return (
     <Field label={`${label} · ${Math.round(deg)}°`}>
       <div className="flex items-center gap-2">
-        <Slider ariaLabel={label} min={-180} max={180} step={1} value={deg} onChange={onChange} className="min-w-0 flex-1" />
+        <Slider
+          ariaLabel={label}
+          min={-180}
+          max={180}
+          step={1}
+          value={deg}
+          onChange={onChange}
+          className="min-w-0 flex-1"
+        />
         <NumberInput
           ariaLabel={`${label} degrees`}
           step="1"
@@ -444,7 +452,9 @@ function MenuPanel({
             }}
             className={
               inert
-                ? menuItemCls.replace('text-zinc-200', 'text-zinc-500').replace('hover:bg-white/10', 'cursor-not-allowed')
+                ? menuItemCls
+                    .replace('text-zinc-200', 'text-zinc-500')
+                    .replace('hover:bg-white/10', 'cursor-not-allowed')
                 : `${menuItemCls} cursor-default`
             }
           >
@@ -453,7 +463,9 @@ function MenuPanel({
               <span className="min-w-0">
                 <span>{item.label}</span>
                 {inert && item.reason && (
-                  <span className="mt-0.5 block max-w-[16rem] text-[10px] leading-snug text-zinc-500">{item.reason}</span>
+                  <span className="mt-0.5 block max-w-[16rem] text-[10px] leading-snug text-zinc-500">
+                    {item.reason}
+                  </span>
                 )}
               </span>
             </span>

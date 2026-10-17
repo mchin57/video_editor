@@ -22,23 +22,17 @@ test('keyframe opacity input drives the store and the preview fades', async ({ a
   await expect(opInputs).toHaveCount(2)
   await opInputs.nth(1).fill('20')
 
-  const kfs = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.layers[0].keyframes
-  )
+  const kfs = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers[0].keyframes)
   expect(kfs![0].opacity).toBeUndefined() // untouched keyframe stays absent (=1)
   expect(kfs![1].opacity).toBeCloseTo(0.2, 9)
 
   // Halfway (t=2) the interpolated opacity is 0.6 — the preview box carries it.
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(2))
-  const boxOpacity = await page
-    .locator('[data-resizebox]')
-    .evaluate((el) => getComputedStyle(el).opacity)
+  const boxOpacity = await page.locator('[data-resizebox]').evaluate((el) => getComputedStyle(el).opacity)
   expect(Number(boxOpacity)).toBeCloseTo(0.6, 2)
 
   // At/after the last keyframe it holds 0.2.
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(4))
-  const endOpacity = await page
-    .locator('[data-resizebox]')
-    .evaluate((el) => getComputedStyle(el).opacity)
+  const endOpacity = await page.locator('[data-resizebox]').evaluate((el) => getComputedStyle(el).opacity)
   expect(Number(endOpacity)).toBeCloseTo(0.2, 2)
 })

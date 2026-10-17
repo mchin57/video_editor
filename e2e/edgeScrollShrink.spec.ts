@@ -25,8 +25,7 @@ const scrollLeftOf = (page: Page): Promise<number> =>
 
 const startOf = (page: Page, id: string): Promise<number> =>
   page.evaluate(
-    (lid) =>
-      window.__reelStores.useProject.getState().project!.layers.find((l) => l.id === lid)!.startSec,
+    (lid) => window.__reelStores.useProject.getState().project!.layers.find((l) => l.id === lid)!.startSec,
     id
   )
 
@@ -40,9 +39,7 @@ async function arrangeFarOutClip(page: Page): Promise<void> {
   })
 }
 
-test('the scrollable width never shrinks while dragging a tile leftwards', async ({
-  appPage: page
-}) => {
+test('the scrollable width never shrinks while dragging a tile leftwards', async ({ appPage: page }) => {
   await arrangeFarOutClip(page)
 
   // Scroll out to the clip and grab it.
@@ -67,9 +64,7 @@ test('the scrollable width never shrinks while dragging a tile leftwards', async
   for (const w of widths) expect(w).toBeGreaterThanOrEqual(widthAtGrab)
 })
 
-test('reversing mid-drag (right, then left without releasing) still never shrinks', async ({
-  appPage: page
-}) => {
+test('reversing mid-drag (right, then left without releasing) still never shrinks', async ({ appPage: page }) => {
   // Owner-reported after the first fix: pinning the width ONCE at grab time
   // leaves a stale floor. Dragging right grows the natural width past it, so
   // dragging back left is free to shrink through that band and the runaway
@@ -99,9 +94,7 @@ test('reversing mid-drag (right, then left without releasing) still never shrink
   for (const w of widths) expect(w).toBeGreaterThanOrEqual(peak)
 })
 
-test('the width is released after the drag, so the track settles to its content', async ({
-  appPage: page
-}) => {
+test('the width is released after the drag, so the track settles to its content', async ({ appPage: page }) => {
   await arrangeFarOutClip(page)
   await page.getByTestId('tile-layer-L1').scrollIntoViewIfNeeded()
   const tile = page.getByTestId('tile-layer-L1')
@@ -119,9 +112,7 @@ test('the width is released after the drag, so the track settles to its content'
   await expect.poll(() => scrollWidth(page)).toBeLessThan(before)
 })
 
-test('a leftward drag moves the tile by the pointer distance, not a runaway multiple', async ({
-  appPage: page
-}) => {
+test('a leftward drag moves the tile by the pointer distance, not a runaway multiple', async ({ appPage: page }) => {
   await arrangeFarOutClip(page)
   await page.getByTestId('tile-layer-L1').scrollIntoViewIfNeeded()
   const tile = page.getByTestId('tile-layer-L1')

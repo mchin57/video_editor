@@ -93,10 +93,7 @@ describe('singleFlight', () => {
 
   it('different keys run independently', async () => {
     const flight = singleFlight<string>()
-    const [a, b] = await Promise.all([
-      flight('a', async () => 'A'),
-      flight('b', async () => 'B')
-    ])
+    const [a, b] = await Promise.all([flight('a', async () => 'A'), flight('b', async () => 'B')])
     expect([a, b]).toEqual(['A', 'B'])
   })
 

@@ -72,7 +72,13 @@ export function buildChecklist(project: Project, input: ChecklistInput): Checkli
   if (d >= 15 && d <= 90) {
     items.push(PASS('length', 'Length 30–90s', `${d.toFixed(0)}s — within the recommended range.`))
   } else if (d >= 7 && d < 15) {
-    items.push(WARN('length', 'Length 30–90s', `${d.toFixed(0)}s — short; fine for trend clips, but 30–90s usually retains better.`))
+    items.push(
+      WARN(
+        'length',
+        'Length 30–90s',
+        `${d.toFixed(0)}s — short; fine for trend clips, but 30–90s usually retains better.`
+      )
+    )
   } else if (d > 90 && d <= 120) {
     items.push(WARN('length', 'Length 30–90s', `${d.toFixed(0)}s — a touch long; tighten toward ≤90s.`))
   } else {
@@ -104,7 +110,11 @@ export function buildChecklist(project: Project, input: ChecklistInput): Checkli
     items.push(
       hits.length > 0
         ? PASS('keywords', 'Niche keywords spoken', `Said: ${hits.slice(0, 4).join(', ')}${hits.length > 4 ? '…' : ''}`)
-        : WARN('keywords', 'Niche keywords spoken', 'No niche keywords heard — Instagram transcribes audio for ranking.')
+        : WARN(
+            'keywords',
+            'Niche keywords spoken',
+            'No niche keywords heard — Instagram transcribes audio for ranking.'
+          )
     )
   }
 
@@ -117,7 +127,11 @@ export function buildChecklist(project: Project, input: ChecklistInput): Checkli
       ? PASS('safezones', 'Text clear of UI safe zones', `No platform UI overlays the ${format.name} frame.`)
       : intruding.length === 0
         ? PASS('safezones', 'Text clear of UI safe zones', 'No text under the caption bar or action rail.')
-        : WARN('safezones', 'Text clear of UI safe zones', `${intruding.length} overlay(s) may sit behind Instagram UI.`)
+        : WARN(
+            'safezones',
+            'Text clear of UI safe zones',
+            `${intruding.length} overlay(s) may sit behind Instagram UI.`
+          )
   )
 
   // 7. Vertical 9:16

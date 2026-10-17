@@ -106,7 +106,10 @@ describe('buildAss', () => {
     // CSS centres the stroke on the glyph edge and paint-order hides the inner
     // half; libass draws \bord wholly outside — verified 8px CSS ≈ 4px visible.
     const withStroke = (pill: boolean): string =>
-      buildAss([overlay({ pill: { enabled: pill, color: '#000000cc', padPx: 18 }, stroke: { widthPx: 8, color: '#000000' } })], target)
+      buildAss(
+        [overlay({ pill: { enabled: pill, color: '#000000cc', padPx: 18 }, stroke: { widthPx: 8, color: '#000000' } })],
+        target
+      )
     expect(withStroke(false)).toContain('\\bord4\\3c&H000000&')
     expect(withStroke(true)).not.toContain('\\bord4')
   })
@@ -124,7 +127,9 @@ describe('buildAss', () => {
     // …scaled with the layer/output, and absent whenever something else
     // separates the text (a pill, an outline, a shadow).
     expect(buildAss([overlay({ decoScale: 2 })], target)).toContain('\\yshad5.4')
-    expect(buildAss([overlay({ pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)).not.toContain('\\yshad')
+    expect(buildAss([overlay({ pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)).not.toContain(
+      '\\yshad'
+    )
     expect(buildAss([overlay({ stroke: { widthPx: 6, color: '#000000' } })], target)).not.toContain('\\yshad')
   })
 
@@ -156,7 +161,10 @@ describe('buildAss', () => {
     })
 
     it('falls back to libass’s own box when the layout measured none', () => {
-      const s = buildAss([overlay({ lines: undefined, pill: { enabled: true, color: '#000000cc', padPx: 18 } })], target)
+      const s = buildAss(
+        [overlay({ lines: undefined, pill: { enabled: true, color: '#000000cc', padPx: 18 } })],
+        target
+      )
       const [ev] = events(s)
       expect(ev).toContain(',Pill,')
       expect(ev).toContain('\\3c&H000000&\\3a&H33&\\bord18')
@@ -170,7 +178,14 @@ describe('buildAss', () => {
 
   it('rotates every piece of a block about its centre (captions)', () => {
     const s = buildAss(
-      [overlay({ text: TWO, lines: twoLines(true), rotationDeg: 15, pill: { enabled: true, color: '#000000cc', padPx: 18 } })],
+      [
+        overlay({
+          text: TWO,
+          lines: twoLines(true),
+          rotationDeg: 15,
+          pill: { enabled: true, color: '#000000cc', padPx: 18 }
+        })
+      ],
       target
     )
     const ev = events(s)
@@ -243,7 +258,9 @@ describe('buildAss', () => {
         { start: 0, end: 2, cx: 540, baseline: 552 + drop },
         { start: 3, end: 5, cx: 540, baseline: 647 + drop }
       ]
-      const ev = events(buildAss([anim({ in: 'typewriter', inSec: 0.5, out: 'none' }, { text: 'ab cd', lines })], target))
+      const ev = events(
+        buildAss([anim({ in: 'typewriter', inSec: 0.5, out: 'none' }, { text: 'ab cd', lines })], target)
+      )
       const line1 = ev.filter((e) => e.includes('\\pos(540,552)'))
       const line2 = ev.filter((e) => e.includes('\\pos(540,647)'))
       // line 1: "a" (0–0.1s), then whole from 0.1s — merged, not one per step
@@ -257,7 +274,12 @@ describe('buildAss', () => {
 
     it('typewriter keeps the pill box up for the whole reveal', () => {
       const s = buildAss(
-        [anim({ in: 'typewriter', inSec: 0.9, out: 'none' }, { text: TWO, lines: twoLines(true), pill: { enabled: true, color: '#000000cc', padPx: 18 } })],
+        [
+          anim(
+            { in: 'typewriter', inSec: 0.9, out: 'none' },
+            { text: TWO, lines: twoLines(true), pill: { enabled: true, color: '#000000cc', padPx: 18 } }
+          )
+        ],
         target
       )
       const boxes = events(s).filter((e) => e.startsWith('Dialogue: 0,'))
@@ -273,7 +295,9 @@ describe('buildAss', () => {
 
     it('word highlight opens each later line with a \\k delay for the words before it', () => {
       // 4 words over 3s = 75cs each; line 2 starts at word 3.
-      const ev = events(buildAss([anim({ in: 'wordHighlight', out: 'none' }, { text: TWO, lines: twoLines() })], target))
+      const ev = events(
+        buildAss([anim({ in: 'wordHighlight', out: 'none' }, { text: TWO, lines: twoLines() })], target)
+      )
       expect(ev[0].endsWith('}{\\k75}Hook {\\k75}text')).toBe(true)
       expect(ev[1].endsWith('}{\\k150}{\\k75}stays {\\k75}put')).toBe(true)
     })
@@ -299,7 +323,6 @@ describe('buildAss', () => {
     })
   })
 })
-
 
 // Sparkles were verified by rendering the ACTUAL generated ASS over a black
 // base and reading `signalstats` YAVG in a crop around one sparkle: it rose

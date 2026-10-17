@@ -24,9 +24,13 @@ const W = 1080
 const H = 1920
 
 function frameAt(file: string, t: number): (x: number, y: number) => number[] {
-  const buf = execFileSync(FFMPEG, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
-    maxBuffer: W * H * 3 + 1024
-  })
+  const buf = execFileSync(
+    FFMPEG,
+    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    {
+      maxBuffer: W * H * 3 + 1024
+    }
+  )
   return (x, y) => {
     const i = (y * W + x) * 3
     return [buf[i], buf[i + 1], buf[i + 2]]
@@ -34,7 +38,11 @@ function frameAt(file: string, t: number): (x: number, y: number) => number[] {
 }
 
 /** Centroid of bright ink in a y band. */
-function inkCentroid(px: (x: number, y: number) => number[], y0: number, y1: number): { x: number; y: number; n: number } {
+function inkCentroid(
+  px: (x: number, y: number) => number[],
+  y0: number,
+  y1: number
+): { x: number; y: number; n: number } {
   let sx = 0
   let sy = 0
   let n = 0
@@ -57,7 +65,22 @@ test('moving text exports along the same straight path the preview draws', async
 
   const dir = mkdtempSync(join(tmpdir(), 'reel-motionexport-'))
   const bg = join(dir, 'black.mp4')
-  execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=1080x1920:r=30:d=4', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', bg])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=1080x1920:r=30:d=4',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    bg
+  ])
 
   await page.evaluate(
     async ({ bg }) => {

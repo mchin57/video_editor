@@ -52,7 +52,11 @@ function volumeLevelRows(): ContextMenuEntry[] {
         label: `${l.name} · ${l.targetLufs} LUFS · ${clips(n)}`,
         testId: `level-menu-${l.id}`,
         submenu: [
-          { label: 'Set loudness…', testId: 'level-set-loudness', onSelect: () => dialog({ mode: 'loudness', levelId: l.id }) },
+          {
+            label: 'Set loudness…',
+            testId: 'level-set-loudness',
+            onSelect: () => dialog({ mode: 'loudness', levelId: l.id })
+          },
           {
             label: 'Rename…',
             testId: 'level-rename',
@@ -120,10 +124,7 @@ export function FileMenu(): JSX.Element {
       >
         File ▾
       </button>
-      <span
-        className="max-w-[220px] truncate text-xs text-zinc-400"
-        title={filePath ?? undefined}
-      >
+      <span className="max-w-[220px] truncate text-xs text-zinc-400" title={filePath ?? undefined}>
         {label}
         {dirty && (
           <span className="ml-1 text-amber-400" title="Unsaved changes">
@@ -154,11 +155,7 @@ export function FileMenu(): JSX.Element {
           />
           <div className="my-1 h-px bg-white/10" />
           <MenuItem label="Import folder…" shortcut="" onClick={run(() => importFolder.mutate())} />
-          <MenuItem
-            label="Extract audio from clip…"
-            shortcut=""
-            onClick={run(() => extractAudio.mutate())}
-          />
+          <MenuItem label="Extract audio from clip…" shortcut="" onClick={run(() => extractAudio.mutate())} />
           <div className="my-1 h-px bg-white/10" />
           <MenuItem
             label="Convert old projects…"

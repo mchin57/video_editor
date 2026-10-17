@@ -42,7 +42,13 @@ export interface TimelineSummary {
 const r3 = (n: number): number => Math.round(n * 1000) / 1000
 
 function layerSummary(l: Layer): LayerSummary {
-  const s: LayerSummary = { id: l.id, kind: l.content.kind, startSec: r3(l.startSec), endSec: r3(l.endSec), hidden: l.hidden }
+  const s: LayerSummary = {
+    id: l.id,
+    kind: l.content.kind,
+    startSec: r3(l.startSec),
+    endSec: r3(l.endSec),
+    hidden: l.hidden
+  }
   const c = l.content
   if (c.kind === 'video') Object.assign(s, { mediaId: c.mediaId, inSec: r3(c.inSec), outSec: r3(c.outSec) })
   else if (c.kind === 'image') s.mediaId = c.mediaId

@@ -61,10 +61,7 @@ export const MIN_SOUND_SEC = 0.15
  *
  * `silences` is ffmpeg silencedetect output in source seconds.
  */
-export function decodeStartSec(
-  silences: { start: number; end: number }[],
-  durationSec: number
-): number {
+export function decodeStartSec(silences: { start: number; end: number }[], durationSec: number): number {
   let cursor = 0
   let onset: number | null = null
   for (const s of [...silences].sort((a, b) => a.start - b.start)) {
@@ -124,11 +121,19 @@ export function buildTranscribeExtractArgs(
     ...(gainDb > 0 ? [`volume=${gainDb}dB`, `alimiter=limit=${LIMIT_LINEAR}:level=0`] : [])
   ]
   return [
-    '-y', '-hide_banner', '-nostdin',
-    '-i', input,
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    input,
     '-vn',
     ...(chain.length > 0 ? ['-af', chain.join(',')] : []),
-    '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+    '-ar',
+    '16000',
+    '-ac',
+    '1',
+    '-c:a',
+    'pcm_s16le',
     wav
   ]
 }

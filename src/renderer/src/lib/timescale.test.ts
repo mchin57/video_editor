@@ -25,9 +25,10 @@ describe('scaleTicks', () => {
       expect(ticks[0]).toBe(0)
       expect(ticks.every((t) => t % 2 === 0)).toBe(true)
     }
-    for (const total of [1e300, Number.MAX_VALUE]) expect(scaleTicks(total, 2).length).toBeLessThanOrEqual(MAX_SCALE_TICKS)
+    for (const total of [1e300, Number.MAX_VALUE])
+      expect(scaleTicks(total, 2).length).toBeLessThanOrEqual(MAX_SCALE_TICKS)
     const big = scaleTicks(300000, 2)
-    expect(big[big.length - 1]).toBeGreaterThan(300000 - 300000 / MAX_SCALE_TICKS * 2)
+    expect(big[big.length - 1]).toBeGreaterThan(300000 - (300000 / MAX_SCALE_TICKS) * 2)
   })
 
   it('survives a non-finite or zero total / step', () => {

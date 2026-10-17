@@ -46,9 +46,7 @@ function createWindow(): void {
     win.webContents.on('render-process-gone', (_e, details) =>
       console.log('[render-process-gone]', JSON.stringify(details))
     )
-    win.webContents.on('preload-error', (_e, path, error) =>
-      console.log('[preload-error]', path, error?.message)
-    )
+    win.webContents.on('preload-error', (_e, path, error) => console.log('[preload-error]', path, error?.message))
   }
 
   win.webContents.setWindowOpenHandler((details) => {

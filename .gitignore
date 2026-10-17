@@ -68,3 +68,4 @@ docs/.obsidian/
 # Playwright output
 test-results/
 playwright-report/
+.playwright-mcp/

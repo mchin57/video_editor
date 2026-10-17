@@ -26,14 +26,7 @@ import { copyAtomic, linkOrCopy } from './linkOrCopy'
 import { hashFile } from './mediaStore'
 import { toRelativePath } from './mediaRef'
 import { ensureProjectFolders } from './projectStore'
-import {
-  cacheDir,
-  docPath,
-  generatedRoot,
-  safeFileName,
-  transcriptPath,
-  uniqueFileName
-} from './projectLayout'
+import { cacheDir, docPath, generatedRoot, safeFileName, transcriptPath, uniqueFileName } from './projectLayout'
 import {
   conversionFolder,
   generatedFileName,
@@ -149,7 +142,11 @@ async function findNearby(ctx: Ctx, id: string, fileName?: string): Promise<stri
 const unknown = (): MediaRecord['fingerprint'] => ({ ...UNKNOWN_FINGERPRINT })
 
 /** A record pointing at `path` (which exists and is the right content). */
-async function pointingAt(ctx: Ctx, base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>, path: string): Promise<MediaRecord> {
+async function pointingAt(
+  ctx: Ctx,
+  base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>,
+  path: string
+): Promise<MediaRecord> {
   ctx.report.found++
   return {
     ...base,
@@ -161,21 +158,34 @@ async function pointingAt(ctx: Ctx, base: Omit<MediaRecord, 'relativePath' | 'ab
 
 /** A record for an original that couldn't be located: it shows Missing, and
  *  Relink ("Update path anyway") fills in the real fingerprint. */
-function missingRecord(ctx: Ctx, base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>, oldPath: string): MediaRecord {
+function missingRecord(
+  ctx: Ctx,
+  base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>,
+  oldPath: string
+): MediaRecord {
   ctx.report.missing.push(base.fileName)
   return { ...base, relativePath: toRelativePath(ctx.root, oldPath), absolutePath: oldPath, fingerprint: unknown() }
 }
 
 /** The user's footage: where the store says, if it still holds the imported
  *  bytes; else beside the legacy `.reel`; else missing. */
-async function footageRecord(ctx: Ctx, rec: StoreRecord, base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>): Promise<MediaRecord> {
-  const path = (await hashOf(rec.originalPath)) === rec.id ? rec.originalPath : await findNearby(ctx, rec.id, rec.fileName)
+async function footageRecord(
+  ctx: Ctx,
+  rec: StoreRecord,
+  base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>
+): Promise<MediaRecord> {
+  const path =
+    (await hashOf(rec.originalPath)) === rec.id ? rec.originalPath : await findNearby(ctx, rec.id, rec.fileName)
   return path ? pointingAt(ctx, base, path) : missingRecord(ctx, base, rec.originalPath)
 }
 
 /** App-generated media: copied into `generated/` under a legal, unique name.
  *  A re-run after a failed attempt reuses its own earlier copy. */
-async function generatedRecord(ctx: Ctx, rec: StoreRecord, base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>): Promise<MediaRecord> {
+async function generatedRecord(
+  ctx: Ctx,
+  rec: StoreRecord,
+  base: Omit<MediaRecord, 'relativePath' | 'absolutePath' | 'fingerprint'>
+): Promise<MediaRecord> {
   const gen = { ...base, generated: true }
   const srcHash = await hashOf(rec.originalPath)
   // Its file stays where the old store had it (gone); generated: true keeps it
@@ -185,7 +195,10 @@ async function generatedRecord(ctx: Ctx, rec: StoreRecord, base: Omit<MediaRecor
   const name = generatedFileName(safeFileName(rec.fileName), rec.originalPath)
   let dest = join(dir, name)
   if ((await hashOf(dest)) !== srcHash) {
-    dest = join(dir, uniqueFileName(name, (n) => existsSync(join(dir, n))))
+    dest = join(
+      dir,
+      uniqueFileName(name, (n) => existsSync(join(dir, n)))
+    )
     await copyAtomic(rec.originalPath, dest)
     ctx.report.copied++
   }
@@ -289,7 +302,13 @@ export async function convertLegacyProject(
   const backup = legacyBackupPath(reelPath)
   await fsp.rename(reelPath, backup)
   try {
-    const saved = { ...doc, name: basename(root), version: PROJECT_VERSION, updatedAt: new Date().toISOString(), library }
+    const saved = {
+      ...doc,
+      name: basename(root),
+      version: PROJECT_VERSION,
+      updatedAt: new Date().toISOString(),
+      library
+    }
     await replaceFile(docPath(root), JSON.stringify(saved, null, 2))
   } catch (error) {
     await fsp.rename(backup, reelPath).catch(() => {})

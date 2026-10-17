@@ -5,14 +5,7 @@
  * dependency-free so it can be unit-tested.
  */
 
-import type {
-  AudioClip,
-  CaptionSegment,
-  FreezeHold,
-  Layer,
-  LayerKeyframe,
-  VideoContent
-} from '@shared/project'
+import type { AudioClip, CaptionSegment, FreezeHold, Layer, LayerKeyframe, VideoContent } from '@shared/project'
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
 import { extractedAudioClip } from '@shared/volumeLevels'
@@ -55,10 +48,7 @@ const clampTo = (n: number, lo: number, hi: number): number => Math.max(lo, Math
  * each half would hold its own first/last keyframe flat and the layer would jump
  * where the two pieces meet.
  */
-function splitLayerKeyframes(
-  layer: Layer,
-  atSec: number
-): [LayerKeyframe[] | undefined, LayerKeyframe[] | undefined] {
+function splitLayerKeyframes(layer: Layer, atSec: number): [LayerKeyframe[] | undefined, LayerKeyframe[] | undefined] {
   const kfs = layer.keyframes
   if (!kfs || kfs.length === 0) return [undefined, undefined]
   const cut = atSec - layer.startSec
@@ -100,11 +90,7 @@ export function reorder<T>(items: T[], from: number, to: number): T[] {
  * source-anchored, so both halves keep the full ramp list unchanged; transform
  * keyframes are start-relative and get partitioned (`splitLayerKeyframes`).
  */
-export function splitVideoLayer(
-  layer: Layer,
-  atSec: number,
-  makeId: () => string
-): [Layer, Layer] | null {
+export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
   if (layer.content.kind !== 'video') return null
   const eps = EPS
   if (atSec <= layer.startSec + eps || atSec >= layer.endSec - eps) return null
@@ -166,11 +152,7 @@ export function splitVideoLayer(
  *   animation mid-block). `wordHighlight` is the exception: it spans the whole
  *   window rather than being an entrance, so both halves keep it.
  */
-export function splitStaticLayer(
-  layer: Layer,
-  atSec: number,
-  makeId: () => string
-): [Layer, Layer] | null {
+export function splitStaticLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
   const kind = layer.content.kind
   if (kind !== 'text' && kind !== 'image') return null
   if (atSec <= layer.startSec + EPS || atSec >= layer.endSec - EPS) return null
@@ -204,12 +186,10 @@ export function splitCaptionSegment(
 ): [CaptionSegment, CaptionSegment] | null {
   if (atSec <= seg.startSec + EPS || atSec >= seg.endSec - EPS) return null
   const words = seg.words ?? []
-  const onLeft = (w: { startSec: number; endSec: number }): boolean =>
-    (w.startSec + w.endSec) / 2 < atSec
+  const onLeft = (w: { startSec: number; endSec: number }): boolean => (w.startSec + w.endSec) / 2 < atSec
   const leftWords = words.filter(onLeft)
   const rightWords = words.filter((w) => !onLeft(w))
-  const textOf = (ws: typeof words): string =>
-    ws.length ? ws.map((w) => w.text).join(' ') : seg.text
+  const textOf = (ws: typeof words): string => (ws.length ? ws.map((w) => w.text).join(' ') : seg.text)
   return [
     { ...seg, endSec: atSec, words: leftWords, text: textOf(leftWords) },
     { ...seg, id: makeId(), startSec: atSec, words: rightWords, text: textOf(rightWords) }
@@ -257,28 +237,15 @@ export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
  * same number and each honors its own mapping. That's the whole reason this is
  * one function per kind with a shared signature.
  */
-export function trimLayerEdge(
-  layer: Layer,
-  edge: TrimEdge,
-  deltaSec: number,
-  srcDurSec = 0
-): Trimmed<Layer> {
+export function trimLayerEdge(layer: Layer, edge: TrimEdge, deltaSec: number, srcDurSec = 0): Trimmed<Layer> {
   const c = layer.content
   let tile = layer
   if (c.kind === 'video') {
     const maxSrc = srcDurSec > 0 ? srcDurSec : c.outSec
     tile =
       edge === 'start'
-        ? trimVideoStart(
-            layer,
-            c,
-            clampTo(sourceAfterPlayed(c, c.inSec, deltaSec), 0, c.outSec - MIN_SOURCE_SEC)
-          )
-        : trimVideoEnd(
-            layer,
-            c,
-            clampTo(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc)
-          )
+        ? trimVideoStart(layer, c, clampTo(sourceAfterPlayed(c, c.inSec, deltaSec), 0, c.outSec - MIN_SOURCE_SEC))
+        : trimVideoEnd(layer, c, clampTo(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc))
   } else if (edge === 'start') {
     tile = { ...layer, startSec: clampTo(layer.startSec + deltaSec, 0, layer.endSec - MIN_LAYER_SEC) }
   } else {
@@ -291,11 +258,7 @@ export function trimLayerEdge(
 /** Trim a caption segment's `edge` by `deltaSec`, keeping a minimum window.
  *  Word timings are left alone — they're absolute, and a trimmed caption simply
  *  shows fewer of them. */
-export function trimCaptionEdge(
-  seg: CaptionSegment,
-  edge: TrimEdge,
-  deltaSec: number
-): Trimmed<CaptionSegment> {
+export function trimCaptionEdge(seg: CaptionSegment, edge: TrimEdge, deltaSec: number): Trimmed<CaptionSegment> {
   const tile: CaptionSegment =
     edge === 'start'
       ? { ...seg, startSec: clampTo(seg.startSec + deltaSec, 0, seg.endSec - MIN_CAPTION_SEC) }
@@ -309,12 +272,7 @@ export function trimCaptionEdge(
  * moves the out-point, bounded by the source duration (`srcDurSec`, falling back
  * to the clip's own out-point the way the timeline's edge drag does).
  */
-export function trimAudioEdge(
-  clip: AudioClip,
-  edge: TrimEdge,
-  deltaSec: number,
-  srcDurSec = 0
-): Trimmed<AudioClip> {
+export function trimAudioEdge(clip: AudioClip, edge: TrimEdge, deltaSec: number, srcDurSec = 0): Trimmed<AudioClip> {
   const maxOut = srcDurSec > 0 ? srcDurSec : clip.outSec > 0 ? clip.outSec : 1
   const effOut = effectiveOut(clip, maxOut)
   if (edge === 'start') {

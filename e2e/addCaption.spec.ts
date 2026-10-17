@@ -7,12 +7,22 @@
  */
 import { test, expect } from './fixtures'
 
-test('＋ Caption adds a lane-styled caption at the playhead; undo removes it; S splits it', async ({ appPage: page }) => {
+test('＋ Caption adds a lane-styled caption at the playhead; undo removes it; S splits it', async ({
+  appPage: page
+}) => {
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1.5))
-  const read = (): Promise<{ enabled: boolean; segs: { id: string; startSec: number; endSec: number; text: string; style?: unknown }[]; sel: string | null }> =>
+  const read = (): Promise<{
+    enabled: boolean
+    segs: { id: string; startSec: number; endSec: number; text: string; style?: unknown }[]
+    sel: string | null
+  }> =>
     page.evaluate(() => {
       const p = window.__reelStores.useProject.getState().project!
-      return { enabled: p.captions.enabled, segs: p.captions.segments, sel: window.__reelStores.useUi.getState().selectedCaptionId }
+      return {
+        enabled: p.captions.enabled,
+        segs: p.captions.segments,
+        sel: window.__reelStores.useUi.getState().selectedCaptionId
+      }
     })
   expect((await read()).segs).toHaveLength(0)
 

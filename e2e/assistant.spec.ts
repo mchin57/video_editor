@@ -16,12 +16,36 @@ import { FFMPEG, FFPROBE } from './bin'
 
 const ROOT = resolve(__dirname, '..')
 const MCP = join(ROOT, 'out', 'main', 'mcp.js')
-const TOOLS = ['add_description', 'export_video', 'get_frames', 'get_text', 'get_timeline', 'get_transcript', 'import_media', 'list_media', 'merge_clips', 'place_sequence', 'remove_items', 'render_frame', 'request_feature', 'set_playhead', 'set_text', 'split_clip', 'trim_clip', 'undo']
+const TOOLS = [
+  'add_description',
+  'export_video',
+  'get_frames',
+  'get_text',
+  'get_timeline',
+  'get_transcript',
+  'import_media',
+  'list_media',
+  'merge_clips',
+  'place_sequence',
+  'remove_items',
+  'render_frame',
+  'request_feature',
+  'set_playhead',
+  'set_text',
+  'split_clip',
+  'trim_clip',
+  'undo'
+]
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
-const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+const textOf = (r: ToolResult): string =>
+  r.content
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text)
+    .join('\n')
 
-const pipeOf = (app: ElectronApplication): Promise<string> => app.evaluate(() => process.env.REEL_ASSISTANT_PIPE as string)
+const pipeOf = (app: ElectronApplication): Promise<string> =>
+  app.evaluate(() => process.env.REEL_ASSISTANT_PIPE as string)
 
 // Every client connect() makes is closed in afterEach, so a failed assertion
 // can never leave a `node out/main/mcp.js` child alive for the rest of the run.
@@ -49,7 +73,10 @@ async function connect(pipe: string): Promise<Client> {
 const call = async (c: Client, name: string, args: Record<string, unknown> = {}): Promise<ToolResult> =>
   (await c.callTool({ name, arguments: args })) as ToolResult
 
-test('lists the tools; an unknown media id on an empty library says to import first', async ({ electronApp, appPage: _page }) => {
+test('lists the tools; an unknown media id on an empty library says to import first', async ({
+  electronApp,
+  appPage: _page
+}) => {
   const c = await connect(await pipeOf(electronApp))
   expect((await c.listTools()).tools.map((t) => t.name).sort()).toEqual(TOOLS)
   const r = await call(c, 'get_transcript', { mediaId: 'nope' })
@@ -72,7 +99,10 @@ test('files a feature request as an issue once', async ({ electronApp, appPage: 
   const req = { title: 'Beat snap', problem: 'Wanted cuts on the beat of the music.', proposal: 'detect_beats tool' }
   expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Filed as a GitHub issue/)
   expect(textOf(await call(c, 'request_feature', req))).toMatch(/^Already requested/)
-  const rows = readFileSync(sink, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const rows = readFileSync(sink, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
   expect(rows).toHaveLength(1)
   expect(rows[0].title).toBe('Beat snap')
   expect(rows[0].labels).toEqual(['enhancement', 'assistant'])
@@ -105,10 +135,27 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   const clip = (name: string, color: string): string => {
     const out = join(dir, name)
     execFileSync(FFMPEG, [
-      '-y', '-v', 'error',
-      '-f', 'lavfi', '-i', `color=c=${color}:s=540x960:r=30:d=4`,
-      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
-      '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', out
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${color}:s=540x960:r=30:d=4`,
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=4',
+      '-shortest',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-c:a',
+      'aac',
+      out
     ])
     return out
   }
@@ -145,7 +192,10 @@ test('rough cut in the given order, undone in one step, then exported', async ({
 
   const historyBefore = await page.evaluate(() => window.__reelStores.useProject.getState().past.length)
   const placed = await call(c, 'place_sequence', {
-    items: [{ mediaId: B, inSec: 1, outSec: 3 }, { mediaId: A, inSec: 0.5, outSec: 2 }]
+    items: [
+      { mediaId: B, inSec: 1, outSec: 3 },
+      { mediaId: A, inSec: 0.5, outSec: 2 }
+    ]
   })
   expect(placed.isError).toBeFalsy()
 
@@ -173,13 +223,20 @@ test('rough cut in the given order, undone in one step, then exported', async ({
   expect(undone.undone).toBe(true)
   expect(undone.timeline.layers).toEqual([])
 
-  await call(c, 'place_sequence', { items: [{ mediaId: B, inSec: 1, outSec: 3 }, { mediaId: A, inSec: 0.5, outSec: 2 }] })
+  await call(c, 'place_sequence', {
+    items: [
+      { mediaId: B, inSec: 1, outSec: 3 },
+      { mediaId: A, inSec: 0.5, outSec: 2 }
+    ]
+  })
   const first = JSON.parse(textOf(await call(c, 'export_video', { fileName: 'cut' }))) as { path: string }
   const second = JSON.parse(textOf(await call(c, 'export_video', { fileName: 'cut' }))) as { path: string }
   expect(first.path).toMatch(/[\\/]cut\.mp4$/)
   expect(second.path).toMatch(/[\\/]cut \(2\)\.mp4$/)
   const duration = Number(
-    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', first.path]).toString().trim()
+    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', first.path])
+      .toString()
+      .trim()
   )
   expect(duration).toBeGreaterThan(3.4)
   expect(duration).toBeLessThan(3.7)
@@ -204,24 +261,48 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const src = join(dir, 'clip.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-v', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=30:d=4',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
-    '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', src
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=540x960:r=30:d=4',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=4',
+    '-shortest',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-c:a',
+    'aac',
+    src
   ])
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [src] }))) as { imported: { id: string }[] }
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [src] }))) as {
+    imported: { id: string }[]
+  }
   const id = imported[0].id
-  const mediaIds = (): Promise<string[]> => page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)
+  const mediaIds = (): Promise<string[]> =>
+    page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)
   const probeDur = (f: string): number =>
-    Number(execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString().trim())
+    Number(
+      execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString().trim()
+    )
   type Created = { id: string; fileName: string; path: string; durationSec: number; fromSourceSec: [number, number] }
 
   // Refused before any encode: nothing is added.
   const before = await mediaIds()
   expect(textOf(await call(c, 'split_clip', { mediaId: id, times: [9] }))).toContain('not inside the clip')
   expect(textOf(await call(c, 'split_clip', { mediaId: id, times: [1, 1.05] }))).toContain('shorter than 0.1s')
-  expect(textOf(await call(c, 'trim_clip', { mediaId: id, startSec: 3, endSec: 2 }))).toContain('must be after the start')
+  expect(textOf(await call(c, 'trim_clip', { mediaId: id, startSec: 3, endSec: 2 }))).toContain(
+    'must be after the start'
+  )
   expect(await mediaIds()).toEqual(before)
 
   // Split at two points (any order) → three back-to-back clips, in order.
@@ -229,7 +310,11 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
   expect(split.isError).toBeFalsy()
   const parts = (JSON.parse(textOf(split)) as { created: Created[] }).created
   expect(parts.map((p) => p.fileName)).toEqual(['clip (cut 1).mp4', 'clip (cut 2).mp4', 'clip (cut 3).mp4'])
-  expect(parts.map((p) => p.fromSourceSec)).toEqual([[0, 1], [1, 2.5], [2.5, 4]])
+  expect(parts.map((p) => p.fromSourceSec)).toEqual([
+    [0, 1],
+    [1, 2.5],
+    [2.5, 4]
+  ])
   const generated = join(projectsDir, 'E2E', 'generated')
   for (const [i, want] of [1, 1.5, 1.5].entries()) {
     expect(parts[i].path).toBe(join(generated, parts[i].fileName))
@@ -237,7 +322,9 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
   }
 
   // Trim keeps one window; an end past the clip is clamped.
-  const trim = JSON.parse(textOf(await call(c, 'trim_clip', { mediaId: id, startSec: 0.5, endSec: 99 }))) as { created: Created[] }
+  const trim = JSON.parse(textOf(await call(c, 'trim_clip', { mediaId: id, startSec: 0.5, endSec: 99 }))) as {
+    created: Created[]
+  }
   expect(trim.created.map((p) => [p.fileName, p.fromSourceSec])).toEqual([['clip (cut).mp4', [0.5, 4]]])
   expect(probeDur(trim.created[0].path)).toBeCloseTo(3.5, 1)
 
@@ -248,7 +335,11 @@ test('split_clip and trim_clip save new clips to generated/ and the library; bad
 
   // #16: undoing the trim takes its clip out of the LIBRARY while the timeline is
   // unchanged — the reply must say so, naming the file.
-  const undo = JSON.parse(textOf(await call(c, 'undo'))) as { undone: boolean; note: string; changes: { library: { removed: string[] } } }
+  const undo = JSON.parse(textOf(await call(c, 'undo'))) as {
+    undone: boolean
+    note: string
+    changes: { library: { removed: string[] } }
+  }
   expect(undo.undone).toBe(true)
   expect(undo.changes.library.removed).toEqual([trim.created[0].id])
   expect(undo.note).toBe('Undid: removed 1 clip from the library (clip (cut).mp4).')
@@ -265,29 +356,58 @@ test('merge_clips joins windows into ONE new clip in generated/; a bad window ch
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const src = join(dir, 'clip.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-v', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=30:d=4',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
-    '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', src
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=540x960:r=30:d=4',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=4',
+    '-shortest',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-c:a',
+    'aac',
+    src
   ])
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [src] }))) as { imported: { id: string }[] }
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [src] }))) as {
+    imported: { id: string }[]
+  }
   const id = imported[0].id
-  const mediaIds = (): Promise<string[]> => page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)
+  const mediaIds = (): Promise<string[]> =>
+    page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)
 
   const before = await mediaIds()
-  expect(textOf(await call(c, 'merge_clips', { items: [{ mediaId: id }, { mediaId: id, inSec: 3, outSec: 9 }] }))).toContain(
-    "can't be after the clip's 4s (clip 2)"
-  )
+  expect(
+    textOf(await call(c, 'merge_clips', { items: [{ mediaId: id }, { mediaId: id, inSec: 3, outSec: 9 }] }))
+  ).toContain("can't be after the clip's 4s (clip 2)")
   expect(await mediaIds()).toEqual(before)
 
   // Keep both ends, drop the middle: [0, 1) + [3, 4) → one 2 s clip.
-  const res = await call(c, 'merge_clips', { items: [{ mediaId: id, outSec: 1 }, { mediaId: id, inSec: 3 }] })
+  const res = await call(c, 'merge_clips', {
+    items: [
+      { mediaId: id, outSec: 1 },
+      { mediaId: id, inSec: 3 }
+    ]
+  })
   expect(res.isError).toBeFalsy()
   const { created } = JSON.parse(textOf(res)) as { created: { id: string; fileName: string; path: string }[] }
   expect(created.map((m) => m.fileName)).toEqual(['clip (cut).mp4'])
   expect(created[0].path).toBe(join(projectsDir, 'E2E', 'generated', 'clip (cut).mp4'))
-  const dur = Number(execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', created[0].path]).toString().trim())
+  const dur = Number(
+    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', created[0].path])
+      .toString()
+      .trim()
+  )
   expect(dur).toBeCloseTo(2, 1)
   expect(await mediaIds()).toContain(created[0].id)
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(0)
@@ -301,7 +421,9 @@ test('add_description sets, shows and clears a clip description; list_media retu
   test.setTimeout(90_000)
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as {
+    imported: { id: string }[]
+  }
   const id = imported[0].id
   type Listed = { id: string; description?: string }[]
   const listed = async (): Promise<Listed> => JSON.parse(textOf(await call(c, 'list_media'))) as Listed
@@ -316,7 +438,9 @@ test('add_description sets, shows and clears a clip description; list_media retu
     .toBe('Night run, streetlights')
   expect(await page.evaluate(() => window.__reelStores.useProject.getState().dirty)).toBe(true)
 
-  expect(textOf(await call(c, 'add_description', { mediaId: id, description: '' }))).toBe('Description removed from black.mp4.')
+  expect(textOf(await call(c, 'add_description', { mediaId: id, description: '' }))).toBe(
+    'Description removed from black.mp4.'
+  )
   expect((await listed())[0]).not.toHaveProperty('description')
 
   const bad = await call(c, 'add_description', { mediaId: 'nope', description: 'x' })
@@ -333,11 +457,25 @@ test('an edit that arrives mid-drag waits for the release instead of being overw
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const clip = join(dir, 'a.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=540x960:r=30:d=3',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=red:s=540x960:r=30:d=3',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    clip
   ])
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as {
+    imported: { id: string }[]
+  }
   const item = { mediaId: imported[0].id, inSec: 0, outSec: 1 }
   expect((await call(c, 'place_sequence', { items: [item] })).isError).toBeFalsy()
   const state = (): Promise<{ layers: { id: string; startSec: number }[]; past: number }> =>
@@ -393,12 +531,28 @@ test('an edit that reaches a blocked editor after the timeout is dropped, not ap
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const clip = join(dir, 'a.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=540x960:r=30:d=2',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=red:s=540x960:r=30:d=2',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    clip
   ])
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as { imported: { id: string }[] }
-  expect((await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 1 }] })).isError).toBeFalsy()
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [clip] }))) as {
+    imported: { id: string }[]
+  }
+  expect(
+    (await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 1 }] })).isError
+  ).toBeFalsy()
   const before = await page.evaluate(() => {
     const s = window.__reelStores.useProject.getState()
     return { layerIds: s.project!.layers.map((l) => l.id), past: s.past.length }
@@ -473,7 +627,11 @@ async function seedText(page: Page): Promise<void> {
   })
 }
 
-type TextState = { past: number; layers: { id: string; text?: string; color?: string }[]; captions: { id: string; text: string }[] }
+type TextState = {
+  past: number
+  layers: { id: string; text?: string; color?: string }[]
+  captions: { id: string; text: string }[]
+}
 const textState = (page: Page): Promise<TextState> =>
   page.evaluate(() => {
     const s = window.__reelStores.useProject.getState()
@@ -561,11 +719,20 @@ test('set_text refuses bad edits and changes nothing', async ({ electronApp, app
   const before = await textState(page)
 
   expect(await refusal(c, 'set_text', { edits: [{ id: 't1', colour: '#ffffff' }] })).toMatch(/colour/)
-  expect(await refusal(c, 'set_text', { edits: [{ id: 't1', fontFamily: 'comic-sans' }] })).toMatch(/fontFamily|comic-sans/)
+  expect(await refusal(c, 'set_text', { edits: [{ id: 't1', fontFamily: 'comic-sans' }] })).toMatch(
+    /fontFamily|comic-sans/
+  )
   // A good edit in the same batch as a bad one is not applied either.
-  const mixed = await refusal(c, 'set_text', { edits: [{ id: 't1', text: 'Fine' }, { id: 'nope', text: 'x' }] })
+  const mixed = await refusal(c, 'set_text', {
+    edits: [
+      { id: 't1', text: 'Fine' },
+      { id: 'nope', text: 'x' }
+    ]
+  })
   expect(mixed).toMatch(/Nothing was changed[\s\S]*edit 2 \(id "nope"\): no text layer or caption has this id/)
-  expect(await refusal(c, 'set_text', { edits: [{ id: 'c1', startSec: 2.5 }] })).toMatch(/linked to another timeline item/)
+  expect(await refusal(c, 'set_text', { edits: [{ id: 'c1', startSec: 2.5 }] })).toMatch(
+    /linked to another timeline item/
+  )
   expect(await refusal(c, 'set_text', { edits: [{ text: 'no window' }] })).toMatch(/needs startSec and endSec/)
 
   expect(await textState(page)).toEqual(before)
@@ -588,8 +755,13 @@ test('set_playhead parks the playhead, paused, clamped to the edit', async ({ el
   const c = await connect(await pipeOf(electronApp))
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setPlaying(true))
   expect(textOf(await call(c, 'set_playhead', { timeSec: 2.5 }))).toMatch(/^Playhead at 2\.5s\. Playback is paused/)
-  expect(await page.evaluate(() => window.__reelStores.usePlayback.getState())).toMatchObject({ time: 2.5, playing: false })
-  expect(textOf(await call(c, 'set_playhead', { timeSec: 99 }))).toMatch(/^Playhead at 3s \(clamped; the edit is 3s long\)/)
+  expect(await page.evaluate(() => window.__reelStores.usePlayback.getState())).toMatchObject({
+    time: 2.5,
+    playing: false
+  })
+  expect(textOf(await call(c, 'set_playhead', { timeSec: 99 }))).toMatch(
+    /^Playhead at 3s \(clamped; the edit is 3s long\)/
+  )
   expect(await page.evaluate(() => window.__reelStores.usePlayback.getState().time)).toBe(3)
 })
 
@@ -597,8 +769,20 @@ test('set_playhead parks the playhead, paused, clamped to the edit', async ({ el
 function blackClip(dir: string): string {
   const clip = join(dir, 'black.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=540x960:r=30:d=3',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=540x960:r=30:d=3',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    clip
   ])
   return clip
 }
@@ -608,7 +792,17 @@ function blackClip(dir: string): string {
 function captionLuma(dir: string, b64: string, name: string): number {
   const jpg = join(dir, name)
   writeFileSync(jpg, Buffer.from(b64, 'base64'))
-  const raw = execFileSync(FFMPEG, ['-v', 'error', '-i', jpg, '-vf', 'crop=iw*0.74:ih*0.083:iw*0.13:ih*0.656,format=gray', '-f', 'rawvideo', '-'])
+  const raw = execFileSync(FFMPEG, [
+    '-v',
+    'error',
+    '-i',
+    jpg,
+    '-vf',
+    'crop=iw*0.74:ih*0.083:iw*0.13:ih*0.656,format=gray',
+    '-f',
+    'rawvideo',
+    '-'
+  ])
   return raw.reduce((s, v) => s + v, 0) / raw.length
 }
 
@@ -622,24 +816,44 @@ test('render_frame returns the finished picture, caption burned in at the right 
   test.setTimeout(120_000)
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
-  expect((await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }] })).isError).toBeFalsy()
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as {
+    imported: { id: string }[]
+  }
+  expect(
+    (await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }] })).isError
+  ).toBeFalsy()
   // A white caption 0–1 s, in the lane's default spot.
   expect(
-    (await call(c, 'set_text', { edits: [{ id: 'captions', visible: true }, { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }] }))
-      .isError
+    (
+      await call(c, 'set_text', {
+        edits: [
+          { id: 'captions', visible: true },
+          { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }
+        ]
+      })
+    ).isError
   ).toBeFalsy()
 
   const r = await call(c, 'render_frame', { times: [0.5, 2.5, 99] })
   expect(r.isError).toBeFalsy()
   expect(textOf(r)).toMatch(/Finished frame @ 0\.5s \(timeline\)\n[\s\S]*Finished frame @ 2\.5s \(timeline\)\n/)
   // Past the end: the label says which frame it really is.
-  expect(textOf(r)).toContain('Finished frame @ 2.97s (timeline) — asked for 99s, which is past the end of the edit; this is its last frame')
+  expect(textOf(r)).toContain(
+    'Finished frame @ 2.97s (timeline) — asked for 99s, which is past the end of the edit; this is its last frame'
+  )
   const [during, after] = images(r)
   expect(captionLuma(dir, during, 'during.jpg')).toBeGreaterThan(20) // white glyphs over black
   expect(captionLuma(dir, after, 'after.jpg')).toBeLessThan(5) // the caption has ended
   // Downscaled to 1280 on the long side.
-  const size = execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', join(dir, 'during.jpg')])
+  const size = execFileSync(FFPROBE, [
+    '-v',
+    'error',
+    '-show_entries',
+    'stream=width,height',
+    '-of',
+    'csv=p=0',
+    join(dir, 'during.jpg')
+  ])
     .toString()
     .trim()
   expect(size).toBe('720,1280')
@@ -650,16 +864,23 @@ test('render_frame returns the finished picture, caption burned in at the right 
   expect(off).toHaveLength(1)
   expect(captionLuma(dir, off[0], 'off.jpg')).toBeLessThan(5)
   // Rendering frames is not an export: no export job appeared (it never blocks the Export button).
-  const jobTypes = await page.evaluate(() => Object.values(window.__reelStores.useEditor.getState().jobs).map((j) => j.type))
+  const jobTypes = await page.evaluate(() =>
+    Object.values(window.__reelStores.useEditor.getState().jobs).map((j) => j.type)
+  )
   expect(jobTypes).not.toContain('export')
 })
 
-test('inside a compound clip, render_frame uses the same local times as get_text', async ({ electronApp, appPage: page }) => {
+test('inside a compound clip, render_frame uses the same local times as get_text', async ({
+  electronApp,
+  appPage: page
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
   test.setTimeout(120_000)
   const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
   const c = await connect(await pipeOf(electronApp))
-  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as { imported: { id: string }[] }
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as {
+    imported: { id: string }[]
+  }
   // The clip sits at 2–5 s on the root, then becomes a compound clip the user enters.
   const { placed } = JSON.parse(
     textOf(await call(c, 'place_sequence', { items: [{ mediaId: imported[0].id, inSec: 0, outSec: 3 }], atSec: 2 }))
@@ -671,7 +892,12 @@ test('inside a compound clip, render_frame uses the same local times as get_text
     s.enterComposition({ layerId: id })
   }, layerId)
   // A caption at LOCAL 0–1 s (root 2–3 s).
-  await call(c, 'set_text', { edits: [{ id: 'captions', visible: true }, { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }] })
+  await call(c, 'set_text', {
+    edits: [
+      { id: 'captions', visible: true },
+      { kind: 'caption', text: 'HELLO WORLD', startSec: 0, endSec: 1 }
+    ]
+  })
   const listed = JSON.parse(textOf(await call(c, 'get_text'))) as { items: { text: string; startSec: number }[] }
   expect(listed.items).toEqual([expect.objectContaining({ text: 'HELLO WORLD', startSec: 0 })])
 
@@ -682,7 +908,10 @@ test('inside a compound clip, render_frame uses the same local times as get_text
   expect(captionLuma(dir, images(r)[0], 'nested.jpg')).toBeGreaterThan(20)
 })
 
-test('a render that fails half-way does not leave its text-layout window behind', async ({ electronApp, appPage: page }) => {
+test('a render that fails half-way does not leave its text-layout window behind', async ({
+  electronApp,
+  appPage: page
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
   // A gradient text layer (rasterised by the hidden Chromium window during the walk),
   // then a clip whose media isn't in the library: the render throws after the window exists.
@@ -708,7 +937,8 @@ test('a render that fails half-way does not leave its text-layout window behind'
     })
     s.addVideoLayer('ghost', 'no-such-media', 0, 2, false)
   })
-  const windows = (): Promise<number> => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  const windows = (): Promise<number> =>
+    electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
   const before = await windows()
   const c = await connect(await pipeOf(electronApp))
   const r = await call(c, 'render_frame', { times: [0.5] })

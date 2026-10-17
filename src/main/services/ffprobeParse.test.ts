@@ -169,7 +169,15 @@ describe('parseFfprobeJson — iPhone JPEG, EXIF orientation only on the first f
       }
     ],
     streams: [
-      { codec_type: 'video', codec_name: 'mjpeg', width: 4032, height: 3024, pix_fmt: 'yuvj420p', avg_frame_rate: '25/1', r_frame_rate: '25/1' }
+      {
+        codec_type: 'video',
+        codec_name: 'mjpeg',
+        width: 4032,
+        height: 3024,
+        pix_fmt: 'yuvj420p',
+        avg_frame_rate: '25/1',
+        r_frame_rate: '25/1'
+      }
     ],
     format: { duration: '0.040000', format_name: 'image2' }
   }
@@ -181,13 +189,19 @@ describe('parseFfprobeJson — iPhone JPEG, EXIF orientation only on the first f
   })
   it('swaps for every quarter-turn orientation, mirrored ones included (EXIF 5–8 → ±90)', () => {
     for (const rotation of [90, -90]) {
-      const v = parseFfprobeJson({ ...json, frames: [{ side_data_list: [{ side_data_type: '3x3 displaymatrix', rotation }] }] }).video!
+      const v = parseFfprobeJson({
+        ...json,
+        frames: [{ side_data_list: [{ side_data_type: '3x3 displaymatrix', rotation }] }]
+      }).video!
       expect({ w: v.displayWidth, h: v.displayHeight }).toEqual({ w: 3024, h: 4032 })
     }
   })
   it('does not swap for upside-down or mirrored-only orientations (EXIF 2–4 → 0/±180)', () => {
     for (const rotation of [0, 180, -180]) {
-      const v = parseFfprobeJson({ ...json, frames: [{ side_data_list: [{ side_data_type: '3x3 displaymatrix', rotation }] }] }).video!
+      const v = parseFfprobeJson({
+        ...json,
+        frames: [{ side_data_list: [{ side_data_type: '3x3 displaymatrix', rotation }] }]
+      }).video!
       expect({ w: v.displayWidth, h: v.displayHeight }).toEqual({ w: 4032, h: 3024 })
     }
   })

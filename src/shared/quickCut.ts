@@ -74,7 +74,9 @@ export function splitPieces(durationSec: number, times: number[]): CutPiece[] {
   const pieces = edges.slice(1).map((outSec, i) => ({ inSec: edges[i], outSec }))
   const short = pieces.findIndex((p) => p.outSec - p.inSec < MIN_CUT_SEC - 1e-9)
   if (short >= 0) {
-    throw new Error(`Clip ${short + 1} (${pieces[short].inSec}–${pieces[short].outSec}s) would be shorter than ${MIN_CUT_SEC}s.`)
+    throw new Error(
+      `Clip ${short + 1} (${pieces[short].inSec}–${pieces[short].outSec}s) would be shorter than ${MIN_CUT_SEC}s.`
+    )
   }
   return pieces
 }
@@ -103,7 +105,12 @@ export function splitPieceAt(pieces: CutPiece[], sec: number): CutPiece[] | null
   if (i < 0) return null
   const p = pieces[i]
   if (at - p.inSec < MIN_CUT_SEC || p.outSec - at < MIN_CUT_SEC) return null
-  return [...pieces.slice(0, i), { inSec: p.inSec, outSec: at }, { inSec: at, outSec: p.outSec }, ...pieces.slice(i + 1)]
+  return [
+    ...pieces.slice(0, i),
+    { inSec: p.inSec, outSec: at },
+    { inSec: at, outSec: p.outSec },
+    ...pieces.slice(i + 1)
+  ]
 }
 
 /** Remove piece `index`. Null for the last remaining piece: a cut never has zero clips. */

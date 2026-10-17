@@ -14,6 +14,7 @@ export function sanitizeExportName(raw: string): string | null {
   const base = raw.split(/[\\/]/).pop() ?? ''
   const stem = base
     .replace(/\.mp4$/i, '')
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"|?*\x00-\x1f]/g, '')
     .replace(/[. ]+$/, '')
     .trim()
@@ -31,10 +32,7 @@ export function uniqueExportPath(dir: string, name: string, exists: (path: strin
 }
 
 /** Why an export must not start now, or null. Same "no clips" guard as the Export button. */
-export function exportRefusal(
-  project: Pick<Project, 'layers'>,
-  jobs: Pick<Job, 'type' | 'status'>[]
-): string | null {
+export function exportRefusal(project: Pick<Project, 'layers'>, jobs: Pick<Job, 'type' | 'status'>[]): string | null {
   if (jobs.some((j) => j.type === 'export' && j.status === 'running')) {
     return 'An export is already running — wait for it to finish'
   }

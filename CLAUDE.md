@@ -24,6 +24,12 @@ Instagram Reels. Read this before adding code.
 ## Commands
 
 - `npm run typecheck` — both node + web tsconfigs. Run after every change.
+- `npm run lint` — ESLint (`eslint.config.mjs`): correctness, React hooks, and the
+  layer boundaries above as `no-restricted-imports` (shared imports no Node/
+  Electron/React; the renderer no Node/Electron/main; main no React). Fix a
+  boundary error by moving the code, not by disabling the rule.
+- `npm run format` / `format:check` — Prettier (`.prettierrc.json`) owns all
+  code formatting; Markdown is left alone. CI runs `lint` and `format:check`.
 - `npm test` — vitest over the pure layers (exporterArgs/project/layers/assBuilder/
   audio/timeline/crop/checklist + ffmpegFilters). The `exporterArgs` tests pin the
   exact ffmpeg arg strings — keep them green; they're how we know export output
@@ -79,8 +85,9 @@ and add an entry whenever you verify something new.
 There is no manual smoke test. A fix or feature is done when it has its tests
 (a regression spec for a bug, unit and/or e2e coverage for a feature, plus a
 real-ffmpeg check for new media behavior, per the section above) and
-`npm run typecheck`, `npm test` and the full `npm run test:e2e` all pass. GitHub CI
-(`.github/workflows/ci.yml`: typecheck + `npm test` on every PR) gates merging, but
+`npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` and the full
+`npm run test:e2e` all pass. GitHub CI (`.github/workflows/ci.yml`: typecheck, lint,
+format check + `npm test` on every PR) gates merging, but
 e2e does not run there — it stays a local gate. Then
 close its GitHub issue with a comment naming the tests that cover it (commit
 messages can say `Closes #N`). Leave the issue open, labelled `needs-verification`,

@@ -1,4 +1,4 @@
-# Gate for every pull request: typecheck + the vitest suite. The `protect-main`
+# Gate for every pull request: typecheck, lint, formatting + the vitest suite. The `protect-main`
 # ruleset requires the `test` check to pass before a PR can merge.
 #
 # Playwright e2e (`npm run test:e2e`) is NOT run here — it drives the built
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: windows-latest   # the app's primary target; some tests assume a case-insensitive FS + Windows pipes
+    runs-on: windows-latest # the app's primary target; some tests assume a case-insensitive FS + Windows pipes
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -31,4 +31,6 @@ jobs:
       - run: npm ci
 
       - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
       - run: npm test

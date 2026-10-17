@@ -47,7 +47,11 @@ export function importFailureReason(err: unknown, size?: number): string {
   }
   // Anything else: ffprobe's last line without its "<path>: " prefix, or the
   // error's own first line.
-  const last = stderr.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop()
+  const last = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .pop()
   if (last) return last.replace(/^.*?:\s(?=[^:]+$)/, '')
   return message.split(/\r?\n/)[0] || 'Unknown error.'
 }

@@ -68,10 +68,7 @@ export function speedRampPlayedExpr(points: { u: number; v: number }[], x = 'T-S
   for (let i = 0; i < p.length - 1; i++) {
     const span = p[i + 1].u - p[i].u
     const m = span > 0 ? (p[i + 1].v - p[i].v) / span : 0
-    cum.push(
-      cum[i] +
-        (span <= 0 ? 0 : Math.abs(m) < 1e-9 ? span / p[i].v : Math.log(p[i + 1].v / p[i].v) / m)
-    )
+    cum.push(cum[i] + (span <= 0 ? 0 : Math.abs(m) < 1e-9 ? span / p[i].v : Math.log(p[i + 1].v / p[i].v) / m))
   }
   let expr = f6(cum[cum.length - 1]) // past the last boundary: hold the total
   for (let i = p.length - 2; i >= 0; i--) {
@@ -108,9 +105,7 @@ export function buildOpacityCmdLines(id: string, points: { t: number; o: number 
     const a = p[i]
     const b = p[i + 1]
     if (b.t - a.t <= 0.001) continue
-    lines.push(
-      `${f3(a.t)}-${f3(b.t)} [expr] colorchannelmixer@${id} aa 'lerp(${f3(a.o)},${f3(b.o)},TI)';`
-    )
+    lines.push(`${f3(a.t)}-${f3(b.t)} [expr] colorchannelmixer@${id} aa 'lerp(${f3(a.o)},${f3(b.o)},TI)';`)
   }
   const last = p[p.length - 1]
   lines.push(`${f3(last.t)}-${f3(last.t + 3600)} [expr] colorchannelmixer@${id} aa '${f3(last.o)}';`)
@@ -127,10 +122,7 @@ export function piecewiseLinearExpr(points: { t: number; v: number }[]): string 
     const a = p[i]
     const b = p[i + 1]
     const span = b.t - a.t
-    const seg =
-      span > 0
-        ? `${f3(a.v)}+${f3(b.v - a.v)}*(t-${f3(a.t)})/${f3(span)}`
-        : f3(b.v)
+    const seg = span > 0 ? `${f3(a.v)}+${f3(b.v - a.v)}*(t-${f3(a.t)})/${f3(span)}` : f3(b.v)
     expr = `if(lt(t,${f3(b.t)}),${seg},${expr})`
   }
   return `if(lt(t,${f3(p[0].t)}),${f3(p[0].v)},${expr})`

@@ -189,9 +189,7 @@ export interface ExportImage {
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
 export type ExportVisual =
-  | { kind: 'video'; video: ExportVideo }
-  | { kind: 'image'; image: ExportImage }
-  | { kind: 'text'; assFile: string }
+  { kind: 'video'; video: ExportVideo } | { kind: 'image'; image: ExportImage } | { kind: 'text'; assFile: string }
 
 /** An audio source to mix (a video layer's audio, or an audio clip). */
 export interface ExportAudio {
@@ -343,8 +341,7 @@ export interface StabilizeJob {
   outFile: string
 }
 
-const clampInt = (n: number, lo: number, hi: number): number =>
-  Math.max(lo, Math.min(hi, Math.round(n)))
+const clampInt = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, Math.round(n)))
 
 /** Pass 1: analyse camera motion → transforms file (writes no real output). */
 export function buildVidstabDetectArgs(j: StabilizeJob): string[] {
@@ -506,16 +503,12 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         // value is single-quoted, so the commas inside if()/gte() need no
         // backslash escaping (verified — see FFMPEG-NOTES "Speed ramps").
         const rampExpr = speedRampPlayedExpr(ramp)
-        const freezeSum = v.freezes
-          .map((f) => `gte(T-STARTT,${f3(freezeAt(f.atLocal))})*${f3(f.holdSec)}`)
-          .join('+')
+        const freezeSum = v.freezes.map((f) => `gte(T-STARTT,${f3(freezeAt(f.atLocal))})*${f3(f.holdSec)}`).join('+')
         const inner = freezeSum ? `${rampExpr}+${freezeSum}` : rampExpr
         setpts = `setpts='(${inner}+${f3(v.startSec)})/TB'`
       } else {
         const elapsed = speed !== 1 ? `(PTS-STARTPTS)/${f3(speed)}` : 'PTS-STARTPTS'
-        const freezeSum = v.freezes
-          .map((f) => `gte(T-STARTT\\,${f3(freezeAt(f.atLocal))})*${f3(f.holdSec)}`)
-          .join('+')
+        const freezeSum = v.freezes.map((f) => `gte(T-STARTT\\,${f3(freezeAt(f.atLocal))})*${f3(f.holdSec)}`).join('+')
         setpts = freezeSum
           ? `setpts=${elapsed}+(${freezeSum})/TB+${f3(v.startSec)}/TB`
           : `setpts=${elapsed}+${f3(v.startSec)}/TB`
@@ -543,11 +536,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       // only the repeat keeps the held frame on screen — `eof_action=pass` punched
       // the base canvas (black) through instead. It also matches the preview,
       // whose `videoSourceTime` clamps to `outSec` past the end of the footage.
-      const vxy = pos
-        ? `x='${pos.x}':y='${pos.y}'`
-        : rot
-          ? centredPos(v.x, v.y, v.boxW, v.boxH)
-          : `${r(v.x)}:${r(v.y)}`
+      const vxy = pos ? `x='${pos.x}':y='${pos.y}'` : rot ? centredPos(v.x, v.y, v.boxW, v.boxH) : `${r(v.x)}:${r(v.y)}`
       chains.push(
         `[${prev}][pv${i}]overlay=${vxy}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
       )
@@ -561,7 +550,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         const c = im.crop
         steps.push(`crop=iw*${f3(c.w)}:ih*${f3(c.h)}:iw*${f3(c.x)}:ih*${f3(c.y)}`)
       }
-      const q = ((im.rotateQuarters ?? 0) % 4 + 4) % 4
+      const q = (((im.rotateQuarters ?? 0) % 4) + 4) % 4
       if (q === 1) steps.push('transpose=1')
       else if (q === 2) steps.push('transpose=1', 'transpose=1')
       else if (q === 3) steps.push('transpose=2')
@@ -657,9 +646,33 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       frames.forEach((f, j) => chains.push(`[s${j}]${cut(f)}[vf${j}]`))
     }
     const outs = frames.flatMap((f, k) => [
-      '-map', `[${labels[k]}]`, '-frames:v', '1', '-r', '30', '-fps_mode', 'cfr', '-pix_fmt', 'yuv420p', '-an', '-q:v', '2', f.path
+      '-map',
+      `[${labels[k]}]`,
+      '-frames:v',
+      '1',
+      '-r',
+      '30',
+      '-fps_mode',
+      'cfr',
+      '-pix_fmt',
+      'yuv420p',
+      '-an',
+      '-q:v',
+      '2',
+      f.path
     ])
-    return ['-y', '-hide_banner', '-nostdin', ...inputs, '-filter_complex', chains.join(';'), '-progress', 'pipe:1', '-nostats', ...outs]
+    return [
+      '-y',
+      '-hide_banner',
+      '-nostdin',
+      ...inputs,
+      '-filter_complex',
+      chains.join(';'),
+      '-progress',
+      'pipe:1',
+      '-nostats',
+      ...outs
+    ]
   }
 
   const nvenc = !alpha && preferNvenc && caps.encoders.h264_nvenc

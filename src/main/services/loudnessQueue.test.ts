@@ -31,7 +31,10 @@ vi.mock('./ffmpegRun', () => ({
         input,
         release: (opts) => {
           if (opts?.fail || !existsSync(input)) return reject(new Error(`ffmpeg failed reading ${input}`))
-          writeFileSync(join(cwd, printName), 'frame:0 pts:0 pts_time:0\nlavfi.astats.Overall.Peak_level=-6\nlavfi.r128.M=-20\n')
+          writeFileSync(
+            join(cwd, printName),
+            'frame:0 pts:0 pts_time:0\nlavfi.astats.Overall.Peak_level=-6\nlavfi.r128.M=-20\n'
+          )
           resolve()
         }
       })

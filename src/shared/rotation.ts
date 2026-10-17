@@ -56,12 +56,7 @@ export const ROTATE_STEP_DEG = 15
  * steps; otherwise the result snaps to 0/90/180/270 when within
  * `ROTATE_SNAP_DEG` of one. Always normalised.
  */
-export function rotateDragDeg(
-  startDeg: number,
-  startPointerDeg: number,
-  pointerDeg: number,
-  step = false
-): number {
+export function rotateDragDeg(startDeg: number, startPointerDeg: number, pointerDeg: number, step = false): number {
   const raw = normalizeDeg(startDeg + (pointerDeg - startPointerDeg))
   if (step) return normalizeDeg(Math.round(raw / ROTATE_STEP_DEG) * ROTATE_STEP_DEG)
   const right = Math.round(raw / 90) * 90

@@ -159,10 +159,7 @@ export function parseFfprobeJson(json: FfprobeJson): ProbeInfo {
   const audioStream = streams.find((s) => s.codec_type === 'audio')
 
   const durationSec =
-    Number(json.format?.duration) ||
-    Number(videoStream?.duration) ||
-    Number(audioStream?.duration) ||
-    0
+    Number(json.format?.duration) || Number(videoStream?.duration) || Number(audioStream?.duration) || 0
 
   return {
     durationSec,

@@ -972,8 +972,7 @@ export function migrateProject(raw: unknown): Project {
   // stack. Normalise any legacy/unknown value to a known id across text layers,
   // the lane-wide caption style, and per-segment overrides. New optional
   // decoration fields (stroke/shadow/gradient) are absence-tolerant.
-  const normFont = (id: unknown): string =>
-    typeof id === 'string' && isKnownFont(id) ? id : DEFAULT_FONT_ID
+  const normFont = (id: unknown): string => (typeof id === 'string' && isKnownFont(id) ? id : DEFAULT_FONT_ID)
   if (Array.isArray(p.layers)) {
     for (const l of p.layers) {
       if (l.content.kind === 'text') l.content.fontFamily = normFont(l.content.fontFamily)
@@ -1052,9 +1051,7 @@ export function migrateProject(raw: unknown): Project {
   if ((p.version ?? 0) < 20) {
     const renameFx = (clips: AudioClip[]): void => {
       for (const a of clips) {
-        const st = a.fx?.settings as
-          | { kind: string; chorus?: unknown; ensemble?: unknown }
-          | undefined
+        const st = a.fx?.settings as { kind: string; chorus?: unknown; ensemble?: unknown } | undefined
         if (st?.kind === 'chorus' && st.chorus !== undefined) {
           st.kind = 'ensemble'
           st.ensemble = st.chorus

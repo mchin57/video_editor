@@ -15,7 +15,9 @@ describe('importFailureReason', () => {
   })
 
   it('says a missing file is missing (fs ENOENT)', () => {
-    const err = Object.assign(new Error("ENOENT: no such file or directory, open 'C:\\x\\gone.mp4'"), { code: 'ENOENT' })
+    const err = Object.assign(new Error("ENOENT: no such file or directory, open 'C:\\x\\gone.mp4'"), {
+      code: 'ENOENT'
+    })
     expect(importFailureReason(err)).toBe('File not found.')
   })
 
@@ -36,7 +38,9 @@ describe('importFailureReason', () => {
   })
 
   it('calls a file cut short mid-header incomplete', () => {
-    const err = probeError('[mov,mp4,m4a,3gp,3g2,mj2 @ 000002b0a39cecc0] error reading header\r\nC:/x/trunc.mp4: End of file\r\n')
+    const err = probeError(
+      '[mov,mp4,m4a,3gp,3g2,mj2 @ 000002b0a39cecc0] error reading header\r\nC:/x/trunc.mp4: End of file\r\n'
+    )
     expect(importFailureReason(err, 3000)).toBe('The file is incomplete (cut short).')
   })
 

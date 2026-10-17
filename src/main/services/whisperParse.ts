@@ -224,9 +224,7 @@ function parseDtwWords(entries: WhisperEntry[]): CaptionWord[] | null {
   // Time every entry, annotations included: a dropped annotation still bounds
   // the end of the word before it.
   const starts = entries.map(dtwStart)
-  const textual = entries
-    .map((entry, i) => ({ i, text: entryText(entry) }))
-    .filter((e) => e.text.length > 0)
+  const textual = entries.map((entry, i) => ({ i, text: entryText(entry) })).filter((e) => e.text.length > 0)
   if (textual.length === 0) return null
 
   // Gate 1: every spoken entry must carry a DTW time. A partial run means DTW

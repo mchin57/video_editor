@@ -55,8 +55,7 @@ export const PANEL_MIN_PX = 40
 /** Mirrors dockview's AddPanelPositionOptions: anchored to an open panel, or
  *  to a container edge. */
 export type DockPlacement =
-  | { direction?: DockDirection; referencePanel: string }
-  | { direction: Exclude<DockDirection, 'within'> }
+  { direction?: DockDirection; referencePanel: string } | { direction: Exclude<DockDirection, 'within'> }
 
 interface AddPanelArgs {
   id: string

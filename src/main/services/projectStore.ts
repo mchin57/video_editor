@@ -203,7 +203,8 @@ async function sweep(root: string): Promise<void> {
     }
   }
   if (!docs.length) return
-  const files = (dir: string): string[] => listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
+  const files = (dir: string): string[] =>
+    listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
   // Only a generated/ the app created (marker) is ever cleaned.
   const ours = existsSync(join(generatedRoot(root), GENERATED_MARKER))
   const generated = ours ? files(generatedRoot(root)).filter((n) => n !== GENERATED_MARKER) : []
@@ -302,7 +303,11 @@ export function createProject(name: string, location: string): Promise<LoadedPro
     if (existsSync(root)) throw new Error(`A folder named "${clean}" already exists there.`)
     await fsp.mkdir(root)
     await ensureProjectFolders(root)
-    await writeJsonAtomic(docPath(root), { ...createEmptyProject(crypto.randomUUID(), clean), version: PROJECT_VERSION, library: [] })
+    await writeJsonAtomic(docPath(root), {
+      ...createEmptyProject(crypto.randomUUID(), clean),
+      version: PROJECT_VERSION,
+      library: []
+    })
     await discardCurrent()
     rememberRoot(root)
     return readFolder(root)
@@ -353,14 +358,12 @@ export function saveProject(project: Project): Promise<void> {
 export async function writeProjectFile(path: string, project: Project): Promise<Project> {
   const saved = withLibrary(project)
   await writeJsonAtomic(path, saved)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { library, ...doc } = saved
   return doc
 }
 
 /** Read and migrate a document (library stripped). Throws on bad input. */
 export async function readProjectFile(path: string): Promise<Project> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { library, ...rest } = (await readJson(path)) as SavedDoc
   return migrateProject(rest)
 }

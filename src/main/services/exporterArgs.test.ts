@@ -78,7 +78,15 @@ describe('buildExportArgs', () => {
     const s = buildExportArgs(
       plan({
         visuals: [
-          { kind: 'video', video: { ...vid, hdrChain: 'tonemapX', crop: { x: 10, y: 20, w: 600, h: 1000 }, colorEq: 'eq=brightness=0.1' } }
+          {
+            kind: 'video',
+            video: {
+              ...vid,
+              hdrChain: 'tonemapX',
+              crop: { x: 10, y: 20, w: 600, h: 1000 },
+              colorEq: 'eq=brightness=0.1'
+            }
+          }
         ]
       }),
       'o'
@@ -92,7 +100,9 @@ describe('buildExportArgs', () => {
     const opaque = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
     expect(opaque).toContain('setsar=1,format=yuv420p,setpts=') // default path unchanged
 
-    const alpha = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, hasAlpha: true } }] }), 'o').join(' ')
+    const alpha = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, hasAlpha: true } }] }), 'o').join(
+      ' '
+    )
     expect(alpha).toContain('setsar=1,format=yuva420p,setpts=')
     expect(alpha).not.toContain('format=yuv420p,setpts=')
   })
@@ -131,7 +141,14 @@ describe('buildExportArgs', () => {
         visuals: [
           {
             kind: 'video',
-            video: { ...vid, endSec: 15, freezes: [{ atLocal: 5, holdSec: 2 }, { atLocal: 5, holdSec: 7 }] }
+            video: {
+              ...vid,
+              endSec: 15,
+              freezes: [
+                { atLocal: 5, holdSec: 2 },
+                { atLocal: 5, holdSec: 7 }
+              ]
+            }
           }
         ]
       }),
@@ -162,9 +179,7 @@ describe('buildExportArgs', () => {
     ]
     const s = buildExportArgs(
       plan({
-        visuals: [
-          { kind: 'video', video: { ...vid, ramp, endSec: 9, freezes: [{ atLocal: 0, holdSec: 3 }] } }
-        ]
+        visuals: [{ kind: 'video', video: { ...vid, ramp, endSec: 9, freezes: [{ atLocal: 0, holdSec: 3 }] } }]
       }),
       'o'
     ).join(' ')
@@ -180,10 +195,7 @@ describe('buildExportArgs', () => {
   })
 
   it('scales PTS for clip speed (slow-mo doubles the spacing) and composes with freezes', () => {
-    const slow = buildExportArgs(
-      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5 } }] }),
-      'o'
-    ).join(' ')
+    const slow = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5 } }] }), 'o').join(' ')
     expect(slow).toContain('setpts=(PTS-STARTPTS)/0.500+1.000/TB[pv1]')
 
     const fastFrozen = buildExportArgs(
@@ -193,10 +205,7 @@ describe('buildExportArgs', () => {
     // Freeze threshold stays in SOURCE time; the hold stays wall-clock.
     expect(fastFrozen).toContain('setpts=(PTS-STARTPTS)/2.000+(gte(T-STARTT\\,1.500)*2.000)/TB+1.000/TB[pv1]')
 
-    const normal = buildExportArgs(
-      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 1 } }] }),
-      'o'
-    ).join(' ')
+    const normal = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 1 } }] }), 'o').join(' ')
     expect(normal).toContain('setpts=PTS-STARTPTS+1.000/TB[pv1]') // speed 1 emits the plain form
   })
 
@@ -206,10 +215,9 @@ describe('buildExportArgs', () => {
       { u: 0, v: 1 },
       { u: 5, v: 2 }
     ]
-    const s = buildExportArgs(
-      plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5, ramp } }] }),
-      'o'
-    ).join(' ')
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, speed: 0.5, ramp } }] }), 'o').join(
+      ' '
+    )
     // m = 0.2; total = ln(2)/0.2 = 3.465736, held past the trim end. The whole
     // value is single-quoted (commas unescaped) — verified against ffmpeg 8.1.1,
     // see FFMPEG-NOTES "Speed ramps".
@@ -220,9 +228,7 @@ describe('buildExportArgs', () => {
     // Freeze thresholds stay in source time (unescaped inside the quotes).
     const frozen = buildExportArgs(
       plan({
-        visuals: [
-          { kind: 'video', video: { ...vid, ramp, freezes: [{ atLocal: 1.5, holdSec: 2 }] } }
-        ]
+        visuals: [{ kind: 'video', video: { ...vid, ramp, freezes: [{ atLocal: 1.5, holdSec: 2 }] } }]
       }),
       'o'
     ).join(' ')
@@ -250,9 +256,7 @@ describe('buildExportArgs', () => {
     // A constant non-1 opacity has no command file — just the initial aa.
     const constant = buildExportArgs(
       plan({
-        visuals: [
-          { kind: 'video', video: { ...vid, opacity: { cmdFile: null, id: 'op0', initial: 0.5 } } }
-        ]
+        visuals: [{ kind: 'video', video: { ...vid, opacity: { cmdFile: null, id: 'op0', initial: 0.5 } } }]
       }),
       'o'
     ).join(' ')
@@ -307,16 +311,13 @@ describe('buildExportArgs', () => {
       { t: 1, w: 500, h: 900, cx: 540, cy: 960 },
       { t: 3, w: 700, h: 1260, cx: 300, cy: 500 }
     ]
-    const s = buildExportArgs(
-      plan({ visuals: [{ kind: 'video', video: { ...vid, keyframes: kfs } }] }),
-      'o'
-    ).join(' ')
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, keyframes: kfs } }] }), 'o').join(' ')
     // No static one-shot scale; animated scale follows the setpts shift.
     expect(s).not.toContain('scale=1080:1920')
     expect(s).toContain(
       "setpts=PTS-STARTPTS+1.000/TB,scale=w='trunc((if(lt(t,1.000),500.000,if(lt(t,3.000),500.000+200.000*(t-1.000)/2.000,700.000)))/2)*2'"
     )
-    expect(s).toContain(":eval=frame:flags=bicubic[pv1]")
+    expect(s).toContain(':eval=frame:flags=bicubic[pv1]')
     expect(s).toContain(
       "overlay=x='(if(lt(t,1.000),540.000,if(lt(t,3.000),540.000+-240.000*(t-1.000)/2.000,300.000)))-overlay_w/2'"
     )
@@ -340,7 +341,9 @@ describe('buildExportArgs', () => {
     }
     const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: img }] }), 'o').join(' ')
     expect(s).toContain('-loop 1 -t 4.000 -i C:/i/p.png')
-    expect(s).toContain("format=rgba,fps=30,scale=w='trunc((if(lt(t,0.000),300.000,if(lt(t,4.000),300.000+300.000*(t-0.000)/4.000,600.000)))/2)*2'")
+    expect(s).toContain(
+      "format=rgba,fps=30,scale=w='trunc((if(lt(t,0.000),300.000,if(lt(t,4.000),300.000+300.000*(t-0.000)/4.000,600.000)))/2)*2'"
+    )
     expect(s).toContain("overlay=x='(if(lt(t,0.000),250.000,")
 
     // Static images keep the exact original input/chain form.
@@ -366,8 +369,18 @@ describe('buildExportArgs', () => {
       flipH: true,
       flipV: false
     }
-    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')
-    expect(s).toContain('[2:v]crop=iw*0.500:ih*0.500:iw*0.100:ih*0.200,transpose=1,hflip,scale=300:200,format=rgba[pi2]')
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: vid },
+          { kind: 'image', image: img }
+        ]
+      }),
+      'o'
+    ).join(' ')
+    expect(s).toContain(
+      '[2:v]crop=iw*0.500:ih*0.500:iw*0.100:ih*0.200,transpose=1,hflip,scale=300:200,format=rgba[pi2]'
+    )
   })
 
   describe('layer rotation (free angle) + video flips', () => {
@@ -375,7 +388,9 @@ describe('buildExportArgs', () => {
 
     it('rotates a static video AFTER its box scale, in an alpha pipeline, centred on the box', () => {
       const s = buildExportArgs(
-        plan({ visuals: [{ kind: 'video', video: { ...vid, boxW: 400, boxH: 200, x: 340, y: 860, rotationDeg: 30 } }] }),
+        plan({
+          visuals: [{ kind: 'video', video: { ...vid, boxW: 400, boxH: 200, x: 340, y: 860, rotationDeg: 30 } }]
+        }),
         'o'
       ).join(' ')
       expect(s).toContain(
@@ -387,7 +402,11 @@ describe('buildExportArgs', () => {
 
     it('flips the cropped picture before scaling', () => {
       const s = buildExportArgs(
-        plan({ visuals: [{ kind: 'video', video: { ...vid, crop: { x: 0, y: 0, w: 600, h: 1000 }, flipH: true, flipV: true } }] }),
+        plan({
+          visuals: [
+            { kind: 'video', video: { ...vid, crop: { x: 0, y: 0, w: 600, h: 1000 }, flipH: true, flipV: true } }
+          ]
+        }),
         'o'
       ).join(' ')
       expect(s).toContain('[1:v]crop=600:1000:0:0,hflip,vflip,scale=1080:1920:flags=bicubic,')
@@ -402,7 +421,9 @@ describe('buildExportArgs', () => {
         plan({ visuals: [{ kind: 'video', video: { ...vid, keyframes: kfs, rotationDeg: 90 } }] }),
         'o'
       ).join(' ')
-      expect(s).toContain('[1:v]scale=800:400:flags=bicubic,setsar=1,format=yuva420p,setpts=PTS-STARTPTS+1.000/TB,rotate=a=1.570796:')
+      expect(s).toContain(
+        '[1:v]scale=800:400:flags=bicubic,setsar=1,format=yuva420p,setpts=PTS-STARTPTS+1.000/TB,rotate=a=1.570796:'
+      )
       // 90°: bounds swap, so the per-frame width follows the boxes' HEIGHTS (200 → 400).
       expect(s).toContain(
         "c=none,scale=w='trunc((if(lt(t,1.000),200.000,if(lt(t,3.000),200.000+200.000*(t-1.000)/2.000,400.000)))/2)*2'"
@@ -411,7 +432,17 @@ describe('buildExportArgs', () => {
     })
 
     it('rotates a static image after its box scale, centred', () => {
-      const img = { path: 'C:/i/p.png', boxW: 300, boxH: 200, x: 100, y: 100, startSec: 0, endSec: 3, opacity: 1, rotationDeg: 30 }
+      const img = {
+        path: 'C:/i/p.png',
+        boxW: 300,
+        boxH: 200,
+        x: 100,
+        y: 100,
+        startSec: 0,
+        endSec: 3,
+        opacity: 1,
+        rotationDeg: 30
+      }
       const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: img }] }), 'o').join(' ')
       expect(s).toContain(`[1:v]scale=300:200,format=rgba,${ROT30}[pi1]`)
       expect(s).toContain("overlay=x='250.000-overlay_w/2':y='200.000-overlay_h/2'")
@@ -419,7 +450,15 @@ describe('buildExportArgs', () => {
 
     it('rotates a keyframed image on its frame stream before the per-frame scale', () => {
       const img = {
-        path: 'C:/i/p.png', boxW: 300, boxH: 200, x: 100, y: 100, startSec: 0, endSec: 4, opacity: 1, rotationDeg: 30,
+        path: 'C:/i/p.png',
+        boxW: 300,
+        boxH: 200,
+        x: 100,
+        y: 100,
+        startSec: 0,
+        endSec: 4,
+        opacity: 1,
+        rotationDeg: 30,
         keyframes: [
           { t: 0, w: 300, h: 200, cx: 250, cy: 200 },
           { t: 4, w: 600, h: 400, cx: 540, cy: 960 }
@@ -432,28 +471,52 @@ describe('buildExportArgs', () => {
     it('treats 0° and 360° as no rotation (strings unchanged)', () => {
       const base = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o').join(' ')
       for (const rotationDeg of [0, 360]) {
-        expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, rotationDeg } }] }), 'o').join(' ')).toBe(base)
+        expect(
+          buildExportArgs(plan({ visuals: [{ kind: 'video', video: { ...vid, rotationDeg } }] }), 'o').join(' ')
+        ).toBe(base)
       }
     })
   })
 
   it('composites an image after the videos: scale, rgba, opacity, gated overlay', () => {
     const img = { path: 'C:/i/logo.png', boxW: 300, boxH: 200, x: 100, y: 50, startSec: 0, endSec: 3, opacity: 0.5 }
-    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: vid },
+          { kind: 'image', image: img }
+        ]
+      }),
+      'o'
+    ).join(' ')
     expect(s).toContain('[2:v]scale=300:200,format=rgba,colorchannelmixer=aa=0.500[pi2]') // input 2 (after video 1)
     expect(s).toContain("overlay=100:50:enable='between(t,0.000,3.000)'")
   })
 
   it('omits colorchannelmixer at full opacity', () => {
     const img = { path: 'p.png', boxW: 1, boxH: 1, x: 0, y: 0, startSec: 0, endSec: 1, opacity: 1 }
-    const s = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }, { kind: 'image', image: img }] }), 'o').join(' ')
+    const s = buildExportArgs(
+      plan({
+        visuals: [
+          { kind: 'video', video: vid },
+          { kind: 'image', image: img }
+        ]
+      }),
+      'o'
+    ).join(' ')
     expect(s).toContain('format=rgba[pi2]')
     expect(s).not.toContain('colorchannelmixer')
   })
 
   it('burns text in z-order (below a later video) and captions on top', () => {
     const s = buildExportArgs(
-      plan({ visuals: [{ kind: 'text', assFile: 'text_0.ass' }, { kind: 'video', video: vid }], captionsAss: 'captions.ass' }),
+      plan({
+        visuals: [
+          { kind: 'text', assFile: 'text_0.ass' },
+          { kind: 'video', video: vid }
+        ],
+        captionsAss: 'captions.ass'
+      }),
       'o'
     ).join(' ')
     expect(s).toContain('[0:v]ass=text_0.ass[v0]') // text first (bottom)
@@ -495,7 +558,9 @@ describe('buildExportArgs', () => {
     const withAudio = buildExportArgs(
       plan({
         visuals: [{ kind: 'video', video: vid }],
-        audio: [{ path: 'm.m4a', inSec: 0, outSec: 8, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }]
+        audio: [
+          { path: 'm.m4a', inSec: 0, outSec: 8, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }
+        ]
       }),
       'o'
     ).join(' ')
@@ -575,8 +640,18 @@ describe('buildExportArgs', () => {
   })
 
   it('uses NVENC when available + preferred, else libx264', () => {
-    expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: true }), 'o').join(' ')).toContain('h264_nvenc')
-    expect(buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: false }), 'o').join(' ')).toContain('libx264')
+    expect(
+      buildExportArgs(
+        plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: true }),
+        'o'
+      ).join(' ')
+    ).toContain('h264_nvenc')
+    expect(
+      buildExportArgs(
+        plan({ visuals: [{ kind: 'video', video: vid }], caps: caps(true), preferNvenc: false }),
+        'o'
+      ).join(' ')
+    ).toContain('libx264')
   })
 })
 
@@ -656,7 +731,9 @@ describe('nested-composition intermediates (alpha)', () => {
 })
 
 describe('stills mode (render_frame)', () => {
-  const music = [{ path: 'm.m4a', inSec: 0, outSec: 8, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }]
+  const music = [
+    { path: 'm.m4a', inSec: 0, outSec: 8, startSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false }
+  ]
 
   it('frameIndexAt: the frame on screen at t is floor(t*30), clamped to the last frame', () => {
     expect(frameIndexAt(5, 60)).toBe(150)
@@ -673,8 +750,12 @@ describe('stills mode (render_frame)', () => {
     const still = buildFrameArgs(p, [{ index: 150, path: 'f0.jpg' }])
     const fc = (a: string[]): string => a[a.indexOf('-filter_complex') + 1]
     // Same composite as the export, minus the audio graph, plus the trim.
-    const videoChains = fc(video).split(';').filter((c) => !c.includes('[1:a]') && !c.includes('aout') && !c.includes(':a]'))
-    expect(fc(still)).toBe([...videoChains, '[v1]trim=start_frame=150:end_frame=151,scale=720:1280:flags=bicubic[vf0]'].join(';'))
+    const videoChains = fc(video)
+      .split(';')
+      .filter((c) => !c.includes('[1:a]') && !c.includes('aout') && !c.includes(':a]'))
+    expect(fc(still)).toBe(
+      [...videoChains, '[v1]trim=start_frame=150:end_frame=151,scale=720:1280:flags=bicubic[vf0]'].join(';')
+    )
     expect(still).not.toContain('m.m4a')
     expect(still.join(' ')).toMatch(
       /-progress pipe:1 -nostats -map \[vf0\] -frames:v 1 -r 30 -fps_mode cfr -pix_fmt yuv420p -an -q:v 2 f0\.jpg$/
@@ -687,14 +768,20 @@ describe('stills mode (render_frame)', () => {
       { index: 90, path: 'b.jpg' }
     ])
     const fc = still[still.indexOf('-filter_complex') + 1]
-    expect(fc.endsWith('[v0]split=2[s0][s1];[s0]trim=start_frame=30:end_frame=31,scale=720:1280:flags=bicubic[vf0];[s1]trim=start_frame=90:end_frame=91,scale=720:1280:flags=bicubic[vf1]')).toBe(true)
+    expect(
+      fc.endsWith(
+        '[v0]split=2[s0][s1];[s0]trim=start_frame=30:end_frame=31,scale=720:1280:flags=bicubic[vf0];[s1]trim=start_frame=90:end_frame=91,scale=720:1280:flags=bicubic[vf1]'
+      )
+    ).toBe(true)
     expect(still.filter((a) => a.endsWith('.jpg'))).toEqual(['a.jpg', 'b.jpg'])
     expect(still.filter((a) => a === '-map')).toHaveLength(2)
   })
 
   it('scales stills to fit 1280 on the long side, whatever the format', () => {
     const fc = (t: ReturnType<typeof targetForPreset>): string => {
-      const a = buildFrameArgs(plan({ target: t, visuals: [{ kind: 'video', video: vid }] }), [{ index: 0, path: 'f.jpg' }])
+      const a = buildFrameArgs(plan({ target: t, visuals: [{ kind: 'video', video: vid }] }), [
+        { index: 0, path: 'f.jpg' }
+      ])
       return a[a.indexOf('-filter_complex') + 1]
     }
     expect(fc(targetForPreset('landscape'))).toContain(',scale=1280:720:flags=bicubic[vf0]')

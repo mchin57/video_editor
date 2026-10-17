@@ -52,15 +52,31 @@ test('library pop-out and timeline tile show the same editable description; it s
   const root = join(projectsDir, 'E2E')
   const clip = join(root, 'swim.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=3',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=3',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    clip
   ])
   const id = await importClip(page, clip)
-  const layers = (): Promise<number> => page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)
+  const layers = (): Promise<number> =>
+    page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)
 
   // ── Library: hover the thumbnail, travel across the video into the description.
-  const thumb = page.getByRole('button', { name: /^swim\.mp4 / }).locator('img').first()
+  const thumb = page
+    .getByRole('button', { name: /^swim\.mp4 / })
+    .locator('img')
+    .first()
   await page.mouse.move(5, 5)
   const start = await centre(thumb)
   await page.mouse.move(start.x, start.y)
@@ -130,7 +146,9 @@ test('library pop-out and timeline tile show the same editable description; it s
 
   // Saved into the .reel's library record.
   await page.evaluate(() => window.__reelStores.useProject.getState().save())
-  const reel = JSON.parse(readFileSync(join(root, 'E2E.reel'), 'utf8')) as { library: { id: string; description?: string }[] }
+  const reel = JSON.parse(readFileSync(join(root, 'E2E.reel'), 'utf8')) as {
+    library: { id: string; description?: string }[]
+  }
   expect(reel.library.find((r) => r.id === id)?.description).toBe('Wave 2 start, goggles fogged')
 })
 
@@ -141,18 +159,51 @@ test('image and audio clips: a description panel in the library and above their 
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const root = join(projectsDir, 'E2E')
-  execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x480', '-frames:v', '1', join(root, 'finish.png')])
-  execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', join(root, 'horn.wav')])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=640x480',
+    '-frames:v',
+    '1',
+    join(root, 'finish.png')
+  ])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=2',
+    join(root, 'horn.wav')
+  ])
   const img = await importClip(page, join(root, 'finish.png'))
   const aud = await importClip(page, join(root, 'horn.wav'))
 
   // Library, image: the picture beside its description.
   await page.mouse.move(5, 5)
-  await page.getByRole('button', { name: /^finish\.png / }).locator('img').first().hover()
+  await page
+    .getByRole('button', { name: /^finish\.png / })
+    .locator('img')
+    .first()
+    .hover()
   await expect(page.getByTestId('preview-image')).toBeVisible()
   await expect(page.getByTestId('preview-popout')).toHaveCount(0)
   let input = page.getByTestId('library-description').getByTestId('description-input')
-  await glide(page, await centre(page.getByRole('button', { name: /^finish\.png / }).locator('img').first()), await centre(input))
+  await glide(
+    page,
+    await centre(
+      page
+        .getByRole('button', { name: /^finish\.png / })
+        .locator('img')
+        .first()
+    ),
+    await centre(input)
+  )
   await input.click()
   await page.keyboard.type('Finish arch, wide')
   await input.press('Enter')
@@ -181,8 +232,28 @@ test('image and audio clips: a description panel in the library and above their 
   await page.evaluate(
     ({ img, aud }) => {
       const s = window.__reelStores.useProject.getState()
-      s.addLayer({ id: 'I1', hidden: false, startSec: 0, endSec: 3, x: 540, y: 960, scale: 0.5, content: { kind: 'image', mediaId: img, opacity: 1 } })
-      s.addAudioClip({ id: 'A1', mediaId: aud, startSec: 0, inSec: 0, outSec: 2, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'audio' })
+      s.addLayer({
+        id: 'I1',
+        hidden: false,
+        startSec: 0,
+        endSec: 3,
+        x: 540,
+        y: 960,
+        scale: 0.5,
+        content: { kind: 'image', mediaId: img, opacity: 1 }
+      })
+      s.addAudioClip({
+        id: 'A1',
+        mediaId: aud,
+        startSec: 0,
+        inSec: 0,
+        outSec: 2,
+        gainDb: 0,
+        fadeInSec: 0,
+        fadeOutSec: 0,
+        duck: false,
+        kind: 'audio'
+      })
     },
     { img, aud }
   )
@@ -206,9 +277,21 @@ test('a quick pass across a tile does not open its description', async ({ appPag
   test.setTimeout(60_000)
   const clip = join(projectsDir, 'E2E', 'a.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'color=c=red:s=320x568:r=30:d=2',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=red:s=320x568:r=30:d=2',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    clip
   ])
   const id = await importClip(page, clip)
   await page.evaluate((id) => window.__reelStores.useProject.getState().addVideoLayer('L1', id, 0, 2, false), id)
@@ -219,14 +302,29 @@ test('a quick pass across a tile does not open its description', async ({ appPag
   await expect(page.getByTestId('timeline-description')).toHaveCount(0)
 })
 
-test('scrolling inside the timeline description box scrolls it and keeps it open', async ({ appPage: page, projectsDir }) => {
+test('scrolling inside the timeline description box scrolls it and keeps it open', async ({
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(60_000)
   const clip = join(projectsDir, 'E2E', 'long.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'color=c=blue:s=320x568:r=30:d=2',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=blue:s=320x568:r=30:d=2',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    clip
   ])
   const id = await importClip(page, clip)
   const long = Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of a long description`).join('\n')

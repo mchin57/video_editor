@@ -81,7 +81,12 @@ export function ImageEditPopout(): JSX.Element | null {
     <Popout title="Edit image" onClose={() => setOpen(false)} width={320}>
       <p className="mb-2 text-[11px] text-zinc-500">Drag to move the crop, drag the corner to resize.</p>
       <div ref={wrapRef} className="relative mb-3 select-none">
-        <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} className="block w-full rounded" />
+        <img
+          src={imageUrl(asset ?? { id: content.mediaId })}
+          alt=""
+          draggable={false}
+          className="block w-full rounded"
+        />
         <div className="pointer-events-none absolute inset-0 bg-black/50" />
         <div
           onPointerDown={move}

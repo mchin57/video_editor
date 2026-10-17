@@ -19,7 +19,13 @@ import type { Page } from '@playwright/test'
 const addBareTextLayer = (page: Page): Promise<void> =>
   page.evaluate(() => {
     window.__reelStores.useProject.getState().addLayer({
-      id: 'BARE', hidden: false, startSec: 0, endSec: 2, x: 540, y: 960, scale: 1,
+      id: 'BARE',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 960,
+      scale: 1,
       content: { kind: 'text' }
     } as never)
   })
@@ -28,9 +34,11 @@ const addBareTextLayer = (page: Page): Promise<void> =>
  *  is saved at startup), and wait for that save. */
 const saveALayout = async (page: Page): Promise<void> => {
   await page.evaluate(() =>
-    (window.__reelStores.useDock.getState().api as unknown as {
-      getPanel(id: string): { group: { api: { setSize(s: { width: number }): void } } }
-    })
+    (
+      window.__reelStores.useDock.getState().api as unknown as {
+        getPanel(id: string): { group: { api: { setSize(s: { width: number }): void } } }
+      }
+    )
       .getPanel('library')
       .group.api.setSize({ width: 333 })
   )

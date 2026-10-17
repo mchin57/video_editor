@@ -10,7 +10,10 @@ import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 
 const headerHeight = (page: Page): Promise<number> =>
-  page.locator('header').first().evaluate((el) => el.getBoundingClientRect().height)
+  page
+    .locator('header')
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().height)
 
 /** Every header button reads as one line (none taller than the shortest twice over). */
 const buttonsOneLine = (page: Page): Promise<boolean> =>

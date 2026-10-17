@@ -11,7 +11,13 @@
 
 import net from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { LineDecoder, encodeLine, type PipeRequest, type PipeResponse, type ToolContent } from '@shared/assistant/pipeProtocol'
+import {
+  LineDecoder,
+  encodeLine,
+  type PipeRequest,
+  type PipeResponse,
+  type ToolContent
+} from '@shared/assistant/pipeProtocol'
 
 export type PipeHandler = (tool: string, args: unknown) => Promise<ToolContent[]>
 
@@ -21,7 +27,8 @@ export const IN_USE = 'Another copy of the editor is already connected to Claude
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
-const isRequest = (v: unknown): v is PipeRequest => isRecord(v) && typeof v.id === 'string' && typeof v.tool === 'string'
+const isRequest = (v: unknown): v is PipeRequest =>
+  isRecord(v) && typeof v.id === 'string' && typeof v.tool === 'string'
 
 const errorLine = (id: string, error: string): string => encodeLine({ id, ok: false, error } satisfies PipeResponse)
 

@@ -49,12 +49,29 @@ describe('normalizeDescription', () => {
 
 describe('media kind: extension checked against the probe', () => {
   const picture: VideoStreamInfo = {
-    codec: 'h264', width: 1080, height: 1920, displayWidth: 1080, displayHeight: 1920, rotationDeg: 0,
-    avgFps: 30, rFps: 30, isVfr: false, pixFmt: 'yuv420p', colorTransfer: null, colorPrimaries: null,
-    colorSpace: null, isHdr: false
+    codec: 'h264',
+    width: 1080,
+    height: 1920,
+    displayWidth: 1080,
+    displayHeight: 1920,
+    rotationDeg: 0,
+    avgFps: 30,
+    rFps: 30,
+    isVfr: false,
+    pixFmt: 'yuv420p',
+    colorTransfer: null,
+    colorPrimaries: null,
+    colorSpace: null,
+    isHdr: false
   }
   const sound = { codec: 'aac', sampleRate: 48000, channels: 2 }
-  const probe = (p: Partial<ProbeInfo>): ProbeInfo => ({ durationSec: 2, container: 'mov,mp4,m4a,3gp,3g2,mj2', video: null, audio: null, ...p })
+  const probe = (p: Partial<ProbeInfo>): ProbeInfo => ({
+    durationSec: 2,
+    container: 'mov,mp4,m4a,3gp,3g2,mj2',
+    video: null,
+    audio: null,
+    ...p
+  })
 
   it('an audio-only .mp4 (AAC, or an MP3 renamed .mp4) is audio, not video', () => {
     expect(kindOfFile('C:/a/song.mp4', probe({ audio: sound }))).toBe('audio')
@@ -71,7 +88,9 @@ describe('media kind: extension checked against the probe', () => {
     // ffprobe on a JPEG renamed .mp4: format jpeg_pipe, codec mjpeg, no duration at all (#19).
     const still = { ...picture, codec: 'mjpeg', avgFps: 25, rFps: 25 }
     expect(kindOfFile('C:/a/photo.mp4', probe({ container: 'jpeg_pipe', durationSec: 0, video: still }))).toBe('image')
-    expect(kindOfFile('C:/a/logo.mov', probe({ container: 'png_pipe', durationSec: 0, video: { ...still, codec: 'png' } }))).toBe('image')
+    expect(
+      kindOfFile('C:/a/logo.mov', probe({ container: 'png_pipe', durationSec: 0, video: { ...still, codec: 'png' } }))
+    ).toBe('image')
     // A picture with sound, or with a duration, is still a video.
     expect(kindOfFile('C:/a/clip.mp4', probe({ durationSec: 0, video: picture, audio: sound }))).toBe('video')
     expect(kindOfFile('C:/a/clip.mp4', probe({ durationSec: 0.04, video: picture }))).toBe('video')
@@ -84,7 +103,9 @@ describe('media kind: extension checked against the probe', () => {
   it('audio and image extensions keep their class', () => {
     expect(kindOfFile('C:/a/song.m4a', probe({ audio: sound }))).toBe('audio')
     expect(kindOfFile('C:/a/cover.mp3', probe({ video: { ...picture, codec: 'mjpeg' }, audio: sound }))).toBe('audio')
-    expect(kindOfFile('C:/a/photo.jpg', probe({ durationSec: 0.04, video: { ...picture, codec: 'mjpeg' } }))).toBe('image')
+    expect(kindOfFile('C:/a/photo.jpg', probe({ durationSec: 0.04, video: { ...picture, codec: 'mjpeg' } }))).toBe(
+      'image'
+    )
   })
 
   it('an unknown extension falls back to the probe', () => {

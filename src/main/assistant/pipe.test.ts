@@ -31,7 +31,9 @@ describe('servePipe + callPipe', () => {
     ])
     const content = await callPipe(path, 'get_frames', { mediaId: 'm', count: 2 })
     expect(content[0]).toEqual({ type: 'text', text: 'get_frames:{"mediaId":"m","count":2}' })
-    expect(content[1].type === 'image' && Buffer.from(content[1].data, 'base64').equals(Buffer.alloc(5000, 7))).toBe(true)
+    expect(content[1].type === 'image' && Buffer.from(content[1].data, 'base64').equals(Buffer.alloc(5000, 7))).toBe(
+      true
+    )
   })
 
   it("passes a handler's error back as the call's error", async () => {
