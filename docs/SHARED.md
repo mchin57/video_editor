@@ -284,19 +284,48 @@ Main owns which project is open and its in-memory library; only Save writes the
 | `convertLegacyProject`, `convertLegacyFolder`, `remainingLegacyProjects`, `legacyStoreBytes`/`deleteLegacyStore` | `legacyConvert.ts` | ad-hoc handling of an old (schema < 24) `.reel`. Old ids are kept; offer `deleteLegacyStore` only when `remainingLegacyProjects` over every folder the app looks in is empty |
 | `conversionFolder`, `legacyIdsIn`, `idsToConvert`, `isLegacyDoc`, `isGeneratedPath`, `generatedFileName` | `legacyPlan.ts` | the converter's pure decisions |
 
-## IPC — `src/preload/index.ts`, `src/renderer/src/ipc/client.ts`
+## IPC — `src/shared/ipc.ts`, `src/main/ipc/`, `src/preload/index.ts`, `src/renderer/src/ipc/client.ts`
 
-The preload `api` object is the **one** place a channel's signature is declared
-(`RendererApi`). `ipc/client.ts` re-exports those methods by **destructuring**
-`window.api` (no second signature list) and adds only the `reelmedia://` URL
-builders (`proxyUrl`/`thumbUrl`/`imageUrl`/`audioUrl`/`waveformUrl`/`fontUrl`).
+**The contract in `shared/ipc.ts` is the one place a channel's signature is
+declared**: `IpcInvoke` (request → result, with the docs), `IpcSend` (one-way
+renderer → main) and `IpcEvents` (main → renderer pushes). Both sides are typed
+against it, the same way `AssistantOps` types the assistant bridge:
+
+- **Preload** builds `window.api` from it — `importPaths: invoke('importPaths')`,
+  `onJobProgress: subscribe('jobProgress')` — so `RendererApi` can't drift.
+- **Main** registers through `handle(name, (event, …args) => …)` (`main/ipc/handle.ts`),
+  whose parameters and result come from the contract. `handle` first checks the
+  arguments against `INVOKE_SCHEMAS` (`main/ipc/schemas.ts`, zod), which is
+  `satisfies` a mapped type over the contract: a channel without a schema, or a
+  schema that disagrees with the types, doesn't compile. Bad arguments reject with
+  `Bad request to <channel>: argument N…` before a service runs; the handler gets
+  the ORIGINAL arguments (validation gates, it never rewrites). Numbers must be
+  finite numbers (effect settings reach an ffmpeg filter graph), settings patches
+  take only known keys, project documents get a structural check.
+- **Pushes** go through `sendTo(webContents, name, …payload)` / `broadcast(name, …)`
+  (`main/ipc/events.ts` — no handler imports, so services like `jobs.ts` use it);
+  one-way messages through `onSend`.
+- `dialogsFor(event)` → `{ open, save, ask }` parents a native dialog to the window
+  that asked (unparented if it's gone); `pickedPath(result)` is the single picked
+  path or null.
+- `IPC` / `IPC_EVENT` (channel strings) are `satisfies` the contract's keys, so a
+  name without a contract entry, or the reverse, doesn't compile.
+
+Handlers live in `main/ipc/` by area (`media`, `project`, `export`, `analysis`,
+`settings`); `index.ts` registers them all.
+
+`ipc/client.ts` re-exports the `window.api` methods by **destructuring** (no
+second signature list) and adds only the `reelmedia://` URL builders
+(`proxyUrl`/`thumbUrl`/`imageUrl`/`audioUrl`/`waveformUrl`/`fontUrl`).
 
 `ipcErrorMessage(err)` (in `ipc/client.ts`) strips Electron's "Error invoking remote method '…': Error: " wrapper
 from a rejected call, for a message shown inline (the Rename dialog).
 
-To add an IPC call: add the channel in `shared/ipc.ts`, the invoker in
-`preload/index.ts`, the handler in `main/ipc.ts`, then add the method name to the
-destructure in `ipc/client.ts`. Don't write a `() => window.api.x()` wrapper.
+To add an IPC call: a contract entry + its channel name in `shared/ipc.ts`, its
+argument schema in `main/ipc/schemas.ts`, its `handle(…)` in the right
+`main/ipc/` module, one `invoke('…')` line in `preload/index.ts`, and the method
+name in the `ipc/client.ts` destructure. The compiler points at each step you
+miss. Don't write a `() => window.api.x()` wrapper.
 
 `listProjectMedia`'s `proxyReady` is recomputed from disk on every call and is
 only true once the playable proxy is COMPLETE (the proxies are written
