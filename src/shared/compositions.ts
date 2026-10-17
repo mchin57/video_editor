@@ -168,7 +168,6 @@ export function resetMediaCuts<T extends Composition>(comp: T, mediaId: string, 
     const c = l.content
     if (c.kind === 'video' && c.mediaId === mediaId) {
       changed = true
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { freezes, speedRamp, ...rest } = c
       const content = { ...rest, inSec: 0, outSec: durationSec }
       return { ...l, endSec: l.startSec + playedVideoDuration(content), content }

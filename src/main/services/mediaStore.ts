@@ -247,7 +247,6 @@ export async function assertMediaUsable(ids: string[]): Promise<void> {
  *  project's `generated/` (Save As carries those files along). */
 function pointAt(r: string, record: MediaRecord, path: string): MediaRecord {
   const relativePath = toRelativePath(r, path)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { generated, ...rest } = record
   const inGenerated = !!relativePath && relativePath.toLowerCase().startsWith('generated/')
   return { ...rest, absolutePath: path, relativePath, ...(inGenerated ? { generated: true } : {}) }

@@ -43,7 +43,10 @@ function colourful(px: Px, y0: number, y1: number): number {
 function extent(px: Px, y0: number, y1: number, hit: (p: number[]) => boolean): { x0: number; x1: number } {
   let x0 = W
   let x1 = -1
-  for (let y = y0; y <= y1; y++) for (let x = 0; x < W; x++) if (hit(px(x, y))) ((x0 = Math.min(x0, x)), (x1 = Math.max(x1, x)))
+  for (let y = y0; y <= y1; y++) for (let x = 0; x < W; x++) if (hit(px(x, y))) {
+        x0 = Math.min(x0, x)
+        x1 = Math.max(x1, x)
+      }
   return { x0, x1 }
 }
 

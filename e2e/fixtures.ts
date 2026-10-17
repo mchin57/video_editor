@@ -43,6 +43,9 @@ export const test = base.extend<{
   appPage: Page
 }>({
   // The test's own temp dir (data dir, profile, pipe, projects).
+  // Playwright reads a fixture's dependencies from its first parameter, so a
+  // fixture with none still needs the empty pattern.
+  // eslint-disable-next-line no-empty-pattern
   scratchDir: async ({}, use) => {
     await use(mkdtempSync(join(tmpdir(), 'reel-e2e-')))
   },

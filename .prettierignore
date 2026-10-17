@@ -1,0 +1,14 @@
+out
+release
+resources
+samples
+test-results
+playwright-report
+node_modules
+.claude
+.playwright-mcp
+package-lock.json
+# Docs are hand-wrapped prose and tables; formatting them would re-pad every table.
+*.md
+# Written by the Obsidian app itself.
+.obsidian

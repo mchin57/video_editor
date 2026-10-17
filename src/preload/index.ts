@@ -147,8 +147,8 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define for non-isolated fallback)
-  window.electron = electronAPI
-  // @ts-ignore
-  window.api = api
+  // Non-isolated fallback: define them on the page's global (`window`). Written
+  // against `globalThis` because this file is checked by both tsconfigs and
+  // only the web one has the DOM lib (index.d.ts types them for the renderer).
+  Object.assign(globalThis, { electron: electronAPI, api })
 }

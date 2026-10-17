@@ -239,7 +239,6 @@ export function withVolumeLevel(clip: AudioClip, levelId: string | null): AudioC
   if (clip.kind === 'fx') return clip
   if ((clip.volumeLevelId ?? null) === levelId) return clip
   if (levelId) return { ...clip, volumeLevelId: levelId }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { volumeLevelId, ...rest } = clip
   return rest
 }

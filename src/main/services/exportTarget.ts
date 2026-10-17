@@ -14,6 +14,7 @@ export function sanitizeExportName(raw: string): string | null {
   const base = raw.split(/[\\/]/).pop() ?? ''
   const stem = base
     .replace(/\.mp4$/i, '')
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"|?*\x00-\x1f]/g, '')
     .replace(/[. ]+$/, '')
     .trim()

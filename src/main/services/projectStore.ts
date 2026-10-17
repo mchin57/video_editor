@@ -353,14 +353,12 @@ export function saveProject(project: Project): Promise<void> {
 export async function writeProjectFile(path: string, project: Project): Promise<Project> {
   const saved = withLibrary(project)
   await writeJsonAtomic(path, saved)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { library, ...doc } = saved
   return doc
 }
 
 /** Read and migrate a document (library stripped). Throws on bad input. */
 export async function readProjectFile(path: string): Promise<Project> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { library, ...rest } = (await readJson(path)) as SavedDoc
   return migrateProject(rest)
 }

@@ -104,6 +104,41 @@ const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
  * data it failed for: the next library refresh (new object) tries again, so a
  * tile drawn a moment before its thumb existed doesn't stay blank for good.
  */
+/** Row packing for an audio band (a whole-source clip ends at its source's length). */
+function packAudioRows(clips: AudioClip[], assetById: Map<string, MediaAsset>): Map<string, number> {
+  return packRows(
+    clips.map((a) => ({
+      id: a.id,
+      startSec: a.startSec,
+      endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
+    }))
+  )
+}
+
+/** Snap targets: layer + audio boundaries, 0 and the end. `skip` (ref keys)
+ *  drops the tiles currently being dragged, so a moving group never snaps to
+ *  its own members. */
+function snapTargetsFor(
+  layers: Layer[],
+  audioClips: AudioClip[],
+  assetById: Map<string, MediaAsset>,
+  total: number,
+  skip?: Set<string>
+): number[] {
+  const t = new Set<number>([0, total])
+  for (const l of layers) {
+    if (skip?.has(refKey({ kind: 'layer', id: l.id }))) continue
+    t.add(l.startSec)
+    t.add(l.endSec)
+  }
+  for (const a of audioClips) {
+    if (skip?.has(refKey({ kind: 'audio', id: a.id }))) continue
+    t.add(a.startSec)
+    t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
+  }
+  return [...t]
+}
+
 function TileThumb({ asset }: { asset: MediaAsset }): JSX.Element | null {
   const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
   if (failedFor === asset) return null
@@ -467,16 +502,8 @@ export function Timeline(): JSX.Element {
   // gets its own band — sharing the Audio lane hid which clip it belongs to.
   const dryClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'audio'), [audioClips])
   const fxClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'fx'), [audioClips])
-  const packAudio = (clips: AudioClip[]): Map<string, number> =>
-    packRows(
-      clips.map((a) => ({
-        id: a.id,
-        startSec: a.startSec,
-        endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
-      }))
-    )
-  const audRows = useMemo(() => packAudio(dryClips), [dryClips, assetById])
-  const fxRows = useMemo(() => packAudio(fxClips), [fxClips, assetById])
+  const audRows = useMemo(() => packAudioRows(dryClips, assetById), [dryClips, assetById])
+  const fxRows = useMemo(() => packAudioRows(fxClips, assetById), [fxClips, assetById])
 
   // Lane layout: Clips / Text / Image always show (≥1 row as drop targets),
   // Captions only when present, Audio always.
@@ -559,24 +586,12 @@ export function Timeline(): JSX.Element {
     }
   }
 
-  // Snap targets: layer + audio boundaries, playhead, 0, end. `skip` (ref keys)
-  // drops the tiles currently being dragged, so a moving group never snaps to
-  // its own members.
-  const collectSnapTargets = (skip?: Set<string>): number[] => {
-    const t = new Set<number>([0, total])
-    for (const l of layers) {
-      if (skip?.has(refKey({ kind: 'layer', id: l.id }))) continue
-      t.add(l.startSec)
-      t.add(l.endSec)
-    }
-    for (const a of audioClips) {
-      if (skip?.has(refKey({ kind: 'audio', id: a.id }))) continue
-      t.add(a.startSec)
-      t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
-    }
-    return [...t]
-  }
-  const snapTargets = useMemo(() => collectSnapTargets(), [layers, audioClips, assetById, total])
+  const collectSnapTargets = (skip?: Set<string>): number[] =>
+    snapTargetsFor(layers, audioClips, assetById, total, skip)
+  const snapTargets = useMemo(
+    () => snapTargetsFor(layers, audioClips, assetById, total),
+    [layers, audioClips, assetById, total]
+  )
   const snapSec = (v: number): number => snap(v, snapTargets, SNAP_PX / pxPerSec)
 
   /** Source duration of a library asset (0 = unknown, the convention the split

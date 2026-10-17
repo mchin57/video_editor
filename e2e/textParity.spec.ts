@@ -32,7 +32,10 @@ function inkLines(px: (x: number, y: number) => number[], y0: number, y1: number
   for (let y = y0; y <= y1; y++) {
     let a = W
     let b = -1
-    for (let x = 0; x < W; x++) if (white(px(x, y))) ((a = Math.min(a, x)), (b = Math.max(b, x)))
+    for (let x = 0; x < W; x++) if (white(px(x, y))) {
+        a = Math.min(a, x)
+        b = Math.max(b, x)
+      }
     if (b < 0) continue
     const run = runs[runs.length - 1]
     if (run && y - run.y1 <= 3) Object.assign(run, { y1: y, x0: Math.min(run.x0, a), x1: Math.max(run.x1, b) })
