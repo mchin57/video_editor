@@ -19,6 +19,19 @@ import type { PillStyle, TextStyleBase } from './project'
 import { pillRadiusPx } from './project'
 import { fontCssFamily, resolveFont } from './fonts'
 
+/**
+ * Whether `text` holds a colour emoji: a character that draws as emoji by
+ * default (😀 🔥 flags), or any emoji-capable character made emoji by U+FE0F
+ * (❤️, 1️⃣). libass has no colour-glyph support: it burns these as monochrome
+ * outlines from the fallback font, with its own advances (so the rest of the
+ * line drifts off where Chromium put it) and no ZWJ shaping (👨‍👩‍👧 splits into
+ * three faces). So a block holding one is rasterised by Chromium instead, like
+ * a gradient (#7). Text-presentation symbols (©, ™, a bare ❤) stay on libass.
+ */
+export function hasColorEmoji(text: string): boolean {
+  return /\p{Emoji_Presentation}|\p{Emoji}\uFE0F/u.test(text)
+}
+
 /** A CSS declaration block as a React-style object (camelCase keys). */
 export type Css = Record<string, string | number>
 /** Formats a length (logical or output px) as a CSS length: `cqw` in the

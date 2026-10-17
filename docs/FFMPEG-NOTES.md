@@ -840,6 +840,15 @@ canvas and reading the pixels, against the same text laid out by Chromium
   exactly 400x130 at the right place), `\1a&H33&` = 80% opaque.
 - Known limit: karaoke's unlit words dim only their FILL (`\2a`); the outline
   and shadow stay full strength, where the preview fades the whole word.
+- **libass draws colour emoji as monochrome outlines** (verified on real
+  exports, 2026-10-16, #7). 😀🔥❤️ came out as white outline glyphs from the
+  fallback face, a ZWJ family 👨‍👩‍👧 split into three faces (no ZWJ shaping), and
+  libass's own emoji advances moved the line off where Chromium laid it out
+  ("Hi 😀🔥❤️" overflowed its pill's left edge by 8 px). The hidden Chromium
+  rasteriser draws them in colour, joined, and inside the pill. So a block
+  holding a colour emoji (`hasColorEmoji` in `shared/textStyle.ts`) rasterises
+  like a gradient (`e2e/emojiExport.spec.ts`). Same limit as a gradient:
+  rasterised text does not play its entrance/exit animation in the export.
 
 After: libass burn vs the preview's CSS (Chromium at output size), line by
 line — tops/bottoms ≤1px, centres ≤0.5px, widths 0.995–1.007, same line

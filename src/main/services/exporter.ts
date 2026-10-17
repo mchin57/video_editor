@@ -26,7 +26,7 @@ import { clampAnimWindows, effectiveTextAnimation } from '@shared/textAnim'
 import { activeSparkle, sparklesFor } from '@shared/sparkle'
 import { normalizeDeg, rotateVec } from '@shared/rotation'
 import { textMotion, type LinearMotion } from '@shared/motion'
-import { textWrapWidth } from '@shared/textStyle'
+import { hasColorEmoji, textWrapWidth } from '@shared/textStyle'
 import { presetFor, type PresetId } from '@shared/formats'
 import { alphaInputDecoder } from '@shared/media'
 import {
@@ -775,9 +775,10 @@ async function renderCompositionWith(
             }
           })
         : []
-      // A gradient (libass can't do it) OR an explicit wrap width burns as a
-      // full-frame PNG overlay, rasterised with the same CSS the preview uses.
-      if (c.gradient || c.widthPx != null) {
+      // A gradient (libass can't do it), an explicit wrap width OR colour emoji
+      // (libass draws them as monochrome outlines, #7) burns as a full-frame
+      // PNG overlay, rasterised with the same CSS the preview uses.
+      if (c.gradient || c.widthPx != null || hasColorEmoji(c.text)) {
         try {
           // A moving block is rasterised at the frame CENTRE (so a move that
           // starts off-frame isn't clipped out of the PNG) and the full-frame
@@ -811,8 +812,8 @@ async function renderCompositionWith(
           continue
         } catch {
           // Rasterising failed — fall through to a flat-colour ASS burn so the
-          // overlay still appears (losing the gradient; the layout keeps the
-          // wrap width).
+          // overlay still appears (losing the gradient or the emoji colour; the
+          // layout keeps the wrap width).
         }
       }
       // Burned through libass: reserve its slot in the stack now, write it
@@ -875,8 +876,8 @@ async function renderCompositionWith(
   // Captions burn on top of everything, through the SAME block path as a text
   // layer (a caption is a text block at scale 1 that may be rotated): each
   // segment at its effective style (per-segment override, else the lane's). A
-  // gradient caption rasterises to a PNG composited over the caption track; a
-  // failed render falls back to a flat burn.
+  // gradient caption, or one with colour emoji (#7), rasterises to a PNG
+  // composited over the caption track; a failed render falls back to a flat burn.
   let captionsAss: string | undefined
   const captionOverlays: ExportImage[] = []
   if (comp.captions.enabled) {
@@ -884,7 +885,7 @@ async function renderCompositionWith(
       if (!seg.enabled || seg.text.trim().length === 0) continue
       const st = effectiveCaptionStyle(comp.captions, seg)
       const spec = textBlockSpec(seg.text, st, st, 1, m, frame.w, { rotationDeg: st.rotationDeg })
-      if (st.gradient) {
+      if (st.gradient || hasColorEmoji(seg.text)) {
         try {
           captionOverlays.push(await renderTextImage(spec, seg.startSec, seg.endSec))
           continue
