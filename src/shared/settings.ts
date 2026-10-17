@@ -1,3 +1,5 @@
+import type { TextStylePreset } from './textStylePresets'
+
 /** User settings, persisted to <dataDir>/settings.json. */
 export interface Settings {
   /** Default folder the export Save dialog opens to. */
@@ -14,6 +16,9 @@ export interface Settings {
    *  on the timeline (shared/volumeLevels.ts `extractedAudioClip`). On by
    *  default; turning it off never removes clips already in Default. */
   autoJoinDefaultLevel: boolean
+  /** Saved text styles (#45): named looks applied to any text layer or caption
+   *  in one click, editor-wide (`shared/textStylePresets.ts`). */
+  textStyles: TextStylePreset[]
 }
 
 /** The auto-join setting with its default (on) for a missing/odd value. */
