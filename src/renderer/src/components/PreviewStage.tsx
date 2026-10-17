@@ -196,6 +196,7 @@ function TextBlock({
   zIndex,
   className,
   onPointerDown,
+  onDoubleClick,
   handleTarget,
   children
 }: {
@@ -209,6 +210,7 @@ function TextBlock({
   zIndex: number
   className: string
   onPointerDown: (e: ReactPointerEvent) => void
+  onDoubleClick?: () => void
   /** Tag the box for the stage's resize-handle measuring (selected layer). */
   handleTarget?: boolean
   children: React.ReactNode
@@ -218,6 +220,7 @@ function TextBlock({
   return (
     <div
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
       data-resizebox={handleTarget ? '' : undefined}
       style={{
         position: 'absolute',
@@ -233,6 +236,68 @@ function TextBlock({
     >
       {children}
     </div>
+  )
+}
+
+/**
+ * Editing a text layer IN PLACE on the preview (#18): double-click its text and
+ * the glyphs become this plain-text editable span, in the same box at the same
+ * font and size. Typing goes here, so it can never reach the app's single-key
+ * shortcuts (S split, T new text, Space play — the shortcut handler skips
+ * editable targets). Every keystroke updates the layer live, inside a store
+ * gesture, so the whole session is ONE undo step (none if nothing changed).
+ * Enter is a new line; Escape or clicking away finishes. Pointer presses stay
+ * inside (no layer drag starts while editing).
+ */
+function InlineTextEditor({
+  initial,
+  color,
+  onChange,
+  onDone
+}: {
+  initial: string
+  color: string
+  onChange: (text: string) => void
+  onDone: () => void
+}): JSX.Element {
+  const ref = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current!
+    // Uncontrolled: React never re-renders the text under the caret.
+    el.textContent = initial
+    el.focus()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+    useProject.getState().beginGesture()
+    return () => useProject.getState().endGesture()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per editing session
+  }, [])
+  return (
+    <span
+      ref={ref}
+      data-testid="inline-text-editor"
+      contentEditable="plaintext-only"
+      suppressContentEditableWarning
+      spellCheck={false}
+      // Chromium keeps a placeholder "\n" at the end once a line break is typed
+      // (so an empty last line has height); it is not part of the text.
+      onInput={(e) => onChange((e.currentTarget.textContent ?? '').replace(/\n$/, ''))}
+      onBlur={onDone}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          e.currentTarget.blur()
+        }
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="inline-block min-w-[1ch] cursor-text rounded bg-black/40 outline-none ring-2 ring-sky-400"
+      style={{ whiteSpace: 'pre-wrap', color, caretColor: '#38bdf8', userSelect: 'text' }}
+    />
   )
 }
 
@@ -893,7 +958,8 @@ function StackLayer({
   selected,
   onMoveDown,
   depth = 1,
-  muted = false
+  muted = false,
+  editable = false
 }: {
   rawLayer: Layer
   z: number
@@ -905,8 +971,11 @@ function StackLayer({
   depth?: number
   /** Silenced by an ancestor comp (a muted cell it fills). */
   muted?: boolean
+  /** A layer of the comp being edited: its text can be edited in place. */
+  editable?: boolean
 }): JSX.Element | null {
   const frame = useContext(FrameCtx)
+  const [editing, setEditing] = useState(false)
   const layer = withKeyframedTransform(rawLayer, time)
 
         // Keyframed opacity (video/image): same shared interpolation the export
@@ -1119,11 +1188,21 @@ function StackLayer({
             opacity={anim.opacity}
             zIndex={z}
             onPointerDown={onMoveDown}
+            onDoubleClick={editable ? () => setEditing(true) : undefined}
             handleTarget={selected}
             className={`cursor-move ${selected ? 'outline-dashed outline-2 outline-sky-400' : ''}`}
           >
-            <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
-            {sparkleEffect && (
+            {editing ? (
+              <InlineTextEditor
+                initial={content.text}
+                color={content.gradient ? '#ffffff' : content.color}
+                onChange={(text) => useProject.getState().updateLayerContent(layer.id, { text })}
+                onDone={() => setEditing(false)}
+              />
+            ) : (
+              <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
+            )}
+            {!editing && sparkleEffect && (
               <Sparkles sparkles={sparkles} color={sparkleEffect.color} tLocal={time - layer.startSec} />
             )}
           </TextBlock>
@@ -1636,6 +1715,7 @@ export function PreviewStage(): JSX.Element {
                 assetById={assetById}
                 selected={rawLayer.id === selectedLayerId}
                 onMoveDown={(e) => startLayerMove(e, withKeyframedTransform(rawLayer, time))}
+                editable
               />
             ))}
 
