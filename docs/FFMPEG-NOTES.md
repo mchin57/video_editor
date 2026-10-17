@@ -402,6 +402,18 @@ anything ffmpeg writes straight to its final name is a trap:
   refuses it ("Could not find tag for codec h264 in stream #0"). Adding
   `-disposition:v:0 0` makes the same encode succeed, with one frame. Not fixed.
 
+## Stills with a video extension (verified ffmpeg 8.1.1, 2026-10-16)
+
+- **A JPEG or PNG renamed `.mp4`/`.mov` probes as an image, not a video.**
+  ffprobe goes by content: `format_name=jpeg_pipe` (codec `mjpeg`) or
+  `png_pipe` (codec `png`), one `video` stream, and **no `duration` at all**
+  (neither format nor stream), so the parser reads 0 s. Taken as a video by its
+  extension, it imported as a 0:00 clip and placed as 0.1 s (#19). So
+  `reconcileKind` (`shared/media.ts`) classes a claimed video with a picture,
+  no audio and 0 s as an image; the image pipeline (display PNG, thumbnail)
+  decodes it fine under the video extension, checked end to end in
+  `e2e/chaosQa1015.spec.ts`.
+
 ## Stills: no input seek (verified ffmpeg 8.1.1, 2026-10)
 
 - **`-ss 0` before `-i` on a JPEG still drops its only frame.** On iPhone

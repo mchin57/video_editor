@@ -158,6 +158,10 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
     const fail = (msg: string): void => void errors.push(`${label}: ${msg}`)
     const unknown = Object.keys(e).filter((k) => !KNOWN_KEYS.has(k as keyof TextEdit))
     if (unknown.length) return fail(`unknown field ${unknown.join(', ')}`)
+    // An id alone changes nothing; accepting it recorded an empty undo step.
+    if (e.id !== undefined && Object.keys(e).every((k) => k === 'id')) {
+      return fail('nothing to change: give at least one field to set besides id')
+    }
     const style = styleProblems(e)
     if (style.length) return fail(style.join('; '))
     if (e.text !== undefined && (typeof e.text !== 'string' || !e.text.trim())) {

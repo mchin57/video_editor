@@ -185,11 +185,15 @@ export function deriveKind(probe: ProbeInfo): MediaKind {
  * the probed streams. A video container with no picture is audio: an `.mp4`
  * can hold only AAC (or an MP3 renamed `.mp4`), and the video proxy's
  * `-map 0:v:0` fails on it (docs/FFMPEG-NOTES.md "Audio-only video
- * containers"). Anything else keeps its claim, and no claim falls back to the
- * probe alone.
+ * containers"). A "video" that is one picture with no duration and no sound is
+ * a still: a JPEG or PNG renamed `.mp4` probes as `jpeg_pipe`/`png_pipe` with
+ * no duration at all (FFMPEG-NOTES "Stills with a video extension"), and as a
+ * video it placed as a 0:00 clip. Anything else keeps its claim, and no claim
+ * falls back to the probe alone.
  */
 export function reconcileKind(claimed: MediaKind | null | undefined, probe: ProbeInfo): MediaKind {
   if (claimed === 'video' && !probe.video && probe.audio) return 'audio'
+  if (claimed === 'video' && probe.video && !probe.audio && probe.durationSec === 0) return 'image'
   return claimed ?? deriveKind(probe)
 }
 

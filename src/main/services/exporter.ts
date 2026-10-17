@@ -66,7 +66,7 @@ import type { LaidOutLine } from './textLayout'
 import { decorationScale, scaledPill, scaledShadow, scaledStroke } from './textScale'
 import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
-import { writeAtomically } from './atomicWrite'
+import { assertWritableDir, writeAtomically } from './atomicWrite'
 import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
 
 /** Canonical logical → output px for one render (`frameToOutput`). */
@@ -148,26 +148,33 @@ export function suggestedExportName(projectName: string, preset: PresetId): stri
   return `${sanitize(projectName)}_${preset}_${stamp}.mp4`
 }
 
+/** What a canceled export rejects with (the job itself reads `canceled`). */
+export const EXPORT_CANCELED = 'Export canceled'
+
 export async function exportProject(
   project: Project,
   opts: ExportOptions,
   outputPath: string
 ): Promise<string> {
   const mediaIds = referencedMediaIds(project)
-  const job = createJob('export', `Export · ${project.name}`, project.id, { uses: mediaIds })
+  const job = createJob('export', `Export · ${project.name}`, project.id, { uses: mediaIds, cancelable: true })
   try {
     // Missing or changed originals block the export, naming every file — never
     // render a clip from different bytes than the user edited.
     await assertMediaUsable(mediaIds)
+    await assertWritableDir(dirname(outputPath))
     // Encode to `<name>.part.mp4` and rename on success: a failed or killed run
     // never leaves a torn file at the chosen name, nor replaces one already there.
     await writeAtomically(outputPath, async (part) => {
-      await runExport(project, opts, job.id, part)
+      await runExport(project, opts, job.id, part, job.signal)
     })
     finishJob(job.id, outputPath)
     return outputPath
   } catch (error) {
     failJob(job.id, error instanceof Error ? error.message : String(error))
+    // Canceled: the throw is the run unwinding (ffmpeg killed, partial file
+    // removed by writeAtomically), so say that rather than ffmpeg's exit code.
+    if (job.signal?.aborted) throw new Error(EXPORT_CANCELED)
     throw error
   }
 }
@@ -195,6 +202,9 @@ interface RenderCtx {
   cache: Map<string, string>
   /** Monotonic counter for unique per-render temp subdirs. */
   n: { v: number }
+  /** The export job's cancel signal: kills every ffmpeg run of the render and
+   *  stops it between steps (Chromium layout, nested pre-renders). */
+  signal?: AbortSignal
   /** Stills render (`renderFrames`): skips the stabilization pre-pass and
    *  records here whether a clip wanted it. */
   stills?: { skippedStabilize: boolean }
@@ -204,7 +214,8 @@ async function runExport(
   project: Project,
   opts: ExportOptions,
   jobId: string,
-  output: string
+  output: string,
+  signal?: AbortSignal
 ): Promise<string> {
   const target = targetForPreset(opts.preset)
   const caps = await getCapabilities()
@@ -222,11 +233,14 @@ async function runExport(
     volumeLevels: project.volumeLevels ?? [],
     tmpRoot,
     cache: new Map(),
-    n: { v: 0 }
+    n: { v: 0 },
+    signal
   }
-  const out = await renderComposition(project, ctx, output, { alpha: false, depth: 1 })
-  await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
-  return out
+  try {
+    return await renderComposition(project, ctx, output, { alpha: false, depth: 1 })
+  } finally {
+    await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
+  }
 }
 
 /**
@@ -324,6 +338,7 @@ async function renderCompositionWith(
   const m = frameToOutput(frame, target.width)
   const s = m.s
 
+  ctx.signal?.throwIfAborted()
   const tmp = join(ctx.tmpRoot, `r${ctx.n.v++}`)
   await fsp.mkdir(tmp, { recursive: true })
 
@@ -437,8 +452,8 @@ async function renderCompositionWith(
       trfFile: `stab_${n}.trf`,
       outFile: `stab_${n}.mp4`
     }
-    await runFfmpeg(ffmpeg, buildVidstabDetectArgs(job), 0, undefined, tmp)
-    await runFfmpeg(ffmpeg, buildVidstabTransformArgs(job), 0, undefined, tmp)
+    await runFfmpeg(ffmpeg, buildVidstabDetectArgs(job), 0, undefined, tmp, ctx.signal)
+    await runFfmpeg(ffmpeg, buildVidstabTransformArgs(job), 0, undefined, tmp, ctx.signal)
     return join(tmp, job.outFile)
   }
   // Keyframed OPACITY: a per-visual sendcmd file drives `colorchannelmixer aa`
@@ -947,7 +962,8 @@ async function renderCompositionWith(
   // Only the top-level export drives the job bar; nested pre-renders would
   // rewind it (weighting them across N+1 passes is a Stage 5 item). Stills have no job.
   const progress = o.depth === 1 && !o.frames ? (pr: number): void => setProgress(jobId, pr) : undefined
-  await runFfmpeg(ffmpeg, args, totalDur, progress, tmp)
+  ctx.signal?.throwIfAborted()
+  await runFfmpeg(ffmpeg, args, totalDur, progress, tmp, ctx.signal)
 
   return output
 }

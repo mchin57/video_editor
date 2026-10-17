@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { existsSync, mkdtempSync, readdirSync, rmSync, promises as fsp } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { partialPath, singleFlight, writeAtomically } from './atomicWrite'
+import { assertWritableDir, partialPath, singleFlight, writeAtomically } from './atomicWrite'
 
 let dir: string
 beforeAll(() => {
@@ -116,5 +116,21 @@ describe('singleFlight', () => {
       })
     ).toBe('ok')
     expect(runs).toBe(2)
+  })
+})
+
+describe('assertWritableDir', () => {
+  it('passes for a writable folder and leaves nothing behind', async () => {
+    const d = join(dir, 'writable')
+    await fsp.mkdir(d)
+    await assertWritableDir(d)
+    expect(readdirSync(d)).toEqual([])
+  })
+  it('names the folder and the reason in plain words, not an ffmpeg log', async () => {
+    const missing = join(dir, 'no-such-folder')
+    await expect(assertWritableDir(missing)).rejects.toThrow(`Can't write to ${missing}: the folder does not exist`)
+    const file = join(dir, 'a-file.txt')
+    await fsp.writeFile(file, 'x')
+    await expect(assertWritableDir(file)).rejects.toThrow(/^Can't write to .*a-file\.txt: .*Choose another folder\.$/)
   })
 })

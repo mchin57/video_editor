@@ -74,6 +74,12 @@ describe('captionInWindow', () => {
 })
 
 describe('applyTextEdits', () => {
+  it('refuses an edit that names only an id: it would change nothing but still cost an undo step', () => {
+    const c = comp()
+    expect(() => applyTextEdits(c, [{ id: 't1' }], ctx())).toThrow(/nothing to change/)
+    expect(() => applyTextEdits(c, [{ id: 'c1' }], ctx())).toThrow(/nothing to change/)
+  })
+
   it('creates a text layer on top when there is no id, with defaults for unset style', () => {
     const { comp: c, results } = applyTextEdits(comp(), [{ text: 'Day one', startSec: 0.5, endSec: 2 }], ctx())
     expect(results).toEqual([{ id: 'new1', kind: 'text', created: true }])
