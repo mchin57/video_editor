@@ -7,8 +7,6 @@ test('launches to an empty project with the idle hints showing', async ({ appPag
   await expect(page.getByText(/Drag media here/)).toBeVisible()
   await expect(page.getByText(/Drag iPhone clips here/)).toBeVisible()
   // Hermetic profile sanity: the temp data dir starts with no media.
-  const layerCount = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project?.layers.length
-  )
+  const layerCount = await page.evaluate(() => window.__reelStores.useProject.getState().project?.layers.length)
   expect(layerCount).toBe(0)
 })

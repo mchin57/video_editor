@@ -53,7 +53,16 @@ function legacyAsset(path: string, bytes: string, fileName = path.split(/[\\/]/)
   mkdirSync(join(store, id), { recursive: true })
   writeFileSync(
     join(store, id, 'asset.json'),
-    JSON.stringify({ id, fileName, originalPath: path, importedAt: 'then', probe, proxyReady: true, transcribed: true, kind: 'video' })
+    JSON.stringify({
+      id,
+      fileName,
+      originalPath: path,
+      importedAt: 'then',
+      probe,
+      proxyReady: true,
+      transcribed: true,
+      kind: 'video'
+    })
   )
   writeFileSync(join(store, id, 'proxy.mp4'), `proxy of ${bytes}`)
   writeFileSync(join(store, id, 'transcript.json'), `{"words":["${id}"]}`)
@@ -127,7 +136,13 @@ describe('legacy conversion', () => {
     expect(existsSync(join(brick, 'reel.reel'))).toBe(false)
 
     const rec = recordOf(doc, brickId)
-    expect(rec).toMatchObject({ fileName: 'IMG_1.MOV', relativePath: 'IMG_1.MOV', absolutePath: footage, importedAt: 'then', kind: 'video' })
+    expect(rec).toMatchObject({
+      fileName: 'IMG_1.MOV',
+      relativePath: 'IMG_1.MOV',
+      absolutePath: footage,
+      importedAt: 'then',
+      kind: 'video'
+    })
     expect(rec.fingerprint).toEqual(await fingerprintFile(footage))
     expect(rec.generated).toBeUndefined()
     // The footage itself is untouched: same bytes, same time, not linked.
@@ -164,7 +179,11 @@ describe('legacy conversion', () => {
 
   it('finds footage moved beside the .reel, and recovers a clip the store lost', async () => {
     const doc = readDoc(join(reels, 'moved', 'moved.reel'))
-    expect(recordOf(doc, movedId)).toMatchObject({ fileName: 'IMG_3.MOV', relativePath: 'renamed.mov', absolutePath: join(reels, 'moved', 'renamed.mov') })
+    expect(recordOf(doc, movedId)).toMatchObject({
+      fileName: 'IMG_3.MOV',
+      relativePath: 'renamed.mov',
+      absolutePath: join(reels, 'moved', 'renamed.mov')
+    })
     expect(recordOf(doc, orphanId)).toMatchObject({ fileName: 'orphan.mp4', relativePath: 'orphan.mp4', kind: 'video' })
     expect(recordOf(doc, orphanId).probe.durationSec).toBe(4)
     expect(doc.library).toHaveLength(2)
@@ -174,7 +193,12 @@ describe('legacy conversion', () => {
   it('reports what it found, copied and missed', () => {
     const by = (name: string): ConversionReport => reports.find((r) => r.from.includes(name))!
     expect(by('bad brick')).toMatchObject({ to: join(brick, 'bad brick.reel'), found: 2, copied: 1, missing: [] })
-    expect(by('test 2')).toMatchObject({ to: join(reels, 'test 2', 'test 2.reel'), found: 1, copied: 0, missing: ['gone.mp4'] })
+    expect(by('test 2')).toMatchObject({
+      to: join(reels, 'test 2', 'test 2.reel'),
+      found: 1,
+      copied: 0,
+      missing: ['gone.mp4']
+    })
     expect(by('moved')).toMatchObject({ found: 2, copied: 0, missing: ['1 clip with no record in the old library'] })
   })
 
@@ -184,7 +208,9 @@ describe('legacy conversion', () => {
 
   it('knows legacy projects remain elsewhere until they are converted too', async () => {
     const elsewhere = join(scratch, 'Elsewhere')
-    expect(remainingLegacyProjects([reels, elsewhere, elsewhere.toUpperCase()])).toEqual([join(elsewhere, 'other.reel')])
+    expect(remainingLegacyProjects([reels, elsewhere, elsewhere.toUpperCase()])).toEqual([
+      join(elsewhere, 'other.reel')
+    ])
     const [report] = await convertLegacyFolder(elsewhere)
     expect(report).toMatchObject({ found: 1, copied: 0, missing: [], to: join(elsewhere, 'other', 'other.reel') })
     expect(remainingLegacyProjects([reels, elsewhere])).toEqual([])

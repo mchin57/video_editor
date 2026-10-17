@@ -21,7 +21,10 @@ const LONG_AGO = new Date(0).toISOString()
  * played (0 when no use says). The empty `absolutePath` marks it as unknown
  * (see `isUnknownClip`); `UNKNOWN_FINGERPRINT` keeps it Missing until Relink.
  */
-export function unknownRecords(doc: Pick<Project, 'layers' | 'audioClips'>, known: (id: string) => boolean): MediaRecord[] {
+export function unknownRecords(
+  doc: Pick<Project, 'layers' | 'audioClips'>,
+  known: (id: string) => boolean
+): MediaRecord[] {
   const byId = new Map<string, { video: boolean; image: boolean; audio: boolean; outSec: number }>()
   for (const use of mediaUses(doc)) {
     if (known(use.mediaId)) continue

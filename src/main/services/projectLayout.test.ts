@@ -59,7 +59,10 @@ describe('project folder layout', () => {
         { id: 'bbbbbbbbbbbb', relativePath: 'footage/IMG_1.MOV' }
       ]
     })
-    const autosave = JSON.stringify({ mediaIds: ['cccccccccccc'], library: [{ id: 'cccccccccccc', generated: true, relativePath: 'generated/x (still).png' }] })
+    const autosave = JSON.stringify({
+      mediaIds: ['cccccccccccc'],
+      library: [{ id: 'cccccccccccc', generated: true, relativePath: 'generated/x (still).png' }]
+    })
     const present = {
       generated: ['clip (no bg 0.03–0.05).webm', 'x (still).png', 'orphan (audio).wav'],
       transcripts: ['aaaaaaaaaaaa.json', 'cccccccccccc.json', 'dddddddddddd.json', 'notes.txt']

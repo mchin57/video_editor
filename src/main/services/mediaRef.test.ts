@@ -129,12 +129,21 @@ describe('decideResolution', () => {
   it('absolute matches and the recorded relative path already agrees → no update', () => {
     const rec = { relativePath: '../../Old/a.mov', absolutePath: elsewhere, fingerprint: fp }
     expect(toRelativePath(proj, elsewhere)).toBe('../../Old/a.mov')
-    expect(decideResolution(rec, proj, check(fromRelativePath(proj, '../../Old/a.mov'), null), check(elsewhere, fp)).update).toEqual({})
+    expect(
+      decideResolution(rec, proj, check(fromRelativePath(proj, '../../Old/a.mov'), null), check(elsewhere, fp)).update
+    ).toEqual({})
   })
 
   it.runIf(process.platform === 'win32')('Windows: another drive → relativePath becomes null', () => {
     const rec = { relativePath: 'footage/a.mov', absolutePath: 'Z:\\footage\\a.mov', fingerprint: fp }
-    expect(decideResolution(rec, 'C:\\Reels\\Trip', check('C:\\Reels\\Trip\\footage\\a.mov', null), check('Z:\\footage\\a.mov', fp))).toEqual({
+    expect(
+      decideResolution(
+        rec,
+        'C:\\Reels\\Trip',
+        check('C:\\Reels\\Trip\\footage\\a.mov', null),
+        check('Z:\\footage\\a.mov', fp)
+      )
+    ).toEqual({
       path: 'Z:\\footage\\a.mov',
       found: 'absolute',
       update: { relativePath: null }
@@ -215,7 +224,11 @@ describe('locateOriginal (real files)', () => {
 
   it('a size mismatch or a missing file is decided by stat alone — no samples read', async () => {
     const clip = put('Trip/a.mov', 'clip-a')
-    const rec = { relativePath: 'a.mov', absolutePath: join(root, 'gone.mov'), fingerprint: await fingerprintFile(clip) }
+    const rec = {
+      relativePath: 'a.mov',
+      absolutePath: join(root, 'gone.mov'),
+      fingerprint: await fingerprintFile(clip)
+    }
     writeFileSync(clip, 'clip-a, re-encoded')
     const r = countingReader()
     expect(await locateOriginal(rec, join(root, 'Trip'), r.read)).toEqual({ path: null, found: null, update: {} })

@@ -77,9 +77,7 @@ export function textBoxCss(
     lineHeight: TEXT_LINE_HEIGHT,
     whiteSpace: 'pre-wrap',
     textAlign: 'center',
-    ...(wrap.widthPx != null
-      ? { width: len(wrap.widthPx) }
-      : { width: 'max-content', maxWidth: len(wrap.wrapWidthPx) })
+    ...(wrap.widthPx != null ? { width: len(wrap.widthPx) } : { width: 'max-content', maxWidth: len(wrap.wrapWidthPx) })
   }
 }
 

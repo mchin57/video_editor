@@ -12,7 +12,12 @@ const base: TextStyleBase = {
 describe('pickTextStyle', () => {
   it('keeps only the style fields and turns absent decorations into null (so applying removes them)', () => {
     const layerContent = { ...base, kind: 'text', text: 'SWIM', widthPx: 500, stroke: { widthPx: 6, color: '#000' } }
-    expect(pickTextStyle(layerContent)).toEqual({ ...base, stroke: { widthPx: 6, color: '#000' }, shadow: null, gradient: null })
+    expect(pickTextStyle(layerContent)).toEqual({
+      ...base,
+      stroke: { widthPx: 6, color: '#000' },
+      shadow: null,
+      gradient: null
+    })
   })
   it('copies nested objects (a later edit to the source cannot change the preset)', () => {
     const src = { ...base, pill: { ...base.pill } }
@@ -27,8 +32,17 @@ describe('upsertTextStyle', () => {
     let list: TextStylePreset[] = []
     list = upsertTextStyle(list, 'Hook', base, undefined, 'a')
     list = upsertTextStyle(list, 'Caption', { ...base, fontSizePx: 60 }, undefined, 'b')
-    list = upsertTextStyle(list, ' hook ', { ...base, color: '#FFFFFF' }, { in: 'bounce', inSec: 0.4, out: 'none', outSec: 0.3 }, 'c')
-    expect(list.map((p) => [p.id, p.name])).toEqual([['a', 'hook'], ['b', 'Caption']])
+    list = upsertTextStyle(
+      list,
+      ' hook ',
+      { ...base, color: '#FFFFFF' },
+      { in: 'bounce', inSec: 0.4, out: 'none', outSec: 0.3 },
+      'c'
+    )
+    expect(list.map((p) => [p.id, p.name])).toEqual([
+      ['a', 'hook'],
+      ['b', 'Caption']
+    ])
     expect(list[0].style.color).toBe('#FFFFFF')
     expect(list[0].animation?.in).toBe('bounce')
   })
@@ -41,7 +55,15 @@ describe('upsertTextStyle', () => {
 describe('sanitizeTextStyles', () => {
   it('keeps well-formed presets and drops anything else', () => {
     const good = { id: 'a', name: 'Hook', style: base }
-    expect(sanitizeTextStyles([good, { id: 'b', name: 'half', style: { fontFamily: 'anton' } }, null, 'x', { id: 'c', name: '', style: base }])).toEqual([good])
+    expect(
+      sanitizeTextStyles([
+        good,
+        { id: 'b', name: 'half', style: { fontFamily: 'anton' } },
+        null,
+        'x',
+        { id: 'c', name: '', style: base }
+      ])
+    ).toEqual([good])
     expect(sanitizeTextStyles(undefined)).toEqual([])
     expect(sanitizeTextStyles({})).toEqual([])
   })

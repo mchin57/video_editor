@@ -22,13 +22,27 @@ const content = (l: { content: unknown }) => l.content as VideoContent
 
 describe('applySequence', () => {
   it('lays items end-to-end in the given order from 0 on an empty timeline', () => {
-    const { comp, placed } = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 2, 5), item('b', 10, 11.5)] }, ctx())
-    expect(placed.map((p) => [p.mediaId, p.startSec, p.endSec])).toEqual([['a', 0, 3], ['b', 3, 4.5]])
-    expect(comp.layers.map((l) => [content(l).inSec, content(l).outSec])).toEqual([[2, 5], [10, 11.5]])
+    const { comp, placed } = applySequence(
+      createEmptyComposition(),
+      { mode: 'append', items: [item('a', 2, 5), item('b', 10, 11.5)] },
+      ctx()
+    )
+    expect(placed.map((p) => [p.mediaId, p.startSec, p.endSec])).toEqual([
+      ['a', 0, 3],
+      ['b', 3, 4.5]
+    ])
+    expect(comp.layers.map((l) => [content(l).inSec, content(l).outSec])).toEqual([
+      [2, 5],
+      [10, 11.5]
+    ])
   })
 
   it("keeps every layer's window equal to its played duration", () => {
-    const { comp } = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 1.25, 7.5), item('b', 0, 3)] }, ctx())
+    const { comp } = applySequence(
+      createEmptyComposition(),
+      { mode: 'append', items: [item('a', 1.25, 7.5), item('b', 0, 3)] },
+      ctx()
+    )
     for (const l of comp.layers) expect(l.endSec - l.startSec).toBeCloseTo(playedVideoDuration(content(l)), 9)
   })
 
@@ -39,7 +53,11 @@ describe('applySequence', () => {
   })
 
   it('starts at atSec when given', () => {
-    const { placed } = applySequence(createEmptyComposition(), { mode: 'append', atSec: 7, items: [item('a', 0, 1)] }, ctx())
+    const { placed } = applySequence(
+      createEmptyComposition(),
+      { mode: 'append', atSec: 7, items: [item('a', 0, 1)] },
+      ctx()
+    )
     expect(placed[0]).toMatchObject({ startSec: 7, endSec: 8 })
   })
 
@@ -76,16 +94,22 @@ describe('applySequence', () => {
         /more than 60s past the end of the edit \(3s\); times are in seconds/
       )
     }
-    expect(applySequence(first, { mode: 'append', atSec: 63, items: [item('b', 0, 1)] }, ctx()).placed[0].startSec).toBe(63)
+    expect(
+      applySequence(first, { mode: 'append', atSec: 63, items: [item('b', 0, 1)] }, ctx()).placed[0].startSec
+    ).toBe(63)
   })
 
   it('measures the atSec bound after replace removes the old video', () => {
     const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 20)] }, ctx()).comp
-    expect(() => applySequence(first, { mode: 'replace', atSec: 70, items: [item('b', 0, 1)] }, ctx())).toThrow(/past the end/)
+    expect(() => applySequence(first, { mode: 'replace', atSec: 70, items: [item('b', 0, 1)] }, ctx())).toThrow(
+      /past the end/
+    )
   })
 
   it('rejects an item that clamps to (almost) nothing, naming it', () => {
-    expect(() => applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 1), item('b', 25, 30)] }, ctx())).toThrow(/item 1 \(b\)/)
+    expect(() =>
+      applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 1), item('b', 25, 30)] }, ctx())
+    ).toThrow(/item 1 \(b\)/)
   })
 
   it('rejects a reversed item without touching the input composition', () => {
@@ -105,7 +129,11 @@ describe('applySequence', () => {
   })
 
   it('adds no audio and leaves the clip unmuted when the source is silent', () => {
-    const { comp } = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 2, { hasAudio: false })] }, ctx())
+    const { comp } = applySequence(
+      createEmptyComposition(),
+      { mode: 'append', items: [item('a', 0, 2, { hasAudio: false })] },
+      ctx()
+    )
     expect(comp.audioClips).toEqual([])
     expect(content(comp.layers[0]).mute).toBe(false)
     expect(comp.layers[0].linkGroupId).toBeUndefined()
@@ -119,7 +147,11 @@ describe('applySequence stacking', () => {
 
   it('append puts new clips on the top layer, over an existing text layer', () => {
     const start = { ...createEmptyComposition(), layers: [makeTextLayer('title', 0, 5)] }
-    const { comp, placed } = applySequence(start, { mode: 'append', atSec: 0, items: [item('a', 0, 2), item('b', 0, 2)] }, ctx())
+    const { comp, placed } = applySequence(
+      start,
+      { mode: 'append', atSec: 0, items: [item('a', 0, 2), item('b', 0, 2)] },
+      ctx()
+    )
     expect(kinds(comp)).toEqual(['text', 'video', 'video'])
     expect(comp.layers.slice(1).map((l) => l.id)).toEqual(placed.map((p) => p.layerId))
   })
@@ -133,7 +165,11 @@ describe('applySequence stacking', () => {
   it('replace keeps a title in front and puts the new clips where the old video was', () => {
     const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 3)] }, ctx()).comp
     const withTitle = { ...first, layers: [...first.layers, makeTextLayer('title', 0, 3)] }
-    const { comp, placed } = applySequence(withTitle, { mode: 'replace', items: [item('b', 0, 2), item('c', 0, 2)] }, ctx())
+    const { comp, placed } = applySequence(
+      withTitle,
+      { mode: 'replace', items: [item('b', 0, 2), item('c', 0, 2)] },
+      ctx()
+    )
     expect(kinds(comp)).toEqual(['video', 'video', 'text'])
     expect(comp.layers[comp.layers.length - 1].id).toBe('title')
     expect(comp.layers.slice(0, 2).map((l) => l.id)).toEqual(placed.map((p) => p.layerId))
@@ -142,7 +178,12 @@ describe('applySequence stacking', () => {
   it('replace slots the new clips at the bottom-most removed video, under surviving layers above it', () => {
     const start = {
       ...createEmptyComposition(),
-      layers: [makeImageLayer('under', 'pic', 0, 2), makeVideoLayer('v1', 'x', 0, 2), makeImageLayer('over', 'pic', 0, 2), makeVideoLayer('v2', 'y', 0, 2)]
+      layers: [
+        makeImageLayer('under', 'pic', 0, 2),
+        makeVideoLayer('v1', 'x', 0, 2),
+        makeImageLayer('over', 'pic', 0, 2),
+        makeVideoLayer('v2', 'y', 0, 2)
+      ]
     }
     const { comp, placed } = applySequence(start, { mode: 'replace', items: [item('b', 0, 2)] }, ctx())
     expect(comp.layers.map((l) => l.id)).toEqual(['under', placed[0].layerId, 'over'])
@@ -152,7 +193,11 @@ describe('applySequence stacking', () => {
     const ids = ctx()
     const first = applySequence(createEmptyComposition(), { mode: 'append', items: [item('a', 0, 3)] }, ids).comp
     const withImage = { ...first, layers: [...first.layers, makeImageLayer('img', 'pic', 0, 3)] }
-    const { comp, placed } = applySequence(withImage, { mode: 'append', items: [item('b', 0, 2), item('c', 0, 2)] }, ids)
+    const { comp, placed } = applySequence(
+      withImage,
+      { mode: 'append', items: [item('b', 0, 2), item('c', 0, 2)] },
+      ids
+    )
     expect(comp.layers.map((l) => l.id)).toEqual([first.layers[0].id, 'img', ...placed.map((p) => p.layerId)])
   })
 })

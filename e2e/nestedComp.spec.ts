@@ -35,9 +35,7 @@ const rootState = (page: Page): Promise<{ layers: number; cell0: unknown; editPa
     }
   })
 
-test('convert a cell to a comp, enter it, edit inside, breadcrumb exits', async ({
-  appPage: page
-}) => {
+test('convert a cell to a comp, enter it, edit inside, breadcrumb exits', async ({ appPage: page }) => {
   await arrangeLayoutWithCell(page)
 
   // Convert + enter through the real store actions (the Stage-4 UI wraps these).
@@ -73,9 +71,7 @@ test('convert a cell to a comp, enter it, edit inside, breadcrumb exits', async 
   expect((await rootState(page)).editPath).toEqual([])
 })
 
-test('an un-entered cell comp renders inside its panel in the preview', async ({
-  appPage: page
-}) => {
+test('an un-entered cell comp renders inside its panel in the preview', async ({ appPage: page }) => {
   await arrangeLayoutWithCell(page)
   // Convert the cell WITHOUT entering it, then add a text layer inside the comp
   // (enter → edit → exit), so the comp has something with visible DOM.
@@ -123,9 +119,7 @@ test('the cell Edit button converts + enters in one click (real UI)', async ({ a
   expect(s.editPath).toHaveLength(1)
 })
 
-test('a timeline clip converts to a compound clip and opens (real UI)', async ({
-  appPage: page
-}) => {
+test('a timeline clip converts to a compound clip and opens (real UI)', async ({ appPage: page }) => {
   // A plain clip with NO audio, so it isn't linked (linked tiles are excluded).
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
@@ -160,9 +154,7 @@ test('a timeline clip converts to a compound clip and opens (real UI)', async ({
   await expect(page.getByTestId('comp-breadcrumb')).toContainText('Compound clip')
 })
 
-test("editing inside a compound resizes its block in the parent timeline", async ({
-  appPage: page
-}) => {
+test('editing inside a compound resizes its block in the parent timeline', async ({ appPage: page }) => {
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
     useProject.getState().addVideoLayer('V1', 'no-such-media', 0, 6, false)
@@ -196,15 +188,11 @@ test("editing inside a compound resizes its block in the parent timeline", async
 
   // The parent block grew to match the comp (v1 comps are untrimmed), so the
   // extra content can't be clipped by a stale window.
-  const end = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.layers[0].endSec
-  )
+  const end = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers[0].endSec)
   expect(end).toBeCloseTo(10, 5)
 })
 
-test('undo while inside a comp pops the edit path instead of dangling', async ({
-  appPage: page
-}) => {
+test('undo while inside a comp pops the edit path instead of dangling', async ({ appPage: page }) => {
   await arrangeLayoutWithCell(page)
   await page.evaluate(() => {
     const s = window.__reelStores.useProject.getState()
@@ -232,18 +220,33 @@ test('undo while inside a comp pops the edit path instead of dangling', async ({
  * the standard workflow (mute the clip, extract its audio to the lane) went
  * silent one level up, while text and pictures propagated fine.
  */
-test('a nested comp plays its own audio track from the parent timeline', async ({
-  appPage: page
-}) => {
+test('a nested comp plays its own audio track from the parent timeline', async ({ appPage: page }) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
 
   // A real clip WITH an audio track (followers need a ready proxy to render).
   const mp4 = join(mkdtempSync(join(tmpdir(), 'reel-na-')), 'av.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc=duration=3:size=270x480:rate=30',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=duration=3:size=270x480:rate=30',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=3',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-c:a',
+    'aac',
+    '-shortest',
     mp4
   ])
   const assetId = await page.evaluate(async (p) => {
@@ -252,10 +255,9 @@ test('a nested comp plays its own audio track from the parent timeline', async (
     return asset.id
   }, mp4)
   await expect
-    .poll(
-      () => page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0]?.proxyReady, assetId),
-      { timeout: 30_000 }
-    )
+    .poll(() => page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0]?.proxyReady, assetId), {
+      timeout: 30_000
+    })
     .toBe(true)
 
   // A layout whose cell 0 is a comp; inside it, the user's usual shape: the
@@ -268,8 +270,7 @@ test('a nested comp plays its own audio track from the parent timeline', async (
     s.convertCellToComp('LAY', 0)
     s.enterComposition({ layerId: 'LAY', cellIndex: 0 })
     const st = useProject.getState()
-    const comp = (st.project!.layers.find((l) => l.id === 'LAY')!.content as LayoutContent).cells[0]
-      .comp!
+    const comp = (st.project!.layers.find((l) => l.id === 'LAY')!.content as LayoutContent).cells[0].comp!
     st.updateLayerContent(comp.layers[0].id, { mute: true })
     st.addAudioClip({
       id: 'NA1',
@@ -294,8 +295,6 @@ test('a nested comp plays its own audio track from the parent timeline', async (
 
   // …and it is silenced when the cell holding the comp is muted, matching the
   // export (which skips a muted cell's intermediate audio entirely).
-  await page.evaluate(() =>
-    window.__reelStores.useProject.getState().updateLayoutCell('LAY', 0, { mute: true })
-  )
+  await page.evaluate(() => window.__reelStores.useProject.getState().updateLayoutCell('LAY', 0, { mute: true }))
   await expect.poll(() => page.locator('audio').count()).toBe(0)
 })

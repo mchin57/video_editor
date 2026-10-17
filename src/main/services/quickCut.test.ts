@@ -50,13 +50,24 @@ describe('buildCutArgs', () => {
   })
 
   it('HEVC 10-bit HDR stays HEVC Main10 with its tags', () => {
-    const hdr = { codec: 'hevc', pixFmt: 'yuv420p10le', colorTransfer: 'arib-std-b67', colorPrimaries: 'bt2020', colorSpace: 'bt2020nc', isHdr: true }
+    const hdr = {
+      codec: 'hevc',
+      pixFmt: 'yuv420p10le',
+      colorTransfer: 'arib-std-b67',
+      colorPrimaries: 'bt2020',
+      colorSpace: 'bt2020nc',
+      isHdr: true
+    }
     expect(args(probe(hdr))).toContain(
       '-c:v hevc_nvenc -preset p6 -tune hq -rc vbr -cq 18 -b:v 0 -profile:v main10 -pix_fmt p010le ' +
         '-color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc -tag:v hvc1'
     )
-    expect(args(probe(hdr), SOFT)).toContain('-c:v libx265 -preset medium -crf 18 -pix_fmt yuv420p10le -x265-params log-level=error')
-    expect(args(probe(hdr), { ...SOFT, libx265: false })).toContain('-c:v libx264 -preset medium -crf 18 -profile:v high10 -pix_fmt yuv420p10le')
+    expect(args(probe(hdr), SOFT)).toContain(
+      '-c:v libx265 -preset medium -crf 18 -pix_fmt yuv420p10le -x265-params log-level=error'
+    )
+    expect(args(probe(hdr), { ...SOFT, libx265: false })).toContain(
+      '-c:v libx264 -preset medium -crf 18 -profile:v high10 -pix_fmt yuv420p10le'
+    )
   })
 
   it('leaves out color tags ffmpeg would reject', () => {

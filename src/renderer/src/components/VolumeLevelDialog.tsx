@@ -59,10 +59,8 @@ function LevelDialogBody(): JSX.Element | null {
   const dialog = useUi((s) => s.levelDialog)!
   const close = (): void => useUi.getState().setLevelDialog(null)
   const levels = useProject((s) => s.project?.volumeLevels ?? [])
-  const target = dialog.mode === 'create' ? null : levels.find((l) => l.id === dialog.levelId) ?? null
-  const [name, setName] = useState(() =>
-    dialog.mode === 'create' ? suggestLevelName(levels) : (target?.name ?? '')
-  )
+  const target = dialog.mode === 'create' ? null : (levels.find((l) => l.id === dialog.levelId) ?? null)
+  const [name, setName] = useState(() => (dialog.mode === 'create' ? suggestLevelName(levels) : (target?.name ?? '')))
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -142,8 +140,8 @@ function LevelDialogBody(): JSX.Element | null {
             )}
             {dialog.mode === 'create' && (
               <p className="mt-2 text-[11px] leading-snug text-zinc-500">
-                Clips in a level are each matched to its loudness (−16 LUFS to start; change it from File ▸
-                Volume levels or the Inspector).
+                Clips in a level are each matched to its loudness (−16 LUFS to start; change it from File ▸ Volume
+                levels or the Inspector).
                 {dialog.assign?.length ? ' The selected clip joins it.' : ''}
               </p>
             )}

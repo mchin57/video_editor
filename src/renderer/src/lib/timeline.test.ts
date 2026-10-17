@@ -128,14 +128,8 @@ describe('ramp-aware trim & split', () => {
     // Both halves keep the ramp and the window invariant.
     expect((left.content as VideoContent).speedRamp).toEqual(ramp)
     expect((right.content as VideoContent).speedRamp).toEqual(ramp)
-    expect(left.endSec - left.startSec).toBeCloseTo(
-      playedVideoDuration(left.content as VideoContent),
-      9
-    )
-    expect(right.endSec - right.startSec).toBeCloseTo(
-      playedVideoDuration(right.content as VideoContent),
-      9
-    )
+    expect(left.endSec - left.startSec).toBeCloseTo(playedVideoDuration(left.content as VideoContent), 9)
+    expect(right.endSec - right.startSec).toBeCloseTo(playedVideoDuration(right.content as VideoContent), 9)
     // The two windows sum to the original.
     expect(right.endSec - left.startSec).toBeCloseTo(4 * Math.log(2), 9)
   })
@@ -171,7 +165,17 @@ describe('splitVideoLayer', () => {
     expect(splitVideoLayer(layer, 4, makeId)).toBeNull()
     expect(splitVideoLayer(layer, 10, makeId)).toBeNull()
     expect(splitVideoLayer(layer, 2, makeId)).toBeNull()
-    const text = { ...layer, content: { kind: 'text' as const, text: 'x', fontFamily: 'a', fontSizePx: 10, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } } }
+    const text = {
+      ...layer,
+      content: {
+        kind: 'text' as const,
+        text: 'x',
+        fontFamily: 'a',
+        fontSizePx: 10,
+        color: '#fff',
+        pill: { enabled: false, color: '#000', padPx: 0 }
+      }
+    }
     expect(splitVideoLayer(text, 7, makeId)).toBeNull()
   })
 
@@ -329,7 +333,13 @@ describe('edge trims report what they achieved', () => {
 
   it('keeps a minimum window on a text layer and a caption', () => {
     const layer: Layer = {
-      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 0, y: 0, scale: 1,
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 0,
+      y: 0,
+      scale: 1,
       content: { kind: 'text', text: 'x' } as Layer['content']
     }
     expect(trimLayerEdge(layer, 'end', -10).tile.endSec).toBe(0.2)
@@ -453,7 +463,12 @@ describe('splitStaticLayer', () => {
     // No opacity anywhere → the seam keyframes must not sprout `opacity: 1`,
     // which would push the layer onto the export's per-frame alpha path.
     const [left, right] = splitStaticLayer(
-      text({ keyframes: [{ tSec: 0, x: 0, y: 960, scale: 1 }, { tSec: 10, x: 100, y: 960, scale: 1 }] }),
+      text({
+        keyframes: [
+          { tSec: 0, x: 0, y: 960, scale: 1 },
+          { tSec: 10, x: 100, y: 960, scale: 1 }
+        ]
+      }),
       4,
       makeId
     )!

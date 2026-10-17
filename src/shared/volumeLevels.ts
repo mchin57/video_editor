@@ -134,9 +134,14 @@ export function fxSourceClip(
   const sameGroup = (c: AudioClip): number => (c.linkGroupId != null && c.linkGroupId === clip.linkGroupId ? 1 : 0)
   const pick = (a: number, b: number): AudioClip | null => {
     const scored = candidates
-      .map((c) => ({ c, overlap: Math.min(b, effectiveOut(c, durationOf(c.mediaId) || Infinity)) - Math.max(a, c.inSec) }))
+      .map((c) => ({
+        c,
+        overlap: Math.min(b, effectiveOut(c, durationOf(c.mediaId) || Infinity)) - Math.max(a, c.inSec)
+      }))
       .filter((s) => s.overlap > 1e-9)
-      .sort((x, y) => (Math.abs(y.overlap - x.overlap) > 1e-9 ? y.overlap - x.overlap : sameGroup(y.c) - sameGroup(x.c)))
+      .sort((x, y) =>
+        Math.abs(y.overlap - x.overlap) > 1e-9 ? y.overlap - x.overlap : sameGroup(y.c) - sameGroup(x.c)
+      )
     return scored[0]?.c ?? null
   }
   // The rendered file starts at `fromInSec` of the source, so a piece trimmed
@@ -173,7 +178,11 @@ export function clipGain(clip: AudioClip, clips: readonly AudioClip[], ctx: Gain
 }
 
 /** Whether resolving `clip` needs any loudness series (else none is fetched). */
-export function seriesNeeded(clip: AudioClip, clips: readonly AudioClip[], levels: readonly VolumeLevel[]): string | null {
+export function seriesNeeded(
+  clip: AudioClip,
+  clips: readonly AudioClip[],
+  levels: readonly VolumeLevel[]
+): string | null {
   if (clip.kind === 'fx') {
     const src = clip.fx ? fxSourceClip(clip, clips) : null
     return src && levelOf(src, levels) ? src.mediaId : null

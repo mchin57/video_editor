@@ -26,16 +26,19 @@ test('every bundled font resolves over reelmedia://', async ({ appPage }) => {
     if (m.type() === 'error') errors.push(m.text())
   })
 
-  const results = await appPage.evaluate(async (labels: string[]) => {
-    await document.fonts.ready
-    const loaded: Record<string, number> = {}
-    for (const label of labels) {
-      // `load()` rejects on a network/CORS failure, so a resolved non-empty
-      // array is proof the TTF really came down the protocol.
-      loaded[label] = (await document.fonts.load(`16px "${label}"`)).length
-    }
-    return loaded
-  }, FONTS.map((f) => f.label))
+  const results = await appPage.evaluate(
+    async (labels: string[]) => {
+      await document.fonts.ready
+      const loaded: Record<string, number> = {}
+      for (const label of labels) {
+        // `load()` rejects on a network/CORS failure, so a resolved non-empty
+        // array is proof the TTF really came down the protocol.
+        loaded[label] = (await document.fonts.load(`16px "${label}"`)).length
+      }
+      return loaded
+    },
+    FONTS.map((f) => f.label)
+  )
 
   for (const font of FONTS) {
     expect(results[font.label], `${font.label} (${font.file}) must load`).toBeGreaterThan(0)
@@ -44,9 +47,7 @@ test('every bundled font resolves over reelmedia://', async ({ appPage }) => {
 })
 
 test('a missing font file 404s instead of hanging', async ({ appPage }) => {
-  const status = await appPage.evaluate(() =>
-    fetch('reelmedia://fonts/NoSuchFace-Regular.ttf').then((r) => r.status)
-  )
+  const status = await appPage.evaluate(() => fetch('reelmedia://fonts/NoSuchFace-Regular.ttf').then((r) => r.status))
   expect(status).toBe(404)
 })
 

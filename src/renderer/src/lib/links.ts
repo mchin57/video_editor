@@ -30,14 +30,7 @@
  * final positions, so this is renderer-only (like `lib/timeline.ts`). Typed against `Composition`, so the SAME ops serve the root timeline and any nested comp.
  */
 
-import type {
-  AudioClip,
-  CaptionSegment,
-  Layer,
-  Composition,
-  TimelineItemKind,
-  TimelineItemRef
-} from '@shared/project'
+import type { AudioClip, CaptionSegment, Layer, Composition, TimelineItemKind, TimelineItemRef } from '@shared/project'
 import { audioClipEnd } from '@shared/project'
 import {
   audioTimelineAt,
@@ -60,8 +53,7 @@ const EPS = 1e-3
  *  within their own array). */
 export const refKey = (ref: TimelineItemRef): string => `${ref.kind}:${ref.id}`
 
-export const sameRef = (a: TimelineItemRef, b: TimelineItemRef): boolean =>
-  a.kind === b.kind && a.id === b.id
+export const sameRef = (a: TimelineItemRef, b: TimelineItemRef): boolean => a.kind === b.kind && a.id === b.id
 
 /** A lookup set for "is this tile in that list of refs". */
 export const refKeys = (refs: TimelineItemRef[]): Set<string> => new Set(refs.map(refKey))
@@ -179,11 +171,7 @@ export function timelineTiles(p: Composition, srcDur: SourceDuration = () => 0):
 }
 
 /** The tile a ref points at, or null if it no longer exists. */
-export function tileOf(
-  p: Composition,
-  ref: TimelineItemRef,
-  srcDur?: SourceDuration
-): Tile | null {
+export function tileOf(p: Composition, ref: TimelineItemRef, srcDur?: SourceDuration): Tile | null {
   return timelineTiles(p, srcDur).find((t) => sameRef(t.ref, ref)) ?? null
 }
 
@@ -251,10 +239,7 @@ function setGroupIds(
   next: (ref: TimelineItemRef, current: string | undefined) => string | undefined
 ): Composition {
   let changed = false
-  const apply = <T extends { id: string; linkGroupId?: string }>(
-    item: T,
-    kind: TimelineItemKind
-  ): T => {
+  const apply = <T extends { id: string; linkGroupId?: string }>(item: T, kind: TimelineItemKind): T => {
     const gid = next({ kind, id: item.id }, item.linkGroupId)
     if (gid === item.linkGroupId) return item
     changed = true
@@ -285,11 +270,7 @@ export function pruneLinkGroups(p: Composition): Composition {
  * brings them along instead of tearing them apart. No-ops (returns `p`) when
  * fewer than two linkable tiles remain — layout layers are never linked.
  */
-export function linkItems(
-  p: Composition,
-  refs: TimelineItemRef[],
-  makeId: () => string
-): Composition {
+export function linkItems(p: Composition, refs: TimelineItemRef[], makeId: () => string): Composition {
   // `canLinkItems` is the single authority for "would this change anything", so
   // the disabled Link button and this action can't drift apart (and re-linking
   // one existing group doesn't churn its id into a pointless undo step).
@@ -298,9 +279,7 @@ export function linkItems(
   const keys = refKeys(targets.map((t) => t.ref))
   const absorbed = new Set(targets.map((t) => t.linkGroupId).filter((g): g is string => !!g))
   const gid = makeId()
-  return setGroupIds(p, (ref, current) =>
-    keys.has(refKey(ref)) || (current && absorbed.has(current)) ? gid : current
-  )
+  return setGroupIds(p, (ref, current) => (keys.has(refKey(ref)) || (current && absorbed.has(current)) ? gid : current))
 }
 
 /** Unlink every group represented in `refs` — all of their members, not just
@@ -332,16 +311,12 @@ export function moveItemsBy(p: Composition, refs: TimelineItemRef[], delta: numb
   return {
     ...p,
     layers: p.layers.map((l) =>
-      keys.has(refKey({ kind: 'layer', id: l.id }))
-        ? { ...l, startSec: l.startSec + d, endSec: l.endSec + d }
-        : l
+      keys.has(refKey({ kind: 'layer', id: l.id })) ? { ...l, startSec: l.startSec + d, endSec: l.endSec + d } : l
     ),
     captions: {
       ...p.captions,
       segments: p.captions.segments.map((s) =>
-        keys.has(refKey({ kind: 'caption', id: s.id }))
-          ? { ...s, startSec: s.startSec + d, endSec: s.endSec + d }
-          : s
+        keys.has(refKey({ kind: 'caption', id: s.id })) ? { ...s, startSec: s.startSec + d, endSec: s.endSec + d } : s
       )
     },
     audioClips: p.audioClips.map((a) =>
@@ -376,11 +351,7 @@ export function moveItemsBy(p: Composition, refs: TimelineItemRef[], delta: numb
  * `moveItemsBy` it feeds — timeline.ts owns single-item source-time math and is
  * imported by this module, so the dependency only runs one way.
  */
-export function snapToPreviousDelta(
-  p: Composition,
-  refs: TimelineItemRef[],
-  srcDur?: SourceDuration
-): number | null {
+export function snapToPreviousDelta(p: Composition, refs: TimelineItemRef[], srcDur?: SourceDuration): number | null {
   const keys = refKeys(refs)
   const tiles = timelineTiles(p, srcDur)
   const moving = tiles.filter((t) => keys.has(refKey(t.ref)))
@@ -422,12 +393,9 @@ export function trimItemsBy(
   const keys = refKeys(refs)
   if (keys.size === 0 || delta === 0) return p
   const has = (kind: TimelineItemKind, id: string): boolean => keys.has(refKey({ kind, id }))
-  const layerSrc = (l: Layer): number =>
-    l.content.kind === 'video' ? srcDur(l.content.mediaId) : 0
-  const trimLayer = (l: Layer, d: number): Trimmed<Layer> =>
-    trimLayerEdge(l, edge, d, layerSrc(l))
-  const trimAudio = (a: AudioClip, d: number): Trimmed<AudioClip> =>
-    trimAudioEdge(a, edge, d, srcDur(a.mediaId))
+  const layerSrc = (l: Layer): number => (l.content.kind === 'video' ? srcDur(l.content.mediaId) : 0)
+  const trimLayer = (l: Layer, d: number): Trimmed<Layer> => trimLayerEdge(l, edge, d, layerSrc(l))
+  const trimAudio = (a: AudioClip, d: number): Trimmed<AudioClip> => trimAudioEdge(a, edge, d, srcDur(a.mediaId))
 
   // Pass 1 — the delta every member can absorb (smallest magnitude wins; a
   // member that can't move at all pins the group at 0).
@@ -449,9 +417,7 @@ export function trimItemsBy(
     layers: p.layers.map((l) => (has('layer', l.id) ? trimLayer(l, d).tile : l)),
     captions: {
       ...p.captions,
-      segments: p.captions.segments.map((s) =>
-        has('caption', s.id) ? trimCaptionEdge(s, edge, d).tile : s
-      )
+      segments: p.captions.segments.map((s) => (has('caption', s.id) ? trimCaptionEdge(s, edge, d).tile : s))
     },
     audioClips: p.audioClips.map((a) => (has('audio', a.id) ? trimAudio(a, d).tile : a))
   }
@@ -459,12 +425,7 @@ export function trimItemsBy(
 
 /** Whether a cut at `atSec` falls strictly inside this tile and the tile
  *  supports splitting at all. */
-export function splittableAt(
-  p: Composition,
-  ref: TimelineItemRef,
-  atSec: number,
-  srcDur?: SourceDuration
-): boolean {
+export function splittableAt(p: Composition, ref: TimelineItemRef, atSec: number, srcDur?: SourceDuration): boolean {
   const t = tileOf(p, ref, srcDur)
   return !!t && t.splittable && atSec > t.startSec + EPS && atSec < t.endSec - EPS
 }
@@ -534,10 +495,7 @@ export function splitItemsAt(
     }
     // Video carries a source trim through the cut; text/image are the same
     // content over two windows (with window-anchored motion/animation split).
-    const res =
-      l.content.kind === 'video'
-        ? splitVideoLayer(l, atSec, makeId)
-        : splitStaticLayer(l, atSec, makeId)
+    const res = l.content.kind === 'video' ? splitVideoLayer(l, atSec, makeId) : splitStaticLayer(l, atSec, makeId)
     if (!res) {
       layers.push(uncut(l))
       continue
@@ -628,7 +586,10 @@ export function splitGroupOnSilence(
     return ranges.some((r) => mid > r.start && mid < r.end)
   }
   const silent = c.audioClips.filter((a) => pieces.includes(a.id) && !speaks(a))
-  return removeItems(c, silent.map((a) => ({ kind: 'audio' as const, id: a.id })))
+  return removeItems(
+    c,
+    silent.map((a) => ({ kind: 'audio' as const, id: a.id }))
+  )
 }
 
 /** An audio clip's source out-point, by `splitAudioClip`'s rule: its explicit
@@ -643,9 +604,7 @@ export function removeItems(p: Composition, refs: TimelineItemRef[]): Compositio
   const keys = refKeys(refs)
   if (keys.size === 0) return p
   const layers = p.layers.filter((l) => !keys.has(refKey({ kind: 'layer', id: l.id })))
-  const segments = p.captions.segments.filter(
-    (s) => !keys.has(refKey({ kind: 'caption', id: s.id }))
-  )
+  const segments = p.captions.segments.filter((s) => !keys.has(refKey({ kind: 'caption', id: s.id })))
   const audioClips = p.audioClips.filter((a) => !keys.has(refKey({ kind: 'audio', id: a.id })))
   if (
     layers.length === p.layers.length &&

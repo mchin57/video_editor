@@ -47,9 +47,7 @@ function scrollSnapshot(page: import('@playwright/test').Page) {
   })
 }
 
-test('centered follow keeps the playhead mid-view; Off leaves the scroll alone', async ({
-  appPage: page
-}) => {
+test('centered follow keeps the playhead mid-view; Off leaves the scroll alone', async ({ appPage: page }) => {
   await arrangeLongTimeline(page)
 
   // ACT: pick Center with a real click, then play from 100s.

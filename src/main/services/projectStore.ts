@@ -203,7 +203,8 @@ async function sweep(root: string): Promise<void> {
     }
   }
   if (!docs.length) return
-  const files = (dir: string): string[] => listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
+  const files = (dir: string): string[] =>
+    listDir(dir).filter((n) => statSync(join(dir, n), { throwIfNoEntry: false })?.isFile())
   // Only a generated/ the app created (marker) is ever cleaned.
   const ours = existsSync(join(generatedRoot(root), GENERATED_MARKER))
   const generated = ours ? files(generatedRoot(root)).filter((n) => n !== GENERATED_MARKER) : []
@@ -302,7 +303,11 @@ export function createProject(name: string, location: string): Promise<LoadedPro
     if (existsSync(root)) throw new Error(`A folder named "${clean}" already exists there.`)
     await fsp.mkdir(root)
     await ensureProjectFolders(root)
-    await writeJsonAtomic(docPath(root), { ...createEmptyProject(crypto.randomUUID(), clean), version: PROJECT_VERSION, library: [] })
+    await writeJsonAtomic(docPath(root), {
+      ...createEmptyProject(crypto.randomUUID(), clean),
+      version: PROJECT_VERSION,
+      library: []
+    })
     await discardCurrent()
     rememberRoot(root)
     return readFolder(root)

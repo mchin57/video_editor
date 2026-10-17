@@ -32,21 +32,42 @@ test('an unknown clip shows a Missing card, and Relink fills it in keeping the c
   doc.library = []
   doc.layers = [
     {
-      id: 'v1', hidden: false, startSec: 0, endSec: 1, x: 540, y: 960, scale: 1,
+      id: 'v1',
+      hidden: false,
+      startSec: 0,
+      endSec: 1,
+      x: 540,
+      y: 960,
+      scale: 1,
       content: { kind: 'video', mediaId: ID, inSec: 0.5, outSec: 1.5, mute: false, gainDb: 0 }
     }
   ]
   writeFileSync(join(dir, 'Converted.reel'), JSON.stringify(doc))
   const clip = join(dir, 'footage', 'IMG_9000.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=3',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=3',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    clip
   ])
 
-  await electronApp.evaluate(({ dialog }, reel) => {
-    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [reel] })) as typeof dialog.showOpenDialog
-  }, join(dir, 'Converted.reel'))
+  await electronApp.evaluate(
+    ({ dialog }, reel) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [reel] })) as typeof dialog.showOpenDialog
+    },
+    join(dir, 'Converted.reel')
+  )
   await page.evaluate(() => window.__reelStores.useProject.getState().openFile())
 
   // The card is there, marked unknown.
@@ -59,7 +80,10 @@ test('an unknown clip shows a Missing card, and Relink fills it in keeping the c
     g.asked = []
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [file] })) as typeof dialog.showOpenDialog
     dialog.showMessageBox = (async (...args: unknown[]) => {
-      const box = args.find((a) => !!a && typeof a === 'object' && 'message' in a) as { message: string; detail?: string }
+      const box = args.find((a) => !!a && typeof a === 'object' && 'message' in a) as {
+        message: string
+        detail?: string
+      }
       g.asked.push({ message: box.message, detail: box.detail })
       return { response: 0, checkboxChecked: false } // "Update path anyway"
     }) as typeof dialog.showMessageBox
@@ -67,12 +91,19 @@ test('an unknown clip shows a Missing card, and Relink fills it in keeping the c
   await page.getByTestId('media-missing').getByRole('button', { name: 'Relink…' }).click()
   await expect(page.getByTestId('media-missing')).toHaveCount(0)
 
-  const asked = await electronApp.evaluate(() => (globalThis as unknown as { asked: { message: string; detail?: string }[] }).asked)
+  const asked = await electronApp.evaluate(
+    () => (globalThis as unknown as { asked: { message: string; detail?: string }[] }).asked
+  )
   expect(asked[0].message).toContain('These fields do not match')
   expect(asked[0].detail).toContain('Nothing records which file this clip was')
 
   const [asset] = (await page.evaluate((ids) => window.api.listProjectMedia(ids), [ID])) as MediaAsset[]
-  expect(asset).toMatchObject({ status: 'ok', fileName: 'IMG_9000.mp4', kind: 'video', relativePath: 'footage/IMG_9000.mp4' })
+  expect(asset).toMatchObject({
+    status: 'ok',
+    fileName: 'IMG_9000.mp4',
+    kind: 'video',
+    relativePath: 'footage/IMG_9000.mp4'
+  })
   // The cut survives the relink.
   const content = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers[0].content)
   expect(content).toMatchObject({ mediaId: ID, inSec: 0.5, outSec: 1.5 })

@@ -70,9 +70,7 @@ test('trimmed audio clip still shows its waveform inside the block', async ({ ap
     .poll(
       async () =>
         page.evaluate((id) => {
-          const img = [...document.querySelectorAll('img')].find((i) =>
-            i.src.includes(`${id}/waveform.png`)
-          )
+          const img = [...document.querySelectorAll('img')].find((i) => i.src.includes(`${id}/waveform.png`))
           if (!img || !img.complete || img.naturalWidth === 0) return null
           const r = img.getBoundingClientRect()
           const block = img.parentElement!.getBoundingClientRect()
@@ -84,9 +82,7 @@ test('trimmed audio clip still shows its waveform inside the block', async ({ ap
     .not.toBeNull()
 
   const { overlap, blockW } = (await page.evaluate((id) => {
-    const img = [...document.querySelectorAll('img')].find((i) =>
-      i.src.includes(`${id}/waveform.png`)
-    )!
+    const img = [...document.querySelectorAll('img')].find((i) => i.src.includes(`${id}/waveform.png`))!
     const r = img.getBoundingClientRect()
     const block = img.parentElement!.getBoundingClientRect()
     return {

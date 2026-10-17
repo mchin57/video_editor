@@ -66,10 +66,7 @@ export function effectiveTextAnimation(content: {
 
 /** Entrance/exit windows clamped to the overlay duration: when they'd overlap,
  *  both scale down proportionally so in+out never exceeds the window. */
-export function clampAnimWindows(
-  anim: TextAnimation,
-  durSec: number
-): { inSec: number; outSec: number } {
+export function clampAnimWindows(anim: TextAnimation, durSec: number): { inSec: number; outSec: number } {
   const wantIn = anim.in === 'none' ? 0 : Math.max(0.01, anim.inSec)
   const wantOut = anim.out === 'none' ? 0 : Math.max(0.01, anim.outSec)
   const sum = wantIn + wantOut

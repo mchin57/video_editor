@@ -32,7 +32,8 @@ function inkLines(px: (x: number, y: number) => number[], y0: number, y1: number
   for (let y = y0; y <= y1; y++) {
     let a = W
     let b = -1
-    for (let x = 0; x < W; x++) if (white(px(x, y))) {
+    for (let x = 0; x < W; x++)
+      if (white(px(x, y))) {
         a = Math.min(a, x)
         b = Math.max(b, x)
       }
@@ -45,9 +46,13 @@ function inkLines(px: (x: number, y: number) => number[], y0: number, y1: number
 }
 
 function frameAt(file: string, t: number): (x: number, y: number) => number[] {
-  const buf = execFileSync(FFMPEG, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
-    maxBuffer: W * H * 3 + 1024
-  })
+  const buf = execFileSync(
+    FFMPEG,
+    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    {
+      maxBuffer: W * H * 3 + 1024
+    }
+  )
   return (x, y) => {
     const i = (y * W + x) * 3
     return [buf[i], buf[i + 1], buf[i + 2]]
@@ -72,7 +77,22 @@ test('burned text and captions land exactly where the preview draws them', async
 
   const dir = mkdtempSync(join(tmpdir(), 'reel-textparity-'))
   const clip = join(dir, 'gray.mp4')
-  execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x808080:s=1080x1920:r=30:d=2', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=0x808080:s=1080x1920:r=30:d=2',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    clip
+  ])
 
   const CAPTION = 'a caption long enough to wrap across the whole frame width'
   await page.evaluate(
@@ -85,7 +105,10 @@ test('burned text and captions land exactly where the preview draws them', async
       const WHITE = { from: '#ffffff', to: '#ffffff', angle: 90 }
       // Poppins: a face whose text box (1.40em) is TALLER than the leading, so
       // wrapped lines' boxes overlap — the case that once merged into one line.
-      for (const [k, t0] of [[0, 0], [1, 1]] as const) {
+      for (const [k, t0] of [
+        [0, 0],
+        [1, 1]
+      ] as const) {
         s.addLayer({
           id: `P${k}`,
           hidden: false,
@@ -113,7 +136,15 @@ test('burned text and captions land exactly where the preview draws them', async
         style,
         segments: [
           { id: 'c0', startSec: 0, endSec: 1, text: CAPTION, words: [], enabled: true },
-          { id: 'c1', startSec: 1, endSec: 2, text: CAPTION, words: [], enabled: true, style: { ...style, gradient: WHITE } }
+          {
+            id: 'c1',
+            startSec: 1,
+            endSec: 2,
+            text: CAPTION,
+            words: [],
+            enabled: true,
+            style: { ...style, gradient: WHITE }
+          }
         ]
       })
       usePlayback.getState().setTime(0.5)
@@ -129,7 +160,9 @@ test('burned text and captions land exactly where the preview draws them', async
     page.evaluate(async (text) => {
       await document.fonts.ready
       const canvas = document.querySelector('[data-testid="preview-canvas"]')!
-      const span = [...canvas.querySelectorAll('span')].find((el) => el.textContent === text && el.children.length === 0)!
+      const span = [...canvas.querySelectorAll('span')].find(
+        (el) => el.textContent === text && el.children.length === 0
+      )!
       const box = span.closest('div')!
       return Math.round(box.getBoundingClientRect().height / (parseFloat(getComputedStyle(box).fontSize) * 1.25))
     }, CAPTION)

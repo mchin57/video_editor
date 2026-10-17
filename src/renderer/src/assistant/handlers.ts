@@ -18,7 +18,9 @@ import { interactionOpen, whenIdle } from '@/lib/interaction'
 import { exportSaveSkipReason } from '@/lib/exportSave'
 
 type Handlers = {
-  [K in keyof AssistantOps]: (args: AssistantOps[K]['args']) => AssistantOps[K]['result'] | Promise<AssistantOps[K]['result']>
+  [K in keyof AssistantOps]: (
+    args: AssistantOps[K]['args']
+  ) => AssistantOps[K]['result'] | Promise<AssistantOps[K]['result']>
 }
 
 function project(): Project {
@@ -48,7 +50,10 @@ const handlers: Handlers = {
     const tiles = timelineTiles(c)
     const unknown = ids.filter((id) => !tiles.some((t) => t.ref.id === id))
     if (unknown.length) throw new Error(`No timeline item with id ${unknown.join(', ')}`)
-    const refs = expandSelection(c, tiles.filter((t) => ids.includes(t.ref.id)).map((t) => t.ref))
+    const refs = expandSelection(
+      c,
+      tiles.filter((t) => ids.includes(t.ref.id)).map((t) => t.ref)
+    )
     useProject.getState().removeItems(refs)
     return { removed: refs }
   },

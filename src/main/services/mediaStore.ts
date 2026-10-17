@@ -358,13 +358,15 @@ export async function renameMedia(id: string, stem: string): Promise<MediaAsset>
   if (isUnknownClip(entry.record)) throw new Error('This clip has no known file to rename. Relink it first.')
   const found = await resolveEntry(id)
   const from = found?.entry.path
-  if (!found || !from) throw new Error(`“${entry.record.fileName}” is missing, so there is no file to rename. Relink it first.`)
+  if (!found || !from)
+    throw new Error(`“${entry.record.fileName}” is missing, so there is no file to rename. Relink it first.`)
   const current = basename(from)
   const reason = validateFileStem(stem, splitFileName(current).ext)
   if (reason) throw new Error(reason)
   const busy = activeJobUsing(id)
   if (busy) throw new Error(`“${current}” is in use by “${busy.label}”. Wait for it to finish, then rename.`)
-  if (loudnessPassReading(r, id)) throw new Error(`“${current}” is still being measured for volume levels. Try again in a moment.`)
+  if (loudnessPassReading(r, id))
+    throw new Error(`“${current}” is still being measured for volume levels. Try again in a moment.`)
 
   const target = renameTarget(from, stem)
   if (!target.unchanged) {
@@ -512,7 +514,10 @@ export async function importGenerated(tmpPath: string, displayName: string): Pro
     await fsp.mkdir(dir, { recursive: true })
     // The display name (e.g. "clip (no bg 0:03–0:05).webm") may not be a legal
     // file name; the library keeps showing it, the file gets a safe one.
-    const dest = join(dir, uniqueFileName(safeFileName(displayName), (n) => existsSync(join(dir, n))))
+    const dest = join(
+      dir,
+      uniqueFileName(safeFileName(displayName), (n) => existsSync(join(dir, n)))
+    )
     await moveFile(tmpPath, dest)
     if (existing) return hydrate(r, toAsset(r, putEntry(pointAt(r, existing.record, dest), dest, r)))
     return register(r, id, dest, displayName, fp, true)

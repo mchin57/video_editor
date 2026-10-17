@@ -38,8 +38,7 @@ function render(over: Partial<Props> = {}): Props {
   return props
 }
 
-const $ = <T extends HTMLElement>(id: string): T | null =>
-  document.querySelector<T>(`[data-testid="${id}"]`)
+const $ = <T extends HTMLElement>(id: string): T | null => document.querySelector<T>(`[data-testid="${id}"]`)
 
 function type(value: string): void {
   const input = $<HTMLInputElement>('new-project-name')!

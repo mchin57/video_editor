@@ -69,8 +69,7 @@ describe('buildHtml — the pill inherits the text metrics', () => {
     wrapWidthPx: 993.6
   }
   /** The declaration block of one CSS rule in the generated page. */
-  const css = (html: string, cls: string): string =>
-    html.match(new RegExp(`\\.${cls}\\{([^}]*)\\}`))?.[1] ?? ''
+  const css = (html: string, cls: string): string => html.match(new RegExp(`\\.${cls}\\{([^}]*)\\}`))?.[1] ?? ''
 
   it('declares the font on the BOX, not only on the text span', () => {
     // THE regression. The pill is an inline span between .box and .txt, and an

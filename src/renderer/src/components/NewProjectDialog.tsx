@@ -238,12 +238,7 @@ export function NewProjectDialog({
 
         <div className="mt-5 flex justify-end gap-2">
           {canCancel && (
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={busy}
-              className={`${btnCls} px-4 ${disabledCls}`}
-            >
+            <button type="button" onClick={onClose} disabled={busy} className={`${btnCls} px-4 ${disabledCls}`}>
               Cancel
             </button>
           )}

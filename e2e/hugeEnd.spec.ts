@@ -107,7 +107,13 @@ test("one panel's render error stays in that panel and clears on undo", async ({
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
     useProject.getState().addLayer({
-      id: 'BAD', hidden: false, startSec: 0, endSec: 2, x: 540, y: 960, scale: 1,
+      id: 'BAD',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 960,
+      scale: 1,
       content: { kind: 'text', text: 'X', fontFamily: 'inter', fontSizePx: 90, color: '#ffffff' }
     } as never)
     useUi.getState().selectLayer('BAD')

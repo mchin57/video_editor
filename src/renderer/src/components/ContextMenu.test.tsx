@@ -45,7 +45,9 @@ describe('ContextMenu', () => {
 
   it('a disabled row shows its reason and does nothing', () => {
     const onSelect = vi.fn()
-    const { onClose } = render([{ label: 'Rename…', testId: 'r', disabled: true, reason: 'The file is missing.', onSelect }])
+    const { onClose } = render([
+      { label: 'Rename…', testId: 'r', disabled: true, reason: 'The file is missing.', onSelect }
+    ])
     expect(row('r').getAttribute('aria-disabled')).toBe('true')
     expect(row('r').textContent).toContain('The file is missing.')
     expect(row('r').title).toBe('The file is missing.')

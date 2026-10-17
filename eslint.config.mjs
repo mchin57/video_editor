@@ -12,24 +12,42 @@ import tseslint from 'typescript-eslint'
 // must stay pure: no Node, no Electron, no React, and nothing from either side.
 const SHARED_FORBIDDEN = {
   patterns: [
-    { group: ['node:*', 'electron', 'electron/*', '@electron-toolkit/*'], message: 'src/shared is pure: no Node or Electron APIs.' },
-    { group: ['react', 'react-dom', 'react/*', 'zustand', 'zustand/*', '@tanstack/*'], message: 'src/shared is pure: no React or renderer state.' },
-    { group: ['@/*', '**/renderer/**', '**/main/**', '**/preload/**'], message: 'src/shared may not import from main, preload or the renderer.' }
+    {
+      group: ['node:*', 'electron', 'electron/*', '@electron-toolkit/*'],
+      message: 'src/shared is pure: no Node or Electron APIs.'
+    },
+    {
+      group: ['react', 'react-dom', 'react/*', 'zustand', 'zustand/*', '@tanstack/*'],
+      message: 'src/shared is pure: no React or renderer state.'
+    },
+    {
+      group: ['@/*', '**/renderer/**', '**/main/**', '**/preload/**'],
+      message: 'src/shared may not import from main, preload or the renderer.'
+    }
   ]
 }
 
 // The renderer reaches main only through the preload `api` (ipc/client.ts).
 const RENDERER_FORBIDDEN = {
   patterns: [
-    { group: ['node:*', 'electron', 'electron/*'], message: 'The renderer has no Node/Electron access: add an IPC call (docs/SHARED.md "IPC").' },
-    { group: ['**/main/**', '**/preload/**'], message: 'The renderer may not import main or preload code: go through ipc/client.ts.' }
+    {
+      group: ['node:*', 'electron', 'electron/*'],
+      message: 'The renderer has no Node/Electron access: add an IPC call (docs/SHARED.md "IPC").'
+    },
+    {
+      group: ['**/main/**', '**/preload/**'],
+      message: 'The renderer may not import main or preload code: go through ipc/client.ts.'
+    }
   ]
 }
 
 // Main never pulls in React or renderer code.
 const MAIN_FORBIDDEN = {
   patterns: [
-    { group: ['react', 'react-dom', 'react/*', 'zustand', 'zustand/*', '@tanstack/*'], message: 'The main process has no React.' },
+    {
+      group: ['react', 'react-dom', 'react/*', 'zustand', 'zustand/*', '@tanstack/*'],
+      message: 'The main process has no React.'
+    },
     { group: ['@/*', '**/renderer/**'], message: 'The main process may not import renderer code.' }
   ]
 }

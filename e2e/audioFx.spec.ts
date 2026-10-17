@@ -71,18 +71,12 @@ test('adding an echo renders a wet track onto the FX lane', async ({ appPage: pa
   // ASSERT: a second clip appears, marked as an effect track and rendered from
   // the dry clip's source over its exact window.
   await expect
-    .poll(
-      () =>
-        page.evaluate(
-          () => window.__reelStores.useProject.getState().project!.audioClips.length
-        ),
-      { timeout: 60_000 }
-    )
+    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length), {
+      timeout: 60_000
+    })
     .toBe(2)
 
-  const fx = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!
-  )
+  const fx = await page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!)
   expect(fx.kind).toBe('fx')
   expect(fx.fx!.settings.kind).toBe('echo')
   expect(fx.fx!.fromMediaId).toBe(sourceId)
@@ -101,8 +95,8 @@ test('adding an echo renders a wet track onto the FX lane', async ({ appPage: pa
   await expect(page.locator(`[data-testid="tile-audio-${fx.id}"]`)).toBeVisible()
 
   // The dry clip is untouched — an effect never modifies its source.
-  const dry = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.audioClips.find((a) => !a.fx)!
+  const dry = await page.evaluate(() =>
+    window.__reelStores.useProject.getState().project!.audioClips.find((a) => !a.fx)!
   )
   expect(dry.mediaId).toBe(sourceId)
   expect(dry.gainDb).toBe(0)
@@ -115,9 +109,7 @@ test('adding an echo renders a wet track onto the FX lane', async ({ appPage: pa
  * that this read as "the original clip came back". The sibling piece was also
  * left pointing at the previous render.
  */
-test('re-rendering a SPLIT effect track keeps every piece trimmed and in sync', async ({
-  appPage: page
-}) => {
+test('re-rendering a SPLIT effect track keeps every piece trimmed and in sync', async ({ appPage: page }) => {
   const wav = join(mkdtempSync(join(tmpdir(), 'reel-fx-')), 'tone.wav')
   makeWav(wav)
 
@@ -142,13 +134,9 @@ test('re-rendering a SPLIT effect track keeps every piece trimmed and in sync', 
 
   await page.getByRole('button', { name: /Add echo track/i }).click()
   await expect
-    .poll(
-      () =>
-        page.evaluate(
-          () => window.__reelStores.useProject.getState().project!.audioClips.length
-        ),
-      { timeout: 60_000 }
-    )
+    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length), {
+      timeout: 60_000
+    })
     .toBe(2)
 
   // ARRANGE: cut the effect track in two, then select the first piece.
@@ -182,9 +170,8 @@ test('re-rendering a SPLIT effect track keeps every piece trimmed and in sync', 
       () =>
         page.evaluate(
           (old) =>
-            window.__reelStores.useProject
-              .getState()
-              .project!.audioClips.filter((a) => a.fx && a.mediaId !== old).length,
+            window.__reelStores.useProject.getState().project!.audioClips.filter((a) => a.fx && a.mediaId !== old)
+              .length,
           before.oldMediaId
         ),
       { timeout: 60_000 }
@@ -242,18 +229,12 @@ test('the chorus kind renders through its own swept chain', async ({ appPage: pa
   await page.getByRole('button', { name: /Add chorus track/i }).click()
 
   await expect
-    .poll(
-      () =>
-        page.evaluate(
-          () => window.__reelStores.useProject.getState().project!.audioClips.length
-        ),
-      { timeout: 60_000 }
-    )
+    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length), {
+      timeout: 60_000
+    })
     .toBe(2)
 
-  const fx = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!
-  )
+  const fx = await page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!)
   expect(fx.fx!.settings.kind).toBe('chorus')
   expect(fx.kind).toBe('fx')
 
@@ -294,18 +275,12 @@ test('the ensemble kind is still available under its new name', async ({ appPage
   await page.getByRole('button', { name: /Add ensemble track/i }).click()
 
   await expect
-    .poll(
-      () =>
-        page.evaluate(
-          () => window.__reelStores.useProject.getState().project!.audioClips.length
-        ),
-      { timeout: 60_000 }
-    )
+    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.length), {
+      timeout: 60_000
+    })
     .toBe(2)
 
-  const fx = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!
-  )
+  const fx = await page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips.find((a) => a.fx)!)
   expect(fx.fx!.settings.kind).toBe('ensemble')
 })
 
@@ -316,9 +291,7 @@ test('the ensemble kind is still available under its new name', async ({ appPage
  * previous clip's settings — and "Re-render" then applies those, or silently
  * no-ops when they happen to match what is already rendered.
  */
-test('selecting a different effect track shows THAT track settings', async ({
-  appPage: page
-}) => {
+test('selecting a different effect track shows THAT track settings', async ({ appPage: page }) => {
   const wav = join(mkdtempSync(join(tmpdir(), 'reel-fx-')), 'tone.wav')
   makeWav(wav)
   await page.evaluate(async (p) => {
@@ -361,9 +334,7 @@ test('selecting a different effect track shows THAT track settings', async ({
   // Select the ECHO track. The panel must follow the selection, not linger on
   // the chorus settings left over from the last thing that was edited.
   const echoId = await page.evaluate(() => {
-    const fx = window.__reelStores.useProject
-      .getState()
-      .project!.audioClips.filter((a) => a.fx)
+    const fx = window.__reelStores.useProject.getState().project!.audioClips.filter((a) => a.fx)
     const echo = fx.find((a) => a.fx!.settings.kind === 'echo')!
     window.__reelStores.useUi.getState().selectAudio(echo.id)
     return echo.id

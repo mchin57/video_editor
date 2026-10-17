@@ -29,9 +29,7 @@ export type SourceDuration = (mediaId: string) => number
  * into a layout CELL's comp (`cellIndex` present). A path of steps from the
  * root addresses any composition in the tree; the empty path is the root.
  */
-export type CompStep =
-  | { layerId: string; cellIndex?: undefined }
-  | { layerId: string; cellIndex: number }
+export type CompStep = { layerId: string; cellIndex?: undefined } | { layerId: string; cellIndex: number }
 export type CompPath = CompStep[]
 
 /** The nested composition one `step` into `comp`, or null if the step doesn't
@@ -91,9 +89,7 @@ export function updateCompAtPath<T extends Composition>(
           content: {
             ...l.content,
             cells: l.content.cells.map((cell, i) =>
-              i === step.cellIndex && cell.comp
-                ? { ...cell, comp: updateCompAtPath(cell.comp, rest, fn) }
-                : cell
+              i === step.cellIndex && cell.comp ? { ...cell, comp: updateCompAtPath(cell.comp, rest, fn) } : cell
             )
           }
         }
@@ -109,10 +105,7 @@ export function updateCompAtPath<T extends Composition>(
  * untrimmed). Mirrors the root duration math in `PreviewStage`.
  */
 export function compositionDuration(comp: Composition, srcDur: SourceDuration = () => 0): number {
-  const audioEnd = comp.audioClips.reduce(
-    (max, a) => Math.max(max, audioClipEnd(a, srcDur(a.mediaId) || a.outSec)),
-    0
-  )
+  const audioEnd = comp.audioClips.reduce((max, a) => Math.max(max, audioClipEnd(a, srcDur(a.mediaId) || a.outSec)), 0)
   return Math.max(visualDuration(comp.layers), audioEnd)
 }
 

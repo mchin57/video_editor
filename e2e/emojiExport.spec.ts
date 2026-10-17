@@ -20,9 +20,13 @@ const H = 1920
 type Px = (x: number, y: number) => number[]
 
 function frameAt(file: string, t: number): Px {
-  const buf = execFileSync(FFMPEG, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
-    maxBuffer: W * H * 3 + 1024
-  })
+  const buf = execFileSync(
+    FFMPEG,
+    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    {
+      maxBuffer: W * H * 3 + 1024
+    }
+  )
   return (x, y) => {
     const i = (y * W + x) * 3
     return [buf[i], buf[i + 1], buf[i + 2]]
@@ -32,10 +36,11 @@ function frameAt(file: string, t: number): Px {
 /** Pixels in rows y0..y1 that are strongly coloured (emoji), not grey/white/black text or pill. */
 function colourful(px: Px, y0: number, y1: number): number {
   let n = 0
-  for (let y = y0; y <= y1; y++) for (let x = 0; x < W; x++) {
-    const [r, g, b] = px(x, y)
-    if (Math.max(r, g, b) - Math.min(r, g, b) > 120) n++
-  }
+  for (let y = y0; y <= y1; y++)
+    for (let x = 0; x < W; x++) {
+      const [r, g, b] = px(x, y)
+      if (Math.max(r, g, b) - Math.min(r, g, b) > 120) n++
+    }
   return n
 }
 
@@ -43,7 +48,9 @@ function colourful(px: Px, y0: number, y1: number): number {
 function extent(px: Px, y0: number, y1: number, hit: (p: number[]) => boolean): { x0: number; x1: number } {
   let x0 = W
   let x1 = -1
-  for (let y = y0; y <= y1; y++) for (let x = 0; x < W; x++) if (hit(px(x, y))) {
+  for (let y = y0; y <= y1; y++)
+    for (let x = 0; x < W; x++)
+      if (hit(px(x, y))) {
         x0 = Math.min(x0, x)
         x1 = Math.max(x1, x)
       }
@@ -61,7 +68,22 @@ test('emoji in text layers and captions export in colour, centred, with ZWJ sequ
   test.setTimeout(120_000)
   const dir = mkdtempSync(join(tmpdir(), 'reel-emoji-'))
   const clip = join(dir, 'gray.mp4')
-  execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x808080:s=1080x1920:r=30:d=2', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', clip])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=0x808080:s=1080x1920:r=30:d=2',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    clip
+  ])
 
   await page.evaluate(async (clip) => {
     const { useProject } = window.__reelStores
@@ -71,8 +93,21 @@ test('emoji in text layers and captions export in colour, centred, with ZWJ sequ
     s.addVideoLayer('BG', asset.id, 0, 2, false)
     const text = (id: string, t0: number, value: string, y: number, pill: boolean): void =>
       useProject.getState().addLayer({
-        id, hidden: false, startSec: t0, endSec: t0 + 1, x: 540, y, scale: 1,
-        content: { kind: 'text', text: value, fontFamily: 'montserrat-extrabold', fontSizePx: 90, color: '#ffffff', pill: { enabled: pill, color: '#000000cc', padPx: 18 } }
+        id,
+        hidden: false,
+        startSec: t0,
+        endSec: t0 + 1,
+        x: 540,
+        y,
+        scale: 1,
+        content: {
+          kind: 'text',
+          text: value,
+          fontFamily: 'montserrat-extrabold',
+          fontSizePx: 90,
+          color: '#ffffff',
+          pill: { enabled: pill, color: '#000000cc', padPx: 18 }
+        }
       })
     text('HI', 0, 'Hi 😀🔥❤️', 500, true)
     // A ZWJ family (t 0–1) and a single face (t 1–2) at the same size and place.
@@ -123,13 +158,25 @@ test('emoji in text layers and captions export in colour, centred, with ZWJ sequ
   expect(fam.x1 - fam.x0).toBeLessThan(1.6 * (one.x1 - one.x0))
 })
 
-test('the preview agrees: an emoji text layer does not animate, and its Animation controls say why', async ({ appPage: page }) => {
+test('the preview agrees: an emoji text layer does not animate, and its Animation controls say why', async ({
+  appPage: page
+}) => {
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
     useProject.getState().addLayer({
-      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 540, y: 960, scale: 1,
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
       content: {
-        kind: 'text', text: 'Hi 🔥', fontFamily: 'montserrat-extrabold', fontSizePx: 90, color: '#ffffff',
+        kind: 'text',
+        text: 'Hi 🔥',
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 90,
+        color: '#ffffff',
         pill: { enabled: false, color: '#000000cc', padPx: 18 },
         animation: { in: 'fadeIn', inSec: 1, out: 'none', outSec: 0.3 }
       }
@@ -144,7 +191,8 @@ test('the preview agrees: an emoji text layer does not animate, and its Animatio
     const canvas = document.querySelector('[data-testid="preview-canvas"]')!
     const span = [...canvas.querySelectorAll('span')].find((el) => el.textContent === 'Hi 🔥')!
     let o = 1
-    for (let el: Element | null = span; el && el !== canvas; el = el.parentElement) o *= Number(getComputedStyle(el).opacity)
+    for (let el: Element | null = span; el && el !== canvas; el = el.parentElement)
+      o *= Number(getComputedStyle(el).opacity)
     return o
   })
   expect(opacity).toBe(1)

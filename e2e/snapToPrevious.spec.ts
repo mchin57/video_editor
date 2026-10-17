@@ -23,12 +23,9 @@ const layerAt = (page: Page, id: string): Promise<{ startSec: number; endSec: nu
     return { startSec: l.startSec, endSec: l.endSec }
   }, id)
 
-const snapButton = (page: Page): ReturnType<Page['getByRole']> =>
-  page.getByRole('button', { name: '⇤ Snap' })
+const snapButton = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('button', { name: '⇤ Snap' })
 
-test('the Snap button closes the gap to the previous clip, keeping duration', async ({
-  appPage: page
-}) => {
+test('the Snap button closes the gap to the previous clip, keeping duration', async ({ appPage: page }) => {
   await arrangeGap(page)
   await page.getByTestId('tile-layer-L2').click()
   await snapButton(page).click()
@@ -67,9 +64,7 @@ test('the button disables when the selection is already flush', async ({ appPage
   await expect(snapButton(page)).toBeDisabled()
 })
 
-test('with nothing before it, the clip snaps to the start of the timeline', async ({
-  appPage: page
-}) => {
+test('with nothing before it, the clip snaps to the start of the timeline', async ({ appPage: page }) => {
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
     useProject.getState().addVideoLayer('L1', 'no-such-media', 8, 2, false)
@@ -89,9 +84,7 @@ test('a snap is one undo step', async ({ appPage: page }) => {
   expect((await layerAt(page, 'L2')).startSec).toBeCloseTo(10)
 })
 
-test('a linked pair snaps as one, preserving the offset between them', async ({
-  appPage: page
-}) => {
+test('a linked pair snaps as one, preserving the offset between them', async ({ appPage: page }) => {
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
     useProject.getState().addVideoLayer('P0', 'no-such-media', 0, 4, false)
@@ -118,8 +111,6 @@ test('a linked pair snaps as one, preserving the offset between them', async ({
 
   // Anchor (the earliest member, L1) lands on P0's end; A1 keeps its +2 offset.
   expect((await layerAt(page, 'L1')).startSec).toBeCloseTo(4)
-  const a1 = await page.evaluate(
-    () => window.__reelStores.useProject.getState().project!.audioClips[0].startSec
-  )
+  const a1 = await page.evaluate(() => window.__reelStores.useProject.getState().project!.audioClips[0].startSec)
   expect(a1).toBeCloseTo(6)
 })

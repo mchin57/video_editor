@@ -11,16 +11,23 @@ function measure(lines: string[], opts: { joiner?: string; pill?: boolean } = {}
   lines.forEach((line, row) => {
     const top = 100 + row * 95
     const x0 = 540 - (line.length * 20) / 2
-    for (let k = 0; k < line.length; k++) chars.push({ i: i + k, len: 1, top, bottom: top + 93, left: x0 + k * 20, right: x0 + (k + 1) * 20 })
+    for (let k = 0; k < line.length; k++)
+      chars.push({ i: i + k, len: 1, top, bottom: top + 93, left: x0 + k * 20, right: x0 + (k + 1) * 20 })
     i += line.length
     if (row < lines.length - 1) {
       // the joiner: a soft-wrap space hangs at the end of its row; a newline has no box
-      if (joiner === ' ') chars.push({ i, len: 1, top, bottom: top + 93, left: x0 + line.length * 20, right: x0 + line.length * 20 + 20 })
+      if (joiner === ' ')
+        chars.push({ i, len: 1, top, bottom: top + 93, left: x0 + line.length * 20, right: x0 + line.length * 20 + 20 })
       i += joiner.length
     }
   })
   const pills = opts.pill
-    ? lines.map((line, row) => ({ x: 540 - (line.length * 20) / 2 - 18, y: 100 + row * 95 - 18, w: line.length * 20 + 36, h: 93 + 36 }))
+    ? lines.map((line, row) => ({
+        x: 540 - (line.length * 20) / 2 - 18,
+        y: 100 + row * 95 - 18,
+        w: line.length * 20 + 36,
+        h: 93 + 36
+      }))
     : []
   return { text, ascent: 74, chars, pills }
 }
@@ -42,7 +49,10 @@ describe('groupLines', () => {
     // Poppins at 64px: 90px text boxes on an 80px line pitch — the second line's
     // box starts ABOVE the first one's bottom. Measured merging a wrapped block.
     const m = measure(['this hook is', 'long enough'])
-    const tall = { ...m, chars: m.chars.map((c) => (c.top > 100 ? { ...c, top: 180, bottom: 270 } : { ...c, bottom: 190 })) }
+    const tall = {
+      ...m,
+      chars: m.chars.map((c) => (c.top > 100 ? { ...c, top: 180, bottom: 270 } : { ...c, bottom: 190 }))
+    }
     expect(groupLines(tall)).toHaveLength(2)
   })
 
@@ -62,7 +72,10 @@ describe('groupLines', () => {
     const m: RawBlockMeasure = {
       text: '  ',
       ascent: 74,
-      chars: [{ i: 0, len: 1, top: 0, bottom: 93, left: 0, right: 10 }, { i: 1, len: 1, top: 0, bottom: 93, left: 10, right: 20 }],
+      chars: [
+        { i: 0, len: 1, top: 0, bottom: 93, left: 0, right: 10 },
+        { i: 1, len: 1, top: 0, bottom: 93, left: 10, right: 20 }
+      ],
       pills: []
     }
     expect(groupLines(m)).toEqual([])

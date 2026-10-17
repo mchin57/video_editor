@@ -24,10 +24,28 @@ test('split on silence cuts a linked clip and its audio together, pairing the sp
   test.setTimeout(120_000)
   const clip = join(projectsDir, 'E2E', 'talk.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=6',
-    '-f', 'lavfi', '-i', "aevalsrc='if(between(t,1,2.5)+between(t,4,5.5),0.5*sin(2*PI*440*t),0)':s=48000:d=6",
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=6',
+    '-f',
+    'lavfi',
+    '-i',
+    "aevalsrc='if(between(t,1,2.5)+between(t,4,5.5),0.5*sin(2*PI*440*t),0)':s=48000:d=6",
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-shortest',
+    clip
   ])
   const id = await page.evaluate(async (p) => {
     const [asset] = await window.api.importPaths([p])
@@ -35,9 +53,12 @@ test('split on silence cuts a linked clip and its audio together, pairing the sp
     return asset.id
   }, clip)
   await expect
-    .poll(async () => ((await page.evaluate((i) => window.api.listProjectMedia([i]), id)) as MediaAsset[])[0]?.proxyReady, {
-      timeout: 30_000
-    })
+    .poll(
+      async () => ((await page.evaluate((i) => window.api.listProjectMedia([i]), id)) as MediaAsset[])[0]?.proxyReady,
+      {
+        timeout: 30_000
+      }
+    )
     .toBe(true)
 
   // Placed as a linked pair (the video muted, its audio on the audio lane).
@@ -57,7 +78,13 @@ test('split on silence cuts a linked clip and its audio together, pairing the sp
       const s = window.__reelStores.useProject.getState()
       return {
         layers: s.project!.layers.map((l) => ({ id: l.id, startSec: l.startSec, endSec: l.endSec, g: l.linkGroupId })),
-        audio: s.project!.audioClips.map((a) => ({ id: a.id, startSec: a.startSec, inSec: a.inSec, outSec: a.outSec, g: a.linkGroupId })),
+        audio: s.project!.audioClips.map((a) => ({
+          id: a.id,
+          startSec: a.startSec,
+          inSec: a.inSec,
+          outSec: a.outSec,
+          g: a.linkGroupId
+        })),
         past: s.past.length
       }
     })

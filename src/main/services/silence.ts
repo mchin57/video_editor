@@ -14,10 +14,15 @@ export interface Interval {
 
 export function buildSilenceArgs(input: string, noiseDb = -30, minSilenceSec = 0.4): string[] {
   return [
-    '-hide_banner', '-nostdin',
-    '-i', input,
-    '-af', `silencedetect=noise=${noiseDb}dB:d=${minSilenceSec}`,
-    '-f', 'null', '-'
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    input,
+    '-af',
+    `silencedetect=noise=${noiseDb}dB:d=${minSilenceSec}`,
+    '-f',
+    'null',
+    '-'
   ]
 }
 

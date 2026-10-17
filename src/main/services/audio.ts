@@ -7,18 +7,25 @@ import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 
-export function buildAudioProxyArgs(
-  input: string,
-  output: string,
-  foldChannel: number | null = null
-): string[] {
+export function buildAudioProxyArgs(input: string, output: string, foldChannel: number | null = null): string[] {
   return [
-    '-y', '-hide_banner', '-nostdin',
-    '-i', input,
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    input,
     '-vn',
     ...(foldChannel != null ? ['-af', monoFoldPan(foldChannel)] : []),
-    '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
-    '-movflags', '+faststart',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-movflags',
+    '+faststart',
     output
   ]
 }
@@ -42,11 +49,18 @@ const SILENCE_PEAK_DB = -60
  */
 export function buildChannelStatsArgs(input: string): string[] {
   return [
-    '-hide_banner', '-nostdin', '-nostats',
-    '-i', input,
-    '-map', '0:a:0',
-    '-af', 'astats=measure_perchannel=Peak_level:measure_overall=none',
-    '-f', 'null', '-'
+    '-hide_banner',
+    '-nostdin',
+    '-nostats',
+    '-i',
+    input,
+    '-map',
+    '0:a:0',
+    '-af',
+    'astats=measure_perchannel=Peak_level:measure_overall=none',
+    '-f',
+    'null',
+    '-'
   ]
 }
 
@@ -89,13 +103,7 @@ export function monoFoldFrom(peaksDb: number[]): number | null {
  * by the normal import pipeline for playback.
  */
 export function buildExtractAudioArgs(input: string, output: string): string[] {
-  return [
-    '-y', '-hide_banner', '-nostdin',
-    '-i', input,
-    '-vn',
-    '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2',
-    output
-  ]
+  return ['-y', '-hide_banner', '-nostdin', '-i', input, '-vn', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', output]
 }
 
 export function buildWaveformArgs(input: string, output: string, durationSec = 0): string[] {
@@ -105,11 +113,15 @@ export function buildWaveformArgs(input: string, output: string, durationSec = 0
   const width = Math.round(Math.min(6000, Math.max(2000, durationSec * 120)))
   const height = 320
   return [
-    '-y', '-hide_banner', '-nostdin',
-    '-i', input,
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    input,
     '-filter_complex',
     `aformat=channel_layouts=mono,compand,showwavespic=s=${width}x${height}:colors=#38bdf8,format=rgba`,
-    '-frames:v', '1',
+    '-frames:v',
+    '1',
     output
   ]
 }
@@ -179,10 +191,7 @@ export function buildAudioGraph(
     const startMs = Math.round(Math.max(0, it.startSec) * 1000)
     const clipEnd = it.startSec + Math.max(0.01, it.outSec - it.inSec)
     const fold = it.foldChannel != null ? `${monoFoldPan(it.foldChannel)},` : ''
-    const parts = [
-      `[${it.inputLabel}]${fold}atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`,
-      'asetpts=N/SR/TB'
-    ]
+    const parts = [`[${it.inputLabel}]${fold}atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`, 'asetpts=N/SR/TB']
     // Tempo before the delay: atempo rescales the trimmed clip's duration, then
     // adelay places the shortened/stretched result at its timeline position.
     if (it.tempo != null && it.tempo !== 1) parts.push(...atempoChain(it.tempo))
@@ -193,8 +202,7 @@ export function buildAudioGraph(
     // the export dies mid-encode with EINVAL. Renormalizing after adelay is
     // verified sample-accurate — see docs/FFMPEG-NOTES.md "adelay after atrim".
     parts.push(`adelay=${startMs}|${startMs}`, 'asetpts=N/SR/TB', `volume=${gain}`)
-    if (it.fadeInSec > 0)
-      parts.push(`afade=t=in:st=${it.startSec.toFixed(2)}:d=${it.fadeInSec.toFixed(2)}`)
+    if (it.fadeInSec > 0) parts.push(`afade=t=in:st=${it.startSec.toFixed(2)}:d=${it.fadeInSec.toFixed(2)}`)
     if (it.fadeOutSec > 0)
       parts.push(`afade=t=out:st=${Math.max(0, clipEnd - it.fadeOutSec).toFixed(2)}:d=${it.fadeOutSec.toFixed(2)}`)
     const label = `ac${i}`

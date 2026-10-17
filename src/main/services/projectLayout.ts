@@ -39,7 +39,8 @@ export const GENERATED_MARKER = '.reel-editor'
 export const projectSubdirs = (root: string): string[] => [generatedRoot(root), transcriptsRoot(root), cacheRoot(root)]
 
 /** Derived (cache) files, by role. */
-export type CacheFile = 'proxy.mp4' | 'proxy.webm' | 'audio.m4a' | 'image.png' | 'waveform.png' | 'thumb.jpg' | 'loudness.json'
+export type CacheFile =
+  'proxy.mp4' | 'proxy.webm' | 'audio.m4a' | 'image.png' | 'waveform.png' | 'thumb.jpg' | 'loudness.json'
 export const cachePath = (root: string, id: string, file: CacheFile): string => join(cacheDir(root, id), file)
 
 /** Media ids are 12 hex — the only names the cache sweep may delete. */

@@ -71,8 +71,7 @@ async function placeAndSelect(page: Page, gainDb: number): Promise<void> {
   )
 }
 
-const follower = (page: Page): ReturnType<Page['getByTestId']> =>
-  page.getByTestId('audio-follower')
+const follower = (page: Page): ReturnType<Page['getByTestId']> => page.getByTestId('audio-follower')
 
 const gain = async (page: Page): Promise<number> => {
   await expect.poll(() => follower(page).count(), { timeout: 30_000 }).toBeGreaterThan(0)
@@ -81,20 +80,14 @@ const gain = async (page: Page): Promise<number> => {
     .evaluate((el: HTMLAudioElement) => window.__reelStores.appliedGain(el))
 }
 
-const muteBox = (page: Page): ReturnType<Page['getByRole']> =>
-  page.getByRole('checkbox', { name: /mute this clip/i })
+const muteBox = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('checkbox', { name: /mute this clip/i })
 
 const clipMute = (page: Page): Promise<boolean | undefined> =>
   page.evaluate(
-    () =>
-      window.__reelStores
-        .useProject.getState()
-        .project?.audioClips.find((a) => a.id === 'mute-clip')?.mute
+    () => window.__reelStores.useProject.getState().project?.audioClips.find((a) => a.id === 'mute-clip')?.mute
   )
 
-test('the Inspector toggle silences the preview and restores the level', async ({
-  appPage: page
-}) => {
+test('the Inspector toggle silences the preview and restores the level', async ({ appPage: page }) => {
   await placeAndSelect(page, -6)
   await expect.poll(() => gain(page)).toBeCloseTo(0.5012, 3)
 

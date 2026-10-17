@@ -13,9 +13,7 @@ import { test, expect } from './fixtures'
 import type { LayoutContent } from '../src/shared/project'
 import { FFMPEG } from './bin'
 
-test('Format adds a layout; Inspector reshapes it; block drags in time', async ({
-  appPage: page
-}) => {
+test('Format adds a layout; Inspector reshapes it; block drags in time', async ({ appPage: page }) => {
   // Open the header FORMAT menu, then "Add layout" — which opens the visual
   // picker modal (the dropdown closes).
   await page.getByRole('button', { name: 'Format ▾' }).click()
@@ -75,9 +73,20 @@ test('Format adds a layout; Inspector reshapes it; block drags in time', async (
 async function importClip(page: import('@playwright/test').Page, name: string): Promise<string> {
   const mp4 = join(mkdtempSync(join(tmpdir(), 'reel-cell-')), name)
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc=duration=3:size=270x480:rate=30',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=duration=3:size=270x480:rate=30',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
     mp4
   ])
   return page.evaluate(async (p) => {
@@ -96,15 +105,11 @@ async function addSplitLayout(page: import('@playwright/test').Page): Promise<vo
 
 const cellMediaId = (page: import('@playwright/test').Page, i: number): Promise<string | null> =>
   page.evaluate(
-    (idx) =>
-      (window.__reelStores.useProject.getState().project!.layers[0].content as LayoutContent).cells[idx]
-        .mediaId,
+    (idx) => (window.__reelStores.useProject.getState().project!.layers[0].content as LayoutContent).cells[idx].mediaId,
     i
   )
 
-test('assigning a clip to a cell (Inspector) shows a ClipCard, no add-to-timeline', async ({
-  appPage: page
-}) => {
+test('assigning a clip to a cell (Inspector) shows a ClipCard, no add-to-timeline', async ({ appPage: page }) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
 
   const assetId = await importClip(page, 'cell.mp4')
@@ -124,9 +129,7 @@ test('assigning a clip to a cell (Inspector) shows a ClipCard, no add-to-timelin
   await expect(cell0.getByTitle('Add clip at the playhead')).toHaveCount(0)
 })
 
-test('dragging a library clip onto a cell assigns it, overwriting the old clip', async ({
-  appPage: page
-}) => {
+test('dragging a library clip onto a cell assigns it, overwriting the old clip', async ({ appPage: page }) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
 
   const first = await importClip(page, 'first.mp4')

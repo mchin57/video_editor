@@ -26,7 +26,11 @@ const pickNext = (app: ElectronApplication, filePaths: string[]): Promise<void> 
 const mediaIds = (page: Page): Promise<string[]> =>
   page.evaluate(() => window.__reelStores.useProject.getState().project?.mediaIds ?? [])
 
-test('a zero-byte, a missing and a garbage file are each named with why', async ({ appPage: page, electronApp, scratchDir }) => {
+test('a zero-byte, a missing and a garbage file are each named with why', async ({
+  appPage: page,
+  electronApp,
+  scratchDir
+}) => {
   const empty = join(scratchDir, 'empty clip.mp4')
   writeFileSync(empty, '')
   const missing = join(scratchDir, 'gone.mov')
@@ -55,13 +59,29 @@ test('a zero-byte, a missing and a garbage file are each named with why', async 
   await expect(notice).toHaveCount(0)
 })
 
-test('a good file in the same pick still imports; the next import clears the notice', async ({ appPage: page, electronApp, scratchDir }) => {
+test('a good file in the same pick still imports; the next import clears the notice', async ({
+  appPage: page,
+  electronApp,
+  scratchDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'needs resources/bin/ffmpeg (npm run collect-binaries)')
   const good = join(scratchDir, 'good.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=1',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', good
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=1',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    good
   ])
   const empty = join(scratchDir, 'empty.mp4')
   writeFileSync(empty, '')

@@ -243,7 +243,10 @@ function HoverPopout({
           </div>
         )}
         <div data-testid="library-description" className={`flex min-w-0 flex-1 flex-col gap-1.5 p-2 ${divider}`}>
-          <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-zinc-400" title={asset.fileName}>
+          <div
+            className="truncate text-[10px] font-semibold uppercase tracking-wide text-zinc-400"
+            title={asset.fileName}
+          >
             Description
           </div>
           <DescriptionBox
@@ -289,12 +292,7 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
       {failed ? (
         <span className="flex h-full w-full items-center justify-center text-base text-zinc-600">▶</span>
       ) : (
-        <img
-          src={thumbUrl(asset)}
-          alt=""
-          onError={() => setFailedFor(asset)}
-          className="h-full w-full object-cover"
-        />
+        <img src={thumbUrl(asset)} alt="" onError={() => setFailedFor(asset)} className="h-full w-full object-cover" />
       )}
       {hover && canPreview && wrapRef.current && (
         <HoverPopout
@@ -369,12 +367,8 @@ export function ClipBadges({ asset }: { asset: MediaAsset }): JSX.Element | null
   if (!v) return null
   return (
     <div className="flex flex-wrap gap-1">
-      {v.isHdr && (
-        <span className="rounded bg-fuchsia-500/15 px-1 text-[9px] font-medium text-fuchsia-300">HDR</span>
-      )}
-      {v.isVfr && (
-        <span className="rounded bg-amber-500/15 px-1 text-[9px] font-medium text-amber-300">VFR</span>
-      )}
+      {v.isHdr && <span className="rounded bg-fuchsia-500/15 px-1 text-[9px] font-medium text-fuchsia-300">HDR</span>}
+      {v.isVfr && <span className="rounded bg-amber-500/15 px-1 text-[9px] font-medium text-amber-300">VFR</span>}
       {v.rotationDeg !== 0 && (
         <span className="rounded bg-sky-500/15 px-1 text-[9px] font-medium text-sky-300">⟳{v.rotationDeg}°</span>
       )}

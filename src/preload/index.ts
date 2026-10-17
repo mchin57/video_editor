@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { IPC, IPC_EVENT, type AudioFxRequest, type LaunchState, type LoadedProject, type QuickCutRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import {
+  IPC,
+  IPC_EVENT,
+  type AudioFxRequest,
+  type LaunchState,
+  type LoadedProject,
+  type QuickCutRequest,
+  type RelinkResult,
+  type RemoveBackgroundRequest,
+  type StillRequest
+} from '@shared/ipc'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { ImportSkip, MediaAsset } from '@shared/media'
 import type { MergeSegment } from '@shared/merge'
@@ -22,8 +32,7 @@ const api = {
   importPaths: (paths: string[]): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importPaths, paths),
   importFolderDialog: (): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.importFolderDialog),
   extractAudioDialog: (): Promise<MediaAsset | null> => ipcRenderer.invoke(IPC.extractAudioDialog),
-  listProjectMedia: (ids: string[]): Promise<MediaAsset[]> =>
-    ipcRenderer.invoke(IPC.listProjectMedia, ids),
+  listProjectMedia: (ids: string[]): Promise<MediaAsset[]> => ipcRenderer.invoke(IPC.listProjectMedia, ids),
   ensureProxy: (id: string): Promise<void> => ipcRenderer.invoke(IPC.ensureProxy, id),
   /** Pick a file holding a missing asset's original (null = canceled). */
   relinkMediaDialog: (id: string): Promise<RelinkResult | null> => ipcRenderer.invoke(IPC.relinkMediaDialog, id),
@@ -37,7 +46,8 @@ const api = {
    *  (the sources are untouched). Rejects with a reason before any encode. */
   mergeClips: (segments: MergeSegment[]): Promise<MediaAsset> => ipcRenderer.invoke(IPC.mergeClips, segments),
   /** A library item's description ('' clears); an unsaved change until Save. */
-  setMediaDescription: (id: string, text: string): Promise<void> => ipcRenderer.invoke(IPC.setMediaDescription, id, text),
+  setMediaDescription: (id: string, text: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.setMediaDescription, id, text),
 
   // Project (M2) — a project is a folder (docs/MEDIA-POINTERS.md).
   // loadProject/saveProject read/write its working copy (autosave); the *File*
@@ -75,30 +85,24 @@ const api = {
   convertLegacyFolderDialog: (): Promise<string[] | null> => ipcRenderer.invoke(IPC.convertLegacyFolderDialog),
 
   // Export (M3) — returns the output path, or null if the Save dialog was canceled.
-  exportProject: (
-    project: Project,
-    opts: { preset: PresetId; preferNvenc: boolean }
-  ): Promise<string | null> => ipcRenderer.invoke(IPC.exportProject, project, opts),
+  exportProject: (project: Project, opts: { preset: PresetId; preferNvenc: boolean }): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.exportProject, project, opts),
   revealFile: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.revealFile, path),
 
   // Settings
   getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.getSettings),
-  updateSettings: (patch: Partial<Settings>): Promise<Settings> =>
-    ipcRenderer.invoke(IPC.updateSettings, patch),
+  updateSettings: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke(IPC.updateSettings, patch),
   chooseExportDir: (): Promise<Settings> => ipcRenderer.invoke(IPC.chooseExportDir),
 
   // Captions (M4)
   whisperAvailable: (): Promise<boolean> => ipcRenderer.invoke(IPC.whisperAvailable),
-  transcribeMedia: (mediaId: string): Promise<Transcript> =>
-    ipcRenderer.invoke(IPC.transcribeMedia, mediaId),
-  getTranscript: (mediaId: string): Promise<Transcript | null> =>
-    ipcRenderer.invoke(IPC.getTranscript, mediaId),
+  transcribeMedia: (mediaId: string): Promise<Transcript> => ipcRenderer.invoke(IPC.transcribeMedia, mediaId),
+  getTranscript: (mediaId: string): Promise<Transcript | null> => ipcRenderer.invoke(IPC.getTranscript, mediaId),
   detectSilence: (mediaId: string): Promise<{ start: number; end: number }[]> =>
     ipcRenderer.invoke(IPC.detectSilence, mediaId),
   /** The asset's loudness series (measured first if not cached yet); null = no
    *  audio, original missing, or the measurement failed. */
-  getLoudness: (mediaId: string): Promise<LoudnessSeries | null> =>
-    ipcRenderer.invoke(IPC.getLoudness, mediaId),
+  getLoudness: (mediaId: string): Promise<LoudnessSeries | null> => ipcRenderer.invoke(IPC.getLoudness, mediaId),
 
   // Background removal (subject-aware crop) — matte one clip segment into a new
   // transparent library asset (a VP9 WebM with the segment's audio), gated on the
@@ -108,12 +112,10 @@ const api = {
     ipcRenderer.invoke(IPC.removeBackground, req),
   /** Ask a cancelable background job to stop (false = nothing to cancel). */
   cancelJob: (jobId: string): Promise<boolean> => ipcRenderer.invoke(IPC.cancelJob, jobId),
-  renderAudioFx: (req: AudioFxRequest): Promise<MediaAsset> =>
-    ipcRenderer.invoke(IPC.renderAudioFx, req),
+  renderAudioFx: (req: AudioFxRequest): Promise<MediaAsset> => ipcRenderer.invoke(IPC.renderAudioFx, req),
 
   // Stills — capture a frame from a clip into the library, or save it to disk.
-  captureStillToLibrary: (req: StillRequest): Promise<MediaAsset> =>
-    ipcRenderer.invoke(IPC.captureStillToLibrary, req),
+  captureStillToLibrary: (req: StillRequest): Promise<MediaAsset> => ipcRenderer.invoke(IPC.captureStillToLibrary, req),
   captureStillToDisk: (req: StillRequest, suggestedName: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.captureStillToDisk, req, suggestedName),
 

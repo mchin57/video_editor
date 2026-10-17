@@ -67,7 +67,9 @@ test('New creates the project folder and opens it; an existing folder and an inv
   expect(created).toMatchObject({ name: 'My Reel', filePath: reel })
 
   // …and the whole structure is on disk.
-  expect(readdirSync(root).sort()).toEqual(expect.arrayContaining(['My Reel.reel', 'cache', 'generated', 'transcripts']))
+  expect(readdirSync(root).sort()).toEqual(
+    expect.arrayContaining(['My Reel.reel', 'cache', 'generated', 'transcripts'])
+  )
   for (const dir of ['generated', 'transcripts', 'cache']) expect(statSync(join(root, dir)).isDirectory()).toBe(true)
   const doc = JSON.parse(readFileSync(reel, 'utf8'))
   expect(doc).toMatchObject({ name: 'My Reel', version: 26, library: [] })

@@ -129,11 +129,7 @@ export const FULL_CELL: CellRect = { x: 0, y: 0, w: W, h: H }
  * pixels — the export twin of the preview's `object-fit: cover`. A wide-of-cell
  * source crops its sides; a tall one crops top/bottom.
  */
-export function coverCrop(
-  srcW: number,
-  srcH: number,
-  aspect: number
-): { x: number; y: number; w: number; h: number } {
+export function coverCrop(srcW: number, srcH: number, aspect: number): { x: number; y: number; w: number; h: number } {
   if (srcW <= 0 || srcH <= 0 || aspect <= 0) return { x: 0, y: 0, w: Math.max(1, srcW), h: Math.max(1, srcH) }
   const srcAspect = srcW / srcH
   if (srcAspect > aspect) {
@@ -150,12 +146,7 @@ export function cellSpan(cell: LayoutCell): number {
 }
 
 /** A fresh layout layer at `startSec`: preset cells, empty (no media), muted. */
-export function makeLayoutLayer(
-  id: string,
-  presetId: string,
-  startSec: number,
-  durationSec = 5
-): Layer {
+export function makeLayoutLayer(id: string, presetId: string, startSec: number, durationSec = 5): Layer {
   const preset = layoutPreset(presetId)
   const dur = Math.max(0.5, durationSec)
   return {
@@ -188,9 +179,7 @@ export function applyLayoutPreset(content: LayoutContent, presetId: string): Lay
   const preset = layoutPreset(presetId)
   const cells: LayoutCell[] = preset.rects.map((rect, i) => {
     const prev = content.cells[i]
-    return prev
-      ? { ...prev, rect: { ...rect } }
-      : { mediaId: null, inSec: 0, outSec: 5, mute: true, rect: { ...rect } }
+    return prev ? { ...prev, rect: { ...rect } } : { mediaId: null, inSec: 0, outSec: 5, mute: true, rect: { ...rect } }
   })
   return { ...content, presetId: preset.id, cells }
 }

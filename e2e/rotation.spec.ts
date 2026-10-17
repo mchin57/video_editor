@@ -42,11 +42,18 @@ const center = async (page: Page, sel: string): Promise<{ x: number; y: number }
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
 }
 
-const layer = (page: Page): Promise<{ rotationDeg?: number; x: number; y: number; stretchX?: number; content: { widthPx?: number } }> =>
+const layer = (
+  page: Page
+): Promise<{ rotationDeg?: number; x: number; y: number; stretchX?: number; content: { widthPx?: number } }> =>
   page.evaluate(() => window.__reelStores.useProject.getState().project!.layers[0] as never)
 
 /** Sweep the pointer from its start round `c` by `deg` (clockwise), in steps. */
-const sweep = async (page: Page, c: { x: number; y: number }, from: { x: number; y: number }, deg: number): Promise<void> => {
+const sweep = async (
+  page: Page,
+  c: { x: number; y: number },
+  from: { x: number; y: number },
+  deg: number
+): Promise<void> => {
   const r = Math.hypot(from.x - c.x, from.y - c.y)
   const a0 = Math.atan2(from.y - c.y, from.x - c.x)
   await page.mouse.move(from.x, from.y)
@@ -82,7 +89,9 @@ test('the rotate handle sits above the top-middle and turns the text, snapping, 
   expect(h1.x).toBeGreaterThan(c.x)
   expect(Math.abs(h1.y - c.y)).toBeLessThan(3)
   // The drawn text box turned too.
-  const t = await page.locator('[data-resizebox]').evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform))
+  const t = await page
+    .locator('[data-resizebox]')
+    .evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform))
   expect(Math.round((Math.atan2(t.b, t.a) * 180) / Math.PI)).toBe(90)
 
   await page.evaluate(() => window.__reelStores.useProject.getState().undo())

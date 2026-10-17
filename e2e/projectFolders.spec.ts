@@ -27,9 +27,20 @@ const stubOpen = (app: ElectronApplication, filePath: string): Promise<void> =>
 
 const synth = (out: string): void => {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=2',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=2',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     out
   ])
 }
@@ -50,7 +61,10 @@ async function importClip(page: Page, path: string): Promise<string> {
 const save = (page: Page): Promise<void> => page.evaluate(() => window.__reelStores.useProject.getState().save())
 const dirty = (page: Page): Promise<boolean> => page.evaluate(() => window.__reelStores.useProject.getState().dirty)
 
-test('a library item points at its original, and only Save writes it into the .reel', async ({ appPage: page, projectsDir }) => {
+test('a library item points at its original, and only Save writes it into the .reel', async ({
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const root = join(projectsDir, 'E2E')
@@ -75,7 +89,12 @@ test('a library item points at its original, and only Save writes it into the .r
   await save(page)
   expect(await dirty(page)).toBe(false)
   const [record] = library(reel)
-  expect(record).toMatchObject({ id, fileName: 'IMG_0001.mp4', relativePath: 'footage/IMG_0001.mp4', absolutePath: source })
+  expect(record).toMatchObject({
+    id,
+    fileName: 'IMG_0001.mp4',
+    relativePath: 'footage/IMG_0001.mp4',
+    absolutePath: source
+  })
   expect(record.fingerprint.size).toBe(statSync(source).size)
 })
 
@@ -132,9 +151,12 @@ test('renamed footage shows Missing, blocks export, and Relink points it at the 
   expect((await media(page, [id]))[0].status).toBe('missing')
 
   // Answer the export's Save dialog (it comes before the media check).
-  await electronApp.evaluate(({ dialog }, filePath) => {
-    dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
-  }, join(projectsDir, 'out.mp4'))
+  await electronApp.evaluate(
+    ({ dialog }, filePath) => {
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
+    },
+    join(projectsDir, 'out.mp4')
+  )
   const exportError = await page.evaluate(async () => {
     const p = window.__reelStores.useProject.getState().project!
     try {

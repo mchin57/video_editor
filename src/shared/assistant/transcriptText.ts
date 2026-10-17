@@ -32,9 +32,7 @@ export function phrases(words: CaptionWord[]): CaptionWord[][] {
     const prev = cur[cur.length - 1]
     const breakHere =
       prev !== undefined &&
-      (w.startSec - prev.endSec >= PHRASE_GAP_SEC ||
-        /[.!?]$/.test(prev.text.trim()) ||
-        cur.length >= PHRASE_MAX_WORDS)
+      (w.startSec - prev.endSec >= PHRASE_GAP_SEC || /[.!?]$/.test(prev.text.trim()) || cur.length >= PHRASE_MAX_WORDS)
     if (breakHere) {
       out.push(cur)
       cur = []

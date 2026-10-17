@@ -25,10 +25,21 @@ const mediaIds = (page: Page): Promise<string[]> =>
 /** A clip made by the real ffmpeg: `size` at `rate` fps for `sec` seconds, with a tone or silent. */
 function synth(out: string, size: string, rate: number, sec: number, tone: boolean): void {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `testsrc2=size=${size}:rate=${rate}:duration=${sec}`,
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=size=${size}:rate=${rate}:duration=${sec}`,
     ...(tone ? ['-f', 'lavfi', '-i', `sine=frequency=440:duration=${sec}`, '-c:a', 'aac', '-shortest'] : []),
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     out
   ])
 }
@@ -43,14 +54,32 @@ async function importClip(page: Page, path: string): Promise<string> {
   return id
 }
 
-const clips = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).filter((n) => !n.startsWith('.')).sort() : [])
+const clips = (dir: string): string[] =>
+  existsSync(dir)
+    ? readdirSync(dir)
+        .filter((n) => !n.startsWith('.'))
+        .sort()
+    : []
 
 const probe = (file: string): { width: number; height: number; streams: string[]; duration: number } => {
   const j = JSON.parse(
-    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', file]).toString()
+    execFileSync(FFPROBE, [
+      '-v',
+      'error',
+      '-show_entries',
+      'stream=codec_type,width,height:format=duration',
+      '-of',
+      'json',
+      file
+    ]).toString()
   ) as { streams: { codec_type: string; width?: number; height?: number }[]; format: { duration: string } }
   const v = j.streams.find((s) => s.codec_type === 'video')!
-  return { width: v.width!, height: v.height!, streams: j.streams.map((s) => s.codec_type), duration: Number(j.format.duration) }
+  return {
+    width: v.width!,
+    height: v.height!,
+    streams: j.streams.map((s) => s.codec_type),
+    duration: Number(j.format.duration)
+  }
 }
 
 const card = (page: Page, name: string): Locator =>

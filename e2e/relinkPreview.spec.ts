@@ -15,10 +15,27 @@ import { FFMPEG } from './bin'
 
 const synth = (out: string, seconds: number, src: string): void => {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `${src}=size=320x568:rate=30:duration=${seconds}`,
-    '-f', 'lavfi', '-i', `sine=frequency=440:duration=${seconds}`,
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `${src}=size=320x568:rate=30:duration=${seconds}`,
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=440:duration=${seconds}`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-shortest',
     out
   ])
 }
@@ -33,7 +50,11 @@ const previewVideo = (page: Page): Promise<{ src: string; duration: number } | n
     return v && v.readyState >= 1 ? { src: v.currentSrc || v.src, duration: v.duration } : null
   })
 
-test('after a forced relink the preview plays the NEW content, not the old', async ({ electronApp, appPage: page, projectsDir }) => {
+test('after a forced relink the preview plays the NEW content, not the old', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const dir = join(projectsDir, 'E2E', 'footage')
@@ -59,12 +80,14 @@ test('after a forced relink the preview plays the NEW content, not the old', asy
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [file] })) as typeof dialog.showOpenDialog
     dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as typeof dialog.showMessageBox
   }, shorter)
-  await page.evaluate((id) => window.api.relinkMediaDialog(id), id).then((res) =>
-    page.evaluate(
-      ({ id, d }) => window.__reelStores.useProject.getState().resetMediaCuts(id, d),
-      { id, d: res!.asset.probe.durationSec }
+  await page
+    .evaluate((id) => window.api.relinkMediaDialog(id), id)
+    .then((res) =>
+      page.evaluate(({ id, d }) => window.__reelStores.useProject.getState().resetMediaCuts(id, d), {
+        id,
+        d: res!.asset.probe.durationSec
+      })
     )
-  )
   await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange'))) // library refetch
   await expect.poll(async () => (await media(page, id))?.proxyReady, { timeout: 30_000 }).toBe(true)
 
@@ -77,6 +100,10 @@ test('after a forced relink the preview plays the NEW content, not the old', asy
   expect(after.endsWith(`?v=${rev}`)).toBe(true)
   // The clip's own audio (its linked audio track) follows the same address.
   await expect
-    .poll(() => page.evaluate(() => (document.querySelector('[data-testid="audio-follower"]') as HTMLMediaElement | null)?.src ?? ''))
+    .poll(() =>
+      page.evaluate(
+        () => (document.querySelector('[data-testid="audio-follower"]') as HTMLMediaElement | null)?.src ?? ''
+      )
+    )
     .toContain(`?v=${rev}`)
 })

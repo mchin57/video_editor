@@ -28,7 +28,13 @@ export function jobProgressText(job: JobProgressEvent, now: number): string {
  * spawned and cleans up in main, then reports `canceled` — so between the click
  * and that event the button reads "Canceling…".
  */
-export function CancelJobButton({ job, className = '' }: { job: JobProgressEvent; className?: string }): JSX.Element | null {
+export function CancelJobButton({
+  job,
+  className = ''
+}: {
+  job: JobProgressEvent
+  className?: string
+}): JSX.Element | null {
   const [requested, setRequested] = useState(false)
   if (!job.cancelable || !isJobActive(job.status)) return null
   return (
@@ -52,7 +58,10 @@ export function CancelJobButton({ job, className = '' }: { job: JobProgressEvent
 function ProgressBar({ value }: { value: number }): JSX.Element {
   return (
     <div className="h-1 w-full overflow-hidden rounded bg-white/10">
-      <div className="h-full bg-sky-400 transition-[width]" style={{ width: `${Math.round(Math.min(1, value) * 100)}%` }} />
+      <div
+        className="h-full bg-sky-400 transition-[width]"
+        style={{ width: `${Math.round(Math.min(1, value) * 100)}%` }}
+      />
     </div>
   )
 }
@@ -119,37 +128,39 @@ export function JobsIndicator(): JSX.Element | null {
 
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 w-96 rounded-lg border border-white/10 bg-zinc-900 p-2 shadow-2xl">
-          {all.filter((j) => isJobActive(j.status) || j.status === 'error').map((j) => (
-            <div key={j.id} data-testid="job-row" className="rounded px-2 py-1.5 hover:bg-white/5">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="min-w-0 flex-1 truncate text-zinc-200" title={j.label}>
-                  {j.label}
-                </span>
+          {all
+            .filter((j) => isJobActive(j.status) || j.status === 'error')
+            .map((j) => (
+              <div key={j.id} data-testid="job-row" className="rounded px-2 py-1.5 hover:bg-white/5">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-zinc-200" title={j.label}>
+                    {j.label}
+                  </span>
+                  {isJobActive(j.status) ? (
+                    <>
+                      <span className="shrink-0 text-[10px] text-zinc-400">{jobProgressText(j, now)}</span>
+                      <CancelJobButton job={j} />
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => dismissJob(j.id)}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+                    >
+                      Dismiss
+                    </button>
+                  )}
+                </div>
                 {isJobActive(j.status) ? (
-                  <>
-                    <span className="shrink-0 text-[10px] text-zinc-400">{jobProgressText(j, now)}</span>
-                    <CancelJobButton job={j} />
-                  </>
+                  <div className="mt-1">
+                    <ProgressBar value={j.progress} />
+                  </div>
                 ) : (
-                  <button
-                    onClick={() => dismissJob(j.id)}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
-                  >
-                    Dismiss
-                  </button>
+                  <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-rose-300" title={j.error}>
+                    {j.error ?? 'Failed'}
+                  </p>
                 )}
               </div>
-              {isJobActive(j.status) ? (
-                <div className="mt-1">
-                  <ProgressBar value={j.progress} />
-                </div>
-              ) : (
-                <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-rose-300" title={j.error}>
-                  {j.error ?? 'Failed'}
-                </p>
-              )}
-            </div>
-          ))}
+            ))}
         </div>
       )}
     </div>

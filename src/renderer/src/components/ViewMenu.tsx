@@ -2,15 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { DOCK_PANELS } from '@/lib/dockLayout'
 import { useDock } from '@/state/dock'
 
-function ActionItem({
-  label,
-  title,
-  onClick
-}: {
-  label: string
-  title: string
-  onClick: () => void
-}): JSX.Element {
+function ActionItem({ label, title, onClick }: { label: string; title: string; onClick: () => void }): JSX.Element {
   return (
     <button
       onClick={onClick}
@@ -86,11 +78,7 @@ export function ViewMenu(): JSX.Element {
           />
           <ActionItem
             label="Reset layout"
-            title={
-              hasCustomDefault
-                ? 'Restore your saved default layout'
-                : 'Restore the built-in layout'
-            }
+            title={hasCustomDefault ? 'Restore your saved default layout' : 'Restore the built-in layout'}
             onClick={() => {
               setOpen(false)
               useDock.getState().resetLayout()

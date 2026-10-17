@@ -59,9 +59,7 @@ test('dragging a layer by its handle restacks it', async ({ appPage: page }) => 
   await expect.poll(() => stackOrder(page)).toEqual(['BG', 'C', 'A', 'B'])
 })
 
-test('dropped the Background pin: the bottom-most layer can be raised', async ({
-  appPage: page
-}) => {
+test('dropped the Background pin: the bottom-most layer can be raised', async ({ appPage: page }) => {
   await arrangeStack(page)
   // BG is last in the front→back list. Dragging it to the TOP makes it
   // front-most, which the old pin made impossible.
@@ -69,9 +67,7 @@ test('dropped the Background pin: the bottom-most layer can be raised', async ({
   await expect.poll(() => stackOrder(page)).toEqual(['A', 'B', 'C', 'BG'])
 })
 
-test('dropped the Background pin: a two-layer project can be reordered', async ({
-  appPage: page
-}) => {
+test('dropped the Background pin: a two-layer project can be reordered', async ({ appPage: page }) => {
   // The case the owner actually hit: with two layers the lower one WAS the
   // Background, so there was one draggable row and nothing to reorder.
   await page.evaluate(() => {

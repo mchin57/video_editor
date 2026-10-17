@@ -40,8 +40,7 @@ export function LayersPanel(): JSX.Element {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
   const selectTile = useUi((s) => s.selectTile)
   // Selecting a row picks the layer's whole link group, like the timeline does.
-  const selectLayer = (id: string): void =>
-    selectTile(useProject.getState().project, { kind: 'layer', id })
+  const selectLayer = (id: string): void => selectTile(useProject.getState().project, { kind: 'layer', id })
   const time = usePlayback((s) => s.time)
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])

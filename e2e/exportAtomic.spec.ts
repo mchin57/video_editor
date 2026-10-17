@@ -17,9 +17,20 @@ import { FFMPEG, FFPROBE } from './bin'
 async function arrange(page: Page, projectsDir: string, durationSec: number): Promise<void> {
   const source = join(projectsDir, 'E2E', 'clip.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `testsrc2=size=320x568:rate=30:duration=${durationSec}`,
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=size=320x568:rate=30:duration=${durationSec}`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     source
   ])
   const id = await page.evaluate(async (p) => {
@@ -30,9 +41,12 @@ async function arrange(page: Page, projectsDir: string, durationSec: number): Pr
     return asset.id
   }, source)
   await expect
-    .poll(async () => (await page.evaluate((i) => window.api.listProjectMedia([i]), id) as MediaAsset[])[0]?.proxyReady, {
-      timeout: 60_000
-    })
+    .poll(
+      async () => ((await page.evaluate((i) => window.api.listProjectMedia([i]), id)) as MediaAsset[])[0]?.proxyReady,
+      {
+        timeout: 60_000
+      }
+    )
     .toBe(true)
 }
 
@@ -46,14 +60,16 @@ async function stubSaveDialog(app: ElectronApplication, filePath: string): Promi
 async function killAppFfmpeg(app: ElectronApplication): Promise<number> {
   const pid = await app.evaluate(() => process.pid)
   const out = execFileSync('powershell.exe', [
-    '-NoProfile', '-Command',
+    '-NoProfile',
+    '-Command',
     `$p = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid} AND Name='ffmpeg.exe'"); ` +
       `$p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; $p.Count`
   ])
   return Number(out.toString().trim())
 }
 
-const exportButton = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('button', { name: 'Export', exact: true })
+const exportButton = (page: Page): ReturnType<Page['getByRole']> =>
+  page.getByRole('button', { name: 'Export', exact: true })
 const SENTINEL = Buffer.from('an earlier export the user wants to keep')
 
 test('a killed export leaves the existing file at that name untouched and no partial', async ({
@@ -98,7 +114,9 @@ test('a finished export replaces the file at that name with a playable mp4', asy
   await expect(page.getByRole('button', { name: '✓ Reveal export' })).toBeVisible({ timeout: 90_000 })
   expect(existsSync(join(dir, 'replace.part.mp4'))).toBe(false)
   const dur = Number(
-    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', target]).toString().trim()
+    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', target])
+      .toString()
+      .trim()
   )
   expect(dur).toBeGreaterThan(1.5)
 })

@@ -68,8 +68,7 @@ export type MediaRef = { id: string; rev?: string }
  *  path; the revision exists so a clip relinked to DIFFERENT content ("Update
  *  path anyway") gets new addresses — same id and file names otherwise, so
  *  <video>, <audio> and <img> would keep showing the old proxy. */
-const mediaUrl = (m: MediaRef, file: string): string =>
-  `reelmedia://${m.id}/${file}${m.rev ? `?v=${m.rev}` : ''}`
+const mediaUrl = (m: MediaRef, file: string): string => `reelmedia://${m.id}/${file}${m.rev ? `?v=${m.rev}` : ''}`
 
 /** Stream URL for a media asset's proxy via the reelmedia:// scheme. */
 export const proxyUrl = (m: MediaRef): string => mediaUrl(m, 'proxy.mp4')

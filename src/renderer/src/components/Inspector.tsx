@@ -50,7 +50,15 @@ import {
   type TextAnimation
 } from '@shared/textAnim'
 import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect, EnsembleEffect } from '@shared/audioFx'
-import { CHORUS_RANGE, DEFAULT_CHORUS, DEFAULT_ECHO, DEFAULT_ENSEMBLE, ECHO_RANGE, ENSEMBLE_RANGE, fxLabel } from '@shared/audioFx'
+import {
+  CHORUS_RANGE,
+  DEFAULT_CHORUS,
+  DEFAULT_ECHO,
+  DEFAULT_ENSEMBLE,
+  ECHO_RANGE,
+  ENSEMBLE_RANGE,
+  fxLabel
+} from '@shared/audioFx'
 import type { SparkleEffect } from '@shared/sparkle'
 import { DEFAULT_SPARKLE, SPARKLE_DENSITY_RANGE } from '@shared/sparkle'
 import { useAddAudioFx, useLibrary } from '@/hooks/useMedia'
@@ -109,7 +117,10 @@ type TriMode = 'default' | 'on' | 'off'
  * selector cheap to compare).
  */
 function useLinkGroupSize(kind: TimelineItemKind, id: string | null): number {
-  return useProject((s) => { const c = activeComp(s); return c && id ? expandGroup(c, { kind, id }).length : 1 })
+  return useProject((s) => {
+    const c = activeComp(s)
+    return c && id ? expandGroup(c, { kind, id }).length : 1
+  })
 }
 
 /** The latest a layer or caption may end via its End (s) field: the assistant's
@@ -132,9 +143,9 @@ function useMaxEndSec(editedLayerId: string | null): number {
 function LinkedNote({ size }: { size: number }): JSX.Element {
   return (
     <p className="mb-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] leading-snug text-sky-300/90">
-      🔗 Linked to {size - 1} other {size === 2 ? 'tile' : 'tiles'} — they move, trim, split and
-      delete together. Drag an edge on the timeline to trim the whole group; re-timing just this
-      tile needs <span className="text-sky-200">⛓ Unlink</span>.
+      🔗 Linked to {size - 1} other {size === 2 ? 'tile' : 'tiles'} — they move, trim, split and delete together. Drag
+      an edge on the timeline to trim the whole group; re-timing just this tile needs{' '}
+      <span className="text-sky-200">⛓ Unlink</span>.
     </p>
   )
 }
@@ -268,8 +279,8 @@ function RemoveBackground({
     return (
       <CollapsibleSection id="removebg" title="Background">
         <p className="text-[10px] leading-snug text-zinc-500">
-          Background removed — this clip is transparent, so whatever sits on the lanes below shows through (a
-          color, an image, another clip).
+          Background removed — this clip is transparent, so whatever sits on the lanes below shows through (a color, an
+          image, another clip).
         </p>
       </CollapsibleSection>
     )
@@ -304,7 +315,11 @@ function RemoveBackground({
         title="Detect the subject and replace this clip with a background-free version of it"
         className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50"
       >
-        {running ? `Removing background… ${Math.round(job.progress * 100)}%` : starting ? 'Starting…' : '✂ Remove background'}
+        {running
+          ? `Removing background… ${Math.round(job.progress * 100)}%`
+          : starting
+            ? 'Starting…'
+            : '✂ Remove background'}
       </button>
       {running && (
         <div className="mt-1.5 flex items-center gap-2" data-testid="matte-progress">
@@ -315,7 +330,9 @@ function RemoveBackground({
           <CancelJobButton job={job} />
         </div>
       )}
-      {note && <p className={`mt-1 text-[10px] leading-snug ${note.error ? 'text-rose-300' : 'text-zinc-400'}`}>{note.text}</p>}
+      {note && (
+        <p className={`mt-1 text-[10px] leading-snug ${note.error ? 'text-rose-300' : 'text-zinc-400'}`}>{note.text}</p>
+      )}
       {failed && <p className="mt-1 text-[10px] leading-snug text-rose-300">{failed}</p>}
       <p className="mt-1 text-[10px] leading-snug text-zinc-500">
         Removes the background from just this clip&apos;s {formatDuration(durationSec)} of footage (source{' '}
@@ -383,10 +400,12 @@ function LiveRange({
   )
 }
 
-const setLayer = (id: string) => (c: Composition, fn: (l: Layer) => Layer): Composition => ({
-  ...c,
-  layers: c.layers.map((l) => (l.id === id ? fn(l) : l))
-})
+const setLayer =
+  (id: string) =>
+  (c: Composition, fn: (l: Layer) => Layer): Composition => ({
+    ...c,
+    layers: c.layers.map((l) => (l.id === id ? fn(l) : l))
+  })
 
 /** Freeze-frame controls: hold the current frame for a chosen duration, and list
  *  existing holds. Adding a freeze extends only this clip (no ripple) — which is
@@ -429,7 +448,10 @@ function FreezeFrames({
       ) : (
         <ul className="flex flex-col gap-1">
           {freezes.map((f, i) => (
-            <li key={i} className="flex items-center justify-between rounded bg-black/30 px-2 py-1 text-[11px] text-zinc-300">
+            <li
+              key={i}
+              className="flex items-center justify-between rounded bg-black/30 px-2 py-1 text-[11px] text-zinc-300"
+            >
               <span>
                 @ {Math.max(0, f.atSec - content.inSec).toFixed(1)}s into clip · hold {f.holdSec.toFixed(1)}s
               </span>
@@ -470,8 +492,7 @@ function LayerEditor(): JSX.Element | null {
   const id = layer.id
   const mut = setLayer(id)
   const c = layer.content
-  const asset =
-    c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
+  const asset = c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
   // Position and zoom READ frame-relative (0,0 = the frame's top-left, 100% =
   // fits the frame); the document stays in canonical coords, so a format switch
   // never rewrites them. Identity in 9:16.
@@ -504,124 +525,127 @@ function LayerEditor(): JSX.Element | null {
       {linked && <LinkedNote size={groupSize} />}
 
       <CollapsibleSection id="transform" title="Transform">
-      {/* Start/End each move ONE edge (a trim, not a move), so they'd change this
+        {/* Start/End each move ONE edge (a trim, not a move), so they'd change this
           tile's length out from under the rest of its group. */}
-      <div className="flex gap-2">
-        <Field label="Start (s)">
-          <NumberInput
-            step="0.1"
-            min={0}
-            max={layer.endSec - 0.2}
-            value={layer.startSec}
-            format={(v) => v.toFixed(1)}
-            disabled={linked}
-            onCommit={(v) => update(id, { startSec: v })}
-            className={`${inputCls} ${disabledCls}`}
-          />
-        </Field>
-        <Field label="End (s)">
-          <NumberInput
-            step="0.1"
-            min={layer.startSec + 0.2}
-            max={Math.max(layer.startSec + 0.2, maxEnd)}
-            value={layer.endSec}
-            format={(v) => v.toFixed(1)}
-            disabled={linked}
-            onCommit={(v) => update(id, { endSec: v })}
-            className={`${inputCls} ${disabledCls}`}
-          />
-        </Field>
-      </div>
-
-      {posKeyframed && (
-        <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
-          {keyframed
-            ? 'Position & zoom are animated by keyframes (below) — these base values are ignored.'
-            : 'Position follows the motion (below) — drag the text to move its whole path.'}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Field label="Position X">
-          <NumberInput
-            step="5"
-            value={Math.round(layer.x - frame.x)}
-            disabled={posKeyframed}
-            onCommit={(v) => update(id, { x: v + frame.x })}
-          />
-        </Field>
-        <Field label="Position Y">
-          <NumberInput
-            step="5"
-            value={Math.round(layer.y - frame.y)}
-            disabled={posKeyframed}
-            onCommit={(v) => update(id, { y: v + frame.y })}
-          />
-        </Field>
-      </div>
-
-      <Field label={`Zoom · ${Math.round((layer.scale / zoomBase) * 100)}%`}>
-        <div className={keyframed ? 'pointer-events-none opacity-40' : ''}>
-          <LiveRange
-            min={0.05}
-            max={4}
-            step={0.01}
-            value={layer.scale / zoomBase}
-            transform={(p, v) => mut(p, (l) => ({ ...l, scale: v * zoomBase }))}
-          />
+        <div className="flex gap-2">
+          <Field label="Start (s)">
+            <NumberInput
+              step="0.1"
+              min={0}
+              max={layer.endSec - 0.2}
+              value={layer.startSec}
+              format={(v) => v.toFixed(1)}
+              disabled={linked}
+              onCommit={(v) => update(id, { startSec: v })}
+              className={`${inputCls} ${disabledCls}`}
+            />
+          </Field>
+          <Field label="End (s)">
+            <NumberInput
+              step="0.1"
+              min={layer.startSec + 0.2}
+              max={Math.max(layer.startSec + 0.2, maxEnd)}
+              value={layer.endSec}
+              format={(v) => v.toFixed(1)}
+              disabled={linked}
+              onCommit={(v) => update(id, { endSec: v })}
+              className={`${inputCls} ${disabledCls}`}
+            />
+          </Field>
         </div>
-      </Field>
 
-      {/* Rotation: the same control captions use, paired with the canvas
+        {posKeyframed && (
+          <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
+            {keyframed
+              ? 'Position & zoom are animated by keyframes (below) — these base values are ignored.'
+              : 'Position follows the motion (below) — drag the text to move its whole path.'}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Field label="Position X">
+            <NumberInput
+              step="5"
+              value={Math.round(layer.x - frame.x)}
+              disabled={posKeyframed}
+              onCommit={(v) => update(id, { x: v + frame.x })}
+            />
+          </Field>
+          <Field label="Position Y">
+            <NumberInput
+              step="5"
+              value={Math.round(layer.y - frame.y)}
+              disabled={posKeyframed}
+              onCommit={(v) => update(id, { y: v + frame.y })}
+            />
+          </Field>
+        </div>
+
+        <Field label={`Zoom · ${Math.round((layer.scale / zoomBase) * 100)}%`}>
+          <div className={keyframed ? 'pointer-events-none opacity-40' : ''}>
+            <LiveRange
+              min={0.05}
+              max={4}
+              step={0.01}
+              value={layer.scale / zoomBase}
+              transform={(p, v) => mut(p, (l) => ({ ...l, scale: v * zoomBase }))}
+            />
+          </div>
+        </Field>
+
+        {/* Rotation: the same control captions use, paired with the canvas
           handle. Layouts and compound clips don't rotate (yet). */}
-      {(c.kind === 'video' || c.kind === 'image' || c.kind === 'text') && (
-        <AngleField value={layer.rotationDeg ?? 0} onChange={(deg) => update(id, { rotationDeg: deg || undefined })} />
-      )}
-      {c.kind === 'video' && (
-        <div className="mb-2 flex gap-1">
-          <button
-            type="button"
-            className={toggleCls(!!c.flipH)}
-            onClick={() => updateContent(id, { flipH: !c.flipH })}
-            title="Mirror left–right"
-          >
-            ⇋ Flip H
-          </button>
-          <button
-            type="button"
-            className={toggleCls(!!c.flipV)}
-            onClick={() => updateContent(id, { flipV: !c.flipV })}
-            title="Mirror top–bottom"
-          >
-            ⇵ Flip V
-          </button>
-        </div>
-      )}
+        {(c.kind === 'video' || c.kind === 'image' || c.kind === 'text') && (
+          <AngleField
+            value={layer.rotationDeg ?? 0}
+            onChange={(deg) => update(id, { rotationDeg: deg || undefined })}
+          />
+        )}
+        {c.kind === 'video' && (
+          <div className="mb-2 flex gap-1">
+            <button
+              type="button"
+              className={toggleCls(!!c.flipH)}
+              onClick={() => updateContent(id, { flipH: !c.flipH })}
+              title="Mirror left–right"
+            >
+              ⇋ Flip H
+            </button>
+            <button
+              type="button"
+              className={toggleCls(!!c.flipV)}
+              onClick={() => updateContent(id, { flipV: !c.flipV })}
+              title="Mirror top–bottom"
+            >
+              ⇵ Flip V
+            </button>
+          </div>
+        )}
 
-      <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
-        <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
-        Visible
-      </label>
+        <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+          <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
+          Visible
+        </label>
 
-      {/* Any ordinary tile can become a compound clip: it moves into a nested
+        {/* Any ordinary tile can become a compound clip: it moves into a nested
           timeline you then edit on its own. Linked tiles are excluded — their
           partners would be left behind in the parent. */}
-      {c.kind !== 'compound' && (
-        <button
-          onClick={() => {
-            useProject.getState().convertLayerToComp(id)
-            useProject.getState().enterComposition({ layerId: id })
-          }}
-          disabled={linked}
-          className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
-          title={
-            linked
-              ? 'Not available on a linked tile — its partners would stay behind (unlink first)'
-              : 'Move this into its own nested timeline and open it'
-          }
-        >
-          🧩 Edit as compound clip
-        </button>
-      )}
+        {c.kind !== 'compound' && (
+          <button
+            onClick={() => {
+              useProject.getState().convertLayerToComp(id)
+              useProject.getState().enterComposition({ layerId: id })
+            }}
+            disabled={linked}
+            className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
+            title={
+              linked
+                ? 'Not available on a linked tile — its partners would stay behind (unlink first)'
+                : 'Move this into its own nested timeline and open it'
+            }
+          >
+            🧩 Edit as compound clip
+          </button>
+        )}
       </CollapsibleSection>
 
       {/* Straight-line motion: start point → end point over a duration. Two
@@ -647,8 +671,8 @@ function LayerEditor(): JSX.Element | null {
         <CollapsibleSection id="layout" title="Layout">
           <LayoutCells layerId={id} content={c} />
           <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
-            The aspect ratio is set in the <span className="text-zinc-400">Format</span> menu. Cells
-            fill their panel (center-cropped) and play at 1× from the layout&apos;s start.
+            The aspect ratio is set in the <span className="text-zinc-400">Format</span> menu. Cells fill their panel
+            (center-cropped) and play at 1× from the layout&apos;s start.
           </p>
         </CollapsibleSection>
       )}
@@ -664,79 +688,79 @@ function LayerEditor(): JSX.Element | null {
       {c.kind === 'video' && (
         <>
           <CollapsibleSection id="trim" title="Trim & audio">
-          <div className="flex gap-2">
-            <Field label="Trim in (s)">
-              <NumberInput
-                step="0.1"
-                min={0}
-                max={c.outSec - 0.05}
-                value={c.inSec}
-                format={(v) => v.toFixed(1)}
-                disabled={linked}
-                onCommit={(v) => updateContent(id, { inSec: v })}
-                className={`${inputCls} ${disabledCls}`}
-              />
-            </Field>
-            <Field label="Trim out (s)">
-              <NumberInput
-                step="0.1"
-                min={c.inSec + 0.05}
-                value={c.outSec}
-                format={(v) => v.toFixed(1)}
-                disabled={linked}
-                onCommit={(v) => updateContent(id, { outSec: v })}
-                className={`${inputCls} ${disabledCls}`}
-              />
-            </Field>
-          </div>
-          {asset?.probe.video && (
-            <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
-          )}
-          {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
-          <SpeedControl layer={layer} content={c} disabled={linked} />
-          <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
-            <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
-            Mute this layer
-          </label>
-          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <Field label="Trim in (s)">
+                <NumberInput
+                  step="0.1"
+                  min={0}
+                  max={c.outSec - 0.05}
+                  value={c.inSec}
+                  format={(v) => v.toFixed(1)}
+                  disabled={linked}
+                  onCommit={(v) => updateContent(id, { inSec: v })}
+                  className={`${inputCls} ${disabledCls}`}
+                />
+              </Field>
+              <Field label="Trim out (s)">
+                <NumberInput
+                  step="0.1"
+                  min={c.inSec + 0.05}
+                  value={c.outSec}
+                  format={(v) => v.toFixed(1)}
+                  disabled={linked}
+                  onCommit={(v) => updateContent(id, { outSec: v })}
+                  className={`${inputCls} ${disabledCls}`}
+                />
+              </Field>
+            </div>
+            {asset?.probe.video && (
+              <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
+            )}
+            {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
+            <SpeedControl layer={layer} content={c} disabled={linked} />
+            <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
+              <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
+              Mute this layer
+            </label>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setCropEditing(true)}
+                className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+              >
+                {c.crop ? 'Edit crop' : `Crop to ${format.ratioLabel}`}
+              </button>
+              {c.crop && (
+                <button
+                  onClick={() => setVideoCrop(id, null, assetAspect(asset) ?? c.crop!.w / c.crop!.h)}
+                  className="rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-400 hover:bg-white/10"
+                >
+                  Remove crop
+                </button>
+              )}
+              {asset?.probe.audio && (
+                <button
+                  onClick={() => extractAudio(id)}
+                  disabled={videoSpeed(c) !== 1 || hasSpeedRamp(c) || linked}
+                  className={`rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
+                  title={
+                    videoSpeed(c) !== 1 || hasSpeedRamp(c)
+                      ? 'Not available on a re-timed clip — the audio track plays at 1× (reset speed first)'
+                      : linked
+                        ? 'Not available on a linked tile — the new audio clip would not be part of the group (unlink first)'
+                        : "Move this layer's audio onto the audio track and mute the layer"
+                  }
+                >
+                  ♪ Extract audio
+                </button>
+              )}
+            </div>
             <button
-              onClick={() => setCropEditing(true)}
-              className="rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+              onClick={() => setStillsOpen(true)}
+              className="mt-2 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+              title="Grab still frames from this clip"
             >
-              {c.crop ? 'Edit crop' : `Crop to ${format.ratioLabel}`}
+              📷 Stills…
             </button>
-            {c.crop && (
-              <button
-                onClick={() => setVideoCrop(id, null, assetAspect(asset) ?? c.crop!.w / c.crop!.h)}
-                className="rounded bg-white/5 px-2 py-1.5 text-xs text-zinc-400 hover:bg-white/10"
-              >
-                Remove crop
-              </button>
-            )}
-            {asset?.probe.audio && (
-              <button
-                onClick={() => extractAudio(id)}
-                disabled={videoSpeed(c) !== 1 || hasSpeedRamp(c) || linked}
-                className={`rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
-                title={
-                  videoSpeed(c) !== 1 || hasSpeedRamp(c)
-                    ? 'Not available on a re-timed clip — the audio track plays at 1× (reset speed first)'
-                    : linked
-                      ? 'Not available on a linked tile — the new audio clip would not be part of the group (unlink first)'
-                      : "Move this layer's audio onto the audio track and mute the layer"
-                }
-              >
-                ♪ Extract audio
-              </button>
-            )}
-          </div>
-          <button
-            onClick={() => setStillsOpen(true)}
-            className="mt-2 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-            title="Grab still frames from this clip"
-          >
-            📷 Stills…
-          </button>
           </CollapsibleSection>
 
           <SoundEffectsSection
@@ -780,7 +804,13 @@ function LayerEditor(): JSX.Element | null {
               return (
                 <>
                   <Field label={`Exposure  ${col.brightness >= 0 ? '+' : ''}${col.brightness.toFixed(2)}`}>
-                    <LiveRange min={-0.5} max={0.5} step={0.02} value={col.brightness} transform={setCol('brightness')} />
+                    <LiveRange
+                      min={-0.5}
+                      max={0.5}
+                      step={0.02}
+                      value={col.brightness}
+                      transform={setCol('brightness')}
+                    />
                   </Field>
                   <Field label={`Contrast  ${col.contrast.toFixed(2)}`}>
                     <LiveRange min={0.5} max={1.8} step={0.02} value={col.contrast} transform={setCol('contrast')} />
@@ -826,14 +856,11 @@ function LayerEditor(): JSX.Element | null {
                     }
                   />
                   {c.stabilize && (
-                    <StabilizeSliders
-                      value={c.stabilize}
-                      onChange={(next) => updateContent(id, { stabilize: next })}
-                    />
+                    <StabilizeSliders value={c.stabilize} onChange={(next) => updateContent(id, { stabilize: next })} />
                   )}
                   <p className="text-[10px] leading-snug text-zinc-500">
-                    Analysed and rendered on export (a two-pass stabilize); higher smoothing is steadier but crops in more.
-                    Preview is unaffected.
+                    Analysed and rendered on export (a two-pass stabilize); higher smoothing is steadier but crops in
+                    more. Preview is unaffected.
                   </p>
                 </>
               )
@@ -929,12 +956,18 @@ function MotionFields({ layer, frame }: { layer: Layer; frame: FrameRect }): JSX
     return (
       <>
         <p className="mb-2 text-[10px] leading-snug text-zinc-500">
-          Moves in a straight line from where it is now, starting at the playhead. Then drag the dots on the
-          preview to set where it starts and ends.
+          Moves in a straight line from where it is now, starting at the playhead. Then drag the dots on the preview to
+          set where it starts and ends.
         </p>
         <div className="flex items-end gap-2">
           <Field label="Duration (s)">
-            <NumberInput step="0.1" min={MIN_MOTION_SEC} value={durSec} format={(v) => v.toFixed(1)} onCommit={setDurSec} />
+            <NumberInput
+              step="0.1"
+              min={MIN_MOTION_SEC}
+              value={durSec}
+              format={(v) => v.toFixed(1)}
+              onCommit={setDurSec}
+            />
           </Field>
           <button type="button" onClick={add} className={`${btnCls} mb-2 shrink-0`}>
             ➜ Add motion
@@ -1037,7 +1070,10 @@ function KeyframesSection({
         <>
           <ul className="mt-1.5 space-y-1">
             {kfs.map((k, i) => (
-              <li key={`${k.tSec}-${i}`} className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[10px] text-zinc-300">
+              <li
+                key={`${k.tSec}-${i}`}
+                className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[10px] text-zinc-300"
+              >
                 <button
                   onClick={() => setTime(layer.startSec + k.tSec)}
                   className="rounded bg-white/10 px-1 text-zinc-200 hover:bg-white/20"
@@ -1068,19 +1104,21 @@ function KeyframesSection({
               </li>
             ))}
           </ul>
-          <button onClick={() => clearKfs(layer.id)} className="mt-1.5 w-full rounded bg-white/5 px-2 py-1 text-[10px] text-zinc-400 hover:bg-white/10">
+          <button
+            onClick={() => clearKfs(layer.id)}
+            className="mt-1.5 w-full rounded bg-white/5 px-2 py-1 text-[10px] text-zinc-400 hover:bg-white/10"
+          >
             Clear all keyframes
           </button>
           <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-            Motion (and the % opacity) is linear between keyframes and holds outside them.
-            Dragging the layer on the canvas updates the keyframe at the playhead.
+            Motion (and the % opacity) is linear between keyframes and holds outside them. Dragging the layer on the
+            canvas updates the keyframe at the playhead.
           </p>
         </>
       )}
     </div>
   )
 }
-
 
 /** A compound clip's only control: open its nested timeline. Everything else
  *  about it (what's inside) is edited by entering it — that's the whole point
@@ -1097,8 +1135,8 @@ function CompoundControls({ layerId }: { layerId: string }): JSX.Element {
         ✎ Edit contents
       </button>
       <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
-        A compound clip is a whole timeline standing in for one clip — cut it, mix its audio,
-        colour-grade it, layer text over it. Its result plays here from this block&apos;s start.
+        A compound clip is a whole timeline standing in for one clip — cut it, mix its audio, colour-grade it, layer
+        text over it. Its result plays here from this block&apos;s start.
       </p>
     </>
   )
@@ -1134,96 +1172,92 @@ function SpeedControl({
   const ramp = sortedRamp(content)
   return (
     // Outer wrapper keeps pointer events so the "why" tooltip still shows.
-    <div
-      title={
-        disabled ? 'Not available on a linked tile — re-timing one member would desync the group' : undefined
-      }
-    >
-    <div className={disabled ? 'pointer-events-none opacity-40' : ''}>
-      <Field label={`Speed · ${ramped ? 'ramp' : `${cur}×`}`}>
-        <div className={`flex flex-wrap gap-1 ${ramped ? 'pointer-events-none opacity-40' : ''}`}>
-          {SPEED_PRESETS.map((v) => (
-            <button
-              key={v}
-              onClick={() => setSpeed(layerId, v)}
+    <div title={disabled ? 'Not available on a linked tile — re-timing one member would desync the group' : undefined}>
+      <div className={disabled ? 'pointer-events-none opacity-40' : ''}>
+        <Field label={`Speed · ${ramped ? 'ramp' : `${cur}×`}`}>
+          <div className={`flex flex-wrap gap-1 ${ramped ? 'pointer-events-none opacity-40' : ''}`}>
+            {SPEED_PRESETS.map((v) => (
+              <button
+                key={v}
+                onClick={() => setSpeed(layerId, v)}
+                disabled={ramped}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${
+                  !ramped && cur === v ? 'bg-sky-500/40 text-sky-100' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
+                }`}
+                title={v < 1 ? `Slow motion (${v}×)` : v > 1 ? `Speed up (${v}×)` : 'Normal speed'}
+              >
+                {v}×
+              </button>
+            ))}
+            <NumberInput
+              min={MIN_VIDEO_SPEED}
+              max={MAX_VIDEO_SPEED}
+              step={0.05}
+              value={cur}
               disabled={ramped}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${
-                !ramped && cur === v ? 'bg-sky-500/40 text-sky-100' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
-              }`}
-              title={v < 1 ? `Slow motion (${v}×)` : v > 1 ? `Speed up (${v}×)` : 'Normal speed'}
-            >
-              {v}×
-            </button>
-          ))}
-          <NumberInput
-            min={MIN_VIDEO_SPEED}
-            max={MAX_VIDEO_SPEED}
-            step={0.05}
-            value={cur}
-            disabled={ramped}
-            onCommit={(v) => setSpeed(layerId, v)}
-            className={`${inputCls} w-16 flex-none`}
-          />
+              onCommit={(v) => setSpeed(layerId, v)}
+              className={`${inputCls} w-16 flex-none`}
+            />
+          </div>
+        </Field>
+        <div className="mt-1">
+          <button
+            onClick={() => addRampKf(layerId, usePlayback.getState().time)}
+            className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+            title="Keyframe the playback speed at the playhead — speed ramps linearly between keyframes"
+          >
+            ＋ Speed keyframe at playhead
+          </button>
+          {ramped && (
+            <>
+              <ul className="mt-1.5 space-y-1">
+                {ramp.map((k, i) => (
+                  <li
+                    key={`${k.atSec}-${i}`}
+                    className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[10px] text-zinc-300"
+                  >
+                    <button
+                      onClick={() => setTime(videoTimelineTime(content, layer, k.atSec))}
+                      className="rounded bg-white/10 px-1 text-zinc-200 hover:bg-white/20"
+                      title="Jump the playhead to this speed keyframe"
+                    >
+                      ▸
+                    </button>
+                    <span className="w-10 font-mono">{k.atSec.toFixed(2)}s</span>
+                    <NumberInput
+                      min={MIN_VIDEO_SPEED}
+                      max={MAX_VIDEO_SPEED}
+                      step={0.05}
+                      value={k.speed}
+                      onCommit={(v) => updateRampKf(layerId, i, v)}
+                      className={`${inputCls} w-14 flex-none`}
+                      title="Playback speed at this source point"
+                    />
+                    <span className="flex-1 text-zinc-500">×</span>
+                    <button
+                      onClick={() => removeRampKf(layerId, i)}
+                      className="text-zinc-500 hover:text-rose-400"
+                      title="Remove this speed keyframe"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => clearRamp(layerId)}
+                className="mt-1.5 w-full rounded bg-white/5 px-2 py-1 text-[10px] text-zinc-400 hover:bg-white/10"
+              >
+                Clear speed ramp
+              </button>
+              <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+                Speed ramps linearly between keyframes (times are source seconds) and holds flat outside them. The
+                clip&apos;s own audio is muted while a ramp is active.
+              </p>
+            </>
+          )}
         </div>
-      </Field>
-      <div className="mt-1">
-        <button
-          onClick={() => addRampKf(layerId, usePlayback.getState().time)}
-          className="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
-          title="Keyframe the playback speed at the playhead — speed ramps linearly between keyframes"
-        >
-          ＋ Speed keyframe at playhead
-        </button>
-        {ramped && (
-          <>
-            <ul className="mt-1.5 space-y-1">
-              {ramp.map((k, i) => (
-                <li
-                  key={`${k.atSec}-${i}`}
-                  className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[10px] text-zinc-300"
-                >
-                  <button
-                    onClick={() => setTime(videoTimelineTime(content, layer, k.atSec))}
-                    className="rounded bg-white/10 px-1 text-zinc-200 hover:bg-white/20"
-                    title="Jump the playhead to this speed keyframe"
-                  >
-                    ▸
-                  </button>
-                  <span className="w-10 font-mono">{k.atSec.toFixed(2)}s</span>
-                  <NumberInput
-                    min={MIN_VIDEO_SPEED}
-                    max={MAX_VIDEO_SPEED}
-                    step={0.05}
-                    value={k.speed}
-                    onCommit={(v) => updateRampKf(layerId, i, v)}
-                    className={`${inputCls} w-14 flex-none`}
-                    title="Playback speed at this source point"
-                  />
-                  <span className="flex-1 text-zinc-500">×</span>
-                  <button
-                    onClick={() => removeRampKf(layerId, i)}
-                    className="text-zinc-500 hover:text-rose-400"
-                    title="Remove this speed keyframe"
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button
-              onClick={() => clearRamp(layerId)}
-              className="mt-1.5 w-full rounded bg-white/5 px-2 py-1 text-[10px] text-zinc-400 hover:bg-white/10"
-            >
-              Clear speed ramp
-            </button>
-            <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-              Speed ramps linearly between keyframes (times are source seconds) and holds flat
-              outside them. The clip&apos;s own audio is muted while a ramp is active.
-            </p>
-          </>
-        )}
       </div>
-    </div>
     </div>
   )
 }
@@ -1572,12 +1606,7 @@ function AudioClipEditor(): JSX.Element | null {
       </Field>
       <div className="flex gap-2">
         <Field label="Fade in (s)">
-          <NumberInput
-            step="0.5"
-            min={0}
-            value={clip.fadeInSec}
-            onCommit={(v) => update(clip.id, { fadeInSec: v })}
-          />
+          <NumberInput step="0.5" min={0} value={clip.fadeInSec} onCommit={(v) => update(clip.id, { fadeInSec: v })} />
         </Field>
         <Field label="Fade out (s)">
           <NumberInput
@@ -1598,9 +1627,7 @@ function AudioClipEditor(): JSX.Element | null {
         effectiveOn={effectiveDenoise(clip, denoiseDefault)}
         defaultOn={denoiseDefault}
         mode={clip.denoise === undefined ? 'default' : clip.denoise ? 'on' : 'off'}
-        onPick={(key) =>
-          update(clip.id, { denoise: key === 'default' ? undefined : key === 'on' })
-        }
+        onPick={(key) => update(clip.id, { denoise: key === 'default' ? undefined : key === 'on' })}
       />
       <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
         <input
@@ -1822,15 +1849,11 @@ function SoundEffectsSection({
   const addFx = useAddAudioFx()
   const start = existing?.settings ?? null
   const [kind, setKind] = useState<AudioFxKind>(start?.kind ?? 'echo')
-  const [echo, setEcho] = useState<EchoEffect>(
-    start?.kind === 'echo' ? start.echo : { ...DEFAULT_ECHO }
-  )
+  const [echo, setEcho] = useState<EchoEffect>(start?.kind === 'echo' ? start.echo : { ...DEFAULT_ECHO })
   const [ensemble, setEnsemble] = useState<EnsembleEffect>(
     start?.kind === 'ensemble' ? start.ensemble : { ...DEFAULT_ENSEMBLE }
   )
-  const [chorus, setChorus] = useState<ChorusEffect>(
-    start?.kind === 'chorus' ? start.chorus : { ...DEFAULT_CHORUS }
-  )
+  const [chorus, setChorus] = useState<ChorusEffect>(start?.kind === 'chorus' ? start.chorus : { ...DEFAULT_CHORUS })
   const settings: AudioFxSettings =
     kind === 'echo'
       ? { kind: 'echo', echo }
@@ -1888,9 +1911,7 @@ function SoundEffectsSection({
           </button>
         ))}
       </div>
-      <p className="mb-2 text-[10px] leading-snug text-zinc-500">
-        {FX_KINDS.find((k) => k.value === kind)?.hint}
-      </p>
+      <p className="mb-2 text-[10px] leading-snug text-zinc-500">{FX_KINDS.find((k) => k.value === kind)?.hint}</p>
 
       {kind === 'echo' ? (
         <>
@@ -2060,8 +2081,7 @@ function TextEffectsFields({
 }): JSX.Element {
   const sparkle = content.effects?.sparkle ?? null
   const on = !!sparkle && sparkle.density > 0
-  const setSparkle = (next: SparkleEffect | null): void =>
-    onPatch({ effects: { ...content.effects, sparkle: next } })
+  const setSparkle = (next: SparkleEffect | null): void => onPatch({ effects: { ...content.effects, sparkle: next } })
 
   return (
     <>
@@ -2095,8 +2115,7 @@ function TextEffectsFields({
             />
           </Field>
           <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-            Follows a typewriter entrance letter by letter; scatters across the text with any
-            other entrance.
+            Follows a typewriter entrance letter by letter; scatters across the text with any other entrance.
           </p>
         </>
       )}

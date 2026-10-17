@@ -185,10 +185,22 @@ function bandedClip(): string {
   const mp4 = join(mkdtempSync(join(tmpdir(), 'reel-aspect-')), 'bands.mp4')
   const band = (c: string): string[] => ['-f', 'lavfi', '-i', `color=c=${c}:s=270x120:r=30:d=2`]
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    ...band('red'), ...band('lime'), ...band('blue'), ...band('yellow'),
-    '-filter_complex', '[0:v][1:v][2:v][3:v]vstack=inputs=4',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    ...band('red'),
+    ...band('lime'),
+    ...band('blue'),
+    ...band('yellow'),
+    '-filter_complex',
+    '[0:v][1:v][2:v][3:v]vstack=inputs=4',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
     mp4
   ])
   return mp4
@@ -224,8 +236,12 @@ for (const c of [
     w: 1920,
     h: 1080,
     samples: [
-      [960, 30, 'red'], [960, 200, 'lime'], [960, 900, 'blue'], [960, 1060, 'yellow'],
-      [100, 540, 'black'], [1820, 540, 'black']
+      [960, 30, 'red'],
+      [960, 200, 'lime'],
+      [960, 900, 'blue'],
+      [960, 1060, 'yellow'],
+      [100, 540, 'black'],
+      [1820, 540, 'black']
     ]
   },
   // …and to 1:1: the frame shows its middle 1080 rows, edge to edge.
@@ -233,7 +249,12 @@ for (const c of [
     preset: 'square',
     w: 1080,
     h: 1080,
-    samples: [[540, 30, 'red'], [540, 200, 'lime'], [540, 900, 'blue'], [540, 1060, 'yellow']]
+    samples: [
+      [540, 30, 'red'],
+      [540, 200, 'lime'],
+      [540, 900, 'blue'],
+      [540, 1060, 'yellow']
+    ]
   }
 ] as const) {
   test(`export in ${c.preset} crops a 9:16 clip to the centred frame`, async ({ appPage: page, electronApp }) => {
@@ -261,8 +282,18 @@ for (const c of [
     expect(statSync(out).size).toBeGreaterThan(0)
 
     const dims = execFileSync(FFPROBE, [
-      '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', out
-    ]).toString().trim()
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=width,height',
+      '-of',
+      'csv=p=0',
+      out
+    ])
+      .toString()
+      .trim()
     expect(dims).toBe(`${c.w},${c.h}`)
 
     const px = grabFrame(out, c.w, c.h)

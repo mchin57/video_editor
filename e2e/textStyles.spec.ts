@@ -12,20 +12,36 @@ import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 
 const text = (id: string, over: Record<string, unknown>): Record<string, unknown> => ({
-  id, hidden: false, startSec: 0, endSec: 4, x: 540, y: 960, scale: 1,
+  id,
+  hidden: false,
+  startSec: 0,
+  endSec: 4,
+  x: 540,
+  y: 960,
+  scale: 1,
   content: {
-    kind: 'text', text: id, fontFamily: 'montserrat-extrabold', fontSizePx: 70, color: '#ffffff',
-    pill: { enabled: false, color: '#000000cc', padPx: 18 }, ...over
+    kind: 'text',
+    text: id,
+    fontFamily: 'montserrat-extrabold',
+    fontSizePx: 70,
+    color: '#ffffff',
+    pill: { enabled: false, color: '#000000cc', padPx: 18 },
+    ...over
   }
 })
 
 const content = (page: Page, id: string): Promise<Record<string, unknown>> =>
-  page.evaluate((id) => window.__reelStores.useProject.getState().project!.layers.find((l) => l.id === id)!.content as never, id)
+  page.evaluate(
+    (id) => window.__reelStores.useProject.getState().project!.layers.find((l) => l.id === id)!.content as never,
+    id
+  )
 
 const saved = (page: Page): Promise<{ name: string; style: Record<string, unknown>; animation?: unknown }[]> =>
   page.evaluate(async () => (await window.api.getSettings()).textStyles as never)
 
-test('save a text layer look as a style, apply it to another layer and a caption in one click', async ({ appPage: page }) => {
+test('save a text layer look as a style, apply it to another layer and a caption in one click', async ({
+  appPage: page
+}) => {
   await page.evaluate(
     ([hook, plain]) => {
       const { useProject, useUi } = window.__reelStores
@@ -35,7 +51,9 @@ test('save a text layer look as a style, apply it to another layer and a caption
     },
     [
       text('HOOK', {
-        fontFamily: 'anton', fontSizePx: 120, color: '#FFE600',
+        fontFamily: 'anton',
+        fontSizePx: 120,
+        color: '#FFE600',
         pill: { enabled: true, color: '#000000cc', padPx: 24 },
         animation: { in: 'bounce', inSec: 0.4, out: 'fadeOut', outSec: 0.3 }
       }),
@@ -60,7 +78,10 @@ test('save a text layer look as a style, apply it to another layer and a caption
   await page.getByTestId('text-style-picker').getByRole('button', { name: 'Hook', exact: true }).click()
   const plain = await content(page, 'PLAIN')
   expect(plain).toMatchObject({
-    text: 'PLAIN', fontFamily: 'anton', fontSizePx: 120, color: '#FFE600',
+    text: 'PLAIN',
+    fontFamily: 'anton',
+    fontSizePx: 120,
+    color: '#FFE600',
     pill: { enabled: true, color: '#000000cc', padPx: 24 },
     animation: { in: 'bounce', out: 'fadeOut' }
   })
@@ -72,7 +93,9 @@ test('save a text layer look as a style, apply it to another layer and a caption
     const { useProject, useUi } = window.__reelStores
     const cap = useProject.getState().project!.captions
     useProject.getState().setCaptions({
-      ...cap, enabled: true, segments: [{ id: 'c0', startSec: 0, endSec: 2, text: 'go', words: [], enabled: true }]
+      ...cap,
+      enabled: true,
+      segments: [{ id: 'c0', startSec: 0, endSec: 2, text: 'go', words: [], enabled: true }]
     })
     useUi.getState().selectCaptionsGlobal()
   })

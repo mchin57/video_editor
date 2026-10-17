@@ -25,13 +25,9 @@ const layerState = (page: Page): Promise<{ startSec: number; endSec: number; c: 
     return { startSec: l.startSec, endSec: l.endSec, c: l.content as VideoContent }
   })
 
-test('Inspector builds a ramp: keyframes at the playhead, duration follows the integral', async ({
-  appPage: page
-}) => {
+test('Inspector builds a ramp: keyframes at the playhead, duration follows the integral', async ({ appPage: page }) => {
   await arrangeClip(page)
-  const addKf = page.getByTitle(
-    'Keyframe the playback speed at the playhead — speed ramps linearly between keyframes'
-  )
+  const addKf = page.getByTitle('Keyframe the playback speed at the playhead — speed ramps linearly between keyframes')
 
   // Keyframe 1 at t=2 (source 2, seeded with the current 1× speed).
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(2))
@@ -101,9 +97,7 @@ test('trim drag on a ramped clip keeps the window invariant', async ({ appPage: 
   // Window invariant: recompute the integral in-page with the shared helper.
   const played = await page.evaluate(() => {
     const l = window.__reelStores.useProject.getState().project!.layers[0]
-    return window.__reelStores.playedVideoDuration(
-      l.content as import('../src/shared/project').VideoContent
-    )
+    return window.__reelStores.playedVideoDuration(l.content as import('../src/shared/project').VideoContent)
   })
   expect(endSec - startSec).toBeCloseTo(played, 5)
 })

@@ -5,9 +5,7 @@ import { expandGroup } from '@/lib/links'
 
 /** What the volume-level dialog is doing. */
 export type LevelDialog =
-  | { mode: 'create'; assign?: string[] }
-  | { mode: 'rename'; levelId: string }
-  | { mode: 'loudness'; levelId: string }
+  { mode: 'create'; assign?: string[] } | { mode: 'rename'; levelId: string } | { mode: 'loudness'; levelId: string }
 
 /** Transient editor UI selection that doesn't belong in the project document. */
 interface UiState {

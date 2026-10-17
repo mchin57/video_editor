@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { buildOpacityCmdLines, cropFilter, eqFilter, f3, f6, piecewiseLinearExpr, r, speedRampPlayedExpr } from './ffmpegFilters'
+import {
+  buildOpacityCmdLines,
+  cropFilter,
+  eqFilter,
+  f3,
+  f6,
+  piecewiseLinearExpr,
+  r,
+  speedRampPlayedExpr
+} from './ffmpegFilters'
 
 describe('ffmpegFilters', () => {
   it('rounds crop geometry to integer pixels (w:h:x:y order)', () => {
@@ -24,9 +33,12 @@ describe('ffmpegFilters', () => {
       expect(piecewiseLinearExpr([{ t: 1, v: 100 }])).toBe('100.000')
     })
     it('ramps linearly between two points, holding outside', () => {
-      expect(piecewiseLinearExpr([{ t: 1, v: 100 }, { t: 3, v: 300 }])).toBe(
-        'if(lt(t,1.000),100.000,if(lt(t,3.000),100.000+200.000*(t-1.000)/2.000,300.000))'
-      )
+      expect(
+        piecewiseLinearExpr([
+          { t: 1, v: 100 },
+          { t: 3, v: 300 }
+        ])
+      ).toBe('if(lt(t,1.000),100.000,if(lt(t,3.000),100.000+200.000*(t-1.000)/2.000,300.000))')
     })
     it('nests additional segments inside-out', () => {
       const e = piecewiseLinearExpr([
@@ -39,20 +51,31 @@ describe('ffmpegFilters', () => {
       )
     })
     it('sorts unordered points and degrades a zero-span segment to a step', () => {
-      const e = piecewiseLinearExpr([{ t: 2, v: 5 }, { t: 2, v: 9 }])
+      const e = piecewiseLinearExpr([
+        { t: 2, v: 5 },
+        { t: 2, v: 9 }
+      ])
       expect(e).toBe('if(lt(t,2.000),5.000,if(lt(t,2.000),9.000,9.000))')
     })
   })
 
   describe('speedRampPlayedExpr', () => {
     it('a flat segment integrates as (x-u)/v', () => {
-      expect(speedRampPlayedExpr([{ u: 0, v: 2 }, { u: 4, v: 2 }])).toBe(
-        'if(lt(T-STARTT,4.000000),0.000000+(T-STARTT-0.000000)/2.000000,2.000000)'
-      )
+      expect(
+        speedRampPlayedExpr([
+          { u: 0, v: 2 },
+          { u: 4, v: 2 }
+        ])
+      ).toBe('if(lt(T-STARTT,4.000000),0.000000+(T-STARTT-0.000000)/2.000000,2.000000)')
     })
     it('a ramped segment integrates as the log closed form (natural log)', () => {
       // speed 1 → 2 over [0, 4]: m = 0.25, total = ln(2)/0.25 ≈ 2.772589.
-      expect(speedRampPlayedExpr([{ u: 0, v: 1 }, { u: 4, v: 2 }])).toBe(
+      expect(
+        speedRampPlayedExpr([
+          { u: 0, v: 1 },
+          { u: 4, v: 2 }
+        ])
+      ).toBe(
         'if(lt(T-STARTT,4.000000),0.000000+log((1.000000+0.250000*(T-STARTT-0.000000))/1.000000)/0.250000,2.772589)'
       )
     })

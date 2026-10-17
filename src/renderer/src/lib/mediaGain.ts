@@ -118,11 +118,7 @@ export function previewAudioState(): AudioContextState | null {
  * linear gain `volume=` applies. Above 0 dB the element is routed through a
  * GainNode so the boost is actually audible and matches the export.
  */
-export function useMediaGain(
-  ref: { current: HTMLMediaElement | null },
-  gainDb: number,
-  muted = false
-): void {
+export function useMediaGain(ref: { current: HTMLMediaElement | null }, gainDb: number, muted = false): void {
   useEffect(() => {
     const el = ref.current
     if (!el) return

@@ -23,13 +23,7 @@
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
-import {
-  _electron as electron,
-  test as base,
-  expect,
-  type ElectronApplication,
-  type Page
-} from '@playwright/test'
+import { _electron as electron, test as base, expect, type ElectronApplication, type Page } from '@playwright/test'
 
 const root = resolve(__dirname, '..')
 // The electron npm package's main export is the path to the binary.
@@ -77,7 +71,8 @@ export const test = base.extend<{
       dialog.showSaveDialog = (async () => ({ canceled: true, filePath: '' })) as typeof dialog.showSaveDialog
       dialog.showOpenDialog = (async () => ({ canceled: true, filePaths: [] })) as typeof dialog.showOpenDialog
       dialog.showMessageBox = (async (...args: unknown[]) => {
-        const opts = args.find((a) => !!a && typeof a === 'object' && 'message' in a) as { cancelId?: number } | undefined
+        const opts = args.find((a) => !!a && typeof a === 'object' && 'message' in a) as
+          { cancelId?: number } | undefined
         return { response: opts?.cancelId ?? 0, checkboxChecked: false }
       }) as typeof dialog.showMessageBox
       dialog.showErrorBox = (title: string, content: string) => console.error('[e2e] error box:', title, content)

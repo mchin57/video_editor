@@ -29,13 +29,7 @@ import { textMotion, type LinearMotion } from '@shared/motion'
 import { hasColorEmoji, textWrapWidth } from '@shared/textStyle'
 import { presetFor, type PresetId } from '@shared/formats'
 import { alphaInputDecoder } from '@shared/media'
-import {
-  effectiveImageAspect,
-  FRAME,
-  frameToOutput,
-  opacityKeyframePoints,
-  stretchedBox
-} from '@shared/layers'
+import { effectiveImageAspect, FRAME, frameToOutput, opacityKeyframePoints, stretchedBox } from '@shared/layers'
 import type { Layer } from '@shared/project'
 import type { AudioClipSource, ExportKeyframe, OpacityAnim } from './exporterArgs'
 import type { LoudnessSeries } from '@shared/loudness'
@@ -139,7 +133,12 @@ export interface ExportOptions {
 }
 
 function sanitize(name: string): string {
-  return name.replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'reel'
+  return (
+    name
+      .replace(/[^\w-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'reel'
+  )
 }
 
 /** Suggested output filename for the Save dialog. */
@@ -151,11 +150,7 @@ export function suggestedExportName(projectName: string, preset: PresetId): stri
 /** What a canceled export rejects with (the job itself reads `canceled`). */
 export const EXPORT_CANCELED = 'Export canceled'
 
-export async function exportProject(
-  project: Project,
-  opts: ExportOptions,
-  outputPath: string
-): Promise<string> {
+export async function exportProject(project: Project, opts: ExportOptions, outputPath: string): Promise<string> {
   const mediaIds = referencedMediaIds(project)
   const job = createJob('export', `Export · ${project.name}`, project.id, { uses: mediaIds, cancelable: true })
   try {
@@ -482,7 +477,11 @@ async function renderCompositionWith(
       const asset = await getAsset(c.mediaId)
       if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
       const v = asset.probe.video
-      const aspect = c.crop ? c.crop.w / c.crop.h : v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : FRAME.width / FRAME.height
+      const aspect = c.crop
+        ? c.crop.w / c.crop.h
+        : v && v.displayHeight > 0
+          ? v.displayWidth / v.displayHeight
+          : FRAME.width / FRAME.height
       const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
       const boxW = box.w * s
       const boxH = box.h * s
@@ -756,7 +755,14 @@ async function renderCompositionWith(
       const at = mo ? { x: mo.x0, y: mo.y0 } : { x: l.x, y: l.y }
       const travel: LinearMotion | null =
         mo && (mo.x1 !== mo.x0 || mo.y1 !== mo.y0)
-          ? { t0: l.startSec + mo.t0, t1: l.startSec + mo.t1, x0: 0, y0: 0, x1: (mo.x1 - mo.x0) * m.s, y1: (mo.y1 - mo.y0) * m.s }
+          ? {
+              t0: l.startSec + mo.t0,
+              t1: l.startSec + mo.t1,
+              x0: 0,
+              y0: 0,
+              x1: (mo.x1 - mo.x0) * m.s,
+              y1: (mo.y1 - mo.y0) * m.s
+            }
           : null
       const spec = textBlockSpec(c.text, c, at, l.scale, m, frame.w, { widthPx: c.widthPx, rotationDeg })
       const fontSizePx = spec.fontSizePx
@@ -773,8 +779,7 @@ async function renderCompositionWith(
             text: c.text,
             fontSizePx,
             durSec: layerDur,
-            typewriterSec:
-              textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
+            typewriterSec: textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
           }).map((sp) => {
             // Sparkle offsets are in the text block's own axes; a rotated block
             // carries them round its centre (the preview draws them inside the
@@ -800,10 +805,20 @@ async function renderCompositionWith(
           // image travels via the image keyframe path, centre-anchored.
           const image = travel
             ? {
-                ...(await renderTextImage({ ...spec, xCenter: target.width / 2, yCenter: target.height / 2 }, l.startSec, l.endSec)),
+                ...(await renderTextImage(
+                  { ...spec, xCenter: target.width / 2, yCenter: target.height / 2 },
+                  l.startSec,
+                  l.endSec
+                )),
                 keyframes: [
                   { t: travel.t0, w: target.width, h: target.height, cx: spec.xCenter, cy: spec.yCenter },
-                  { t: travel.t1, w: target.width, h: target.height, cx: spec.xCenter + travel.x1, cy: spec.yCenter + travel.y1 }
+                  {
+                    t: travel.t1,
+                    w: target.width,
+                    h: target.height,
+                    cx: spec.xCenter + travel.x1,
+                    cy: spec.yCenter + travel.y1
+                  }
                 ]
               }
             : await renderTextImage(spec, l.startSec, l.endSec)

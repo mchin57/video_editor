@@ -174,7 +174,9 @@ describe('project folders (pointer model)', () => {
     expect(existsSync(join(to, 'transcripts', `${clip.id}.json`))).toBe(true)
     expect(existsSync(join(root, 'autosave.json'))).toBe(false) // …now belong to the new folder
     const saved = reelOf(to).library[0]
-    expect(saved.absolutePath).toBe(clip.absolutePath.replace(join(reels, 'Race day'), join(scratch, 'Elsewhere', 'Race day')))
+    expect(saved.absolutePath).toBe(
+      clip.absolutePath.replace(join(reels, 'Race day'), join(scratch, 'Elsewhere', 'Race day'))
+    )
     expect(saved.relativePath).toBe(toRelativePath(to, saved.absolutePath))
     expect(currentProjectRoot()).toBe(to)
     initProjectRoot()

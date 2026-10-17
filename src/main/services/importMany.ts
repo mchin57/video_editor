@@ -29,7 +29,10 @@ export async function importManyReport(paths: string[]): Promise<ImportReport> {
       }
     } catch (err) {
       console.error('import failed for', path, err)
-      const size = await stat(path).then((s) => s.size, () => undefined)
+      const size = await stat(path).then(
+        (s) => s.size,
+        () => undefined
+      )
       report.skipped.push({ path, reason: importFailureReason(err, size) })
     }
   }

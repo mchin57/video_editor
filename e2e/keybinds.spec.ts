@@ -71,8 +71,25 @@ test('M toggles mute on the selection (video layer + audio clip), one undo step,
   await page.evaluate(() => {
     const s = window.__reelStores.useProject.getState()
     s.addVideoLayer('L1', 'media-v', 0, 3, false)
-    s.addAudioClip({ id: 'A1', mediaId: 'media-a', startSec: 0, inSec: 0, outSec: 2, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music' })
-    window.__reelStores.useUi.getState().selectItems([{ kind: 'layer', id: 'L1' }, { kind: 'audio', id: 'A1' }], { kind: 'layer', id: 'L1' })
+    s.addAudioClip({
+      id: 'A1',
+      mediaId: 'media-a',
+      startSec: 0,
+      inSec: 0,
+      outSec: 2,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'music'
+    })
+    window.__reelStores.useUi.getState().selectItems(
+      [
+        { kind: 'layer', id: 'L1' },
+        { kind: 'audio', id: 'A1' }
+      ],
+      { kind: 'layer', id: 'L1' }
+    )
   })
   const read = (): Promise<{ layer: boolean; audio: boolean; past: number }> =>
     page.evaluate(() => {

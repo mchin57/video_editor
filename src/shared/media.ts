@@ -159,7 +159,20 @@ export interface MediaAsset extends MediaRecord {
 
 /** Source extensions we recognise, by class. Drive the import dialog + kind. */
 export const VIDEO_EXTS = [
-  'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'hevc', '3gp', 'wmv', 'flv', 'mts', 'm2ts', 'mpg', 'mpeg'
+  'mp4',
+  'mov',
+  'm4v',
+  'avi',
+  'mkv',
+  'webm',
+  'hevc',
+  '3gp',
+  'wmv',
+  'flv',
+  'mts',
+  'm2ts',
+  'mpg',
+  'mpeg'
 ]
 export const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'wma']
 export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif']
@@ -230,9 +243,7 @@ export function pixFmtHasAlpha(pixFmt: string | undefined | null): boolean {
  * VP9 WebM yields a fully-opaque alpha plane). Null = no forcing needed: either
  * no alpha, or a codec whose default decoder carries it (e.g. ProRes 4444).
  */
-export function alphaInputDecoder(
-  v: Pick<VideoStreamInfo, 'codec' | 'hasAlpha'> | null | undefined
-): string | null {
+export function alphaInputDecoder(v: Pick<VideoStreamInfo, 'codec' | 'hasAlpha'> | null | undefined): string | null {
   if (!v?.hasAlpha) return null
   if (v.codec === 'vp9') return 'libvpx-vp9'
   if (v.codec === 'vp8') return 'libvpx'

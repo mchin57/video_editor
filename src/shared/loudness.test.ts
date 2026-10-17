@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { isLoudnessSeries, windowLoudness, LOUDNESS_VERSION, type LoudnessSeries, type WindowLoudness } from './loudness'
+import {
+  isLoudnessSeries,
+  windowLoudness,
+  LOUDNESS_VERSION,
+  type LoudnessSeries,
+  type WindowLoudness
+} from './loudness'
 
 /**
  * The real series of a 3:13 teleprompter recording (mono AAC, ~−36 LUFS with
@@ -77,7 +83,8 @@ describe('windowLoudness — gating and edges', () => {
     expect(ok(windowLoudness(s, 0, 20)).lufs).toBeCloseTo(-20, 6)
     // −25 is inside the relative gate, so it does count.
     for (let i = 100; i < 200; i++) s.momentary[i] = -25
-    const both = -0.691 + 10 * Math.log10((Math.pow(10, (-20 + 0.691) / 10) * 97 + Math.pow(10, (-25 + 0.691) / 10) * 100) / 197)
+    const both =
+      -0.691 + 10 * Math.log10((Math.pow(10, (-20 + 0.691) / 10) * 97 + Math.pow(10, (-25 + 0.691) / 10) * 100) / 197)
     expect(ok(windowLoudness(s, 0, 20)).lufs).toBeCloseTo(both, 6)
   })
 

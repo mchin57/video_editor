@@ -17,9 +17,20 @@ test('popout survives cursor travel and its scrub bar seeks', async ({ appPage: 
   // ARRANGE: synthesize a tiny 4s clip and import it for real (proxy + thumb).
   const mp4 = join(mkdtempSync(join(tmpdir(), 'reel-clip-')), 'test.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc=duration=4:size=270x480:rate=30',
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=duration=4:size=270x480:rate=30',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
     mp4
   ])
   const assetId = await page.evaluate(async (p) => {
@@ -31,14 +42,9 @@ test('popout survives cursor travel and its scrub bar seeks', async ({ appPage: 
   // Wait for the proxy to land (main-process truth; the proxy-done job event
   // invalidates the renderer's library query so the card catches up).
   await expect
-    .poll(
-      () =>
-        page.evaluate(
-          async (id) => (await window.api.listProjectMedia([id]))[0]?.proxyReady,
-          assetId
-        ),
-      { timeout: 30_000 }
-    )
+    .poll(() => page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0]?.proxyReady, assetId), {
+      timeout: 30_000
+    })
     .toBe(true)
 
   // ACT: hover the card THUMBNAIL (the hover group lives on the thumb, not the

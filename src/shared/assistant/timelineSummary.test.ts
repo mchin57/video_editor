@@ -27,9 +27,20 @@ describe('summarizeTimeline', () => {
     }
     const s = summarizeTimeline(comp)
     expect(s.layers.map((l) => l.id)).toEqual(['i', 'v'])
-    expect(s.layers[1]).toEqual({ id: 'v', kind: 'video', startSec: 1, endSec: 5, hidden: false, mediaId: 'm1', inSec: 0, outSec: 4 })
+    expect(s.layers[1]).toEqual({
+      id: 'v',
+      kind: 'video',
+      startSec: 1,
+      endSec: 5,
+      hidden: false,
+      mediaId: 'm1',
+      inSec: 0,
+      outSec: 4
+    })
     expect(s.layers[0]).toMatchObject({ id: 'i', kind: 'image', mediaId: 'm2' })
-    expect(s.audioClips).toEqual([{ id: 'a1', mediaId: 'm1', startSec: 1, endSec: 5, inSec: 0, outSec: 4, linkGroupId: 'g' }])
+    expect(s.audioClips).toEqual([
+      { id: 'a1', mediaId: 'm1', startSec: 1, endSec: 5, inSec: 0, outSec: 4, linkGroupId: 'g' }
+    ])
     expect(s.durationSec).toBe(5)
   })
 

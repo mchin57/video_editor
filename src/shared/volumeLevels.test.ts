@@ -61,7 +61,10 @@ const LEVELS: VolumeLevel[] = [
   { id: 'loud', name: 'Loud', targetLufs: -10 }
 ]
 
-const ctxWith = (series: Record<string, LoudnessSeries | null>, durations: Record<string, number> = {}): GainContext => ({
+const ctxWith = (
+  series: Record<string, LoudnessSeries | null>,
+  durations: Record<string, number> = {}
+): GainContext => ({
   levels: LEVELS,
   seriesOf: (id) => series[id],
   durationOf: (id) => durations[id] ?? 0
@@ -170,7 +173,12 @@ describe('clipGain — a clip in a level', () => {
 describe('clipGain — a clip in no level', () => {
   it('plays at its own gainDb and needs no series', () => {
     const c = clip({ gainDb: -4 })
-    expect(clipGain(c, [c], ctxWith({}))).toEqual({ gainDb: -4, audible: true, levelId: null, status: { kind: 'none' } })
+    expect(clipGain(c, [c], ctxWith({}))).toEqual({
+      gainDb: -4,
+      audible: true,
+      levelId: null,
+      status: { kind: 'none' }
+    })
     expect(seriesNeeded(c, [c], LEVELS)).toBeNull()
     expect(seriesNeeded(clip({ volumeLevelId: 'default' }), [], LEVELS)).toBe('m1')
   })
@@ -182,7 +190,15 @@ describe('clipGain — a clip in no level', () => {
 })
 
 describe('clipGain — an effect track follows its source clip', () => {
-  const dry = clip({ id: 'dry', mediaId: 'voice', inSec: 4, outSec: 10, gainDb: -3, volumeLevelId: 'default', linkGroupId: 'g' })
+  const dry = clip({
+    id: 'dry',
+    mediaId: 'voice',
+    inSec: 4,
+    outSec: 10,
+    gainDb: -3,
+    volumeLevelId: 'default',
+    linkGroupId: 'g'
+  })
   const wet = clip({
     id: 'wet',
     mediaId: 'echo',
@@ -191,7 +207,12 @@ describe('clipGain — an effect track follows its source clip', () => {
     gainDb: -2,
     kind: 'fx',
     linkGroupId: 'g',
-    fx: { settings: { kind: 'echo', echo: { delayMs: 260, decay: 0.45, repeats: 3 } }, fromMediaId: 'voice', fromInSec: 4, fromOutSec: 10 }
+    fx: {
+      settings: { kind: 'echo', echo: { delayMs: 260, decay: 0.45, repeats: 3 } },
+      fromMediaId: 'voice',
+      fromInSec: 4,
+      fromOutSec: 10
+    }
   })
 
   it('gets the same change the level gave its source', () => {
@@ -244,7 +265,10 @@ describe('level edits', () => {
       x: 540,
       y: 960,
       scale: 1,
-      content: { kind: 'compound', comp: { ...createEmptyComposition(), audioClips: [clip({ id: 'n1', volumeLevelId: 'loud' })] } }
+      content: {
+        kind: 'compound',
+        comp: { ...createEmptyComposition(), audioClips: [clip({ id: 'n1', volumeLevelId: 'loud' })] }
+      }
     }
     return {
       ...p,
@@ -271,7 +295,10 @@ describe('level edits', () => {
     const p = project()
     expect(removeVolumeLevel(p, DEFAULT_VOLUME_LEVEL_ID)).toBe(p)
     expect(renameVolumeLevel(p, DEFAULT_VOLUME_LEVEL_ID, 'Voice')).toBe(p)
-    expect(setVolumeLevelTarget(p, DEFAULT_VOLUME_LEVEL_ID, -14).volumeLevels[0]).toMatchObject({ name: 'Default', targetLufs: -14 })
+    expect(setVolumeLevelTarget(p, DEFAULT_VOLUME_LEVEL_ID, -14).volumeLevels[0]).toMatchObject({
+      name: 'Default',
+      targetLufs: -14
+    })
   })
 
   it('adds, renames and clamps', () => {
@@ -294,7 +321,12 @@ describe('level edits', () => {
 describe('auto-join (extractedAudioClip)', () => {
   it('joins Default only when the setting is on', () => {
     const f = { id: 'e', mediaId: 'm', startSec: 1, inSec: 0, outSec: 4, linkGroupId: 'g' }
-    expect(extractedAudioClip(f, true)).toMatchObject({ kind: 'extracted', gainDb: 0, linkGroupId: 'g', volumeLevelId: 'default' })
+    expect(extractedAudioClip(f, true)).toMatchObject({
+      kind: 'extracted',
+      gainDb: 0,
+      linkGroupId: 'g',
+      volumeLevelId: 'default'
+    })
     expect(extractedAudioClip(f, false).volumeLevelId).toBeUndefined()
   })
 })

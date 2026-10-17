@@ -28,8 +28,24 @@ import { captionInWindow, captionWithText, makeCaption } from './captions'
 import { isLinked } from './links'
 
 const KNOWN_KEYS = new Set<keyof TextEdit>([
-  'id', 'kind', 'text', 'startSec', 'endSec', 'visible', 'x', 'y', 'rotationDeg', 'fontFamily',
-  'fontSizePx', 'color', 'pill', 'stroke', 'shadow', 'gradient', 'widthPx', 'followLaneStyle'
+  'id',
+  'kind',
+  'text',
+  'startSec',
+  'endSec',
+  'visible',
+  'x',
+  'y',
+  'rotationDeg',
+  'fontFamily',
+  'fontSizePx',
+  'color',
+  'pill',
+  'stroke',
+  'shadow',
+  'gradient',
+  'widthPx',
+  'followLaneStyle'
 ])
 /** Fields that restyle a text block (shared by text layers, captions and the lane). */
 const STYLE_KEYS = ['fontFamily', 'fontSizePx', 'color', 'pill', 'stroke', 'shadow', 'gradient'] as const
@@ -62,7 +78,8 @@ function styleProblems(e: TextEdit): string[] {
     if (v !== undefined && (!finite(v) || v < lo || v > hi)) p.push(`${name} must be a number from ${lo} to ${hi}`)
   }
   const color = (name: string, v: unknown): void => {
-    if (v !== undefined && (typeof v !== 'string' || !HEX.test(v))) p.push(`${name} must be a hex colour like #ffffff or #000000cc`)
+    if (v !== undefined && (typeof v !== 'string' || !HEX.test(v)))
+      p.push(`${name} must be a hex colour like #ffffff or #000000cc`)
   }
   if (e.fontFamily !== undefined && !isKnownFont(e.fontFamily)) {
     p.push(`unknown font "${e.fontFamily}"; fonts: ${FONTS.map((f) => f.id).join(', ')}`)
@@ -75,7 +92,8 @@ function styleProblems(e: TextEdit): string[] {
     else {
       color('pill.color', e.pill.color)
       inRange('pill.padPx', e.pill.padPx, 0, TEXT_PILL_PAD_MAX)
-      if (e.pill.enabled !== undefined && typeof e.pill.enabled !== 'boolean') p.push('pill.enabled must be true or false')
+      if (e.pill.enabled !== undefined && typeof e.pill.enabled !== 'boolean')
+        p.push('pill.enabled must be true or false')
     }
   }
   if (e.stroke) {
@@ -117,8 +135,7 @@ function withCaptionStyle(base: CaptionStyle, e: TextEdit): CaptionStyle {
   return out
 }
 
-const touchesStyle = (e: TextEdit): boolean =>
-  [...STYLE_KEYS, ...POSITION_KEYS].some((k) => e[k] !== undefined)
+const touchesStyle = (e: TextEdit): boolean => [...STYLE_KEYS, ...POSITION_KEYS].some((k) => e[k] !== undefined)
 
 /**
  * The [start, end) an edit asks for, or a problem. An existing item keeps its
@@ -145,7 +162,8 @@ function windowOf(
   return [s, t]
 }
 
-const laneOffNote = 'The caption lane is off, so this caption will not show; set visible: true on id "captions" to turn the lane on.'
+const laneOffNote =
+  'The caption lane is off, so this caption will not show; set visible: true on id "captions" to turn the lane on.'
 
 /** Apply `edits` in order. Throws (applying nothing) if any edit is invalid. */
 export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEditCtx): TextEditOutcome {
@@ -172,7 +190,8 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
     // --- the caption lane ---------------------------------------------------
     if (e.id === CAPTION_LANE_ID) {
       const bad = Object.keys(e).filter((k) => !LANE_KEYS.has(k))
-      if (bad.length) return fail(`the caption lane only takes visible, position and style fields, not ${bad.join(', ')}`)
+      if (bad.length)
+        return fail(`the caption lane only takes visible, position and style fields, not ${bad.join(', ')}`)
       c = {
         ...c,
         captions: {
@@ -233,7 +252,8 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
       if (e.followLaneStyle !== undefined && typeof e.followLaneStyle !== 'boolean') {
         return fail('followLaneStyle must be true or false')
       }
-      if (e.followLaneStyle && touchesStyle(e)) return fail('followLaneStyle: true cannot be combined with style or position fields')
+      if (e.followLaneStyle && touchesStyle(e))
+        return fail('followLaneStyle: true cannot be combined with style or position fields')
       const win = windowOf(e, seg, ctx.durationSec)
       if (typeof win === 'string') return fail(win)
       if (retimes(e, seg) && isLinked(c, { kind: 'caption', id: seg.id })) return fail(linkedMsg)
@@ -242,7 +262,9 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
       if (e.visible !== undefined) next = { ...next, enabled: e.visible }
       if (e.followLaneStyle) next = { ...next, style: null }
       else if (touchesStyle(e)) next = { ...next, style: withCaptionStyle(next.style ?? c.captions.style, e) }
-      const segments = c.captions.segments.map((s) => (s.id === seg.id ? next : s)).sort((a, b) => a.startSec - b.startSec)
+      const segments = c.captions.segments
+        .map((s) => (s.id === seg.id ? next : s))
+        .sort((a, b) => a.startSec - b.startSec)
       c = { ...c, captions: { ...c.captions, segments } }
       const note = next.enabled && !c.captions.enabled ? laneOffNote : undefined
       results.push({ id: seg.id, kind: 'caption', created: false, ...(note ? { note } : {}) })

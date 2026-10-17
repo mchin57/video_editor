@@ -41,7 +41,17 @@ describe('dtwPreset', () => {
 describe('buildWhisperArgs', () => {
   it('asks for one entry per word and the full JSON', () => {
     expect(buildWhisperArgs('m.bin', 'a.wav', 'out', null)).toEqual([
-      '-m', 'm.bin', '-f', 'a.wav', '-ml', '1', '-sow', '-ojf', '-of', 'out', '-np'
+      '-m',
+      'm.bin',
+      '-f',
+      'a.wav',
+      '-ml',
+      '1',
+      '-sow',
+      '-ojf',
+      '-of',
+      'out',
+      '-np'
     ])
   })
 
@@ -49,8 +59,20 @@ describe('buildWhisperArgs', () => {
     // Without -nfa, flash attention (on by default) silently disables DTW and
     // every t_dtw comes back -1 — the bug looks unfixed.
     expect(buildWhisperArgs('m.bin', 'a.wav', 'out', 'small.en')).toEqual([
-      '-m', 'm.bin', '-f', 'a.wav', '-ml', '1', '-sow', '-ojf', '-of', 'out', '-np',
-      '-dtw', 'small.en', '-nfa'
+      '-m',
+      'm.bin',
+      '-f',
+      'a.wav',
+      '-ml',
+      '1',
+      '-sow',
+      '-ojf',
+      '-of',
+      'out',
+      '-np',
+      '-dtw',
+      'small.en',
+      '-nfa'
     ])
   })
 })
@@ -58,9 +80,22 @@ describe('buildWhisperArgs', () => {
 describe('buildWhisperArgs offset', () => {
   it('starts decoding at the offset, in milliseconds', () => {
     expect(buildWhisperArgs('m.bin', 'a.wav', 'out', 'small.en', 4.5539)).toEqual([
-      '-m', 'm.bin', '-f', 'a.wav', '-ml', '1', '-sow', '-ojf', '-of', 'out', '-np',
-      '-ot', '4554',
-      '-dtw', 'small.en', '-nfa'
+      '-m',
+      'm.bin',
+      '-f',
+      'a.wav',
+      '-ml',
+      '1',
+      '-sow',
+      '-ojf',
+      '-of',
+      'out',
+      '-np',
+      '-ot',
+      '4554',
+      '-dtw',
+      'small.en',
+      '-nfa'
     ])
   })
 
@@ -90,7 +125,15 @@ describe('decodeStartSec', () => {
   })
 
   it('finds speech after a leading silence that runs from zero', () => {
-    expect(decodeStartSec([{ start: 0, end: 6 }, { start: 9, end: 10 }], 12)).toBeCloseTo(5.5, 6)
+    expect(
+      decodeStartSec(
+        [
+          { start: 0, end: 6 },
+          { start: 9, end: 10 }
+        ],
+        12
+      )
+    ).toBeCloseTo(5.5, 6)
   })
 
   it('finds speech that only begins after the last silence', () => {
@@ -139,20 +182,36 @@ describe('buildTranscribeExtractArgs', () => {
 
   it('writes a plain 16k mono wav when there is nothing to fold or boost', () => {
     expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', null, 0)).toEqual([
-      '-y', '-hide_banner', '-nostdin', '-i', 'in.mp4', '-vn', ...tail
+      '-y',
+      '-hide_banner',
+      '-nostdin',
+      '-i',
+      'in.mp4',
+      '-vn',
+      ...tail
     ])
   })
 
   it('folds first, then boosts behind a no-make-up limiter', () => {
     expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c1|c1=c1', 17.7)).toEqual([
-      '-y', '-hide_banner', '-nostdin', '-i', 'in.mp4', '-vn',
-      '-af', 'pan=stereo|c0=c1|c1=c1,volume=17.7dB,alimiter=limit=0.891:level=0',
+      '-y',
+      '-hide_banner',
+      '-nostdin',
+      '-i',
+      'in.mp4',
+      '-vn',
+      '-af',
+      'pan=stereo|c0=c1|c1=c1,volume=17.7dB,alimiter=limit=0.891:level=0',
       ...tail
     ])
   })
 
   it('folds without a limiter when there is no boost', () => {
-    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c0|c1=c0', 0)).toContain('pan=stereo|c0=c0|c1=c0')
-    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c0|c1=c0', 0).join(' ')).not.toContain('alimiter')
+    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c0|c1=c0', 0)).toContain(
+      'pan=stereo|c0=c0|c1=c0'
+    )
+    expect(buildTranscribeExtractArgs('in.mp4', 'a.wav', 'pan=stereo|c0=c0|c1=c0', 0).join(' ')).not.toContain(
+      'alimiter'
+    )
   })
 })

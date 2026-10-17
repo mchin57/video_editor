@@ -26,9 +26,7 @@ test('OS-file drag overlay clears when the drag leaves without a drop', async ({
   await expect(overlay).toBeHidden()
 })
 
-test('overlay survives child-element boundaries and clears only on the final leave', async ({
-  appPage: page
-}) => {
+test('overlay survives child-element boundaries and clears only on the final leave', async ({ appPage: page }) => {
   const root = page.locator('#root > div').first()
   const header = page.locator('header')
   const overlay = page.getByText('Drop video files to import')

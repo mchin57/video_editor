@@ -7,9 +7,7 @@
  */
 import { test, expect } from './fixtures'
 
-test('dragging the font size slider resizes the text and undoes in one step', async ({
-  appPage: page
-}) => {
+test('dragging the font size slider resizes the text and undoes in one step', async ({ appPage: page }) => {
   await page.evaluate(() => {
     const { useProject, useUi, usePlayback } = window.__reelStores
     useProject.getState().addLayer({
@@ -37,8 +35,7 @@ test('dragging the font size slider resizes the text and undoes in one step', as
     page.evaluate(
       () => (window.__reelStores.useProject.getState().project!.layers[0].content as { fontSizePx: number }).fontSizePx
     )
-  const historyLen = (): Promise<number> =>
-    page.evaluate(() => window.__reelStores.useProject.getState().past.length)
+  const historyLen = (): Promise<number> => page.evaluate(() => window.__reelStores.useProject.getState().past.length)
 
   const slider = page.getByRole('slider', { name: 'Font size' })
   await slider.scrollIntoViewIfNeeded()

@@ -23,10 +23,19 @@ const STEP = "volume='if(lt(t,3),1,0.2)':eval=frame"
 
 function synth(out: string, extraFilter = ''): void {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', TONE,
-    '-af', STEP + extraFilter,
-    '-c:a', 'pcm_s16le', out
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    TONE,
+    '-af',
+    STEP + extraFilter,
+    '-c:a',
+    'pcm_s16le',
+    out
   ])
 }
 
@@ -35,9 +44,16 @@ function measureDirect(file: string, inSec: number, outSec: number, pre = 'anull
   const run = spawnSync(
     FFMPEG,
     [
-      '-hide_banner', '-nostdin', '-nostats', '-i', file,
-      '-af', `${pre},aresample=48000,atrim=${inSec}:${outSec},asetpts=N/SR/TB,ebur128=framelog=quiet`,
-      '-f', 'null', '-'
+      '-hide_banner',
+      '-nostdin',
+      '-nostats',
+      '-i',
+      file,
+      '-af',
+      `${pre},aresample=48000,atrim=${inSec}:${outSec},asetpts=N/SR/TB,ebur128=framelog=quiet`,
+      '-f',
+      'null',
+      '-'
     ],
     { encoding: 'utf8' }
   )
@@ -59,11 +75,14 @@ test('import measures a loudness series that matches ffmpeg on the same windows'
   synth(side, ',pan=stereo|c0=0*c0|c1=c0')
 
   const projectDir = (await page.evaluate(() => window.api.getProjectDir()))!
-  const ids = await page.evaluate(async (paths) => {
-    const assets = await window.api.importPaths(paths)
-    window.__reelStores.useProject.getState().addMedia(assets.map((a) => a.id))
-    return assets.map((a) => ({ id: a.id, name: a.fileName, fold: a.probe.audio?.monoFoldChannel ?? null }))
-  }, [tone, side])
+  const ids = await page.evaluate(
+    async (paths) => {
+      const assets = await window.api.importPaths(paths)
+      window.__reelStores.useProject.getState().addMedia(assets.map((a) => a.id))
+      return assets.map((a) => ({ id: a.id, name: a.fileName, fold: a.probe.audio?.monoFoldChannel ?? null }))
+    },
+    [tone, side]
+  )
   expect(ids).toHaveLength(2)
   const byName = (n: string): { id: string; fold: number | null } => ids.find((a) => a.name === n)!
   const [toneId, sideId] = [byName('tone.wav').id, byName('side.wav').id]
@@ -85,7 +104,11 @@ test('import measures a loudness series that matches ffmpeg on the same windows'
     if (w.status !== 'ok' || w.lufs == null) throw new Error(`no measurement for ${a}–${b}: ${JSON.stringify(w)}`)
     return w.lufs
   }
-  for (const [a, b] of [[0, 6], [1, 4], [3.5, 6]]) {
+  for (const [a, b] of [
+    [0, 6],
+    [1, 4],
+    [3.5, 6]
+  ]) {
     expect(Math.abs(lufs(series, a, b) - measureDirect(tone, a, b))).toBeLessThanOrEqual(0.1)
   }
   const w = windowLoudness(series, 0, 6)

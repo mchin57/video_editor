@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: windows-latest   # the app's primary target; some tests assume a case-insensitive FS + Windows pipes
+    runs-on: windows-latest # the app's primary target; some tests assume a case-insensitive FS + Windows pipes
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

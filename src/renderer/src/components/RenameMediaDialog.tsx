@@ -137,7 +137,11 @@ export function RenameMediaDialog({
               className={`${inputCls} py-1.5 ${disabledCls}`}
             />
             {ext && (
-              <span data-testid="rename-ext" className="shrink-0 text-xs text-zinc-400" title="The extension stays the same">
+              <span
+                data-testid="rename-ext"
+                className="shrink-0 text-xs text-zinc-400"
+                title="The extension stays the same"
+              >
                 {ext}
               </span>
             )}
@@ -150,8 +154,8 @@ export function RenameMediaDialog({
         )}
 
         <p className="mt-3 text-[11px] leading-snug text-zinc-500">
-          Renames the file on disk, then saves this project. Other projects that use this file will show it as
-          Missing until you relink it there.
+          Renames the file on disk, then saves this project. Other projects that use this file will show it as Missing
+          until you relink it there.
         </p>
 
         {error && (
