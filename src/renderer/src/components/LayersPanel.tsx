@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Layer } from '@shared/project'
 import { layerLabel, layersAtTime } from '@shared/layers'
+import { kindInfo, layerMediaId } from '@shared/layerKinds'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -10,9 +11,6 @@ import { clamp } from '@shared/math'
 
 const ROW_H = 30 // px — must match the row height below for drag math
 const NO_LAYERS: Layer[] = [] // a stable empty stack, so the memos below don't recompute every render
-
-const kindIcon = (l: Layer): string =>
-  l.content.kind === 'video' ? '🎬' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🅣'
 
 /** Drag state: the layer being dragged and the live front→back order it implies. */
 interface Drag {
@@ -92,11 +90,9 @@ export function LayersPanel(): JSX.Element {
   }
 
   const label = (l: Layer): string => {
-    if (l.content.kind === 'video' || l.content.kind === 'image') {
-      const name = assetById.get(l.content.mediaId)?.fileName
-      if (name) return name
-    }
-    return layerLabel(l)
+    const mediaId = layerMediaId(l.content)
+    const name = mediaId ? assetById.get(mediaId)?.fileName : undefined
+    return name || layerLabel(l)
   }
 
   const renderRow = (l: Layer): JSX.Element => {
@@ -128,7 +124,9 @@ export function LayersPanel(): JSX.Element {
           title={l.hidden ? 'Show layer' : 'Hide layer'}
           className="shrink-0 accent-sky-400"
         />
-        <span className="shrink-0 text-[11px]">{kindIcon(l)}</span>
+        <span className="shrink-0 text-[11px]" data-testid="layer-kind-icon">
+          {kindInfo(l).icon}
+        </span>
         <span className="min-w-0 flex-1 truncate" title={label(l)}>
           {label(l)}
         </span>
