@@ -57,6 +57,7 @@ import {
   transcriptPath,
   transcriptsRoot
 } from './projectLayout'
+import { newId } from '@shared/ids'
 
 export { REEL_EXT } from './projectLayout'
 export type { LoadedProject } from '@shared/ipc'
@@ -304,7 +305,7 @@ export function createProject(name: string, location: string): Promise<LoadedPro
     await fsp.mkdir(root)
     await ensureProjectFolders(root)
     await writeJsonAtomic(docPath(root), {
-      ...createEmptyProject(crypto.randomUUID(), clean),
+      ...createEmptyProject(newId(), clean),
       version: PROJECT_VERSION,
       library: []
     })

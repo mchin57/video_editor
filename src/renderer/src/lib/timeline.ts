@@ -10,6 +10,7 @@ import { audioClipEnd, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
 import { extractedAudioClip } from '@shared/volumeLevels'
 import { playedBetween, sourceAfterPlayed } from '@shared/speed'
+import { clamp } from '@shared/math'
 
 /** Cut tolerance shared by every split below (and mirrored by
  *  `splittableAt` in `lib/links.ts`, which decides whether to offer the cut). */
@@ -35,8 +36,6 @@ export interface Trimmed<T> {
   tile: T
   achieved: number
 }
-
-const clampTo = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 /**
  * Partition a layer's keyframes across a cut at absolute time `atSec`, returning
@@ -244,10 +243,10 @@ export function trimLayerEdge(layer: Layer, edge: TrimEdge, deltaSec: number, sr
     const maxSrc = srcDurSec > 0 ? srcDurSec : c.outSec
     tile =
       edge === 'start'
-        ? trimVideoStart(layer, c, clampTo(sourceAfterPlayed(c, c.inSec, deltaSec), 0, c.outSec - MIN_SOURCE_SEC))
-        : trimVideoEnd(layer, c, clampTo(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc))
+        ? trimVideoStart(layer, c, clamp(sourceAfterPlayed(c, c.inSec, deltaSec), 0, c.outSec - MIN_SOURCE_SEC))
+        : trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc))
   } else if (edge === 'start') {
-    tile = { ...layer, startSec: clampTo(layer.startSec + deltaSec, 0, layer.endSec - MIN_LAYER_SEC) }
+    tile = { ...layer, startSec: clamp(layer.startSec + deltaSec, 0, layer.endSec - MIN_LAYER_SEC) }
   } else {
     tile = { ...layer, endSec: Math.max(layer.startSec + MIN_LAYER_SEC, layer.endSec + deltaSec) }
   }
@@ -261,7 +260,7 @@ export function trimLayerEdge(layer: Layer, edge: TrimEdge, deltaSec: number, sr
 export function trimCaptionEdge(seg: CaptionSegment, edge: TrimEdge, deltaSec: number): Trimmed<CaptionSegment> {
   const tile: CaptionSegment =
     edge === 'start'
-      ? { ...seg, startSec: clampTo(seg.startSec + deltaSec, 0, seg.endSec - MIN_CAPTION_SEC) }
+      ? { ...seg, startSec: clamp(seg.startSec + deltaSec, 0, seg.endSec - MIN_CAPTION_SEC) }
       : { ...seg, endSec: Math.max(seg.startSec + MIN_CAPTION_SEC, seg.endSec + deltaSec) }
   return { tile, achieved: edge === 'start' ? tile.startSec - seg.startSec : tile.endSec - seg.endSec }
 }
@@ -276,11 +275,11 @@ export function trimAudioEdge(clip: AudioClip, edge: TrimEdge, deltaSec: number,
   const maxOut = srcDurSec > 0 ? srcDurSec : clip.outSec > 0 ? clip.outSec : 1
   const effOut = effectiveOut(clip, maxOut)
   if (edge === 'start') {
-    const ni = clampTo(clip.inSec + deltaSec, 0, effOut - MIN_SOURCE_SEC)
+    const ni = clamp(clip.inSec + deltaSec, 0, effOut - MIN_SOURCE_SEC)
     const tile = { ...clip, inSec: ni, startSec: Math.max(0, clip.startSec + (ni - clip.inSec)) }
     return { tile, achieved: tile.startSec - clip.startSec }
   }
-  const no = clampTo(effOut + deltaSec, clip.inSec + MIN_SOURCE_SEC, maxOut)
+  const no = clamp(effOut + deltaSec, clip.inSec + MIN_SOURCE_SEC, maxOut)
   return { tile: { ...clip, outSec: no }, achieved: no - effOut }
 }
 

@@ -6,10 +6,10 @@ import { activeComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { startPointerDrag } from '@/lib/pointerDrag'
+import { clamp } from '@shared/math'
 
 const ROW_H = 30 // px — must match the row height below for drag math
 const NO_LAYERS: Layer[] = [] // a stable empty stack, so the memos below don't recompute every render
-const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 const kindIcon = (l: Layer): string =>
   l.content.kind === 'video' ? '🎬' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : '🅣'

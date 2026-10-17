@@ -69,6 +69,10 @@ import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { thumbUrl, waveformUrl } from '@/ipc/client'
 import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 import { levelOf } from '@shared/volumeLevels'
+import { clamp } from '@shared/math'
+import { enumPref, numberPref, objectPref } from '@/lib/persisted'
+import { usePersistedState } from '@/hooks/usePersistedState'
+import { newId } from '@shared/ids'
 
 const DEFAULT_PPS = 48
 const HOOK_SEC = 3
@@ -90,8 +94,6 @@ const EMPTY_CAPTIONS: CaptionSegment[] = []
 const EMPTY_SCRIPT: ScriptLine[] = []
 const EMPTY_AUDIO: AudioClip[] = []
 const EMPTY_LEVELS: VolumeLevel[] = []
-
-const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
   id: l.id,
@@ -333,19 +335,10 @@ const FOLLOW_OPTIONS: { mode: FollowMode; label: string; title: string }[] = [
   { mode: 'centered', label: 'Center', title: 'Continuously scroll to keep the playhead centered' }
 ]
 
-function loadFollowMode(): FollowMode {
-  const v = localStorage.getItem('timelineFollow')
-  return v === 'page' || v === 'centered' ? v : 'none'
-}
-
-function loadTimelineView(): TimelineView {
-  try {
-    const v = JSON.parse(localStorage.getItem('timelineView') ?? '{}')
-    return v && typeof v === 'object' ? (v as TimelineView) : {}
-  } catch {
-    return {}
-  }
-}
+// View preferences (lib/persisted.ts): zoom, follow mode, per-lane sizes.
+const PPS_PREF = numberPref(DEFAULT_PPS, 8, 240)
+const FOLLOW_PREF = enumPref<FollowMode>(['none', 'page', 'centered'], 'none')
+const VIEW_PREF = objectPref<TimelineView>(() => ({}))
 
 export function Timeline(): JSX.Element {
   // The timeline renders the ACTIVE composition (the root, or the nested comp
@@ -437,30 +430,18 @@ export function Timeline(): JSX.Element {
   const previewDur = previewAsset?.proxyReady ? previewAsset.probe.durationSec : 0
   const canPlay = layers.length > 0 || previewDur > 0
 
-  const [pxPerSec, setPxPerSec] = useState(() => {
-    const v = Number(localStorage.getItem('timelinePps'))
-    return v >= 8 && v <= 240 ? v : DEFAULT_PPS
-  })
-  useEffect(() => {
-    localStorage.setItem('timelinePps', String(pxPerSec))
-  }, [pxPerSec])
+  const [pxPerSec, setPxPerSec] = usePersistedState('timelinePps', PPS_PREF)
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
 
-  const [followMode, setFollowMode] = useState<FollowMode>(loadFollowMode)
-  useEffect(() => {
-    localStorage.setItem('timelineFollow', followMode)
-  }, [followMode])
+  const [followMode, setFollowMode] = usePersistedState('timelineFollow', FOLLOW_PREF)
   const followModeRef = useRef(followMode)
   followModeRef.current = followMode
   const playingRef = useRef(playing)
   playingRef.current = playing
 
   // Per-lane height / collapse prefs, persisted across reloads.
-  const [laneView, setLaneView] = useState<TimelineView>(loadTimelineView)
-  useEffect(() => {
-    localStorage.setItem('timelineView', JSON.stringify(laneView))
-  }, [laneView])
+  const [laneView, setLaneView] = usePersistedState('timelineView', VIEW_PREF)
   const patchLane = (key: LaneKey, patch: LaneViewPref): void =>
     setLaneView((v) => ({ ...v, [key]: { ...v[key], ...patch } }))
   const toggleLaneCollapsed = (key: LaneKey): void =>
@@ -660,7 +641,7 @@ export function Timeline(): JSX.Element {
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [setPxPerSec]) // stable: the setter's key and codec never change
 
   // Playhead follow: while playing, keep the playhead in view per the selected
   // mode. Runs on every playback tick (time updates each rAF), so user scrolls
@@ -717,7 +698,7 @@ export function Timeline(): JSX.Element {
     const asset = assetById.get(id)
     if (!asset || !asset.proxyReady) return
     const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
-    const nid = crypto.randomUUID()
+    const nid = newId()
     const kind = assetKind(asset)
     if (kind === 'image') {
       addLayer(
@@ -1076,7 +1057,7 @@ export function Timeline(): JSX.Element {
   const isLinkedTile = (gid: string | undefined): boolean => !!gid && linkedGroups.has(gid)
 
   const addText = (): void => {
-    const id = crypto.randomUUID()
+    const id = newId()
     const start = usePlayback.getState().time
     addLayer(makeTextLayer(id, start, start + 3, getFormat().frame))
     selectLayer(id)
@@ -1084,7 +1065,7 @@ export function Timeline(): JSX.Element {
 
   /** A caption at the playhead, in the lane-wide caption style like every other. */
   const addCaptionAtPlayhead = (): void => {
-    const id = crypto.randomUUID()
+    const id = newId()
     const start = usePlayback.getState().time
     addCaption(makeCaption(id, start, start + 2))
     selectCaption(id)

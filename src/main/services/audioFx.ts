@@ -23,6 +23,7 @@
 import type { AudioFxSettings } from '@shared/audioFx'
 import { chorusVoices, echoTaps, ensembleVoices, normalizeChorus } from '@shared/audioFx'
 import { getBinaries } from './ffmpeg'
+import { f3 } from './ffmpegFilters'
 import { runFfmpeg } from './ffmpegRun'
 
 /** Working rate for the effect graph. The pitch-shift stages derive their
@@ -33,8 +34,6 @@ export const FX_SAMPLE_RATE = 48000
 /** Silence prepended before the swept (chorus) voices and discarded after them,
  *  so `vibrato`'s startup transient never reaches the rendered file. */
 export const CHORUS_PRIME_MS = 200
-
-const f3 = (n: number): string => n.toFixed(3)
 
 /**
  * Pitch-shift stages for one ENSEMBLE voice: reinterpret the samples at a shifted

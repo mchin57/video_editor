@@ -5,6 +5,7 @@ import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { LayoutPickerModal } from './LayoutPickerModal'
 import { Field, inputCls } from './ui'
+import { newId } from '@shared/ids'
 
 /**
  * FORMAT menu (header bar, next to File / View): how the frame is shaped — the
@@ -36,7 +37,7 @@ export function FormatMenu(): JSX.Element | null {
   if (!hasProject) return null
 
   const onPick = (presetId: string): void => {
-    const id = crypto.randomUUID()
+    const id = newId()
     addLayoutLayer(id, presetId, usePlayback.getState().time)
     useUi.getState().selectLayer(id)
     setPickerOpen(false)

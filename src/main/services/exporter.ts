@@ -7,7 +7,7 @@
  * media. Progress is the single encode's progress over the project duration.
  */
 
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Composition, Project, Stabilize, TextStyleBase, VolumeLevel } from '@shared/project'
@@ -62,6 +62,7 @@ import { hdrToSdrChain } from './proxy'
 import { runFfmpeg } from './ffmpegRun'
 import { assertWritableDir, writeAtomically } from './atomicWrite'
 import { buildOpacityCmdLines, eqFilter, r } from './ffmpegFilters'
+import { newId } from '@shared/ids'
 
 /** Canonical logical → output px for one render (`frameToOutput`). */
 type OutputMap = ReturnType<typeof frameToOutput>
@@ -258,7 +259,7 @@ export async function renderFrames(
   await assertMediaUsable(referencedMediaIds(comp))
   const caps = await getCapabilities()
   const { ffmpeg } = await getBinaries()
-  const tmpRoot = join(getSubdir('tmp'), `frames-${randomUUID()}`)
+  const tmpRoot = join(getSubdir('tmp'), `frames-${newId()}`)
   await fsp.mkdir(tmpRoot, { recursive: true })
   const ctx: RenderCtx = {
     target: targetForPreset(preset),

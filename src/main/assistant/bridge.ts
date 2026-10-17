@@ -5,9 +5,9 @@
  */
 
 import { BrowserWindow, ipcMain } from 'electron'
-import { randomUUID } from 'node:crypto'
 import { IPC, IPC_EVENT } from '@shared/ipc'
 import type { AssistantOp, AssistantOps, AssistantRequest, AssistantResponse } from '@shared/assistant/protocol'
+import { newId } from '@shared/ids'
 
 export const RENDERER_TIMEOUT_MS = 10_000
 /** How far ahead of the timeout a request expires in the renderer (see `AssistantRequest.deadline`). */
@@ -45,7 +45,7 @@ export function callRenderer<K extends AssistantOp>(
 ): Promise<AssistantOps[K]['result']> {
   const win = editorWindow()
   if (!win) return Promise.reject(new Error('The editor window is not open'))
-  const id = randomUUID()
+  const id = newId()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id)

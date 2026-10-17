@@ -1,4 +1,9 @@
-import { useState, type JSX, type ReactNode } from 'react'
+import type { JSX, ReactNode } from 'react'
+import { boolPref } from '@/lib/persisted'
+import { usePersistedState } from '@/hooks/usePersistedState'
+
+const OPEN_BY_DEFAULT = boolPref(true)
+const CLOSED_BY_DEFAULT = boolPref(false)
 
 /**
  * An Inspector sub-section with a click-to-collapse header. Open/closed state is
@@ -19,18 +24,11 @@ export function CollapsibleSection({
   right?: ReactNode
   children: ReactNode
 }): JSX.Element {
-  const key = `inspector.section.${id}`
-  const [open, setOpen] = useState<boolean>(() => {
-    const saved = localStorage.getItem(key)
-    return saved === null ? defaultOpen : saved === '1'
-  })
-  const toggle = (): void => {
-    setOpen((o) => {
-      const next = !o
-      localStorage.setItem(key, next ? '1' : '0')
-      return next
-    })
-  }
+  const [open, setOpen] = usePersistedState(
+    `inspector.section.${id}`,
+    defaultOpen ? OPEN_BY_DEFAULT : CLOSED_BY_DEFAULT
+  )
+  const toggle = (): void => setOpen((o) => !o)
 
   return (
     <div className="border-t border-white/5 first:border-t-0">
