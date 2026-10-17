@@ -8,6 +8,8 @@
  * add CSS easing on the preview side without changing the burn to match.
  */
 
+import { hasColorEmoji } from './textStyle'
+
 export type TextAnimIn = 'none' | 'fadeIn' | 'slideUp' | 'typewriter' | 'bounce' | 'wordHighlight'
 export type TextAnimOut = 'none' | 'fadeOut' | 'slideDown'
 
@@ -51,10 +53,14 @@ export function effectiveTextAnimation(content: {
   animation?: TextAnimation | null
   gradient?: unknown
   widthPx?: number | null
+  text?: string
 }): TextAnimation | null {
   const a = content.animation
   if (!a || (a.in === 'none' && a.out === 'none')) return null
+  // The export rasterises these (gradient, wrap width, colour emoji — #7) and a
+  // rasterised block doesn't animate, so the preview mustn't either.
   if (content.gradient || content.widthPx != null) return null
+  if (content.text !== undefined && hasColorEmoji(content.text)) return null
   return a
 }
 

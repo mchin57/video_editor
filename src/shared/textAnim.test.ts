@@ -30,6 +30,11 @@ describe('effectiveTextAnimation', () => {
     expect(effectiveTextAnimation({ animation: a, widthPx: 400 })).toBeNull()
     expect(effectiveTextAnimation({ animation: a })).toBe(a)
   })
+  it('is null for text with colour emoji, which the export rasterises too (#7)', () => {
+    const a = anim({ in: 'fadeIn' })
+    expect(effectiveTextAnimation({ animation: a, text: 'Hi 🔥' })).toBeNull()
+    expect(effectiveTextAnimation({ animation: a, text: 'Hi' })).toBe(a)
+  })
 })
 
 describe('clampAnimWindows', () => {

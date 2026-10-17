@@ -39,6 +39,7 @@ import {
 } from '@shared/layers'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect } from '@shared/media'
+import { hasColorEmoji } from '@shared/textStyle'
 import { isJobActive } from '@shared/jobs'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import {
@@ -1236,7 +1237,7 @@ const ANIM_OUT_OPTIONS: { value: TextAnimOut; label: string }[] = [
 ]
 
 /** Entrance/exit animation controls for a text layer. Disabled while the layer
- *  burns as a rasterised PNG (gradient fill / fixed wrap width) — that path
+ *  burns as a rasterised PNG (gradient fill / fixed wrap width / colour emoji) — that path
  *  can't animate, and `effectiveTextAnimation` ignores the setting there so
  *  preview and export agree. */
 function TextAnimationFields({
@@ -1252,14 +1253,17 @@ function TextAnimationFields({
     out: 'none',
     outSec: DEFAULT_OUT_SEC
   }
-  const disabled = !!content.gradient || content.widthPx != null
+  const emoji = hasColorEmoji(content.text)
+  const disabled = !!content.gradient || content.widthPx != null || emoji
   const patch = (p: Partial<TextAnimation>): void => onPatch({ animation: { ...anim, ...p } })
   return (
     <div className={disabled ? 'opacity-50' : ''}>
       <div className="mb-1 mt-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Animation</div>
       {disabled && (
         <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
-          Not available with a gradient fill or a fixed wrap width (that text is rendered as an image).
+          {emoji
+            ? 'Not available on text with emoji: it is rendered as an image so the emoji keep their colour.'
+            : 'Not available with a gradient fill or a fixed wrap width (that text is rendered as an image).'}
         </p>
       )}
       <div className="flex gap-2">

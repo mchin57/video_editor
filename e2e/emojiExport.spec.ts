@@ -119,3 +119,30 @@ test('emoji in text layers and captions export in colour, centred, with ZWJ sequ
   expect(one.x1).toBeGreaterThan(one.x0)
   expect(fam.x1 - fam.x0).toBeLessThan(1.6 * (one.x1 - one.x0))
 })
+
+test('the preview agrees: an emoji text layer does not animate, and its Animation controls say why', async ({ appPage: page }) => {
+  await page.evaluate(() => {
+    const { useProject, useUi } = window.__reelStores
+    useProject.getState().addLayer({
+      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 540, y: 960, scale: 1,
+      content: {
+        kind: 'text', text: 'Hi 🔥', fontFamily: 'montserrat-extrabold', fontSizePx: 90, color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 },
+        animation: { in: 'fadeIn', inSec: 1, out: 'none', outSec: 0.3 }
+      }
+    })
+    useUi.getState().selectLayer('T1')
+  })
+  await expect(page.getByText(/Not available on text with emoji/)).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Entrance' })).toBeDisabled()
+  // Mid-fade-in, the preview's text is fully opaque (no animation), as the export burns it.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(0.2))
+  const opacity = await page.evaluate(() => {
+    const canvas = document.querySelector('[data-testid="preview-canvas"]')!
+    const span = [...canvas.querySelectorAll('span')].find((el) => el.textContent === 'Hi 🔥')!
+    let o = 1
+    for (let el: Element | null = span; el && el !== canvas; el = el.parentElement) o *= Number(getComputedStyle(el).opacity)
+    return o
+  })
+  expect(opacity).toBe(1)
+})
