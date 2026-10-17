@@ -34,12 +34,9 @@ const addTextLayer = async (page: import('@playwright/test').Page): Promise<void
   })
 }
 
-const sparkleCount = (page: import('@playwright/test').Page): Promise<number> =>
-  page.locator('[data-sparkle]').count()
+const sparkleCount = (page: import('@playwright/test').Page): Promise<number> => page.locator('[data-sparkle]').count()
 
-test('the Sparkles toggle writes the document and paints the preview', async ({
-  appPage: page
-}) => {
+test('the Sparkles toggle writes the document and paints the preview', async ({ appPage: page }) => {
   await addTextLayer(page)
 
   // Off by default — nothing painted.
@@ -71,9 +68,7 @@ test('the Sparkles toggle writes the document and paints the preview', async ({
   expect(sawSparkles).toBe(true)
 })
 
-test('sparkles follow the playhead rather than wall-clock animation', async ({
-  appPage: page
-}) => {
+test('sparkles follow the playhead rather than wall-clock animation', async ({ appPage: page }) => {
   await addTextLayer(page)
   await page.getByText('✧ Sparkles').click()
 
@@ -98,9 +93,7 @@ test('sparkles follow the playhead rather than wall-clock animation', async ({
   expect(elsewhere).not.toBe(first)
 })
 
-test('sparkles are removed from the document when toggled back off', async ({
-  appPage: page
-}) => {
+test('sparkles are removed from the document when toggled back off', async ({ appPage: page }) => {
   await addTextLayer(page)
   const toggle = page.getByText('✧ Sparkles')
   await toggle.click()

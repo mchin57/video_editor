@@ -35,7 +35,5 @@ export function initAutoUpdate(): void {
     if (response === 0) autoUpdater.quitAndInstall()
   })
 
-  autoUpdater.checkForUpdates().catch((err) =>
-    console.error('[updater] check failed:', err?.message ?? err)
-  )
+  autoUpdater.checkForUpdates().catch((err) => console.error('[updater] check failed:', err?.message ?? err))
 }

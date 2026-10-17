@@ -12,10 +12,35 @@ test('tile titles are anchored top-left on layer, caption and audio tiles', asyn
   await page.evaluate(() => {
     const s = window.__reelStores.useProject.getState()
     s.addLayer({
-      id: 'T1', hidden: false, startSec: 0, endSec: 3, x: 540, y: 960, scale: 1,
-      content: { kind: 'text', text: 'HELLO', fontFamily: 'inter', fontSizePx: 90, color: '#ffffff', pill: { enabled: false, color: '#000000ff', padPx: 18 } }
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'HELLO',
+        fontFamily: 'inter',
+        fontSizePx: 90,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000ff', padPx: 18 }
+      }
     })
-    s.addAudioClip({ id: 'A1', mediaId: 'media-a', startSec: 0, inSec: 0, outSec: 3, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music', mute: true })
+    s.addAudioClip({
+      id: 'A1',
+      mediaId: 'media-a',
+      startSec: 0,
+      inSec: 0,
+      outSec: 3,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'music',
+      mute: true
+    })
     s.addCaption({ id: 'C1', startSec: 0, endSec: 3, text: 'Hi there', words: [], enabled: true })
   })
   for (const id of ['tile-layer-T1', 'tile-audio-A1', 'tile-caption-C1']) {

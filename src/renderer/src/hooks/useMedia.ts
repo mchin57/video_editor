@@ -51,9 +51,7 @@ export function useLibrary(): ReturnType<typeof useQuery<MediaAsset[]>> {
  * Import via the OS dialog (no args) or from explicit paths (drag-and-drop).
  * A path may be a FOLDER — main expands it to the media inside.
  */
-export function useImportMedia(): ReturnType<
-  typeof useMutation<MediaAsset[], Error, string[] | undefined>
-> {
+export function useImportMedia(): ReturnType<typeof useMutation<MediaAsset[], Error, string[] | undefined>> {
   const qc = useQueryClient()
   const select = useEditor((s) => s.select)
   return useMutation<MediaAsset[], Error, string[] | undefined>({
@@ -150,9 +148,7 @@ export function useSetDescription(): ReturnType<typeof useMutation<void, Error, 
  * project's library as a standalone audio asset (ready to drag onto the music
  * track). Surfaces a "no audio track" error from the picked file.
  */
-export function useExtractAudio(): ReturnType<
-  typeof useMutation<MediaAsset | null, Error, void>
-> {
+export function useExtractAudio(): ReturnType<typeof useMutation<MediaAsset | null, Error, void>> {
   const qc = useQueryClient()
   return useMutation<MediaAsset | null, Error, void>({
     mutationFn: () => extractAudioDialog(),
@@ -194,9 +190,7 @@ export interface AddAudioFxInput {
  * the same `<audio>` follower, exports through the same mix, and can be moved,
  * trimmed, faded and split like any other. @see shared/audioFx.ts
  */
-export function useAddAudioFx(): ReturnType<
-  typeof useMutation<MediaAsset, Error, AddAudioFxInput>
-> {
+export function useAddAudioFx(): ReturnType<typeof useMutation<MediaAsset, Error, AddAudioFxInput>> {
   const qc = useQueryClient()
   return useMutation<MediaAsset, Error, AddAudioFxInput>({
     mutationFn: (input) =>
@@ -309,7 +303,9 @@ export function useRenameMedia(): (id: string, stem: string) => Promise<void> {
       await store.save()
     } catch (err) {
       // The file IS renamed; only the save failed. Say so, and let the dialog close.
-      window.alert(`The file was renamed, but the project couldn't be saved: ${ipcErrorMessage(err)}\n\nUse File ▸ Save.`)
+      window.alert(
+        `The file was renamed, but the project couldn't be saved: ${ipcErrorMessage(err)}\n\nUse File ▸ Save.`
+      )
     }
   }
 }

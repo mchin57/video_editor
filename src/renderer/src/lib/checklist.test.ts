@@ -27,8 +27,7 @@ function caption(text: string, startSec = 0, endSec = 2): CaptionSegment {
 }
 
 const baseInput = { durationSec: 45, keywordBank: ['triathlon training'], format: EXPORT_PRESETS.reel }
-const statusOf = (r: ReturnType<typeof buildChecklist>, id: string): string =>
-  r.items.find((i) => i.id === id)!.status
+const statusOf = (r: ReturnType<typeof buildChecklist>, id: string): string => r.items.find((i) => i.id === id)!.status
 
 describe('buildChecklist', () => {
   it('fails the hook check with no early text, passes with it', () => {

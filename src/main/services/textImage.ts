@@ -49,8 +49,7 @@ export interface TextImageSpec {
   rotationDeg?: number
 }
 
-const esc = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 const px: CssLength = (n) => `${n}px`
 
@@ -99,12 +98,7 @@ function fontFaceCss(fontsDir: string | null): string {
 
 /** Build the standalone HTML page that draws one text element on a transparent
  *  W×H canvas, positioned by its center. */
-export function buildHtml(
-  spec: TextImageSpec,
-  W: number,
-  H: number,
-  fontsDir: string | null
-): string {
+export function buildHtml(spec: TextImageSpec, W: number, H: number, fontsDir: string | null): string {
   const css = blockCss(spec, true)
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;padding:0;width:${W}px;height:${H}px;background:transparent;overflow:hidden}
@@ -212,9 +206,7 @@ export function createTextRenderer(
       await w.loadFile(htmlPath)
       // Wait for the bundled faces to load so the text isn't captured in a
       // fallback font.
-      await w.webContents.executeJavaScript(
-        '(async()=>{try{await document.fonts.ready}catch{}; return true})()'
-      )
+      await w.webContents.executeJavaScript('(async()=>{try{await document.fonts.ready}catch{}; return true})()')
       w.showInactive()
       await delay(70) // let a frame paint after show
       const img = await w.webContents.capturePage()

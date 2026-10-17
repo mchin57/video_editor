@@ -20,9 +20,7 @@ test('close a panel via its tab, reopen it from the View menu', async ({ appPage
 
   // ASSERT: DOM gone + store agrees.
   await expect(timelineTab).toHaveCount(0)
-  expect(
-    await page.evaluate(() => window.__reelStores.useDock.getState().openPanels.timeline)
-  ).toBe(false)
+  expect(await page.evaluate(() => window.__reelStores.useDock.getState().openPanels.timeline)).toBe(false)
 
   // ACT: reopen from the View menu.
   await page.getByRole('button', { name: 'View ▾' }).click()
@@ -30,14 +28,10 @@ test('close a panel via its tab, reopen it from the View menu', async ({ appPage
 
   // ASSERT: tab is back, store agrees.
   await expect(page.locator('.dv-default-tab', { hasText: 'Timeline' })).toBeVisible()
-  expect(
-    await page.evaluate(() => window.__reelStores.useDock.getState().openPanels.timeline)
-  ).toBe(true)
+  expect(await page.evaluate(() => window.__reelStores.useDock.getState().openPanels.timeline)).toBe(true)
 })
 
-test('set default layout: reset restores the saved default, not the built-in one', async ({
-  appPage: page
-}) => {
+test('set default layout: reset restores the saved default, not the built-in one', async ({ appPage: page }) => {
   // ARRANGE: a deliberately non-default arrangement — Library closed.
   await page.evaluate(() => window.__reelStores.useDock.getState().closePanel('library'))
   await expect(page.locator('.dv-default-tab', { hasText: 'Library' })).toHaveCount(0)
@@ -60,9 +54,12 @@ test('set default layout: reset restores the saved default, not the built-in one
   // ASSERT: back to the SAVED default — Inspector returns, Library stays closed.
   await expect(page.locator('.dv-default-tab', { hasText: 'Inspector' })).toBeVisible()
   await expect(page.locator('.dv-default-tab', { hasText: 'Library' })).toHaveCount(0)
-  expect(await page.evaluate(() => window.__reelStores.useDock.getState().openPanels)).toMatchObject(
-    { library: false, inspector: true, preview: true, timeline: true }
-  )
+  expect(await page.evaluate(() => window.__reelStores.useDock.getState().openPanels)).toMatchObject({
+    library: false,
+    inspector: true,
+    preview: true,
+    timeline: true
+  })
 
   // Forgetting the default sends Reset back to the built-in layout.
   await page.getByRole('button', { name: 'View ▾' }).click()
@@ -72,9 +69,7 @@ test('set default layout: reset restores the saved default, not the built-in one
   await expect(page.locator('.dv-default-tab', { hasText: 'Library' })).toBeVisible()
 })
 
-test('reset layout restores all panels and rewrites the saved layout', async ({
-  appPage: page
-}) => {
+test('reset layout restores all panels and rewrites the saved layout', async ({ appPage: page }) => {
   // ARRANGE: close two panels through the store (same actions the UI calls).
   await page.evaluate(() => {
     const dock = window.__reelStores.useDock.getState()
@@ -95,7 +90,11 @@ test('reset layout restores all panels and rewrites the saved layout', async ({
   }
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('dockLayout') ?? 'null'))
   expect(saved?.v).toBe(1)
-  expect(Object.keys(saved?.layout?.panels ?? {}).sort()).toEqual(
-    ['inspector', 'layers', 'library', 'preview', 'timeline']
-  )
+  expect(Object.keys(saved?.layout?.panels ?? {}).sort()).toEqual([
+    'inspector',
+    'layers',
+    'library',
+    'preview',
+    'timeline'
+  ])
 })

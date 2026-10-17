@@ -151,7 +151,10 @@ export function staleTranscriptIds(): string[] {
  * a project is opening, before the renderer adopts it) reports a change by the
  * return value instead of notifying.
  */
-export async function resolveEntry(id: string, silent = false): Promise<{ entry: LibraryEntry; changed: boolean } | null> {
+export async function resolveEntry(
+  id: string,
+  silent = false
+): Promise<{ entry: LibraryEntry; changed: boolean } | null> {
   const entry = entries.get(id)
   if (!entry || !root) return null
   const at = root

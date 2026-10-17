@@ -40,7 +40,14 @@ const vid = (id: string, start: number, end: number): Layer => ({
 })
 const txt = (id: string, start: number, end: number, text = 'hi'): Layer => ({
   ...makeTextLayer(id, start, end),
-  content: { kind: 'text', text, fontFamily: 'x', fontSizePx: 40, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } }
+  content: {
+    kind: 'text',
+    text,
+    fontFamily: 'x',
+    fontSizePx: 40,
+    color: '#fff',
+    pill: { enabled: false, color: '#000', padPx: 0 }
+  }
 })
 
 describe('containBox', () => {
@@ -162,7 +169,13 @@ describe('videoSourceTime', () => {
 
   it('chains multiple freezes', () => {
     const l = makeVideoLayer('a', 'm', 0, 10)
-    const c = { ...(l.content as VideoContent), freezes: [{ atSec: 2, holdSec: 1 }, { atSec: 5, holdSec: 2 }] }
+    const c = {
+      ...(l.content as VideoContent),
+      freezes: [
+        { atSec: 2, holdSec: 1 },
+        { atSec: 5, holdSec: 2 }
+      ]
+    }
     expect(videoSourceTime(c, l, 2.5)).toBe(2) // inside first hold
     expect(videoSourceTime(c, l, 4)).toBe(3) // after first hold (1s dead time removed)
     expect(videoSourceTime(c, l, 6)).toBe(5) // inside second hold (2+3 dead... at played 6: source 5)
@@ -489,11 +502,16 @@ describe('output frame', () => {
   })
 })
 
-
 describe('videoSourceWindow', () => {
   it('is the trim — all the footage a layer can show, whatever its holds or speed', () => {
     const l = makeVideoLayer('a', 'm', 20, 8)
-    const c = { ...(l.content as VideoContent), inSec: 12.5, outSec: 20.5, freezes: [{ atSec: 14, holdSec: 3 }], speed: 0.5 }
+    const c = {
+      ...(l.content as VideoContent),
+      inSec: 12.5,
+      outSec: 20.5,
+      freezes: [{ atSec: 14, holdSec: 3 }],
+      speed: 0.5
+    }
     expect(videoSourceWindow(c)).toEqual({ startSec: 12.5, durationSec: 8 })
     expect(videoSourceWindow({ inSec: 4, outSec: 3 })).toEqual({ startSec: 4, durationSec: 0 })
   })
@@ -537,7 +555,13 @@ describe('rebaseVideoContent', () => {
   it('rescales a source-pixel crop to the matte size and clamps it inside', () => {
     const c = layer().content as VideoContent
     // A 4K source mattes at half size (the matte caps its long edge at 1920).
-    const half = rebaseVideoContent({ ...c, crop: { x: 1001, y: 40, w: 1215, h: 2160 } }, 'm2', 12.5, { x: 0.5, y: 0.5 }, { w: 1920, h: 1080 })
+    const half = rebaseVideoContent(
+      { ...c, crop: { x: 1001, y: 40, w: 1215, h: 2160 } },
+      'm2',
+      12.5,
+      { x: 0.5, y: 0.5 },
+      { w: 1920, h: 1080 }
+    )
     expect(half.crop).toEqual({ x: 501, y: 0, w: 608, h: 1080 }) // rounded, then clamped to fit
     const same = rebaseVideoContent(c, 'm2', 12.5, { x: 1, y: 1 }, { w: 1080, h: 1920 })
     expect(same.crop).toEqual(c.crop)
@@ -547,15 +571,27 @@ describe('rebaseVideoContent', () => {
 
   it('forces stabilization off (the export stabilizes through an opaque intermediate)', () => {
     const c = layer().content as VideoContent
-    expect(rebaseVideoContent({ ...c, stabilize: undefined }, 'm2', 12.5, { x: 1, y: 1 }, { w: 1, h: 1 }).stabilize).toBeNull()
     expect(
-      rebaseVideoContent({ ...c, stabilize: { smoothing: 10, shakiness: 5 } as never }, 'm2', 12.5, { x: 1, y: 1 }, { w: 1, h: 1 })
-        .stabilize
+      rebaseVideoContent({ ...c, stabilize: undefined }, 'm2', 12.5, { x: 1, y: 1 }, { w: 1, h: 1 }).stabilize
+    ).toBeNull()
+    expect(
+      rebaseVideoContent(
+        { ...c, stabilize: { smoothing: 10, shakiness: 5 } as never },
+        'm2',
+        12.5,
+        { x: 1, y: 1 },
+        { w: 1, h: 1 }
+      ).stabilize
     ).toBeNull()
   })
 
   it('keeps everything that is not source-anchored', () => {
-    const c = { ...(layer().content as VideoContent), mute: true, gainDb: -6, color: { brightness: 0.1, contrast: 1.2, saturation: 0.9 } }
+    const c = {
+      ...(layer().content as VideoContent),
+      mute: true,
+      gainDb: -6,
+      color: { brightness: 0.1, contrast: 1.2, saturation: 0.9 }
+    }
     const r = rebaseVideoContent(c, 'm2', 12.5, { x: 1, y: 1 }, { w: 1080, h: 1920 })
     expect(r.mute).toBe(true)
     expect(r.gainDb).toBe(-6)

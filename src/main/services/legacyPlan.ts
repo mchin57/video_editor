@@ -46,7 +46,10 @@ export function conversionFolder(reelPath: string, facts: PlaceFacts): { root: s
 /** Whether `dir` is one of `sharedDirs` (case-insensitive, trailing
  *  separators ignored) — Documents, Desktop, the batch root… */
 export function isSharedDir(dir: string, sharedDirs: string[]): boolean {
-  const key = (p: string): string => normalize(p).replace(/[\\/]+$/, '').toLowerCase()
+  const key = (p: string): string =>
+    normalize(p)
+      .replace(/[\\/]+$/, '')
+      .toLowerCase()
   return sharedDirs.some((d) => !!d && key(d) === key(dir))
 }
 
@@ -94,7 +97,14 @@ export function nearbyOrder(paths: string[], fileName: string | undefined): stri
 
 /** Derived files worth carrying over from the old store into `cache/<id>/` —
  *  the cache rebuilds anything that doesn't come along. */
-export const LEGACY_CACHE_FILES = ['proxy.mp4', 'proxy.webm', 'audio.m4a', 'image.png', 'waveform.png', 'thumb.jpg'] as const
+export const LEGACY_CACHE_FILES = [
+  'proxy.mp4',
+  'proxy.webm',
+  'audio.m4a',
+  'image.png',
+  'waveform.png',
+  'thumb.jpg'
+] as const
 
 /** The old global store's directories (all of it goes once everything is converted). */
 export const LEGACY_STORE_DIRS = ['media', 'nobg', 'audiofx', 'extracted', 'stills'] as const

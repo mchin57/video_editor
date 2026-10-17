@@ -42,16 +42,39 @@ describe('migrateProject — caption style', () => {
       version: 6,
       layers: [
         {
-          id: 'l0', hidden: false, startSec: 0, endSec: 2, x: 540, y: 600, scale: 1,
-          content: { kind: 'text', text: 'hi', fontFamily: 'Inter, system-ui, sans-serif', fontSizePx: 76, color: '#fff', pill: { enabled: false, color: '#000', padPx: 0 } }
+          id: 'l0',
+          hidden: false,
+          startSec: 0,
+          endSec: 2,
+          x: 540,
+          y: 600,
+          scale: 1,
+          content: {
+            kind: 'text',
+            text: 'hi',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSizePx: 76,
+            color: '#fff',
+            pill: { enabled: false, color: '#000', padPx: 0 }
+          }
         }
       ],
       audioClips: [],
       captions: {
-        enabled: true, stylePreset: 'reels-bold', yBaseline: 1340,
+        enabled: true,
+        stylePreset: 'reels-bold',
+        yBaseline: 1340,
         style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'Arial, sans-serif' },
         segments: [
-          { id: 'c0', startSec: 0, endSec: 1, text: 'x', words: [], enabled: true, style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'whatever' } }
+          {
+            id: 'c0',
+            startSec: 0,
+            endSec: 1,
+            text: 'x',
+            words: [],
+            enabled: true,
+            style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'whatever' }
+          }
         ]
       }
     }
@@ -65,10 +88,15 @@ describe('migrateProject — caption style', () => {
 
   it('keeps an already-valid bundled-font id', () => {
     const legacy = {
-      version: 6, layers: [], audioClips: [],
+      version: 6,
+      layers: [],
+      audioClips: [],
       captions: {
-        enabled: true, stylePreset: 'reels-bold', yBaseline: 1340,
-        style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'anton' }, segments: []
+        enabled: true,
+        stylePreset: 'reels-bold',
+        yBaseline: 1340,
+        style: { ...DEFAULT_CAPTION_STYLE, fontFamily: 'anton' },
+        segments: []
       }
     }
     expect(migrateProject(legacy).captions.style.fontFamily).toBe('anton')
@@ -93,12 +121,26 @@ describe('migrateProject — caption style', () => {
 
 describe('migrateProject — noise filter default (v8)', () => {
   const clip = (over: Record<string, unknown>): Record<string, unknown> => ({
-    id: 'a', mediaId: 'm', startSec: 0, inSec: 0, outSec: 0,
-    gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music', ...over
+    id: 'a',
+    mediaId: 'm',
+    startSec: 0,
+    inSec: 0,
+    outSec: 0,
+    gainDb: 0,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    duck: false,
+    kind: 'music',
+    ...over
   })
 
   it('defaults denoiseDefault to false and normalises legacy denoise:false to inherit', () => {
-    const legacy = { version: 7, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: false })] }
+    const legacy = {
+      version: 7,
+      layers: [],
+      captions: { style: DEFAULT_CAPTION_STYLE, segments: [] },
+      audioClips: [clip({ denoise: false })]
+    }
     const p = migrateProject(legacy)
     expect(p.denoiseDefault).toBe(false)
     expect(p.audioClips[0].denoise).toBeUndefined() // redundant explicit-off → inherit
@@ -106,12 +148,23 @@ describe('migrateProject — noise filter default (v8)', () => {
   })
 
   it('keeps an explicit denoise:true override across migration', () => {
-    const legacy = { version: 7, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: true })] }
+    const legacy = {
+      version: 7,
+      layers: [],
+      captions: { style: DEFAULT_CAPTION_STYLE, segments: [] },
+      audioClips: [clip({ denoise: true })]
+    }
     expect(migrateProject(legacy).audioClips[0].denoise).toBe(true)
   })
 
   it('does not re-normalise denoise:false once already at v8 (an intentional force-off)', () => {
-    const current = { version: 8, denoiseDefault: true, layers: [], captions: { style: DEFAULT_CAPTION_STYLE, segments: [] }, audioClips: [clip({ denoise: false })] }
+    const current = {
+      version: 8,
+      denoiseDefault: true,
+      layers: [],
+      captions: { style: DEFAULT_CAPTION_STYLE, segments: [] },
+      audioClips: [clip({ denoise: false })]
+    }
     const p = migrateProject(current)
     expect(p.denoiseDefault).toBe(true)
     expect(p.audioClips[0].denoise).toBe(false) // stays a real override
@@ -145,7 +198,13 @@ describe('stabilization default + per-clip override', () => {
 describe('effectiveCaptionStyle', () => {
   const captions = { style: { ...DEFAULT_CAPTION_STYLE, color: '#ffffff' } } as CaptionsConfig
   const seg = (over: Partial<CaptionSegment> = {}): CaptionSegment => ({
-    id: 'c', startSec: 0, endSec: 1, text: 't', words: [], enabled: true, ...over
+    id: 'c',
+    startSec: 0,
+    endSec: 1,
+    text: 't',
+    words: [],
+    enabled: true,
+    ...over
   })
   it('uses the lane style when a segment has no override', () => {
     expect(effectiveCaptionStyle(captions, seg()).color).toBe('#ffffff')
@@ -176,7 +235,17 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
           outSec: 5,
           mute,
           rect: { x: 0, y: 0, w: 540, h: 1920 },
-          comp: { layers: [], audioClips: [], captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, style: { ...DEFAULT_CAPTION_STYLE }, segments: [] } }
+          comp: {
+            layers: [],
+            audioClips: [],
+            captions: {
+              enabled: false,
+              stylePreset: 'reels-bold',
+              yBaseline: 1340,
+              style: { ...DEFAULT_CAPTION_STYLE },
+              segments: []
+            }
+          }
         },
         // A plain clip cell keeps its muted default — that rule is right for a
         // single clip; only compositions mix their own audio.
@@ -210,15 +279,21 @@ describe('migrateProject — comp cells un-mute (v18)', () => {
             comp: {
               layers: [layoutWithCompCell(true)],
               audioClips: [],
-              captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, style: { ...DEFAULT_CAPTION_STYLE }, segments: [] }
+              captions: {
+                enabled: false,
+                stylePreset: 'reels-bold',
+                yBaseline: 1340,
+                style: { ...DEFAULT_CAPTION_STYLE },
+                segments: []
+              }
             }
           }
         }
       ],
       audioClips: []
     })
-    const inner = (p.layers[0].content as { comp: { layers: { content: { cells: { mute: boolean }[] } }[] } })
-      .comp.layers[0].content.cells
+    const inner = (p.layers[0].content as { comp: { layers: { content: { cells: { mute: boolean }[] } }[] } }).comp
+      .layers[0].content.cells
     expect(inner[0].mute).toBe(false)
   })
 })
@@ -372,7 +447,16 @@ describe('migrateProject v22 (format registry)', () => {
   })
 
   it('moves no layer when the format is part of the document', () => {
-    const layer = { id: 'v', hidden: false, startSec: 0, endSec: 2, x: 123, y: 456, scale: 0.7, content: { kind: 'text', text: 'hi' } }
+    const layer = {
+      id: 'v',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 123,
+      y: 456,
+      scale: 0.7,
+      content: { kind: 'text', text: 'hi' }
+    }
     const p = migrateProject({ version: 21, preset: 'square', layers: [layer], audioClips: [] })
     expect(p.layers[0]).toMatchObject({ x: 123, y: 456, scale: 0.7 })
     expect(p.version).toBe(PROJECT_VERSION)
@@ -382,7 +466,13 @@ describe('migrateProject v22 (format registry)', () => {
 describe('migrateProject v23 (layer rotation + video flips)', () => {
   it('is additive: an older layer comes back upright and unflipped, untouched', () => {
     const layer = {
-      id: 'v', hidden: false, startSec: 0, endSec: 2, x: 10, y: 20, scale: 1,
+      id: 'v',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 10,
+      y: 20,
+      scale: 1,
       content: { kind: 'video', mediaId: 'm', inSec: 0, outSec: 2, mute: false, gainDb: 0 }
     }
     const p = migrateProject({ version: 22, preset: 'reel', layers: [layer], audioClips: [] })
@@ -391,7 +481,19 @@ describe('migrateProject v23 (layer rotation + video flips)', () => {
     expect(p.layers[0]).toMatchObject({ x: 10, y: 20, scale: 1 })
   })
   it('keeps a saved rotation', () => {
-    const layer = { id: 't', hidden: false, startSec: 0, endSec: 2, x: 0, y: 0, scale: 1, rotationDeg: -30, content: { kind: 'text', text: 'hi' } }
-    expect(migrateProject({ version: 23, preset: 'reel', layers: [layer], audioClips: [] }).layers[0].rotationDeg).toBe(-30)
+    const layer = {
+      id: 't',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotationDeg: -30,
+      content: { kind: 'text', text: 'hi' }
+    }
+    expect(migrateProject({ version: 23, preset: 'reel', layers: [layer], audioClips: [] }).layers[0].rotationDeg).toBe(
+      -30
+    )
   })
 })

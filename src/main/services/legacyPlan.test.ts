@@ -97,7 +97,11 @@ describe('which media to convert', () => {
 
   it('hashes a nearby file named like the record first', () => {
     const files = [join(reels, 'a.mov'), join(reels, 'IMG_1.MOV'), join(reels, 'z.mov')]
-    expect(nearbyOrder(files, 'img_1.mov')).toEqual([join(reels, 'IMG_1.MOV'), join(reels, 'a.mov'), join(reels, 'z.mov')])
+    expect(nearbyOrder(files, 'img_1.mov')).toEqual([
+      join(reels, 'IMG_1.MOV'),
+      join(reels, 'a.mov'),
+      join(reels, 'z.mov')
+    ])
     expect(nearbyOrder(files, undefined)).toEqual(files)
   })
 })

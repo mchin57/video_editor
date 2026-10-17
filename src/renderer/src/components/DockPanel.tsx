@@ -22,7 +22,11 @@ export function DockPanel({ children }: { children: ReactNode }): JSX.Element {
 
 function panelFallback(error: Error, retry: () => void): JSX.Element {
   return (
-    <div role="alert" data-testid="panel-error" className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs">
+    <div
+      role="alert"
+      data-testid="panel-error"
+      className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs"
+    >
       <p className="text-rose-300">This panel hit an error and stopped drawing.</p>
       <p className="max-w-md break-words font-mono text-[10px] text-zinc-500">{error.message}</p>
       <p className="text-zinc-400">Undo (Ctrl+Z) the last change, or try again.</p>

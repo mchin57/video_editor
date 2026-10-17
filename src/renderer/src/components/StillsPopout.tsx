@@ -113,9 +113,7 @@ export function StillsPopout(): JSX.Element | null {
             </button>
           </div>
           {err && <p className="mb-2 text-[11px] text-rose-400">{err}</p>}
-          <p className="mb-1.5 text-[10px] uppercase tracking-wide text-zinc-500">
-            Captured this session
-          </p>
+          <p className="mb-1.5 text-[10px] uppercase tracking-wide text-zinc-500">Captured this session</p>
           {shots.length === 0 ? (
             <p className="text-[11px] text-zinc-600">No stills yet.</p>
           ) : (
@@ -131,7 +129,9 @@ export function StillsPopout(): JSX.Element | null {
                       + Add as layer
                     </button>
                     <button
-                      onClick={() => void captureStillToDisk({ mediaId: s.id, sourceSec: 0, crop: null, color: null }, `${s.id}.png`)}
+                      onClick={() =>
+                        void captureStillToDisk({ mediaId: s.id, sourceSec: 0, crop: null, color: null }, `${s.id}.png`)
+                      }
                       className="rounded bg-white/5 px-1.5 py-1 text-[11px] text-zinc-400 hover:bg-white/10"
                       title="Save this still to a file"
                     >

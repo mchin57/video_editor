@@ -152,7 +152,9 @@ export async function mergeToLibrary(segments: MergeSegment[]): Promise<MediaAss
   // Transcripts: carried only when every clip with audio has one.
   const transcripts = new Map<string, Transcript | null>()
   for (const id of ids) transcripts.set(id, assets.get(id)!.probe.audio ? await getTranscript(id) : null)
-  const words = mergeWords(segments, (s) => (assets.get(s.mediaId)!.probe.audio ? transcripts.get(s.mediaId)?.words ?? null : []))
+  const words = mergeWords(segments, (s) =>
+    assets.get(s.mediaId)!.probe.audio ? (transcripts.get(s.mediaId)?.words ?? null) : []
+  )
   const firstTranscript = [...transcripts.values()].find((t) => t)
 
   const [{ ffmpeg }, caps] = await Promise.all([getBinaries(), getCapabilities()])

@@ -59,8 +59,7 @@ const selection = (page: Page): Promise<TimelineItemRef[]> =>
   page.evaluate(() => window.__reelStores.useUi.getState().selection)
 
 /** px per second of the timeline (persisted zoom; 48 on a fresh profile). */
-const pps = (page: Page): Promise<number> =>
-  page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)
+const pps = (page: Page): Promise<number> => page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)
 
 /** Ctrl-click both tiles, then hit Link. */
 async function linkPair(page: Page): Promise<void> {
@@ -87,12 +86,7 @@ async function dragTile(page: Page, testId: string, seconds: number): Promise<vo
 }
 
 /** Drag a tile's left/right trim handle horizontally by `seconds`. */
-async function dragEdge(
-  page: Page,
-  testId: string,
-  which: 'left' | 'right',
-  seconds: number
-): Promise<void> {
+async function dragEdge(page: Page, testId: string, which: 'left' | 'right', seconds: number): Promise<void> {
   const scale = await pps(page)
   const tile = page.getByTestId(testId)
   await tile.scrollIntoViewIfNeeded()
@@ -107,13 +101,9 @@ async function dragEdge(
   await page.mouse.up()
 }
 
-test('a clip with audio is added LINKED, and trimming either trims both', async ({
-  appPage: page
-}) => {
+test('a clip with audio is added LINKED, and trimming either trims both', async ({ appPage: page }) => {
   // The store action behind a timeline drop and the Library's ＋ PH / ＋ End.
-  await page.evaluate(() =>
-    window.__reelStores.useProject.getState().addVideoLayer('L1', 'no-such-media', 0, 10, true)
-  )
+  await page.evaluate(() => window.__reelStores.useProject.getState().addVideoLayer('L1', 'no-such-media', 0, 10, true))
   const added = await tiles(page)
   expect(added.layers[0].gid).toBeTruthy()
   expect(added.audio[0].gid).toBe(added.layers[0].gid) // the pair lands linked
@@ -136,9 +126,7 @@ test('a clip with audio is added LINKED, and trimming either trims both', async 
   expect(both.layers[0].endSec).toBeCloseTo(8, 1)
 })
 
-test('Ctrl-click + Link makes tiles move as one, keeping their offset', async ({
-  appPage: page
-}) => {
+test('Ctrl-click + Link makes tiles move as one, keeping their offset', async ({ appPage: page }) => {
   await arrangePair(page)
   await linkPair(page)
 
@@ -186,9 +174,7 @@ test('the group clamps at 0 instead of collapsing onto itself', async ({ appPage
   expect(t.audio[0].startSec).toBeCloseTo(2, 5) // offset preserved exactly
 })
 
-test('S splits every linked tile the playhead crosses, and only those', async ({
-  appPage: page
-}) => {
+test('S splits every linked tile the playhead crosses, and only those', async ({ appPage: page }) => {
   await arrangePair(page)
   await linkPair(page)
 
@@ -234,19 +220,14 @@ test('a linked tile the playhead misses is left whole', async ({ appPage: page }
  * text/image layers and captions had no split op at all, so the group silently
  * cut one member and left the other spanning both halves.
  */
-test('a linked text tile splits at the playhead like everything else', async ({
-  appPage: page
-}) => {
+test('a linked text tile splits at the playhead like everything else', async ({ appPage: page }) => {
   await page.evaluate(() => {
     window.__reelStores.useProject.getState().addVideoLayer('L1', 'no-such-media', 0, 10, false)
     window.__reelStores.useUi.getState().clearSelection()
   })
   await page.keyboard.press('t') // text layer over 0..3s at the playhead, selected
   const textId = await page.evaluate(
-    () =>
-      window.__reelStores.useProject
-        .getState()
-        .project!.layers.find((l) => l.content.kind === 'text')!.id
+    () => window.__reelStores.useProject.getState().project!.layers.find((l) => l.content.kind === 'text')!.id
   )
   // The text tile is already selected, so Ctrl-click only the clip to add it.
   await page.getByTestId('tile-layer-L1').click({ modifiers: ['Control'] })

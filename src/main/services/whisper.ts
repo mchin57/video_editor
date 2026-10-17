@@ -41,7 +41,6 @@ import { ensureLoudness } from './loudness'
 import { detectSilence } from './silence'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 
-
 /** Whisper search roots, bundled (installer) first, then the user data dir. */
 function whisperDirs(): string[] {
   const dirs: string[] = []
@@ -56,12 +55,9 @@ export function discoverWhisper(): { cli: string; model: string } | null {
   for (const dir of whisperDirs()) {
     // Build layouts vary: MSVC emits Release\, the cmake/Unix default emits
     // build\bin\ (or bin\), and the bundled/flat layout drops it straight in dir.
-    const cli = [
-      join(dir, 'Release', exe),
-      join(dir, 'bin', exe),
-      join(dir, 'build', 'bin', exe),
-      join(dir, exe)
-    ].find((p) => existsSync(p))
+    const cli = [join(dir, 'Release', exe), join(dir, 'bin', exe), join(dir, 'build', 'bin', exe), join(dir, exe)].find(
+      (p) => existsSync(p)
+    )
     if (!cli) continue
     let model: string | null = null
     try {
@@ -166,9 +162,11 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
     const level = series ? windowLoudness(series, 0, asset.probe.durationSec) : null
     const gainDb = transcribeGainDb(level?.status === 'ok' ? level.lufs : null)
     const fold = asset.probe.audio?.monoFoldChannel
-    await runFfmpeg(ffmpeg, buildTranscribeExtractArgs(
-      asset.originalPath, wav, fold != null ? monoFoldPan(fold) : null, gainDb
-    ), 0)
+    await runFfmpeg(
+      ffmpeg,
+      buildTranscribeExtractArgs(asset.originalPath, wav, fold != null ? monoFoldPan(fold) : null, gainDb),
+      0
+    )
     setProgress(job.id, 0.25)
 
     // Skip whatever precedes the first speech: whisper drops the opening

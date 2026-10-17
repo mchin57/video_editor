@@ -27,27 +27,43 @@ import { FFMPEG } from './bin'
 
 type Probe = { __jobs: JobProgressEvent[]; __second: Promise<boolean> }
 
-test('a clip is not ready — and cannot be added — until its proxy is fully written', async ({
-  appPage: page
-}) => {
+test('a clip is not ready — and cannot be added — until its proxy is fully written', async ({ appPage: page }) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
 
   const dir = mkdtempSync(join(tmpdir(), 'reel-proxy-'))
   const clip = join(dir, 'iphone-hlg.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=60:duration=20',
-    '-vf', 'setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc,format=yuv420p10le',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=1080x1920:rate=60:duration=20',
+    '-vf',
+    'setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc,format=yuv420p10le',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-crf',
+    '30',
     clip
   ])
   // A second, tiny asset: importing it mid-encode is the Library refetch that
   // used to flip the clip to ready.
   const tone = join(dir, 'tone.wav')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=1',
     tone
   ])
 
@@ -82,9 +98,7 @@ test('a clip is not ready — and cannot be added — until its proxy is fully w
   // --- Mid-encode ----------------------------------------------------------
   // The final name never refers to an incomplete file, so main says not ready.
   expect(existsSync(join(assetDir, 'proxy.mp4'))).toBe(false)
-  expect(
-    await page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0].proxyReady, id)
-  ).toBe(false)
+  expect(await page.evaluate(async (id) => (await window.api.listProjectMedia([id]))[0].proxyReady, id)).toBe(false)
 
   // A second ensureProxy joins the running build: no second encode, and it
   // resolves only once the proxy is really there.
@@ -108,9 +122,7 @@ test('a clip is not ready — and cannot be added — until its proxy is fully w
   ).toBe(false)
 
   // --- After the encode ----------------------------------------------------
-  await expect
-    .poll(async () => (await proxyJobs(id)).some((e) => e.status === 'done'), { timeout: 60_000 })
-    .toBe(true)
+  await expect.poll(async () => (await proxyJobs(id)).some((e) => e.status === 'done'), { timeout: 60_000 }).toBe(true)
   expect(await page.evaluate(() => (window as unknown as Probe).__second)).toBe(true)
   expect(new Set((await proxyJobs(id)).map((e) => e.id)).size).toBe(1) // one build, not two
   expect(readdirSync(assetDir).filter((f) => f.includes('.part.'))).toEqual([]) // no partial left
@@ -123,9 +135,7 @@ test('a clip is not ready — and cannot be added — until its proxy is fully w
     .poll(
       () =>
         page.evaluate((id) => {
-          const vids = [...document.querySelectorAll('video')].filter((v) =>
-            v.src.includes(`${id}/proxy.mp4`)
-          )
+          const vids = [...document.querySelectorAll('video')].filter((v) => v.src.includes(`${id}/proxy.mp4`))
           if (!vids.length) return 'no <video>'
           const failed = vids.find((v) => v.error)
           if (failed) return `MediaError ${failed.error!.code}: ${failed.error!.message}`

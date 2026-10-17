@@ -24,7 +24,14 @@ import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
 import { refetchFresh } from '@/lib/refetchFresh'
-import { chooseProjectLocation, defaultProjectLocation, onImportSkipped, onJobProgress, onLibraryChanged, pathForFile } from '@/ipc/client'
+import {
+  chooseProjectLocation,
+  defaultProjectLocation,
+  onImportSkipped,
+  onJobProgress,
+  onLibraryChanged,
+  pathForFile
+} from '@/ipc/client'
 import { useEditor } from '@/state/store'
 import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
@@ -122,7 +129,10 @@ export function AppErrorBoundary({ children }: { children: ReactNode }): JSX.Ele
             >
               Undo
             </button>
-            <button onClick={retry} className="rounded-md bg-white/10 px-3 py-1 text-xs text-zinc-200 hover:bg-white/20">
+            <button
+              onClick={retry}
+              className="rounded-md bg-white/10 px-3 py-1 text-xs text-zinc-200 hover:bg-white/20"
+            >
               Try again
             </button>
           </div>
@@ -239,16 +249,19 @@ export default function App(): JSX.Element {
         // Split the selection at the playhead — every selected tile it crosses.
         const { selection } = useUi.getState()
         if (selection.length) {
-          project.splitItemsAt(selection, usePlayback.getState().time, (mediaId) =>
-            assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
+          project.splitItemsAt(
+            selection,
+            usePlayback.getState().time,
+            (mediaId) => assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
           )
         }
       } else if (!mod && e.key.toLowerCase() === 'n') {
         // Butt the selection against the previous clip in its lane (no gap).
         const { selection } = useUi.getState()
         if (selection.length) {
-          project.snapItemsToPrevious(selection, (mediaId) =>
-            assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
+          project.snapItemsToPrevious(
+            selection,
+            (mediaId) => assetsRef.current.find((m) => m.id === mediaId)?.probe.durationSec ?? 0
           )
         }
       } else if (!mod && e.key.toLowerCase() === 'm') {
@@ -319,7 +332,10 @@ export default function App(): JSX.Element {
     >
       <Section name="header">
         {/* One line always: labels never wrap; a running job's indicator truncates instead (JobsIndicator). */}
-        <header data-app-header className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2">
+        <header
+          data-app-header
+          className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2"
+        >
           <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
           <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
           <FileMenu />

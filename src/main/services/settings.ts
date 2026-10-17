@@ -3,7 +3,12 @@
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import type { Settings } from '@shared/settings'
-import { DEFAULT_BRAND_COLORS, DEFAULT_KEYWORD_BANK, withAssistantDefaults, withAutoJoinDefault } from '@shared/settings'
+import {
+  DEFAULT_BRAND_COLORS,
+  DEFAULT_KEYWORD_BANK,
+  withAssistantDefaults,
+  withAutoJoinDefault
+} from '@shared/settings'
 import { sanitizeTextStyles } from '@shared/textStylePresets'
 import { getDataDir, getSubdir } from '../config'
 

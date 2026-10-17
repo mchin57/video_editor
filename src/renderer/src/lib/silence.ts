@@ -10,12 +10,7 @@ export interface Interval {
   end: number
 }
 
-export function speechSegments(
-  silences: Interval[],
-  inSec: number,
-  outSec: number,
-  minSpeechSec = 0.3
-): Interval[] {
+export function speechSegments(silences: Interval[], inSec: number, outSec: number, minSpeechSec = 0.3): Interval[] {
   const sil = silences
     .map((s) => ({ start: Math.max(s.start, inSec), end: Math.min(s.end, outSec) }))
     .filter((s) => s.end > s.start)

@@ -1,10 +1,5 @@
 import type { JSX } from 'react'
-import {
-  DockviewReact,
-  themeAbyss,
-  type DockviewReadyEvent,
-  type IDockviewPanelProps
-} from 'dockview-react'
+import { DockviewReact, themeAbyss, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react'
 import { DockPanel } from '@/components/DockPanel'
 import { Library } from '@/components/Library'
 import { PreviewStage } from '@/components/PreviewStage'

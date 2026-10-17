@@ -128,11 +128,7 @@ export function normalizeEnsemble(e: EnsembleEffect): EnsembleEffect {
   return {
     voices: clampInt(e.voices, ENSEMBLE_RANGE.voices.min, ENSEMBLE_RANGE.voices.max),
     spreadMs: clamp(e.spreadMs, ENSEMBLE_RANGE.spreadMs.min, ENSEMBLE_RANGE.spreadMs.max),
-    detuneCents: clamp(
-      e.detuneCents,
-      ENSEMBLE_RANGE.detuneCents.min,
-      ENSEMBLE_RANGE.detuneCents.max
-    )
+    detuneCents: clamp(e.detuneCents, ENSEMBLE_RANGE.detuneCents.min, ENSEMBLE_RANGE.detuneCents.max)
   }
 }
 

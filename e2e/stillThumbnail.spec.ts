@@ -16,7 +16,19 @@ test('an imported JPEG gets its thumbnail and the card shows it', async ({ appPa
   test.setTimeout(60_000)
   const still = join(projectsDir, 'E2E', 'photo.jpg')
   // A lavfi-made JPEG reproduces the iPhone failure (verified).
-  execFileSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x480:rate=1', '-frames:v', '1', still])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=640x480:rate=1',
+    '-frames:v',
+    '1',
+    still
+  ])
 
   const id = await page.evaluate(async (p) => {
     const [asset] = await window.api.importPaths([p])

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { buildTimelineCaptions, captionedClipsUnchanged, makeCaption, NEW_CAPTION_TEXT, type CaptionSource } from './captions'
+import {
+  buildTimelineCaptions,
+  captionedClipsUnchanged,
+  makeCaption,
+  NEW_CAPTION_TEXT,
+  type CaptionSource
+} from './captions'
 import type { CaptionWord } from '@shared/project'
 
 const src = (mediaId: string, startSec: number, inSec: number, outSec: number): CaptionSource => ({

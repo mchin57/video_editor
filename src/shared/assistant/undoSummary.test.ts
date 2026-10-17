@@ -32,7 +32,12 @@ describe('undoChanges / describeUndo', () => {
 
   it('reports captions and other settings, ignoring updatedAt', () => {
     const after = base()
-    const before = { ...after, updatedAt: 'later', preset: 'square' as const, captions: { ...after.captions, enabled: !after.captions.enabled } }
+    const before = {
+      ...after,
+      updatedAt: 'later',
+      preset: 'square' as const,
+      captions: { ...after.captions, enabled: !after.captions.enabled }
+    }
     const c = undoChanges(before, after)
     expect(c.captionsChanged).toBe(true)
     expect(c.otherChanged).toBe(true)

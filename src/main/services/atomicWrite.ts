@@ -33,17 +33,15 @@ export function partialPath(finalPath: string): string {
  * The partial name is fixed, so two concurrent writers of one file would share
  * it: callers that can race must coalesce through `singleFlight`.
  */
-export async function writeAtomically(
-  finalPath: string,
-  write: (partPath: string) => Promise<void>
-): Promise<void> {
+export async function writeAtomically(finalPath: string, write: (partPath: string) => Promise<void>): Promise<void> {
   const part = partialPath(finalPath)
   try {
     await write(part)
     // A writer can "succeed" without writing anything (ffmpeg exits 0 with
     // "Output file is empty, nothing was encoded"): say so, rather than
     // failing the rename with a baffling ENOENT on the partial name.
-    if (!existsSync(part)) throw new Error(`${basename(finalPath)} was not written: the command finished without producing a file`)
+    if (!existsSync(part))
+      throw new Error(`${basename(finalPath)} was not written: the command finished without producing a file`)
     await fsp.rename(part, finalPath)
   } catch (error) {
     await fsp.rm(part, { force: true }).catch(() => {})
@@ -107,11 +105,15 @@ export async function assertWritableDir(dir: string): Promise<void> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     const why =
-      code === 'ENOENT' ? 'the folder does not exist'
-      : code === 'EPERM' || code === 'EACCES' ? 'permission denied'
-      : code === 'EROFS' ? 'the drive is read-only'
-      : code === 'ENOTDIR' ? 'it is not a folder'
-      : (code ?? String(error))
+      code === 'ENOENT'
+        ? 'the folder does not exist'
+        : code === 'EPERM' || code === 'EACCES'
+          ? 'permission denied'
+          : code === 'EROFS'
+            ? 'the drive is read-only'
+            : code === 'ENOTDIR'
+              ? 'it is not a folder'
+              : (code ?? String(error))
     throw new Error(`Can't write to ${dir}: ${why}. Choose another folder.`)
   }
   await fsp.rm(probe, { force: true }).catch(() => {})

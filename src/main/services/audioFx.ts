@@ -72,11 +72,7 @@ function sourceChain(inSec: number, outSec: number): string {
  * a non-zero `adelay` emits a poisoned near-INT64_MAX PTS that kills the mux
  * far downstream (verified — FFMPEG-NOTES "adelay after atrim").
  */
-export function buildAudioFxFilter(
-  settings: AudioFxSettings,
-  inSec: number,
-  outSec: number
-): string {
+export function buildAudioFxFilter(settings: AudioFxSettings, inSec: number, outSec: number): string {
   const src = sourceChain(inSec, outSec)
 
   if (settings.kind === 'echo') {
@@ -125,9 +121,7 @@ export function buildAudioFxFilter(
   chains.push(`[src]asplit=${voiceParts.length}${voiceParts.map((_, i) => `[v${i}]`).join('')}`)
   voiceParts.forEach((parts, i) => chains.push(`[v${i}]${parts.join(',')}[o${i}]`))
   const mixOut = primed ? 'mix' : 'fx'
-  chains.push(
-    `${voiceParts.map((_, i) => `[o${i}]`).join('')}amix=inputs=${voiceParts.length}:normalize=0[${mixOut}]`
-  )
+  chains.push(`${voiceParts.map((_, i) => `[o${i}]`).join('')}amix=inputs=${voiceParts.length}:normalize=0[${mixOut}]`)
   if (primed) {
     chains.push(`[mix]atrim=start=${f3(CHORUS_PRIME_MS / 1000)},asetpts=N/SR/TB[fx]`)
   }
@@ -145,11 +139,21 @@ export function buildAudioFxArgs(
   output: string
 ): string[] {
   return [
-    '-y', '-hide_banner', '-nostdin',
-    '-i', input,
-    '-filter_complex', buildAudioFxFilter(settings, inSec, outSec),
-    '-map', '[fx]',
-    '-c:a', 'pcm_s16le', '-ar', String(FX_SAMPLE_RATE), '-ac', '2',
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    input,
+    '-filter_complex',
+    buildAudioFxFilter(settings, inSec, outSec),
+    '-map',
+    '[fx]',
+    '-c:a',
+    'pcm_s16le',
+    '-ar',
+    String(FX_SAMPLE_RATE),
+    '-ac',
+    '2',
     output
   ]
 }

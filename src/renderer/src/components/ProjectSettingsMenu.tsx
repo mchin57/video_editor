@@ -50,11 +50,7 @@ export function ProjectSettingsMenu(): JSX.Element | null {
             className="flex items-center gap-2 text-xs text-zinc-300"
             title="Applies FFT noise reduction to every audio clip on export. Individual clips can override this from their inspector; overridden clips show an N badge on the timeline."
           >
-            <input
-              type="checkbox"
-              checked={denoiseDefault}
-              onChange={(e) => setDenoiseDefault(e.target.checked)}
-            />
+            <input type="checkbox" checked={denoiseDefault} onChange={(e) => setDenoiseDefault(e.target.checked)} />
             Reduce noise by default (all audio clips)
           </label>
 

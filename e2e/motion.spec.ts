@@ -65,7 +65,9 @@ const drag = async (page: Page, from: { x: number; y: number }, dx: number, dy: 
   await page.mouse.up()
 }
 
-test('Add motion starts a move at the playhead from where the text is; the text follows it', async ({ appPage: page }) => {
+test('Add motion starts a move at the playhead from where the text is; the text follows it', async ({
+  appPage: page
+}) => {
   await addText(page)
   await page.getByRole('button', { name: /Add motion/ }).click()
 
@@ -83,9 +85,7 @@ test('Add motion starts a move at the playhead from where the text is; the text 
   const k = await logicalPerPx(page)
   const canvas = (await page.getByTestId('preview-canvas').boundingBox())!
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1.5))
-  await expect
-    .poll(async () => ((await centre(page, '[data-resizebox]')).x - canvas.x) * k)
-    .toBeGreaterThan(670)
+  await expect.poll(async () => ((await centre(page, '[data-resizebox]')).x - canvas.x) * k).toBeGreaterThan(670)
   expect(((await centre(page, '[data-resizebox]')).x - canvas.x) * k).toBeLessThan(680)
 })
 

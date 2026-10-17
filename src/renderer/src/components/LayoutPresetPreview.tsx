@@ -26,10 +26,7 @@ export function LayoutPresetPreview({
 }): JSX.Element {
   const width = Math.round(height * aspect)
   return (
-    <div
-      className="relative overflow-hidden rounded-md border border-white/15 bg-black"
-      style={{ width, height }}
-    >
+    <div className="relative overflow-hidden rounded-md border border-white/15 bg-black" style={{ width, height }}>
       {preset.rects.map((rect: CellRect, i) => {
         const style = {
           left: `${(rect.x / FRAME.width) * 100}%`,
@@ -44,9 +41,7 @@ export function LayoutPresetPreview({
             className="absolute flex items-center justify-center overflow-hidden border border-white/25 bg-white/[0.04]"
             style={style}
           >
-            {content ?? (
-              <span className="text-[11px] font-semibold text-zinc-500">{i + 1}</span>
-            )}
+            {content ?? <span className="text-[11px] font-semibold text-zinc-500">{i + 1}</span>}
           </div>
         )
       })}

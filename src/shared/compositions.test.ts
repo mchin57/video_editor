@@ -234,7 +234,14 @@ describe('resetMediaCuts (relink to a different-length file)', () => {
     const root = nestedRoot() // m-inner, behind a compound layer and a layout cell comp
     const clip = { ...makeVideoLayer('v', 'm', 2, 3), name: 'cut' }
     if (clip.content.kind === 'video') {
-      clip.content = { ...clip.content, inSec: 4, outSec: 7, speed: 2, freezes: [{ atSec: 5, holdSec: 1 }], speedRamp: [] }
+      clip.content = {
+        ...clip.content,
+        inSec: 4,
+        outSec: 7,
+        speed: 2,
+        freezes: [{ atSec: 5, holdSec: 1 }],
+        speedRamp: []
+      }
     }
     root.layers.push(clip, layoutLayer('cells', { mediaId: 'm', inSec: 3, outSec: 4 }))
     root.audioClips = [audio('m', 0, 2, 3), audio('other', 0, 1, 2)]

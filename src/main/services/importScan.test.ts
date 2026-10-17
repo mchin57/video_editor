@@ -6,7 +6,11 @@ import { expandImportPaths, isMediaPath } from './importScan'
 
 /** A tree with media at two depths plus the junk a real media folder carries. */
 let root = ''
-const rel = (p: string): string => p.slice(root.length + 1).split(sep).join('/')
+const rel = (p: string): string =>
+  p
+    .slice(root.length + 1)
+    .split(sep)
+    .join('/')
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'reel-scan-'))

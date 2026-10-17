@@ -83,15 +83,9 @@ function CropModal({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-8">
-      <div className="text-sm text-zinc-300">
-        Crop to {format.ratioLabel} — drag to move, drag the corner to resize
-      </div>
+      <div className="text-sm text-zinc-300">Crop to {format.ratioLabel} — drag to move, drag the corner to resize</div>
 
-      <div
-        ref={frameRef}
-        className="relative"
-        style={{ width: rendered.w || 'auto', height: rendered.h || 'auto' }}
-      >
+      <div ref={frameRef} className="relative" style={{ width: rendered.w || 'auto', height: rendered.h || 'auto' }}>
         <img
           src={thumbUrl(asset)}
           alt=""

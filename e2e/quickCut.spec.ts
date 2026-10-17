@@ -25,10 +25,27 @@ const mediaIds = (page: Page): Promise<string[]> =>
 /** A 4 s 320×568 clip with a tone, made by the real ffmpeg. */
 function synth(out: string): void {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=4',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=4',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=4',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-shortest',
     out
   ])
 }
@@ -44,15 +61,24 @@ async function importClip(page: Page, path: string): Promise<string> {
 }
 
 /** A folder's media files, sorted (the `.reel-editor` marker left out). */
-const clips = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).filter((n) => !n.startsWith('.')).sort() : [])
+const clips = (dir: string): string[] =>
+  existsSync(dir)
+    ? readdirSync(dir)
+        .filter((n) => !n.startsWith('.'))
+        .sort()
+    : []
 
 const duration = (file: string): number =>
-  Number(execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).toString().trim())
+  Number(
+    execFileSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).toString().trim()
+  )
 
 const pieces = (page: Page): Promise<{ in: number; out: number }[]> =>
-  page.locator('[data-testid^="quickcut-piece-"]').evaluateAll((els) =>
-    els.map((e) => ({ in: Number(e.getAttribute('data-in')), out: Number(e.getAttribute('data-out')) }))
-  )
+  page
+    .locator('[data-testid^="quickcut-piece-"]')
+    .evaluateAll((els) =>
+      els.map((e) => ({ in: Number(e.getAttribute('data-in')), out: Number(e.getAttribute('data-out')) }))
+    )
 
 /** The track x for source second `sec` (the clip is 4 s). */
 async function xAt(track: Locator, sec: number): Promise<{ x: number; y: number }> {

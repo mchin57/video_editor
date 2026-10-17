@@ -78,7 +78,7 @@ describe('mergePlan', () => {
   })
   const hlg = { isHdr: true, colorTransfer: 'arib-std-b67', pixFmt: 'yuv420p10le', codec: 'hevc' }
 
-  it('takes the first clip\'s display size (even) and the fastest frame rate, 24–60', () => {
+  it("takes the first clip's display size (even) and the fastest frame rate, 24–60", () => {
     const p = mergePlan([v({ displayWidth: 721, displayHeight: 1281 }), v({ avgFps: 59.94 }), v({ avgFps: 120 })])
     expect([p.width, p.height, p.fps]).toEqual([720, 1280, 60])
     expect(mergePlan([v({ avgFps: 15 })]).fps).toBe(24)
@@ -88,7 +88,10 @@ describe('mergePlan', () => {
     expect(mergePlan([v(), v({ hasAlpha: true })]).mode).toBe('alpha')
     expect(mergePlan([v(hlg), v(hlg)])).toMatchObject({ mode: 'hdr', toneMap: [false, false] })
     expect(mergePlan([v(hlg), v()])).toMatchObject({ mode: 'sdr', toneMap: [true, false] })
-    expect(mergePlan([v(hlg), v({ ...hlg, colorTransfer: 'smpte2084' })])).toMatchObject({ mode: 'sdr', toneMap: [true, true] })
+    expect(mergePlan([v(hlg), v({ ...hlg, colorTransfer: 'smpte2084' })])).toMatchObject({
+      mode: 'sdr',
+      toneMap: [true, true]
+    })
     expect(mergePlan([v(hlg), v({ hasAlpha: true })])).toMatchObject({ mode: 'alpha', toneMap: [true, false] })
   })
 })

@@ -23,9 +23,20 @@ const media = (page: Page, ids: string[]): Promise<MediaAsset[]> =>
 
 const synth = (out: string, duration: number, pattern = 'testsrc2'): void => {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `${pattern}=size=320x568:rate=30:duration=${duration}`,
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `${pattern}=size=320x568:rate=30:duration=${duration}`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     out
   ])
 }
@@ -46,9 +57,11 @@ const dirty = (page: Page): Promise<boolean> => page.evaluate(() => window.__ree
 
 /** The saved `.reel`'s library record for `id`. */
 const savedRecord = (reel: string, id: string): { fileName: string; relativePath: string; absolutePath: string } =>
-  (JSON.parse(readFileSync(reel, 'utf8')) as { library: { id: string; fileName: string; relativePath: string; absolutePath: string }[] }).library.find(
-    (r) => r.id === id
-  )!
+  (
+    JSON.parse(readFileSync(reel, 'utf8')) as {
+      library: { id: string; fileName: string; relativePath: string; absolutePath: string }[]
+    }
+  ).library.find((r) => r.id === id)!
 
 async function openRename(page: Page, cardName: string): Promise<void> {
   await page.getByText(cardName, { exact: true }).click({ button: 'right' })
@@ -95,7 +108,11 @@ test('Rename renames the file and the card, saves the .reel with the new path, a
   const renamed = join(root, 'footage', 'Swim drill.mp4')
   expect(readdirSync(join(root, 'footage'))).toEqual(['Swim drill.mp4'])
   await expect(page.getByText('Swim drill.mp4', { exact: true })).toBeVisible()
-  expect((await media(page, [id]))[0]).toMatchObject({ status: 'ok', fileName: 'Swim drill.mp4', originalPath: renamed })
+  expect((await media(page, [id]))[0]).toMatchObject({
+    status: 'ok',
+    fileName: 'Swim drill.mp4',
+    originalPath: renamed
+  })
   // Saved at once: the .reel names the new file, and nothing is left unsaved.
   await expect.poll(() => savedRecord(reel, id).relativePath).toBe('footage/Swim drill.mp4')
   expect(savedRecord(reel, id)).toMatchObject({ fileName: 'Swim drill.mp4', absolutePath: renamed })

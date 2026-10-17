@@ -30,7 +30,14 @@ describe('text block box', () => {
 
   it('auto-wraps as max-content capped at the wrap width, or takes a fixed width', () => {
     const auto = textBoxCss({ fontFamily: 'anton', fontSizePx: 76 }, { wrapWidthPx: 900 }, px)
-    expect(auto).toMatchObject({ fontSize: '76px', lineHeight: 1.25, width: 'max-content', maxWidth: '900px', whiteSpace: 'pre-wrap', textAlign: 'center' })
+    expect(auto).toMatchObject({
+      fontSize: '76px',
+      lineHeight: 1.25,
+      width: 'max-content',
+      maxWidth: '900px',
+      whiteSpace: 'pre-wrap',
+      textAlign: 'center'
+    })
     const fixed = textBoxCss({ fontFamily: 'anton', fontSizePx: 76 }, { widthPx: 500, wrapWidthPx: 900 }, px)
     expect(fixed.width).toBe('500px')
     expect(fixed.maxWidth).toBeUndefined()
@@ -96,9 +103,11 @@ describe('libass corrections', () => {
 
 describe('hasColorEmoji', () => {
   it('finds default-emoji characters, FE0F-made emoji, ZWJ sequences, flags and keycaps', () => {
-    for (const t of ['Hi 😀', '🔥', 'love ❤️', '👨‍👩‍👧', '🇺🇸', '1️⃣ drill', '🏊‍♂️ swim']) expect(hasColorEmoji(t), t).toBe(true)
+    for (const t of ['Hi 😀', '🔥', 'love ❤️', '👨‍👩‍👧', '🇺🇸', '1️⃣ drill', '🏊‍♂️ swim'])
+      expect(hasColorEmoji(t), t).toBe(true)
   })
   it('leaves plain text and text-presentation symbols on libass', () => {
-    for (const t of ['SWIM START', '70.3 IRONMAN', '© 2026', 'Pro™', 'a bare ❤', '#1', '*', '']) expect(hasColorEmoji(t), t).toBe(false)
+    for (const t of ['SWIM START', '70.3 IRONMAN', '© 2026', 'Pro™', 'a bare ❤', '#1', '*', ''])
+      expect(hasColorEmoji(t), t).toBe(false)
   })
 })

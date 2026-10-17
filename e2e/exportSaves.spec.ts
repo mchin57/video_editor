@@ -19,7 +19,11 @@ const ROOT = resolve(__dirname, '..')
 const MCP = join(ROOT, 'out', 'main', 'mcp.js')
 
 type ToolResult = { content: { type: string; text?: string }[]; isError?: boolean }
-const textOf = (r: ToolResult): string => r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+const textOf = (r: ToolResult): string =>
+  r.content
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text)
+    .join('\n')
 
 // Every MCP client is closed in afterEach, so a failed assertion never leaves reel-mcp running.
 const clients: Client[] = []
@@ -61,9 +65,20 @@ async function arrange(page: Page, projectsDir: string): Promise<Arranged> {
   const root = join(projectsDir, 'E2E')
   const source = join(root, 'clip.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=2',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=2',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     source
   ])
   const id = await page.evaluate(async (p) => {
@@ -74,9 +89,12 @@ async function arrange(page: Page, projectsDir: string): Promise<Arranged> {
     return asset.id
   }, source)
   await expect
-    .poll(async () => (await page.evaluate((i) => window.api.listProjectMedia([i]), id) as MediaAsset[])[0]?.proxyReady, {
-      timeout: 30_000
-    })
+    .poll(
+      async () => ((await page.evaluate((i) => window.api.listProjectMedia([i]), id)) as MediaAsset[])[0]?.proxyReady,
+      {
+        timeout: 30_000
+      }
+    )
     .toBe(true)
   await page.evaluate(() => window.__reelStores.useProject.getState().save())
   const reel = await page.evaluate(() => window.__reelStores.useProject.getState().filePath!)
@@ -105,7 +123,8 @@ async function stubSaveDialog(app: ElectronApplication, filePath: string | null)
 const asked = (app: ElectronApplication): Promise<number> =>
   app.evaluate(() => (globalThis as unknown as { __asked: number }).__asked)
 
-const exportButton = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('button', { name: 'Export', exact: true })
+const exportButton = (page: Page): ReturnType<Page['getByRole']> =>
+  page.getByRole('button', { name: 'Export', exact: true })
 
 test('assistant export_video saves the project: the .reel holds the edit and nothing is dirty', async ({
   electronApp,
@@ -130,7 +149,11 @@ test('assistant export_video saves the project: the .reel holds the edit and not
   expect(await dirty(page)).toBe(false)
 })
 
-test('the Export button saves the project after the export finishes', async ({ electronApp, appPage: page, projectsDir }) => {
+test('the Export button saves the project after the export finishes', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const { reel } = await arrange(page, projectsDir)
@@ -210,7 +233,11 @@ const otherOpen = async (page: Page, projectsDir: string): Promise<string> => {
   return other
 }
 
-test('the Export button does not save a project opened while it exported', async ({ electronApp, appPage: page, projectsDir }) => {
+test('the Export button does not save a project opened while it exported', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const { reel, saved } = await arrange(page, projectsDir)
@@ -229,7 +256,11 @@ test('the Export button does not save a project opened while it exported', async
   await expect(page.getByTestId('export-save-error')).toHaveCount(0)
 })
 
-test('assistant export_video does not save a project opened while it exported', async ({ electronApp, appPage: page, projectsDir }) => {
+test('assistant export_video does not save a project opened while it exported', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const { reel, saved } = await arrange(page, projectsDir)

@@ -36,9 +36,20 @@ test('opening an old project converts it in place, keeping its clip id and point
   mkdirSync(oldDir)
   const clip = join(oldDir, 'clip.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=2',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=2',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     clip
   ])
   const oldId = createHash('sha1').update(readFileSync(clip)).digest('hex').slice(0, 12)
@@ -129,11 +140,20 @@ test('opening an old project converts it in place, keeping its clip id and point
   expect(names).toContain('old.reel-legacy')
   expect(names).not.toContain('old.reel')
   expect(JSON.parse(readFileSync(`${oldReel}-legacy`, 'utf8'))).toEqual(oldDoc)
-  const saved = JSON.parse(readFileSync(reel, 'utf8')) as { version: number; mediaIds: string[]; library: MediaRecord[] }
+  const saved = JSON.parse(readFileSync(reel, 'utf8')) as {
+    version: number
+    mediaIds: string[]
+    library: MediaRecord[]
+  }
   expect(saved.version).toBe(26)
   expect(saved.mediaIds).toEqual([oldId])
   expect(saved.library).toHaveLength(1)
-  expect(saved.library[0]).toMatchObject({ id: oldId, fileName: 'clip.mp4', relativePath: 'clip.mp4', absolutePath: clip })
+  expect(saved.library[0]).toMatchObject({
+    id: oldId,
+    fileName: 'clip.mp4',
+    relativePath: 'clip.mp4',
+    absolutePath: clip
+  })
   expect(saved.library[0].fingerprint.size).toBe(clipBefore.size)
   for (const dir of ['generated', 'transcripts', 'cache']) expect(statSync(join(oldDir, dir)).isDirectory()).toBe(true)
 

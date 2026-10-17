@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  PHRASE_MAX_WORDS,
-  phrases,
-  transcriptPhraseText,
-  transcriptWordText,
-  wordsInRange
-} from './transcriptText'
+import { PHRASE_MAX_WORDS, phrases, transcriptPhraseText, transcriptWordText, wordsInRange } from './transcriptText'
 
 const w = (text: string, startSec: number, endSec: number) => ({ text, startSec, endSec })
 

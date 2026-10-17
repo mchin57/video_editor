@@ -14,8 +14,21 @@ const addText = (page: Page, text = 'HELLO'): Promise<void> =>
   page.evaluate((text) => {
     const { useProject } = window.__reelStores
     useProject.getState().addLayer({
-      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 540, y: 960, scale: 1,
-      content: { kind: 'text', text, fontFamily: 'montserrat-extrabold', fontSizePx: 90, color: '#ffffff', pill: { enabled: false, color: '#000000cc', padPx: 18 } }
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text,
+        fontFamily: 'montserrat-extrabold',
+        fontSizePx: 90,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 }
+      }
     })
   }, text)
 
@@ -35,7 +48,9 @@ const state = (page: Page): Promise<{ text: string; layers: number; past: number
 const previewText = (page: Page, text: string): ReturnType<Page['locator']> =>
   page.getByTestId('preview-canvas').getByText(text, { exact: true }).first()
 
-test('double-click the preview text, type a title: it edits the text and fires no shortcut', async ({ appPage: page }) => {
+test('double-click the preview text, type a title: it edits the text and fires no shortcut', async ({
+  appPage: page
+}) => {
   await addText(page)
   const before = await state(page)
   await previewText(page, 'HELLO').dblclick()
@@ -57,7 +72,9 @@ test('double-click the preview text, type a title: it edits the text and fires n
   expect((await state(page)).text).toBe('HELLO')
 })
 
-test('Enter makes a new line; clicking away finishes; an unchanged session records nothing', async ({ appPage: page }) => {
+test('Enter makes a new line; clicking away finishes; an unchanged session records nothing', async ({
+  appPage: page
+}) => {
   await addText(page, 'TOP')
   await previewText(page, 'TOP').dblclick()
   await page.keyboard.press('End')
@@ -68,7 +85,11 @@ test('Enter makes a new line; clicking away finishes; an unchanged session recor
   await expect(page.getByTestId('inline-text-editor')).toHaveCount(0)
 
   const past = (await state(page)).past
-  await page.getByTestId('preview-canvas').getByText(/BOTTOM/).first().dblclick()
+  await page
+    .getByTestId('preview-canvas')
+    .getByText(/BOTTOM/)
+    .first()
+    .dblclick()
   await expect(page.getByTestId('inline-text-editor')).toBeFocused()
   await page.keyboard.press('Escape')
   expect((await state(page)).past).toBe(past)

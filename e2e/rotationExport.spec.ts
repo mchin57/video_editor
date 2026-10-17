@@ -24,9 +24,13 @@ const W = 1080
 const H = 1920
 
 function frameAt(file: string, t: number): (x: number, y: number) => number[] {
-  const buf = execFileSync(FFMPEG, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
-    maxBuffer: W * H * 3 + 1024
-  })
+  const buf = execFileSync(
+    FFMPEG,
+    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    {
+      maxBuffer: W * H * 3 + 1024
+    }
+  )
   return (x, y) => {
     const i = (Math.round(y) * W + Math.round(x)) * 3
     return [buf[i], buf[i + 1], buf[i + 2]]
@@ -35,13 +39,24 @@ function frameAt(file: string, t: number): (x: number, y: number) => number[] {
 
 /** Bounding box + centroid of "ink" (bright grey-ish pixels) within a y band. */
 function ink(px: (x: number, y: number) => number[], y0: number, y1: number, min = 100) {
-  let x0 = W, x1 = -1, top = H, bot = -1, sx = 0, sy = 0, n = 0
+  let x0 = W,
+    x1 = -1,
+    top = H,
+    bot = -1,
+    sx = 0,
+    sy = 0,
+    n = 0
   for (let y = y0; y <= y1; y++) {
     for (let x = 0; x < W; x++) {
       const [r, g, b] = px(x, y)
       if (r > min && g > min && b > min) {
-        x0 = Math.min(x0, x); x1 = Math.max(x1, x); top = Math.min(top, y); bot = Math.max(bot, y)
-        sx += x; sy += y; n++
+        x0 = Math.min(x0, x)
+        x1 = Math.max(x1, x)
+        top = Math.min(top, y)
+        bot = Math.max(bot, y)
+        sx += x
+        sy += y
+        n++
       }
     }
   }

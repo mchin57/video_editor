@@ -5,13 +5,7 @@ import { FONTS, FONT_CATEGORIES, fontCssFamily, resolveFont, type FontCategory }
  * Grouped font picker with a live in-font preview of each option. Used by both
  * text layers and captions. `value` is a bundled-font id (shared/fonts).
  */
-export function FontPicker({
-  value,
-  onChange
-}: {
-  value: string
-  onChange: (id: string) => void
-}): JSX.Element {
+export function FontPicker({ value, onChange }: { value: string; onChange: (id: string) => void }): JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const current = resolveFont(value)
@@ -48,9 +42,7 @@ export function FontPicker({
         <div className="absolute z-50 mt-1 max-h-72 w-full overflow-y-auto rounded border border-white/10 bg-zinc-900 p-1 shadow-xl">
           {FONT_CATEGORIES.map((cat) => (
             <div key={cat.id}>
-              <div className="px-2 pb-0.5 pt-1.5 text-[9px] uppercase tracking-wider text-zinc-500">
-                {cat.label}
-              </div>
+              <div className="px-2 pb-0.5 pt-1.5 text-[9px] uppercase tracking-wider text-zinc-500">{cat.label}</div>
               {FONTS.filter((f) => f.category === (cat.id as FontCategory)).map((f) => (
                 <button
                   key={f.id}

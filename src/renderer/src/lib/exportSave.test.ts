@@ -10,14 +10,16 @@ describe('exportSaveSkipReason', () => {
   })
 
   it('does not save another project opened while it exported', () => {
-    expect(exportSaveSkipReason({ id: 'a', filePath: 'C:/Reels/a/a.reel' }, open('b'))).toMatch(/Another project was opened/)
+    expect(exportSaveSkipReason({ id: 'a', filePath: 'C:/Reels/a/a.reel' }, open('b'))).toMatch(
+      /Another project was opened/
+    )
     expect(exportSaveSkipReason({ id: 'a' }, open('b'))).toMatch(/Another project was opened/)
   })
 
   it('does not save the same document now at another file (e.g. a copy sharing its id)', () => {
-    expect(exportSaveSkipReason({ id: 'a', filePath: 'C:/Reels/a/a.reel' }, open('a', 'C:/Reels/copy/copy.reel'))).toMatch(
-      /Another project/
-    )
+    expect(
+      exportSaveSkipReason({ id: 'a', filePath: 'C:/Reels/a/a.reel' }, open('a', 'C:/Reels/copy/copy.reel'))
+    ).toMatch(/Another project/)
   })
 
   it('does not save when no project is open any more', () => {

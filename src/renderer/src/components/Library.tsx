@@ -1,7 +1,14 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect, assetKind, isImageAsset, isUnknownClip } from '@shared/media'
-import { useLibrary, useImportMedia, useMergeClips, useQuickCut, useRenameMedia, useRepairMedia } from '@/hooks/useMedia'
+import {
+  useLibrary,
+  useImportMedia,
+  useMergeClips,
+  useQuickCut,
+  useRenameMedia,
+  useRepairMedia
+} from '@/hooks/useMedia'
 import { MergeClipsDialog } from '@/components/MergeClipsDialog'
 import { revealFile } from '@/ipc/client'
 import { RenameMediaDialog } from '@/components/RenameMediaDialog'
@@ -73,7 +80,13 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
         : undefined)
   const menuItems = (): ContextMenuEntry[] => [
     { label: 'Quick cut…', testId: 'ctx-quickcut', disabled: !!noCut, reason: noCut, onSelect: () => setCutting(true) },
-    { label: 'Merge clips…', testId: 'ctx-merge', disabled: !!noMerge, reason: noMerge, onSelect: () => setMerging(true) },
+    {
+      label: 'Merge clips…',
+      testId: 'ctx-merge',
+      disabled: !!noMerge,
+      reason: noMerge,
+      onSelect: () => setMerging(true)
+    },
     { label: 'Rename…', testId: 'ctx-rename', disabled: !!noFile, reason: noFile, onSelect: () => setRenaming(true) },
     {
       label: 'Reveal in Explorer',
@@ -143,7 +156,9 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   const addImageAt = (startSec: number): void => {
     if (!ready) return
     const id = crypto.randomUUID()
-    addLayer(makeImageLayer(id, asset.id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) }))
+    addLayer(
+      makeImageLayer(id, asset.id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) })
+    )
     selectLayer(id)
   }
   const addBtn = `rounded bg-sky-500/20 px-1 py-0.5 text-center text-[10px] font-semibold text-sky-300 transition hover:bg-sky-500/40 whitespace-nowrap ${
@@ -155,10 +170,28 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
     <>
       {isImage ? (
         <>
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); addImageAt(playhead()) }} className={addBtn} title="Add image at the playhead">
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              addImageAt(playhead())
+            }}
+            className={addBtn}
+            title="Add image at the playhead"
+          >
             ＋ PH
           </span>
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); addImageAt(endOfTimeline()) }} className={addBtn} title="Add image to the end of the timeline">
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              addImageAt(endOfTimeline())
+            }}
+            className={addBtn}
+            title="Add image to the end of the timeline"
+          >
             ＋ End
           </span>
         </>
@@ -193,10 +226,28 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
         </span>
       ) : (
         <>
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); addVideoAt(playhead()) }} className={addBtn} title="Add clip at the playhead">
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              addVideoAt(playhead())
+            }}
+            className={addBtn}
+            title="Add clip at the playhead"
+          >
             ＋ PH
           </span>
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); addVideoAt(endOfTimeline()) }} className={addBtn} title="Add clip to the end of the timeline">
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              addVideoAt(endOfTimeline())
+            }}
+            className={addBtn}
+            title="Add clip to the end of the timeline"
+          >
             ＋ End
           </span>
         </>

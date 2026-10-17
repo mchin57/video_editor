@@ -76,10 +76,10 @@ test('a split-on-silence result that arrives mid-drag waits for the release', as
   const y = box.y + box.height / 2
   // The press must land ON the tile (not the footer) or this would test nothing.
   expect(
-    await page.evaluate(([x, yy]) => !!document.elementFromPoint(x, yy)?.closest('[data-testid="tile-audio-gap-clip"]'), [
-      box.x + box.width / 2,
-      y
-    ])
+    await page.evaluate(
+      ([x, yy]) => !!document.elementFromPoint(x, yy)?.closest('[data-testid="tile-audio-gap-clip"]'),
+      [box.x + box.width / 2, y]
+    )
   ).toBe(true)
   await page.mouse.move(box.x + box.width / 2, y)
   await page.mouse.down()

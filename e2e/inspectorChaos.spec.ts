@@ -16,23 +16,46 @@ test('a new project starts with the playhead at 0', async ({ appPage: page, proj
   expect(await page.evaluate(() => window.__reelStores.usePlayback.getState().time)).toBe(0)
 })
 
-test('switching between two video layers never stacks duplicate Inspector sections', async ({ appPage: page, projectsDir }) => {
+test('switching between two video layers never stacks duplicate Inspector sections', async ({
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(90_000)
   const ids: string[] = []
   for (const name of ['a.mp4', 'b.mp4']) {
     const clip = join(projectsDir, 'E2E', name)
     execFileSync(FFMPEG, [
-      '-y', '-hide_banner', '-loglevel', 'error',
-      '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=2',
-      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=320x568:rate=30:duration=2',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=2',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-shortest',
+      clip
     ])
-    ids.push(await page.evaluate(async (p) => {
-      const [asset] = await window.api.importPaths([p])
-      window.__reelStores.useProject.getState().addMedia([asset.id])
-      return asset.id
-    }, clip))
+    ids.push(
+      await page.evaluate(async (p) => {
+        const [asset] = await window.api.importPaths([p])
+        window.__reelStores.useProject.getState().addMedia([asset.id])
+        return asset.id
+      }, clip)
+    )
   }
   const errors: string[] = []
   page.on('console', (m) => {

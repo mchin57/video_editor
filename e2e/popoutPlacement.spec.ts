@@ -36,9 +36,21 @@ test('the library pop-out leaves its card buttons and the header menus clickable
   const clip = join(projectsDir, 'E2E', 'swim.mp4')
   // Tall (9:16) so the pop-out is at its largest.
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', 'testsrc2=size=320x568:rate=30:duration=3',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x568:rate=30:duration=3',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    clip
   ])
   const id = await page.evaluate(async (p) => {
     const [asset] = await window.api.importPaths([p])
@@ -73,7 +85,5 @@ test('the library pop-out leaves its card buttons and the header menus clickable
   const ph = await centre(addPh)
   await page.mouse.move(ph.x, ph.y, { steps: 15 })
   await page.mouse.click(ph.x, ph.y)
-  await expect
-    .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length))
-    .toBe(1)
+  await expect.poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)).toBe(1)
 })

@@ -138,7 +138,11 @@ describe('library Rename (docs/MEDIA-POINTERS.md "Rename")', () => {
     const g = await importGenerated(tmp, 'clip (no bg 0:03–0:05).wav')
     const asset = await renameMedia(g.id, 'swimmer cutout')
     expect(existsSync(join(root, 'generated', 'swimmer cutout.wav'))).toBe(true)
-    expect(asset).toMatchObject({ fileName: 'swimmer cutout.wav', relativePath: 'generated/swimmer cutout.wav', generated: true })
+    expect(asset).toMatchObject({
+      fileName: 'swimmer cutout.wav',
+      relativePath: 'generated/swimmer cutout.wav',
+      generated: true
+    })
   })
 
   it('refuses an unknown clip (nothing records its file)', async () => {

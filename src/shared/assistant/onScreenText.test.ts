@@ -18,11 +18,17 @@ function comp(): Composition {
   const title = makeTextLayer('t1', 1, 4)
   return {
     ...base,
-    layers: [makeVideoLayer('v', 'm1', 0, 10), { ...title, content: { ...title.content, text: 'Title' } as typeof title.content }],
+    layers: [
+      makeVideoLayer('v', 'm1', 0, 10),
+      { ...title, content: { ...title.content, text: 'Title' } as typeof title.content }
+    ],
     captions: {
       ...base.captions,
       enabled: true,
-      segments: [cap({}), cap({ id: 'c2', startSec: 1, endSec: 2, style: { ...base.captions.style, color: '#ff0000' } })]
+      segments: [
+        cap({}),
+        cap({ id: 'c2', startSec: 1, endSec: 2, style: { ...base.captions.style, color: '#ff0000' } })
+      ]
     }
   }
 }
@@ -66,10 +72,16 @@ describe('summarizeText', () => {
 
   it('a caption at or after the end of the edit never shows; one straddling it is cut off', () => {
     const c = comp()
-    c.captions = { ...c.captions, segments: [cap({ id: 'late', startSec: 10, endSec: 11 }), cap({ id: 'edge', startSec: 9, endSec: 10.5 })] }
+    c.captions = {
+      ...c.captions,
+      segments: [cap({ id: 'late', startSec: 10, endSec: 11 }), cap({ id: 'edge', startSec: 9, endSec: 10.5 })]
+    }
     const s = summarizeText(c, unlinked, 10)
     expect(s.durationSec).toBe(10)
-    expect(s.items.find((i) => i.id === 'late')).toMatchObject({ visible: false, hiddenBecause: 'after the end of the edit' })
+    expect(s.items.find((i) => i.id === 'late')).toMatchObject({
+      visible: false,
+      hiddenBecause: 'after the end of the edit'
+    })
     expect(s.items.find((i) => i.id === 'edge')).toMatchObject({ visible: true, cutOffAtSec: 10 })
     expect(s.items.find((i) => i.id === 'edge')!.hiddenBecause).toBeUndefined()
   })

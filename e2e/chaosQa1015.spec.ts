@@ -36,9 +36,21 @@ async function importReady(page: Page, path: string): Promise<string> {
 async function placedClip(page: Page, projectsDir: string, sec: number): Promise<string> {
   const source = join(projectsDir, 'E2E', `clip${sec}.mp4`)
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `testsrc2=size=320x568:rate=30:duration=${sec}`,
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', source
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=size=320x568:rate=30:duration=${sec}`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    source
   ])
   const id = await importReady(page, source)
   await page.evaluate(
@@ -54,7 +66,8 @@ const stubSaveDialog = (app: ElectronApplication, filePath: string): Promise<voi
     dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
   }, filePath)
 
-const exportButton = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('button', { name: 'Export', exact: true })
+const exportButton = (page: Page): ReturnType<Page['getByRole']> =>
+  page.getByRole('button', { name: 'Export', exact: true })
 
 test('Cancel stops a running export: no file, nothing saved, a "canceled" note instead of a failure', async ({
   electronApp,
@@ -90,7 +103,11 @@ test('Cancel stops a running export: no file, nothing saved, a "canceled" note i
   expect(readFileSync(reel).equals(saved)).toBe(true) // a canceled export saves nothing
 })
 
-test("an export's Reveal goes away once another project is opened", async ({ electronApp, appPage: page, projectsDir }) => {
+test("an export's Reveal goes away once another project is opened", async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   await placedClip(page, projectsDir, 2)
@@ -137,8 +154,21 @@ test('the Text box: one typing session is one undo step', async ({ appPage: page
   await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores
     useProject.getState().addLayer({
-      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 540, y: 960, scale: 1,
-      content: { kind: 'text', text: 'HELLO', fontFamily: 'inter', fontSizePx: 90, color: '#ffffff', pill: { enabled: false, color: '#000000cc', padPx: 18 } }
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'HELLO',
+        fontFamily: 'inter',
+        fontSizePx: 90,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 }
+      }
     })
     useUi.getState().selectLayer('T1')
   })
@@ -162,13 +192,27 @@ test('a JPEG renamed .mp4 imports and places as a still, not a 0:00 video', asyn
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(120_000)
   const jpg = join(projectsDir, 'E2E', 'photo.jpg')
-  execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x480', '-frames:v', '1', jpg])
+  execFileSync(FFMPEG, [
+    '-y',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=640x480',
+    '-frames:v',
+    '1',
+    jpg
+  ])
   const renamed = join(projectsDir, 'E2E', 'photo.mp4')
   writeFileSync(renamed, readFileSync(jpg))
   const id = await importReady(page, renamed)
   expect((await media(page, id)).kind).toBe('image')
 
-  await page.getByRole('button', { name: /^photo\.mp4 / }).getByTitle('Add image at the playhead').click()
+  await page
+    .getByRole('button', { name: /^photo\.mp4 / })
+    .getByTitle('Add image at the playhead')
+    .click()
   const layer = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers[0])
   expect(layer.content.kind).toBe('image')
   expect(layer.endSec - layer.startSec).toBeGreaterThanOrEqual(1) // a still's default length, not 0.1 s
@@ -177,8 +221,21 @@ test('a JPEG renamed .mp4 imports and places as a still, not a 0:00 video', asyn
 test('the Layers checkbox is named "Visible" and is checked while the layer shows', async ({ appPage: page }) => {
   await page.evaluate(() => {
     window.__reelStores.useProject.getState().addLayer({
-      id: 'T1', hidden: false, startSec: 0, endSec: 4, x: 540, y: 960, scale: 1,
-      content: { kind: 'text', text: 'HELLO', fontFamily: 'inter', fontSizePx: 90, color: '#ffffff', pill: { enabled: false, color: '#000000cc', padPx: 18 } }
+      id: 'T1',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'text',
+        text: 'HELLO',
+        fontFamily: 'inter',
+        fontSizePx: 90,
+        color: '#ffffff',
+        pill: { enabled: false, color: '#000000cc', padPx: 18 }
+      }
     })
   })
   const box = page.getByRole('checkbox', { name: 'Visible' })

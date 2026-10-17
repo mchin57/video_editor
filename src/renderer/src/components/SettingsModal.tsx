@@ -41,9 +41,7 @@ export function SettingsModal(): JSX.Element | null {
           </button>
         </div>
 
-        <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">
-          Default export folder
-        </div>
+        <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Default export folder</div>
         <div className="flex items-center gap-2">
           <div
             className="min-w-0 flex-1 truncate rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-zinc-300"
@@ -89,13 +87,11 @@ export function SettingsModal(): JSX.Element | null {
           Auto-join new clips to the Default volume level
         </Check>
         <p className="text-[11px] text-zinc-500">
-          Audio pulled off a video as it lands on the timeline is matched to Default&rsquo;s loudness. Imported
-          music and effect tracks never join. Turning this off leaves clips already in Default where they are.
+          Audio pulled off a video as it lands on the timeline is matched to Default&rsquo;s loudness. Imported music
+          and effect tracks never join. Turning this off leaves clips already in Default where they are.
         </p>
 
-        <div className="mt-5 mb-1 text-[10px] uppercase tracking-wide text-zinc-500">
-          AI assistant (Claude Code)
-        </div>
+        <div className="mt-5 mb-1 text-[10px] uppercase tracking-wide text-zinc-500">AI assistant (Claude Code)</div>
         <Check
           checked={settings?.assistant.enabled ?? false}
           onChange={(enabled) => {
@@ -128,7 +124,9 @@ export function SettingsModal(): JSX.Element | null {
               </code>
               <button
                 className={btnCls}
-                onClick={() => void navigator.clipboard.writeText(mcpAddCommand(status.scriptPath)).then(() => setCopied(true))}
+                onClick={() =>
+                  void navigator.clipboard.writeText(mcpAddCommand(status.scriptPath)).then(() => setCopied(true))
+                }
               >
                 {copied ? 'Copied' : 'Copy'}
               </button>

@@ -78,10 +78,7 @@ export function textLines(text: string): string[] {
 }
 
 /** Estimated size of the text block in logical px. */
-export function estimateTextBox(
-  text: string,
-  fontSizePx: number
-): { width: number; height: number } {
+export function estimateTextBox(text: string, fontSizePx: number): { width: number; height: number } {
   const lines = textLines(text)
   const cols = lines.reduce((m, l) => Math.max(m, l.length), 0)
   return {
@@ -95,11 +92,7 @@ export function estimateTextBox(
  * logical px — used to follow a typewriter's reveal frontier. Lines are treated
  * as centered, matching the overlay's centered layout.
  */
-export function charAnchor(
-  text: string,
-  index: number,
-  fontSizePx: number
-): { x: number; y: number } {
+export function charAnchor(text: string, index: number, fontSizePx: number): { x: number; y: number } {
   const lines = textLines(text)
   const box = estimateTextBox(text, fontSizePx)
   let remaining = Math.max(0, Math.min(index, text.length))
@@ -177,19 +170,13 @@ export interface SparkleLayout {
  * lets the preview and the ASS burn agree without sharing any state.
  */
 export function sparklesFor(o: SparkleLayout): Sparkle[] {
-  const density = Math.max(
-    SPARKLE_DENSITY_RANGE.min,
-    Math.min(SPARKLE_DENSITY_RANGE.max, o.effect.density)
-  )
+  const density = Math.max(SPARKLE_DENSITY_RANGE.min, Math.min(SPARKLE_DENSITY_RANGE.max, o.effect.density))
   const dur = Math.max(0.01, o.durSec)
   // Work back from "how many are on screen at once" to how many to spawn: each
   // lives ~SPARKLE_LIFE_SEC, so holding `concurrent` alive across `dur` needs
   // that many lifetimes' worth of births.
   const concurrent = Math.min(MAX_CONCURRENT_SPARKLES, density * CONCURRENT_PER_DENSITY)
-  const count = Math.min(
-    MAX_SPARKLES,
-    Math.max(1, Math.round((concurrent * dur) / SPARKLE_LIFE_SEC))
-  )
+  const count = Math.min(MAX_SPARKLES, Math.max(1, Math.round((concurrent * dur) / SPARKLE_LIFE_SEC)))
   const box = estimateTextBox(o.text, o.fontSizePx)
   const typeSec = o.typewriterSec ?? 0
   // Sparkles ride slightly outside the text block so they frame the glyphs

@@ -19,12 +19,7 @@ import type {
   TextStyleBase,
   VideoContent
 } from '@shared/project'
-import {
-  audioClipEnd,
-  effectiveCaptionStyle,
-  effectiveOut,
-  videoSpeed
-} from '@shared/project'
+import { audioClipEnd, effectiveCaptionStyle, effectiveOut, videoSpeed } from '@shared/project'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { cellSpan, FULL_CELL, layoutCellRect } from '@shared/layouts'
@@ -470,7 +465,11 @@ function ResizeHandles({
               data-handle={h}
               data-pinned={px !== x || py !== y ? '' : undefined}
               onPointerDown={(e) => onStart(e, h)}
-              style={{ left: pct(px - frame.x, frame.w), top: pct(py - frame.y, frame.h), cursor: handleCursor(h, deg) }}
+              style={{
+                left: pct(px - frame.x, frame.w),
+                top: pct(py - frame.y, frame.h),
+                cursor: handleCursor(h, deg)
+              }}
               className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-sky-500 bg-white shadow"
             />
           )
@@ -728,9 +727,7 @@ function VideoLayerView({
   // (preservesPitch) like the export's atempo — but a ramped clip is muted on
   // both sides (no variable-tempo export path).
   const ramped = hasSpeedRamp(content)
-  const speed = ramped
-    ? videoSpeedAtSource(content, target)
-    : videoSpeed(content)
+  const speed = ramped ? videoSpeedAtSource(content, target) : videoSpeed(content)
   useEffect(() => {
     const v = ref.current
     if (v && v.playbackRate !== speed) v.playbackRate = speed
@@ -931,9 +928,7 @@ function LayoutLayerView({
           )
         }
         // Empty / out-of-span cell: outline it while selected so the slots show.
-        return selected ? (
-          <div key={i} style={rel} className="border border-dashed border-white/25" />
-        ) : null
+        return selected ? <div key={i} style={rel} className="border border-dashed border-white/25" /> : null
       })}
     </div>
   )
@@ -978,235 +973,230 @@ function StackLayer({
   const [editing, setEditing] = useState(false)
   const layer = withKeyframedTransform(rawLayer, time)
 
-        // Keyframed opacity (video/image): same shared interpolation the export
-        // bakes into its sendcmd `aa` ramp — applied on the layer box.
-        const kfOp = layerTransformAt(rawLayer, time).opacity
+  // Keyframed opacity (video/image): same shared interpolation the export
+  // bakes into its sendcmd `aa` ramp — applied on the layer box.
+  const kfOp = layerTransformAt(rawLayer, time).opacity
 
-        if (layer.content.kind === 'video') {
-          const content = layer.content
-          const asset = assetById.get(content.mediaId)
-          const box = {
-            ...mediaBox(layer, mediaAspect(asset, content)),
-            zIndex: z,
-            ...(kfOp < 1 ? { opacity: kfOp } : {})
-          }
-          if (!asset?.proxyReady || !asset.probe.video) {
-            return (
-              <div
-                key={layer.id}
-                style={box}
-                onPointerDown={onMoveDown}
-                data-resizebox={selected ? '' : undefined}
-                className={`flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500 ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : ''}`}
-              >
-                {asset ? (
-                  <img src={thumbUrl(asset)} alt="" className="h-full w-full object-cover opacity-40" />
-                ) : (
-                  'missing'
-                )}
-              </div>
-            )
-          }
-          return (
-            <VideoLayerView
-              key={layer.id}
-              layer={layer}
-              content={content}
-              asset={asset}
-              time={time}
-              playing={playing}
-              selected={selected}
-              boxStyle={box}
-              onMoveDown={onMoveDown}
-              muted={muted}
-            />
-          )
+  if (layer.content.kind === 'video') {
+    const content = layer.content
+    const asset = assetById.get(content.mediaId)
+    const box = {
+      ...mediaBox(layer, mediaAspect(asset, content)),
+      zIndex: z,
+      ...(kfOp < 1 ? { opacity: kfOp } : {})
+    }
+    if (!asset?.proxyReady || !asset.probe.video) {
+      return (
+        <div
+          key={layer.id}
+          style={box}
+          onPointerDown={onMoveDown}
+          data-resizebox={selected ? '' : undefined}
+          className={`flex items-center justify-center overflow-hidden bg-zinc-900/70 text-[10px] text-zinc-500 ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : ''}`}
+        >
+          {asset ? <img src={thumbUrl(asset)} alt="" className="h-full w-full object-cover opacity-40" /> : 'missing'}
+        </div>
+      )
+    }
+    return (
+      <VideoLayerView
+        key={layer.id}
+        layer={layer}
+        content={content}
+        asset={asset}
+        time={time}
+        playing={playing}
+        selected={selected}
+        boxStyle={box}
+        onMoveDown={onMoveDown}
+        muted={muted}
+      />
+    )
+  }
+
+  if (layer.content.kind === 'image') {
+    const content = layer.content
+    const asset = assetById.get(content.mediaId)
+    // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
+    const base = mediaAspect(asset, {})
+    const cr = content.crop
+    const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
+    const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
+    const odd = q === 1 || q === 3
+    const box = {
+      ...mediaBox(layer, aspect),
+      zIndex: z,
+      containerType: 'size' as const,
+      ...(kfOp < 1 ? { opacity: kfOp } : {})
+    }
+    // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
+    // box, so swap its width/height (cqw/cqh resolve to the box via its
+    // container context) for odd quarter-turns.
+    const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
+    const imgStyle: CSSProperties = cr
+      ? {
+          position: 'absolute',
+          width: `${100 / cr.w}%`,
+          height: `${100 / cr.h}%`,
+          left: `${-(cr.x / cr.w) * 100}%`,
+          top: `${-(cr.y / cr.h) * 100}%`,
+          objectFit: 'fill',
+          maxWidth: 'none',
+          opacity: content.opacity
         }
-
-        if (layer.content.kind === 'image') {
-          const content = layer.content
-          const asset = assetById.get(content.mediaId)
-          // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
-          const base = mediaAspect(asset, {})
-          const cr = content.crop
-          const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
-          const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
-          const odd = q === 1 || q === 3
-          const box = {
-            ...mediaBox(layer, aspect),
-            zIndex: z,
-            containerType: 'size' as const,
-            ...(kfOp < 1 ? { opacity: kfOp } : {})
-          }
-          // Inner wrapper holds the un-rotated crop; rotating it 90° must fill the
-          // box, so swap its width/height (cqw/cqh resolve to the box via its
-          // container context) for odd quarter-turns.
-          const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
-          const imgStyle: CSSProperties = cr
-            ? {
-                position: 'absolute',
-                width: `${100 / cr.w}%`,
-                height: `${100 / cr.h}%`,
-                left: `${-(cr.x / cr.w) * 100}%`,
-                top: `${-(cr.y / cr.h) * 100}%`,
-                objectFit: 'fill',
-                maxWidth: 'none',
-                opacity: content.opacity
-              }
-            : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
-          return (
-            <div
-              key={layer.id}
-              style={box}
-              onPointerDown={onMoveDown}
-              data-resizebox={selected ? '' : undefined}
-              className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '50%',
-                  width: odd ? '100cqh' : '100cqw',
-                  height: odd ? '100cqw' : '100cqh',
-                  transform: `translate(-50%, -50%) rotate(${q * 90}deg) ${flip}`,
-                  overflow: 'hidden'
-                }}
-              >
-                <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} style={imgStyle} />
-              </div>
-            </div>
-          )
-        }
-
-        if (layer.content.kind === 'layout') {
-          const content = layer.content
-          // The wrapper is the layer's transformed FULL-FRAME rect; cells sit
-          // inside at their plain preset fractions (the wrapper carries the
-          // move/zoom) — same numbers `layoutCellRect` gives the export.
-          const frameRect = layoutCellRect(layer, FULL_CELL, frame)
-          const box: CSSProperties = {
+      : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
+    return (
+      <div
+        key={layer.id}
+        style={box}
+        onPointerDown={onMoveDown}
+        data-resizebox={selected ? '' : undefined}
+        className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
+      >
+        <div
+          style={{
             position: 'absolute',
-            left: pct(frameRect.x, LOGICAL.width),
-            top: pct(frameRect.y, LOGICAL.height),
-            width: pct(frameRect.w, LOGICAL.width),
-            height: pct(frameRect.h, LOGICAL.height),
-            zIndex: z
-          }
-          return (
-            <LayoutLayerView
-              key={layer.id}
-              layer={layer}
-              content={content}
-              assetById={assetById}
-              time={time}
-              playing={playing}
-              selected={selected}
-              boxStyle={box}
-              onMoveDown={onMoveDown}
-              depth={depth}
-              muted={muted}
-            />
-          )
-        }
+            left: '50%',
+            top: '50%',
+            width: odd ? '100cqh' : '100cqw',
+            height: odd ? '100cqw' : '100cqh',
+            transform: `translate(-50%, -50%) rotate(${q * 90}deg) ${flip}`,
+            overflow: 'hidden'
+          }}
+        >
+          <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} style={imgStyle} />
+        </div>
+      </div>
+    )
+  }
 
-        if (layer.content.kind === 'compound') {
-          // Like a layout, the box is the layer-transformed FULL-FRAME rect;
-          // the nested comp fills it on its own local clock (comp t=0 at the
-          // layer start). Compounds ignore transform keyframes (v1 rule).
-          const frameRect = layoutCellRect(layer, FULL_CELL, frame)
-          const box: CSSProperties = {
-            position: 'absolute',
-            left: pct(frameRect.x, LOGICAL.width),
-            top: pct(frameRect.y, LOGICAL.height),
-            width: pct(frameRect.w, LOGICAL.width),
-            height: pct(frameRect.h, LOGICAL.height),
-            zIndex: z,
-            containerType: 'size' as const
-          }
-          return (
-            <div
-              style={box}
-              onPointerDown={onMoveDown}
-              data-resizebox={selected ? '' : undefined}
-              className={`overflow-hidden ${
-                selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'
-              }`}
-            >
-              <CompFill
-                comp={layer.content.comp}
-                time={time - layer.startSec}
-                playing={playing}
-                assetById={assetById}
-                depth={depth + 1}
-                muted={muted}
-              />
-            </div>
-          )
-        }
+  if (layer.content.kind === 'layout') {
+    const content = layer.content
+    // The wrapper is the layer's transformed FULL-FRAME rect; cells sit
+    // inside at their plain preset fractions (the wrapper carries the
+    // move/zoom) — same numbers `layoutCellRect` gives the export.
+    const frameRect = layoutCellRect(layer, FULL_CELL, frame)
+    const box: CSSProperties = {
+      position: 'absolute',
+      left: pct(frameRect.x, LOGICAL.width),
+      top: pct(frameRect.y, LOGICAL.height),
+      width: pct(frameRect.w, LOGICAL.width),
+      height: pct(frameRect.h, LOGICAL.height),
+      zIndex: z
+    }
+    return (
+      <LayoutLayerView
+        key={layer.id}
+        layer={layer}
+        content={content}
+        assetById={assetById}
+        time={time}
+        playing={playing}
+        selected={selected}
+        boxStyle={box}
+        onMoveDown={onMoveDown}
+        depth={depth}
+        muted={muted}
+      />
+    )
+  }
 
-        // Text layer — the same `TextBlock` a caption renders through. Explicit
-        // `widthPx` (from a side-resize) fixes the wrap width; otherwise it hugs
-        // content up to the shared frame-relative wrap width. Animation state
-        // comes from the shared per-frame helper (playhead-driven, so
-        // scrub/pause stay exact — never CSS animations).
-        const content = layer.content
-        const textAnim = effectiveTextAnimation(content)
-        const anim = textAnimStateAt(textAnim, layer.startSec, layer.endSec, content.text, time)
-        // Sparkles: same shared generator the export burns from, fed the LOGICAL
-        // font size here and the output-scaled one there. Every offset it returns
-        // is a multiple of that size, so the two layouts agree at any preset.
-        const sparkleEffect = activeSparkle(content.effects)
-        const layerDur = Math.max(0.01, layer.endSec - layer.startSec)
-        const sparkles = sparkleEffect
-          ? sparklesFor({
-              effect: sparkleEffect,
-              text: content.text,
-              fontSizePx: content.fontSizePx,
-              durSec: layerDur,
-              typewriterSec:
-                textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
-            })
-          : []
-        // A slide travels along the text's OWN (rotated) axis — the export's
-        // \move runs about a fixed \org, which turns it the same way.
-        const rot = layerRotation(layer)
-        const slide = rotateVec(0, anim.dy, rot)
-        // Straight-line motion: text follows its keyframes for POSITION only,
-        // through the same `textMotion` the export burns from.
-        const mo = textMotion(layer.keyframes)
-        const pos = mo ? motionPosAt(mo, time - layer.startSec) : { x: layer.x, y: layer.y }
-        return (
-          <TextBlock
-            key={layer.id}
-            s={content}
-            x={pos.x + slide.x}
-            y={pos.y + slide.y}
-            wrap={{ widthPx: content.widthPx, wrapWidthPx: textWrapWidth(frame.w) }}
-            rotationDeg={rot}
-            scale={layer.scale * anim.scale}
-            opacity={anim.opacity}
-            zIndex={z}
-            onPointerDown={onMoveDown}
-            onDoubleClick={editable ? () => setEditing(true) : undefined}
-            handleTarget={selected}
-            className={`cursor-move ${selected ? 'outline-dashed outline-2 outline-sky-400' : ''}`}
-          >
-            {editing ? (
-              <InlineTextEditor
-                initial={content.text}
-                color={content.gradient ? '#ffffff' : content.color}
-                onChange={(text) => useProject.getState().updateLayerContent(layer.id, { text })}
-                onDone={() => setEditing(false)}
-              />
-            ) : (
-              <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
-            )}
-            {!editing && sparkleEffect && (
-              <Sparkles sparkles={sparkles} color={sparkleEffect.color} tLocal={time - layer.startSec} />
-            )}
-          </TextBlock>
-        )
+  if (layer.content.kind === 'compound') {
+    // Like a layout, the box is the layer-transformed FULL-FRAME rect;
+    // the nested comp fills it on its own local clock (comp t=0 at the
+    // layer start). Compounds ignore transform keyframes (v1 rule).
+    const frameRect = layoutCellRect(layer, FULL_CELL, frame)
+    const box: CSSProperties = {
+      position: 'absolute',
+      left: pct(frameRect.x, LOGICAL.width),
+      top: pct(frameRect.y, LOGICAL.height),
+      width: pct(frameRect.w, LOGICAL.width),
+      height: pct(frameRect.h, LOGICAL.height),
+      zIndex: z,
+      containerType: 'size' as const
+    }
+    return (
+      <div
+        style={box}
+        onPointerDown={onMoveDown}
+        data-resizebox={selected ? '' : undefined}
+        className={`overflow-hidden ${
+          selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'
+        }`}
+      >
+        <CompFill
+          comp={layer.content.comp}
+          time={time - layer.startSec}
+          playing={playing}
+          assetById={assetById}
+          depth={depth + 1}
+          muted={muted}
+        />
+      </div>
+    )
+  }
+
+  // Text layer — the same `TextBlock` a caption renders through. Explicit
+  // `widthPx` (from a side-resize) fixes the wrap width; otherwise it hugs
+  // content up to the shared frame-relative wrap width. Animation state
+  // comes from the shared per-frame helper (playhead-driven, so
+  // scrub/pause stay exact — never CSS animations).
+  const content = layer.content
+  const textAnim = effectiveTextAnimation(content)
+  const anim = textAnimStateAt(textAnim, layer.startSec, layer.endSec, content.text, time)
+  // Sparkles: same shared generator the export burns from, fed the LOGICAL
+  // font size here and the output-scaled one there. Every offset it returns
+  // is a multiple of that size, so the two layouts agree at any preset.
+  const sparkleEffect = activeSparkle(content.effects)
+  const layerDur = Math.max(0.01, layer.endSec - layer.startSec)
+  const sparkles = sparkleEffect
+    ? sparklesFor({
+        effect: sparkleEffect,
+        text: content.text,
+        fontSizePx: content.fontSizePx,
+        durSec: layerDur,
+        typewriterSec: textAnim?.in === 'typewriter' ? clampAnimWindows(textAnim, layerDur).inSec : 0
+      })
+    : []
+  // A slide travels along the text's OWN (rotated) axis — the export's
+  // \move runs about a fixed \org, which turns it the same way.
+  const rot = layerRotation(layer)
+  const slide = rotateVec(0, anim.dy, rot)
+  // Straight-line motion: text follows its keyframes for POSITION only,
+  // through the same `textMotion` the export burns from.
+  const mo = textMotion(layer.keyframes)
+  const pos = mo ? motionPosAt(mo, time - layer.startSec) : { x: layer.x, y: layer.y }
+  return (
+    <TextBlock
+      key={layer.id}
+      s={content}
+      x={pos.x + slide.x}
+      y={pos.y + slide.y}
+      wrap={{ widthPx: content.widthPx, wrapWidthPx: textWrapWidth(frame.w) }}
+      rotationDeg={rot}
+      scale={layer.scale * anim.scale}
+      opacity={anim.opacity}
+      zIndex={z}
+      onPointerDown={onMoveDown}
+      onDoubleClick={editable ? () => setEditing(true) : undefined}
+      handleTarget={selected}
+      className={`cursor-move ${selected ? 'outline-dashed outline-2 outline-sky-400' : ''}`}
+    >
+      {editing ? (
+        <InlineTextEditor
+          initial={content.text}
+          color={content.gradient ? '#ffffff' : content.color}
+          onChange={(text) => useProject.getState().updateLayerContent(layer.id, { text })}
+          onDone={() => setEditing(false)}
+        />
+      ) : (
+        <StyledText s={content} text={content.text} reveal={anim.revealChars} litWords={anim.litWords} />
+      )}
+      {!editing && sparkleEffect && (
+        <Sparkles sparkles={sparkles} color={sparkleEffect.color} tLocal={time - layer.startSec} />
+      )}
+    </TextBlock>
+  )
 }
 
 /** The same four-point star the ASS burn draws (`SPARKLE_PATH`), as SVG. Both
@@ -1224,15 +1214,7 @@ const SPARKLE_SVG_PATH = 'M0,-10 L2,-2 L10,0 L2,2 L0,10 L-2,2 L-10,0 L-2,-2 Z'
  * does by computing sparkles at the output-scaled font size. Both dimensions
  * use `cqw` so the star stays round (logical px are square).
  */
-function Sparkles({
-  sparkles,
-  color,
-  tLocal
-}: {
-  sparkles: Sparkle[]
-  color: string
-  tLocal: number
-}): JSX.Element {
+function Sparkles({ sparkles, color, tLocal }: { sparkles: Sparkle[]; color: string; tLocal: number }): JSX.Element {
   return (
     <>
       {sparkles.map((s, i) => {
@@ -1320,9 +1302,7 @@ function CompFill({
       <div style={frameCanvasStyle(frame)}>
         {/* The comp's own audio track — without this a comp whose clips are
             muted and extracted to its audio lane would play silent. */}
-        {!muted && (
-          <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />
-        )}
+        {!muted && <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />}
         {active.map((l, i) => (
           <StackLayer
             key={l.id}
@@ -1456,7 +1436,10 @@ export function PreviewStage(): JSX.Element {
           if (l.id !== layer.id) return l
           if (path) return movePath(l, raw, nx - layer.x, ny - layer.y)
           if (kfd) {
-            return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale, ...kfExtra }) }
+            return {
+              ...l,
+              keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale, ...kfExtra })
+            }
           }
           return { ...l, x: nx, y: ny }
         })
@@ -1487,11 +1470,7 @@ export function PreviewStage(): JSX.Element {
     const raw = getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
     const path = onPath(raw)
     const kfd = !path && !!layer.keyframes?.length && !isText
-    const kfT = clamp(
-      usePlayback.getState().time - layer.startSec,
-      0,
-      Math.max(0, layer.endSec - layer.startSec)
-    )
+    const kfT = clamp(usePlayback.getState().time - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
     const rOp = layerTransformAt(layer, usePlayback.getState().time).opacity
     const kfExtra = rOp < 1 ? { opacity: rOp } : {}
     startDragWithUndo((ev) => {
@@ -1509,7 +1488,9 @@ export function PreviewStage(): JSX.Element {
         if (!path) return l
         const f = isCorner ? nb.w / startBox.w : 1
         const moved = movePath(l, raw, x - layer.x, y - layer.y)
-        return f === 1 ? moved : { ...moved, keyframes: moved.keyframes?.map((k) => ({ ...k, scale: clamp(k.scale * f, 0.05, 8) })) }
+        return f === 1
+          ? moved
+          : { ...moved, keyframes: moved.keyframes?.map((k) => ({ ...k, scale: clamp(k.scale * f, 0.05, 8) })) }
       }
       useProject.getState().liveUpdate((p) => ({
         ...p,
@@ -1572,11 +1553,7 @@ export function PreviewStage(): JSX.Element {
   // Rotate-handle drag — THE one rotate interaction; `apply` is the only part
   // that differs between a layer and a caption. Relative to where the drag
   // began (no jump on grab), snapping near right angles; Shift steps by 15°.
-  const startRotate = (
-    e: ReactPointerEvent,
-    startDeg: number,
-    apply: (deg: number) => void
-  ): void => {
+  const startRotate = (e: ReactPointerEvent, startDeg: number, apply: (deg: number) => void): void => {
     e.stopPropagation()
     e.preventDefault()
     const stage = stageRef.current
@@ -1699,7 +1676,12 @@ export function PreviewStage(): JSX.Element {
         >
           {/* The canonical canvas the whole stack lives in (pointer math and
               box measuring read THIS element — it is 1080 logical px wide). */}
-          <div ref={stageRef} data-testid="preview-canvas" style={frameCanvasStyle(frame)} onPointerDown={deselectOnBackground}>
+          <div
+            ref={stageRef}
+            data-testid="preview-canvas"
+            style={frameCanvasStyle(frame)}
+            onPointerDown={deselectOnBackground}
+          >
             {/* Audio track of the composition being edited. Nested comps render
                 their own through CompFill, so every level reaches the mix. */}
             <CompAudioTrack clips={audioClips} assetById={assetById} time={time} playing={playing} />
@@ -1808,7 +1790,12 @@ export function PreviewStage(): JSX.Element {
         {/* Captions are text: they get the same rotate handle (no resize —
             their size is the style's font size). */}
         {handleCaption && handleBox && (
-          <ResizeHandles box={handleBox} frame={frame} handles={[]} onRotateStart={(e) => startCaptionRotate(e, handleCaption)} />
+          <ResizeHandles
+            box={handleBox}
+            frame={frame}
+            handles={[]}
+            onRotateStart={(e) => startCaptionRotate(e, handleCaption)}
+          />
         )}
       </div>
     </FrameCtx.Provider>

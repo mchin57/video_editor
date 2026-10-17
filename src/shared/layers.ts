@@ -35,7 +35,11 @@ export function fitScale(aspect: number, frame: FrameRect = FULL_FRAME): number 
  * frame-relative already (font px / `layoutCellRect`), so theirs is 1. An
  * unknown source aspect (media not probed yet) also reads as 1.
  */
-export function layerFitScale(layer: Pick<Layer, 'content'>, sourceAspect: number | undefined, frame: FrameRect): number {
+export function layerFitScale(
+  layer: Pick<Layer, 'content'>,
+  sourceAspect: number | undefined,
+  frame: FrameRect
+): number {
   const c = layer.content
   if (c.kind === 'video') {
     const aspect = c.crop ? c.crop.w / c.crop.h : sourceAspect
@@ -416,11 +420,7 @@ export function opacityKeyframePoints(layer: Layer): { t: number; o: number }[] 
  * is replaced — a canvas drag at the playhead updates rather than stacking).
  * Returns a new sorted array.
  */
-export function upsertKeyframe(
-  kfs: LayerKeyframe[] | undefined,
-  kf: LayerKeyframe,
-  eps = 0.02
-): LayerKeyframe[] {
+export function upsertKeyframe(kfs: LayerKeyframe[] | undefined, kf: LayerKeyframe, eps = 0.02): LayerKeyframe[] {
   const kept = (kfs ?? []).filter((k) => Math.abs(k.tSec - kf.tSec) > eps)
   return [...kept, kf].sort((a, b) => a.tSec - b.tSec)
 }
@@ -453,12 +453,10 @@ export function layerLabel(layer: Layer): string {
  */
 export function applyVisibleOrder(layers: Layer[], visibleBackToFront: string[]): Layer[] {
   const byId = new Map(layers.map((l) => [l.id, l]))
-  const ordered = visibleBackToFront
-    .map((id) => byId.get(id))
-    .filter((l): l is Layer => l != null)
+  const ordered = visibleBackToFront.map((id) => byId.get(id)).filter((l): l is Layer => l != null)
   const visibleSet = new Set(visibleBackToFront)
   let vi = 0
-  return layers.map((l) => (visibleSet.has(l.id) ? ordered[vi++] ?? l : l))
+  return layers.map((l) => (visibleSet.has(l.id) ? (ordered[vi++] ?? l) : l))
 }
 
 /** Move the layer at `from` to index `to`, returning a new array. */
@@ -473,11 +471,7 @@ export function moveLayer(layers: Layer[], from: number, to: number): Layer[] {
 /** True if some non-empty text layer is on screen during the first 3 seconds. */
 export function hookCovered(layers: Layer[]): boolean {
   return layers.some(
-    (l) =>
-      l.content.kind === 'text' &&
-      l.content.text.trim().length > 0 &&
-      l.startSec < HOOK_WINDOW_SEC &&
-      l.endSec > 0
+    (l) => l.content.kind === 'text' && l.content.text.trim().length > 0 && l.startSec < HOOK_WINDOW_SEC && l.endSec > 0
   )
 }
 
@@ -540,12 +534,7 @@ export function makeImageLayer(
 
 /** A default text layer placed at the given time window, a third of the way
  *  down the output frame. */
-export function makeTextLayer(
-  id: string,
-  startSec: number,
-  endSec: number,
-  frame: FrameRect = FULL_FRAME
-): Layer {
+export function makeTextLayer(id: string, startSec: number, endSec: number, frame: FrameRect = FULL_FRAME): Layer {
   return {
     id,
     hidden: false,

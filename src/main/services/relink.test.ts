@@ -65,7 +65,11 @@ describe('Relink (docs/MEDIA-POINTERS.md)', () => {
 
     const res = await relinkMedia(a.id, join(root, 'moved', 'a.wav'))
     expect(res.cutsReset).toBe(false)
-    expect(res.asset).toMatchObject({ status: 'ok', originalPath: join(root, 'moved', 'a.wav'), relativePath: 'moved/a.wav' })
+    expect(res.asset).toMatchObject({
+      status: 'ok',
+      originalPath: join(root, 'moved', 'a.wav'),
+      relativePath: 'moved/a.wav'
+    })
     expect(res.alsoFound).toEqual(['b.wav']) // relink one, fix the rest
     expect(getEntry(b.id)!.path).toBe(join(root, 'moved', 'b.wav'))
   })
@@ -125,7 +129,12 @@ describe('Relink (docs/MEDIA-POINTERS.md)', () => {
     expect(check).toMatchObject({ matches: false, placeholder: true })
     const res = await relinkMedia('cccccccccccc', found, true)
     expect(res.cutsReset).toBe(false) // no known old length: the timeline's cut stays
-    expect(res.asset).toMatchObject({ status: 'ok', fileName: 'IMG_9000.wav', kind: 'audio', relativePath: 'footage/IMG_9000.wav' })
+    expect(res.asset).toMatchObject({
+      status: 'ok',
+      fileName: 'IMG_9000.wav',
+      kind: 'audio',
+      relativePath: 'footage/IMG_9000.wav'
+    })
     expect(isUnknownClip(getEntry('cccccccccccc')!.record)).toBe(false)
   })
 

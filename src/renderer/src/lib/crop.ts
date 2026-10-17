@@ -41,13 +41,7 @@ export function clampCrop(crop: CropRect, srcW: number, srcH: number): CropRect 
  * Resize a crop from its top-left by a new width, keeping `aspect` and staying
  * within source bounds (used by the corner drag handle).
  */
-export function resizeCrop(
-  crop: CropRect,
-  newW: number,
-  srcW: number,
-  srcH: number,
-  aspect = OUTPUT_ASPECT
-): CropRect {
+export function resizeCrop(crop: CropRect, newW: number, srcW: number, srcH: number, aspect = OUTPUT_ASPECT): CropRect {
   const maxW = Math.min(srcW - crop.x, (srcH - crop.y) * aspect)
   const w = Math.max(40, Math.min(newW, maxW))
   return clampCrop({ x: crop.x, y: crop.y, w, h: w / aspect }, srcW, srcH)

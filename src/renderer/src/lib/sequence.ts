@@ -100,7 +100,11 @@ export function applySequence(
       )
     }
     const id = ctx.newId()
-    const full = makeVideoLayer(id, item.mediaId, 0, src, { mute: item.hasAudio, frame: ctx.frame, aspect: item.aspect })
+    const full = makeVideoLayer(id, item.mediaId, 0, src, {
+      mute: item.hasAudio,
+      frame: ctx.frame,
+      aspect: item.aspect
+    })
     const tail = trimVideoEnd(full, full.content as VideoContent, outSec)
     const trimmed = trimVideoStart(tail, tail.content as VideoContent, inSec)
     // The trims leave the window where the source sits; slide it to the cursor.
@@ -109,7 +113,9 @@ export function applySequence(
     if (item.hasAudio) {
       const group = ctx.newId()
       layer = { ...layer, linkGroupId: group }
-      audioClips.push(makeExtractedAudioClip(ctx.newId(), item.mediaId, layer.startSec, inSec, outSec, group, ctx.autoJoinLevel))
+      audioClips.push(
+        makeExtractedAudioClip(ctx.newId(), item.mediaId, layer.startSec, inSec, outSec, group, ctx.autoJoinLevel)
+      )
     }
     layers.push(layer)
     placed.push({ layerId: id, mediaId: item.mediaId, inSec, outSec, startSec: layer.startSec, endSec: layer.endSec })

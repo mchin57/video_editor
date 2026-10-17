@@ -42,12 +42,9 @@ const fontSizeInDoc = (page: Page): Promise<number> =>
   })
 
 // The number field, not its paired slider (both are named "Font size").
-const fontSizeField = (page: Page): ReturnType<Page['getByRole']> =>
-  page.getByRole('spinbutton', { name: 'Font size' })
+const fontSizeField = (page: Page): ReturnType<Page['getByRole']> => page.getByRole('spinbutton', { name: 'Font size' })
 
-test('the field can be cleared while typing without snapping to the minimum', async ({
-  appPage: page
-}) => {
+test('the field can be cleared while typing without snapping to the minimum', async ({ appPage: page }) => {
   await addTextLayer(page)
   const field = fontSizeField(page)
   await field.click()
@@ -60,9 +57,7 @@ test('the field can be cleared while typing without snapping to the minimum', as
   expect(await fontSizeInDoc(page)).toBe(90)
 })
 
-test('an intermediate value below the minimum survives until commit', async ({
-  appPage: page
-}) => {
+test('an intermediate value below the minimum survives until commit', async ({ appPage: page }) => {
   await addTextLayer(page)
   const field = fontSizeField(page)
   await field.click()
@@ -75,9 +70,7 @@ test('an intermediate value below the minimum survives until commit', async ({
   expect(await fontSizeInDoc(page)).toBe(120)
 })
 
-test('an in-range value commits live, so the preview follows each keystroke', async ({
-  appPage: page
-}) => {
+test('an in-range value commits live, so the preview follows each keystroke', async ({ appPage: page }) => {
   await addTextLayer(page)
   const field = fontSizeField(page)
   await field.click()
@@ -137,7 +130,9 @@ test('Start (s) cannot be set past End (s) — the layer never inverts', async (
   const start = page.getByRole('spinbutton', { name: 'Start (s)' })
   await start.fill('50')
   await start.press('Enter')
-  const l = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'T1')!)
+  const l = await page.evaluate(() =>
+    window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'T1')!
+  )
   expect(l.endSec).toBe(4)
   expect(l.startSec).toBeLessThan(l.endSec)
   expect(l.startSec).toBeCloseTo(3.8)

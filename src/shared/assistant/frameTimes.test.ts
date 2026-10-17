@@ -16,6 +16,11 @@ describe('frameTimes', () => {
 
   it('never returns more than MAX_FRAMES', () => {
     expect(frameTimes(100, undefined, 50)).toHaveLength(MAX_FRAMES)
-    expect(frameTimes(100, Array.from({ length: 20 }, (_, i) => i))).toHaveLength(MAX_FRAMES)
+    expect(
+      frameTimes(
+        100,
+        Array.from({ length: 20 }, (_, i) => i)
+      )
+    ).toHaveLength(MAX_FRAMES)
   })
 })

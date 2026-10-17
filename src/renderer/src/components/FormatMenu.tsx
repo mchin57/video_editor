@@ -82,9 +82,7 @@ export function FormatMenu(): JSX.Element | null {
 
           <div className="my-2 h-px bg-white/10" />
 
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            Multi-clip layout
-          </div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Multi-clip layout</div>
           <button
             onClick={() => {
               setPickerOpen(true)
@@ -96,8 +94,8 @@ export function FormatMenu(): JSX.Element | null {
             ▦ Add layout at playhead
           </button>
           <p className="mt-2 text-[10px] leading-snug text-zinc-500">
-            Fill the panels and change the arrangement from the{' '}
-            <span className="text-zinc-400">Inspector</span> once a layout is selected.
+            Fill the panels and change the arrangement from the <span className="text-zinc-400">Inspector</span> once a
+            layout is selected.
           </p>
         </div>
       )}

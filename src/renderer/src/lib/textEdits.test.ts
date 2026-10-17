@@ -110,7 +110,11 @@ describe('applyTextEdits', () => {
 
   it('patches only the fields given, merging pill field by field', () => {
     const before = comp()
-    const { comp: c } = applyTextEdits(before, [{ id: 't1', text: 'New title', pill: { enabled: true }, y: 300 }], ctx())
+    const { comp: c } = applyTextEdits(
+      before,
+      [{ id: 't1', text: 'New title', pill: { enabled: true }, y: 300 }],
+      ctx()
+    )
     const t = textOf(c, 't1')
     expect(t.text).toBe('New title')
     expect(t.pill).toEqual({ ...textOf(before, 't1').pill, enabled: true })
@@ -134,7 +138,11 @@ describe('applyTextEdits', () => {
   })
 
   it('patches the caption lane through the reserved id', () => {
-    const { comp: c, results } = applyTextEdits(comp(), [{ id: 'captions', visible: false, y: 1500, color: '#ffff00' }], ctx())
+    const { comp: c, results } = applyTextEdits(
+      comp(),
+      [{ id: 'captions', visible: false, y: 1500, color: '#ffff00' }],
+      ctx()
+    )
     expect(c.captions.enabled).toBe(false)
     expect(c.captions.style).toMatchObject({ y: 1500, color: '#ffff00' })
     expect(results[0]).toEqual({ id: 'captions', kind: 'captionLane', created: false })
@@ -143,7 +151,11 @@ describe('applyTextEdits', () => {
   it('applies a batch in order and hides/shows through visible', () => {
     const { comp: c, results } = applyTextEdits(
       comp(),
-      [{ id: 't1', visible: false }, { id: 'c1', visible: false }, { text: 'more', startSec: 0, endSec: 1 }],
+      [
+        { id: 't1', visible: false },
+        { id: 'c1', visible: false },
+        { text: 'more', startSec: 0, endSec: 1 }
+      ],
       ctx()
     )
     expect(results.map((r) => r.id)).toEqual(['t1', 'c1', 'new1'])
@@ -213,7 +225,14 @@ describe('applyTextEdits', () => {
     const base = comp()
     base.captions = {
       ...base.captions,
-      segments: [cap({ startSec: 2.00041, endSec: 3.99962, words: [w('helo', 2.00041, 2.8), w('wrld', 3, 3.99962)], linkGroupId: 'g' })]
+      segments: [
+        cap({
+          startSec: 2.00041,
+          endSec: 3.99962,
+          words: [w('helo', 2.00041, 2.8), w('wrld', 3, 3.99962)],
+          linkGroupId: 'g'
+        })
+      ]
     }
     base.layers = base.layers.map((l) => (l.id === 'v' ? { ...l, linkGroupId: 'g' } : l))
     const { comp: c } = applyTextEdits(base, [{ id: 'c1', text: 'hello world', startSec: 2, endSec: 4 }], ctx())
@@ -223,7 +242,9 @@ describe('applyTextEdits', () => {
     // A text layer echoing rounded times keeps its exact window too.
     const layered = comp()
     layered.layers = layered.layers.map((l) => (l.id === 't1' ? { ...l, startSec: 1.00049 } : l))
-    const t = applyTextEdits(layered, [{ id: 't1', text: 'x', startSec: 1 }], ctx()).comp.layers.find((l) => l.id === 't1')!
+    const t = applyTextEdits(layered, [{ id: 't1', text: 'x', startSec: 1 }], ctx()).comp.layers.find(
+      (l) => l.id === 't1'
+    )!
     expect(t.startSec).toBe(1.00049)
   })
 
@@ -246,7 +267,14 @@ describe('applyTextEdits', () => {
   it('does not touch the input composition', () => {
     const before = comp()
     const snapshot = JSON.stringify(before)
-    applyTextEdits(before, [{ id: 't1', text: 'x', pill: { padPx: 30 } }, { id: 'c1', text: 'a b c' }], ctx())
+    applyTextEdits(
+      before,
+      [
+        { id: 't1', text: 'x', pill: { padPx: 30 } },
+        { id: 'c1', text: 'a b c' }
+      ],
+      ctx()
+    )
     expect(JSON.stringify(before)).toBe(snapshot)
   })
 })

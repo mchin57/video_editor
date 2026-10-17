@@ -62,9 +62,14 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
 export function describeUndo(c: UndoChanges, fileName: (mediaId: string) => string): string {
   const parts: string[] = []
   const names = (ids: string[]): string => ids.map(fileName).join(', ')
-  if (c.library.removed.length) parts.push(`removed ${plural(c.library.removed.length, 'clip')} from the library (${names(c.library.removed)})`)
-  if (c.library.restored.length) parts.push(`put ${plural(c.library.restored.length, 'clip')} back in the library (${names(c.library.restored)})`)
-  for (const [d, noun] of [[c.layers, 'layer'], [c.audioClips, 'audio clip']] as const) {
+  if (c.library.removed.length)
+    parts.push(`removed ${plural(c.library.removed.length, 'clip')} from the library (${names(c.library.removed)})`)
+  if (c.library.restored.length)
+    parts.push(`put ${plural(c.library.restored.length, 'clip')} back in the library (${names(c.library.restored)})`)
+  for (const [d, noun] of [
+    [c.layers, 'layer'],
+    [c.audioClips, 'audio clip']
+  ] as const) {
     if (d.removed.length) parts.push(`removed ${plural(d.removed.length, noun)} from the timeline`)
     if (d.restored.length) parts.push(`restored ${plural(d.restored.length, noun)} on the timeline`)
     if (d.changed.length) parts.push(`reverted changes to ${plural(d.changed.length, noun)}`)

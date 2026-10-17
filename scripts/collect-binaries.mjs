@@ -78,7 +78,11 @@ const modelSrc =
   process.env.WHISPER_MODEL ??
   [whisperRoot, cliDir]
     .filter((d) => existsSync(d))
-    .flatMap((d) => readdirSync(d).filter((f) => f.toLowerCase().endsWith('.bin')).map((f) => join(d, f)))[0]
+    .flatMap((d) =>
+      readdirSync(d)
+        .filter((f) => f.toLowerCase().endsWith('.bin'))
+        .map((f) => join(d, f))
+    )[0]
 if (!modelSrc || !existsSync(modelSrc)) die('whisper model (*.bin) not found. Set WHISPER_MODEL.')
 copyInto(modelSrc, destWhisper)
 

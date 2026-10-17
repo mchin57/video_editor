@@ -104,6 +104,41 @@ const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
  * data it failed for: the next library refresh (new object) tries again, so a
  * tile drawn a moment before its thumb existed doesn't stay blank for good.
  */
+/** Row packing for an audio band (a whole-source clip ends at its source's length). */
+function packAudioRows(clips: AudioClip[], assetById: Map<string, MediaAsset>): Map<string, number> {
+  return packRows(
+    clips.map((a) => ({
+      id: a.id,
+      startSec: a.startSec,
+      endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
+    }))
+  )
+}
+
+/** Snap targets: layer + audio boundaries, 0 and the end. `skip` (ref keys)
+ *  drops the tiles currently being dragged, so a moving group never snaps to
+ *  its own members. */
+function snapTargetsFor(
+  layers: Layer[],
+  audioClips: AudioClip[],
+  assetById: Map<string, MediaAsset>,
+  total: number,
+  skip?: Set<string>
+): number[] {
+  const t = new Set<number>([0, total])
+  for (const l of layers) {
+    if (skip?.has(refKey({ kind: 'layer', id: l.id }))) continue
+    t.add(l.startSec)
+    t.add(l.endSec)
+  }
+  for (const a of audioClips) {
+    if (skip?.has(refKey({ kind: 'audio', id: a.id }))) continue
+    t.add(a.startSec)
+    t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
+  }
+  return [...t]
+}
+
 function TileThumb({ asset }: { asset: MediaAsset }): JSX.Element | null {
   const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
   if (failedFor === asset) return null
@@ -154,10 +189,11 @@ function TileDescription({
   const group = { onMouseEnter: () => intent.enter(), onMouseLeave: () => intent.leave() }
   const boxRef = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<HTMLDivElement>(null)
-  useHoverGuard(
-    { enter: () => intent.enter(), leave: () => intent.leave() },
-    () => [at.el, boxRef.current, bridgeRef.current]
-  )
+  useHoverGuard({ enter: () => intent.enter(), leave: () => intent.leave() }, () => [
+    at.el,
+    boxRef.current,
+    bridgeRef.current
+  ])
   return createPortal(
     <>
       <div
@@ -224,13 +260,48 @@ function ToolbarButton({
 // `satisfies` makes that exhaustive: adding a band to the tile model without
 // giving it colours here is a compile error, so the two can't drift apart.
 const LANE_STYLE = {
-  clips: { dot: 'bg-sky-400', tint: 'border-sky-400/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/20', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
-  layout: { dot: 'bg-fuchsia-400', tint: 'border-fuchsia-400/30 bg-fuchsia-500/10', block: 'border-fuchsia-400/40 bg-fuchsia-500/20', sel: 'border-fuchsia-300 ring-1 ring-fuchsia-300/50' },
-  text: { dot: 'bg-violet-400', tint: 'border-violet-400/30 bg-violet-500/10', block: 'border-violet-400/40 bg-violet-500/20', sel: 'border-violet-300 ring-1 ring-violet-300/50' },
-  image: { dot: 'bg-orange-400', tint: 'border-orange-400/30 bg-orange-500/10', block: 'border-orange-400/40 bg-orange-500/20', sel: 'border-orange-300 ring-1 ring-orange-300/50' },
-  caption: { dot: 'bg-emerald-400', tint: 'border-emerald-400/30 bg-emerald-500/10', block: 'border-emerald-400/40 bg-emerald-500/25', sel: 'border-emerald-300 ring-1 ring-emerald-300/50' },
-  audio: { dot: 'bg-sky-300', tint: 'border-sky-300/30 bg-sky-500/10', block: 'border-sky-400/40 bg-sky-500/15', sel: 'border-sky-300 ring-1 ring-sky-300/50' },
-  fx: { dot: 'bg-teal-300', tint: 'border-teal-300/30 bg-teal-500/10', block: 'border-teal-400/40 bg-teal-500/15', sel: 'border-teal-300 ring-1 ring-teal-300/50' }
+  clips: {
+    dot: 'bg-sky-400',
+    tint: 'border-sky-400/30 bg-sky-500/10',
+    block: 'border-sky-400/40 bg-sky-500/20',
+    sel: 'border-sky-300 ring-1 ring-sky-300/50'
+  },
+  layout: {
+    dot: 'bg-fuchsia-400',
+    tint: 'border-fuchsia-400/30 bg-fuchsia-500/10',
+    block: 'border-fuchsia-400/40 bg-fuchsia-500/20',
+    sel: 'border-fuchsia-300 ring-1 ring-fuchsia-300/50'
+  },
+  text: {
+    dot: 'bg-violet-400',
+    tint: 'border-violet-400/30 bg-violet-500/10',
+    block: 'border-violet-400/40 bg-violet-500/20',
+    sel: 'border-violet-300 ring-1 ring-violet-300/50'
+  },
+  image: {
+    dot: 'bg-orange-400',
+    tint: 'border-orange-400/30 bg-orange-500/10',
+    block: 'border-orange-400/40 bg-orange-500/20',
+    sel: 'border-orange-300 ring-1 ring-orange-300/50'
+  },
+  caption: {
+    dot: 'bg-emerald-400',
+    tint: 'border-emerald-400/30 bg-emerald-500/10',
+    block: 'border-emerald-400/40 bg-emerald-500/25',
+    sel: 'border-emerald-300 ring-1 ring-emerald-300/50'
+  },
+  audio: {
+    dot: 'bg-sky-300',
+    tint: 'border-sky-300/30 bg-sky-500/10',
+    block: 'border-sky-400/40 bg-sky-500/15',
+    sel: 'border-sky-300 ring-1 ring-sky-300/50'
+  },
+  fx: {
+    dot: 'bg-teal-300',
+    tint: 'border-teal-300/30 bg-teal-500/10',
+    block: 'border-teal-400/40 bg-teal-500/15',
+    sel: 'border-teal-300 ring-1 ring-teal-300/50'
+  }
 } as const satisfies Record<TileLane, { dot: string; tint: string; block: string; sel: string }>
 
 type LaneKey = TileLane
@@ -297,8 +368,7 @@ export function Timeline(): JSX.Element {
   const selection = useUi((s) => s.selection)
   const selectItems = useUi((s) => s.selectItems)
   const selKeys = useMemo(() => refKeys(selection), [selection])
-  const isSelected = (kind: TimelineItemRef['kind'], id: string): boolean =>
-    selKeys.has(refKey({ kind, id }))
+  const isSelected = (kind: TimelineItemRef['kind'], id: string): boolean => selKeys.has(refKey({ kind, id }))
 
   const addLayer = useProject((s) => s.addLayer)
   const addCaption = useProject((s) => s.addCaption)
@@ -467,25 +537,15 @@ export function Timeline(): JSX.Element {
   // gets its own band — sharing the Audio lane hid which clip it belongs to.
   const dryClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'audio'), [audioClips])
   const fxClips = useMemo(() => audioClips.filter((a) => audioLane(a) === 'fx'), [audioClips])
-  const packAudio = (clips: AudioClip[]): Map<string, number> =>
-    packRows(
-      clips.map((a) => ({
-        id: a.id,
-        startSec: a.startSec,
-        endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
-      }))
-    )
-  const audRows = useMemo(() => packAudio(dryClips), [dryClips, assetById])
-  const fxRows = useMemo(() => packAudio(fxClips), [fxClips, assetById])
+  const audRows = useMemo(() => packAudioRows(dryClips, assetById), [dryClips, assetById])
+  const fxRows = useMemo(() => packAudioRows(fxClips, assetById), [fxClips, assetById])
 
   // Lane layout: Clips / Text / Image always show (≥1 row as drop targets),
   // Captions only when present, Audio always.
   const laneDefs = [
     { key: 'clips' as const, label: 'Clips', rows: rowCount(grouped.vRows) },
     // Layout lane only when a layout exists (rare enough not to burn a band).
-    ...(grouped.layout.length > 0
-      ? [{ key: 'layout' as const, label: 'Layout', rows: rowCount(grouped.lRows) }]
-      : []),
+    ...(grouped.layout.length > 0 ? [{ key: 'layout' as const, label: 'Layout', rows: rowCount(grouped.lRows) }] : []),
     { key: 'text' as const, label: 'Text', rows: rowCount(grouped.tRows) },
     { key: 'image' as const, label: 'Image', rows: rowCount(grouped.iRows) },
     ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
@@ -541,10 +601,7 @@ export function Timeline(): JSX.Element {
    * calling `edgeAutoScroll` itself and pins the HEIGHT instead. Releasing the
    * pin rides on the `stop()` every caller already runs in its `onUp`.
    */
-  const startEdgeScrollX = (
-    sc: HTMLElement,
-    onScroll: () => void
-  ): { setX: (x: number) => void; stop: () => void } => {
+  const startEdgeScrollX = (sc: HTMLElement, onScroll: () => void): { setX: (x: number) => void; stop: () => void } => {
     // Arm the ratchet; the effect above seeds and then maintains the floor from
     // the live content width, so it keeps up with a drag that reverses.
     setDraggingX(true)
@@ -559,24 +616,12 @@ export function Timeline(): JSX.Element {
     }
   }
 
-  // Snap targets: layer + audio boundaries, playhead, 0, end. `skip` (ref keys)
-  // drops the tiles currently being dragged, so a moving group never snaps to
-  // its own members.
-  const collectSnapTargets = (skip?: Set<string>): number[] => {
-    const t = new Set<number>([0, total])
-    for (const l of layers) {
-      if (skip?.has(refKey({ kind: 'layer', id: l.id }))) continue
-      t.add(l.startSec)
-      t.add(l.endSec)
-    }
-    for (const a of audioClips) {
-      if (skip?.has(refKey({ kind: 'audio', id: a.id }))) continue
-      t.add(a.startSec)
-      t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
-    }
-    return [...t]
-  }
-  const snapTargets = useMemo(() => collectSnapTargets(), [layers, audioClips, assetById, total])
+  const collectSnapTargets = (skip?: Set<string>): number[] =>
+    snapTargetsFor(layers, audioClips, assetById, total, skip)
+  const snapTargets = useMemo(
+    () => snapTargetsFor(layers, audioClips, assetById, total),
+    [layers, audioClips, assetById, total]
+  )
   const snapSec = (v: number): number => snap(v, snapTargets, SNAP_PX / pxPerSec)
 
   /** Source duration of a library asset (0 = unknown, the convention the split
@@ -675,7 +720,9 @@ export function Timeline(): JSX.Element {
     const nid = crypto.randomUUID()
     const kind = assetKind(asset)
     if (kind === 'image') {
-      addLayer(makeImageLayer(nid, id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) }))
+      addLayer(
+        makeImageLayer(nid, id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) })
+      )
       selectLayer(nid)
     } else if (kind === 'audio') {
       addAudioClip({
@@ -865,12 +912,11 @@ export function Timeline(): JSX.Element {
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
-    const deltaFor = (clientX: number): number =>
-      (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
+    const deltaFor = (clientX: number): number => (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, endSec } = layer
     const srcOut =
       layer.content.kind === 'video'
-        ? assetById.get(layer.content.mediaId)?.probe.durationSec ?? layer.content.outSec
+        ? (assetById.get(layer.content.mediaId)?.probe.durationSec ?? layer.content.outSec)
         : 0
     let last: PointerEvent | null = null
     let scroller: { setX: (x: number) => void; stop: () => void } | null = null
@@ -925,8 +971,7 @@ export function Timeline(): JSX.Element {
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
-    const deltaFor = (clientX: number): number =>
-      (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
+    const deltaFor = (clientX: number): number => (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     const { startSec, endSec } = seg
     let last: PointerEvent | null = null
     let scroller: { setX: (x: number) => void; stop: () => void } | null = null
@@ -974,8 +1019,7 @@ export function Timeline(): JSX.Element {
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
-    const deltaFor = (clientX: number): number =>
-      (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
+    const deltaFor = (clientX: number): number => (clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll)) / pxPerSec
     let last: PointerEvent | null = null
     let scroller: { setX: (x: number) => void; stop: () => void } | null = null
     const onMove = (ev: PointerEvent): void => {
@@ -1047,12 +1091,17 @@ export function Timeline(): JSX.Element {
   }
 
   // Render one layer block within its lane.
-  const layerBlock = (l: Layer, laneKey: 'clips' | 'layout' | 'text' | 'image', rows: Map<string, number>): JSX.Element => {
+  const layerBlock = (
+    l: Layer,
+    laneKey: 'clips' | 'layout' | 'text' | 'image',
+    rows: Map<string, number>
+  ): JSX.Element => {
     const left = l.startSec * pxPerSec
     const width = Math.max(12, (l.endSec - l.startSec) * pxPerSec)
     const selected = isSelected('layer', l.id)
     const linked = isLinkedTile(l.linkGroupId)
-    const asset = l.content.kind === 'video' || l.content.kind === 'image' ? assetById.get(l.content.mediaId) : undefined
+    const asset =
+      l.content.kind === 'video' || l.content.kind === 'image' ? assetById.get(l.content.mediaId) : undefined
     const st = LANE_STYLE[laneKey]
     const rowH = laneRowHeight(laneKey)
     return (
@@ -1071,7 +1120,18 @@ export function Timeline(): JSX.Element {
         {/* The title row sits top-left (every tile kind does), its badges beside it. */}
         <div className="pointer-events-none flex min-w-0 flex-1 items-center gap-1 pr-2 pt-0.5">
           <span className="min-w-0 truncate text-[9px] font-medium leading-tight text-zinc-100">
-            {linked ? '🔗' : l.content.kind === 'text' ? '🅣' : l.content.kind === 'image' ? '🖼' : l.content.kind === 'layout' ? '▦' : l.content.kind === 'compound' ? '🧩' : '🎬'}&nbsp;
+            {linked
+              ? '🔗'
+              : l.content.kind === 'text'
+                ? '🅣'
+                : l.content.kind === 'image'
+                  ? '🖼'
+                  : l.content.kind === 'layout'
+                    ? '▦'
+                    : l.content.kind === 'compound'
+                      ? '🧩'
+                      : '🎬'}
+            &nbsp;
             {asset?.fileName ?? layerLabel(l)}
           </span>
           {l.content.kind === 'video' && hasSpeedRamp(l.content) ? (
@@ -1102,8 +1162,14 @@ export function Timeline(): JSX.Element {
             </span>
           )}
         </div>
-        <div onPointerDown={(e) => startLayerDrag(e, l, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
-        <div onPointerDown={(e) => startLayerDrag(e, l, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50" />
+        <div
+          onPointerDown={(e) => startLayerDrag(e, l, 'start')}
+          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
+        />
+        <div
+          onPointerDown={(e) => startLayerDrag(e, l, 'end')}
+          className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
+        />
       </div>
     )
   }
@@ -1131,9 +1197,10 @@ export function Timeline(): JSX.Element {
     const levels = useProject.getState().project?.volumeLevels ?? []
     const clipsNow = getActiveComp()?.audioClips ?? []
     const sel = useUi.getState().selection
-    const ids = (sel.some((r) => r.kind === 'audio' && r.id === a.id)
-      ? sel.filter((r) => r.kind === 'audio').map((r) => r.id)
-      : [a.id]
+    const ids = (
+      sel.some((r) => r.kind === 'audio' && r.id === a.id)
+        ? sel.filter((r) => r.kind === 'audio').map((r) => r.id)
+        : [a.id]
     ).filter((id) => clipsNow.find((c) => c.id === id)?.kind !== 'fx')
     const current = levelOf(a, levels)?.id ?? null
     const assign = (levelId: string | null) => (): void => useProject.getState().setClipsVolumeLevel(ids, levelId)
@@ -1143,14 +1210,12 @@ export function Timeline(): JSX.Element {
         testId: 'ctx-volume-level',
         submenu: [
           { label: 'None', checked: current === null, onSelect: assign(null), testId: 'ctx-level-none' },
-          ...levels.map(
-            (l): ContextMenuEntry => ({
-              label: `${l.name} · ${l.targetLufs} LUFS`,
-              checked: current === l.id,
-              onSelect: assign(l.id),
-              testId: `ctx-level-${l.id}`
-            })
-          ),
+          ...levels.map((l): ContextMenuEntry => ({
+            label: `${l.name} · ${l.targetLufs} LUFS`,
+            checked: current === l.id,
+            onSelect: assign(l.id),
+            testId: `ctx-level-${l.id}`
+          })),
           MENU_SEPARATOR,
           {
             label: 'New level…',
@@ -1168,11 +1233,7 @@ export function Timeline(): JSX.Element {
    * trim handles, selection, waveform and badges — rather than becoming a
    * second, quietly diverging implementation.
    */
-  const renderAudioTile = (
-    a: AudioClip,
-    laneKey: 'audio' | 'fx',
-    rows: Map<string, number>
-  ): JSX.Element => {
+  const renderAudioTile = (a: AudioClip, laneKey: 'audio' | 'fx', rows: Map<string, number>): JSX.Element => {
     const asset = assetById.get(a.mediaId)
     const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
     const eo = effectiveOut(a, maxOut)
@@ -1190,11 +1251,9 @@ export function Timeline(): JSX.Element {
         onPointerDown={(e) => startTileDrag(e, { kind: 'audio', id: a.id })}
         onContextMenu={(e) => tileMenu.open(e, audioTileMenu(a))}
         {...descHoverProps(asset)}
-        title={
-          [fxName ? `${fxName} track` : null, asset?.fileName ?? a.mediaId, linked ? 'linked' : null]
-            .filter(Boolean)
-            .join(' · ')
-        }
+        title={[fxName ? `${fxName} track` : null, asset?.fileName ?? a.mediaId, linked ? 'linked' : null]
+          .filter(Boolean)
+          .join(' · ')}
         className={`group absolute flex cursor-move items-center overflow-hidden rounded border ${
           selected ? LANE_STYLE[laneKey].sel : LANE_STYLE[laneKey].block
         }`}
@@ -1205,9 +1264,7 @@ export function Timeline(): JSX.Element {
             src={waveformUrl(asset)}
             alt=""
             onError={(e) => (e.currentTarget.style.display = 'none')}
-            className={`pointer-events-none absolute inset-y-0 max-w-none ${
-              a.mute ? 'opacity-20' : 'opacity-70'
-            }`}
+            className={`pointer-events-none absolute inset-y-0 max-w-none ${a.mute ? 'opacity-20' : 'opacity-70'}`}
             style={{
               left: `${-(a.inSec / Math.max(0.01, eo - a.inSec)) * 100}%`,
               width: `${(maxOut / Math.max(0.01, eo - a.inSec)) * 100}%`,
@@ -1259,12 +1316,17 @@ export function Timeline(): JSX.Element {
             </span>
           )}
         </div>
-        <div onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
-        <div onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70" />
+        <div
+          onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)}
+          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"
+        />
+        <div
+          onPointerDown={(e) => startAudioDrag(e, a, 'end', maxOut)}
+          className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"
+        />
       </div>
     )
   }
-
 
   return (
     <div className="flex h-full flex-col">
@@ -1319,15 +1381,26 @@ export function Timeline(): JSX.Element {
         <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
           ＋ Text
         </ToolbarButton>
-        <ToolbarButton title="Add a caption at the playhead, in the caption style (turns the caption lane on)" onClick={addCaptionAtPlayhead}>
+        <ToolbarButton
+          title="Add a caption at the playhead, in the caption style (turns the caption lane on)"
+          onClick={addCaptionAtPlayhead}
+        >
           ＋ Caption
         </ToolbarButton>
-        <ToolbarButton title="Delete the selection — every selected tile (Del)" onClick={deleteSelected} disabled={!canDelete}>
+        <ToolbarButton
+          title="Delete the selection — every selected tile (Del)"
+          onClick={deleteSelected}
+          disabled={!canDelete}
+        >
           🗑 Delete
         </ToolbarButton>
         <div className="flex-1" />
         <span className="text-[10px] uppercase tracking-wide text-zinc-500">Follow</span>
-        <div className="flex overflow-hidden rounded border border-white/10" role="group" aria-label="Playhead follow mode">
+        <div
+          className="flex overflow-hidden rounded border border-white/10"
+          role="group"
+          aria-label="Playhead follow mode"
+        >
           {FOLLOW_OPTIONS.map((o) => (
             <button
               key={o.mode}
@@ -1360,9 +1433,19 @@ export function Timeline(): JSX.Element {
 
       <div className="flex min-h-0 flex-1">
         {/* Fixed left gutter with lane labels */}
-        <div className="relative shrink-0 overflow-hidden border-r border-white/10 bg-zinc-900/50" style={{ width: GUTTER }}>
-          <div ref={gutterInnerRef} className="absolute inset-x-0 top-0 will-change-transform" style={{ height: totalH }}>
-            <div className="absolute inset-x-0 top-0 flex items-center border-b border-white/10 px-2" style={{ height: RULER_H }}>
+        <div
+          className="relative shrink-0 overflow-hidden border-r border-white/10 bg-zinc-900/50"
+          style={{ width: GUTTER }}
+        >
+          <div
+            ref={gutterInnerRef}
+            className="absolute inset-x-0 top-0 will-change-transform"
+            style={{ height: totalH }}
+          >
+            <div
+              className="absolute inset-x-0 top-0 flex items-center border-b border-white/10 px-2"
+              style={{ height: RULER_H }}
+            >
               <span className="text-[8px] font-semibold uppercase tracking-wider text-zinc-600">Tracks</span>
             </div>
             {lanes.map((lane) => {
@@ -1428,14 +1511,24 @@ export function Timeline(): JSX.Element {
             ref={trackInnerRef}
             onPointerDown={onTrackDown}
             className="relative h-full cursor-pointer"
-            style={{ width: Math.max(naturalW, dragFloorW), minWidth: '100%', minHeight: Math.max(totalH, resizeFloorH) }}
+            style={{
+              width: Math.max(naturalW, dragFloorW),
+              minWidth: '100%',
+              minHeight: Math.max(totalH, resizeFloorH)
+            }}
           >
             {/* Ruler */}
-            <div className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30" style={{ height: RULER_H }} />
+            <div
+              className="absolute inset-x-0 top-0 border-b border-white/10 bg-black/30"
+              style={{ height: RULER_H }}
+            />
 
             {/* 3-second hook marker */}
             {total >= HOOK_SEC && (
-              <div className="pointer-events-none absolute top-0 bottom-0 z-10 border-l border-amber-400/70" style={{ left: HOOK_SEC * pxPerSec }}>
+              <div
+                className="pointer-events-none absolute top-0 bottom-0 z-10 border-l border-amber-400/70"
+                style={{ left: HOOK_SEC * pxPerSec }}
+              >
                 <span className="ml-1 text-[9px] uppercase text-amber-300/90">3s hook</span>
               </div>
             )}
@@ -1466,31 +1559,47 @@ export function Timeline(): JSX.Element {
             {!laneCollapsed('image') && grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
 
             {/* Caption lane */}
-            {!laneCollapsed('caption') && captionSegs.map((seg) => {
-              const left = seg.startSec * pxPerSec
-              const width = Math.max(10, (seg.endSec - seg.startSec) * pxPerSec)
-              const selected = isSelected('caption', seg.id)
-              const linked = isLinkedTile(seg.linkGroupId)
-              const rowH = laneRowHeight('caption')
-              return (
-                <div
-                  key={seg.id}
-                  data-testid={`tile-caption-${seg.id}`}
-                  onPointerDown={(e) => startTileDrag(e, { kind: 'caption', id: seg.id })}
-                  title={linked ? `${seg.text} · linked` : seg.text}
-                  className={`group absolute flex cursor-move items-start overflow-hidden rounded border px-1.5 pt-0.5 ${
-                    selected ? LANE_STYLE.caption.sel : seg.enabled ? LANE_STYLE.caption.block : 'border-zinc-500/40 bg-zinc-600/30'
-                  }`}
-                  style={{ left, width, top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * rowH, height: rowH - 2 }}
-                >
-                  <span className="truncate text-[9px] font-medium leading-tight text-emerald-100">
-                    {linked ? '🔗' : 'CC'}&nbsp;&nbsp;{seg.text}
-                  </span>
-                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'start')} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
-                  <div onPointerDown={(e) => startCaptionDrag(e, seg, 'end')} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70" />
-                </div>
-              )
-            })}
+            {!laneCollapsed('caption') &&
+              captionSegs.map((seg) => {
+                const left = seg.startSec * pxPerSec
+                const width = Math.max(10, (seg.endSec - seg.startSec) * pxPerSec)
+                const selected = isSelected('caption', seg.id)
+                const linked = isLinkedTile(seg.linkGroupId)
+                const rowH = laneRowHeight('caption')
+                return (
+                  <div
+                    key={seg.id}
+                    data-testid={`tile-caption-${seg.id}`}
+                    onPointerDown={(e) => startTileDrag(e, { kind: 'caption', id: seg.id })}
+                    title={linked ? `${seg.text} · linked` : seg.text}
+                    className={`group absolute flex cursor-move items-start overflow-hidden rounded border px-1.5 pt-0.5 ${
+                      selected
+                        ? LANE_STYLE.caption.sel
+                        : seg.enabled
+                          ? LANE_STYLE.caption.block
+                          : 'border-zinc-500/40 bg-zinc-600/30'
+                    }`}
+                    style={{
+                      left,
+                      width,
+                      top: laneTop('caption') + (capRows.get(seg.id) ?? 0) * rowH,
+                      height: rowH - 2
+                    }}
+                  >
+                    <span className="truncate text-[9px] font-medium leading-tight text-emerald-100">
+                      {linked ? '🔗' : 'CC'}&nbsp;&nbsp;{seg.text}
+                    </span>
+                    <div
+                      onPointerDown={(e) => startCaptionDrag(e, seg, 'start')}
+                      className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70"
+                    />
+                    <div
+                      onPointerDown={(e) => startCaptionDrag(e, seg, 'end')}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-emerald-200/70"
+                    />
+                  </div>
+                )
+              })}
 
             {/* Audio lane — source audio only; effect tracks get their own band. */}
             {!laneCollapsed('audio') && dryClips.map((a) => renderAudioTile(a, 'audio', audRows))}
@@ -1499,7 +1608,10 @@ export function Timeline(): JSX.Element {
             {!laneCollapsed('fx') && fxClips.map((a) => renderAudioTile(a, 'fx', fxRows))}
 
             {/* Bottom time scale */}
-            <div className="pointer-events-none absolute inset-x-0 border-t border-white/10" style={{ top: scaleTop, height: SCALE_H }}>
+            <div
+              className="pointer-events-none absolute inset-x-0 border-t border-white/10"
+              style={{ top: scaleTop, height: SCALE_H }}
+            >
               {(() => {
                 const step = niceTimeStep(pxPerSec)
                 return scaleTicks(Math.max(total, 1), step).map((t) => (
@@ -1512,7 +1624,10 @@ export function Timeline(): JSX.Element {
             </div>
 
             {/* Playhead */}
-            <div className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-rose-400" style={{ left: time * pxPerSec }}>
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-rose-400"
+              style={{ left: time * pxPerSec }}
+            >
               <div className="absolute -left-1 top-0 h-2 w-2 rounded-full bg-rose-400" />
             </div>
 

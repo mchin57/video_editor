@@ -111,17 +111,7 @@ export function buildProxyArgs(input: string, output: string, probe: ProbeInfo):
   if (probe.video?.isHdr) chain.push(hdrToSdrChain(probe.video))
   chain.push(`scale=${w}:${h}:flags=bicubic`, 'format=yuv420p')
 
-  const args = [
-    '-y',
-    '-hide_banner',
-    '-nostdin',
-    '-i',
-    input,
-    '-map',
-    '0:v:0',
-    '-vf',
-    chain.join(',')
-  ]
+  const args = ['-y', '-hide_banner', '-nostdin', '-i', input, '-map', '0:v:0', '-vf', chain.join(',')]
 
   if (probe.video?.isVfr) {
     args.push('-fps_mode', 'cfr', '-r', String(targetFps(probe)))
@@ -145,17 +135,10 @@ export function buildProxyArgs(input: string, output: string, probe: ProbeInfo):
 
 /** Run the proxy transcode, reporting progress (0..1) to the given job. `output`
  *  appears only once complete — its existence is what "proxy ready" means. */
-export async function generateProxy(
-  input: string,
-  output: string,
-  probe: ProbeInfo,
-  jobId: string
-): Promise<void> {
+export async function generateProxy(input: string, output: string, probe: ProbeInfo, jobId: string): Promise<void> {
   const { ffmpeg } = await getBinaries()
   await writeAtomically(output, (part) =>
-    runFfmpeg(ffmpeg, buildProxyArgs(input, part, probe), probe.durationSec || 0, (p) =>
-      setProgress(jobId, p)
-    )
+    runFfmpeg(ffmpeg, buildProxyArgs(input, part, probe), probe.durationSec || 0, (p) => setProgress(jobId, p))
   )
 }
 
@@ -169,8 +152,6 @@ export async function generateAlphaProxy(
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
   await writeAtomically(output, (part) =>
-    runFfmpeg(ffmpeg, buildAlphaProxyArgs(input, part, probe), probe.durationSec || 0, (p) =>
-      setProgress(jobId, p)
-    )
+    runFfmpeg(ffmpeg, buildAlphaProxyArgs(input, part, probe), probe.durationSec || 0, (p) => setProgress(jobId, p))
   )
 }

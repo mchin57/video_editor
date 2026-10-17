@@ -1,7 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync, promises as fsp } from 'node:fs'
 import { join, parse } from 'node:path'
-import { IPC, IPC_EVENT, type AudioFxRequest, type QuickCutRequest, type RelinkResult, type RemoveBackgroundRequest, type StillRequest } from '@shared/ipc'
+import {
+  IPC,
+  IPC_EVENT,
+  type AudioFxRequest,
+  type QuickCutRequest,
+  type RelinkResult,
+  type RemoveBackgroundRequest,
+  type StillRequest
+} from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder, AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
 import type { Project } from '@shared/project'
@@ -84,7 +92,7 @@ const mb = (bytes: number): string => `${(bytes / 1024 ** 2).toFixed(1)} MB`
 function relinkMismatchDetail(c: RelinkCheck): string {
   if (c.placeholder) {
     return (
-      "Nothing records which file this clip was (its project was converted without the old media library), " +
+      'Nothing records which file this clip was (its project was converted without the old media library), ' +
       "so this file can't be checked against it. The clip will use this file; its cuts on the timeline stay as they are."
     )
   }
@@ -137,9 +145,7 @@ export function registerIpcHandlers(): void {
         { name: 'All files', extensions: ['*'] }
       ]
     }
-    const result = win
-      ? await dialog.showOpenDialog(win, options)
-      : await dialog.showOpenDialog(options)
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled) return []
     return importForUi(event.sender, result.filePaths)
   })
@@ -156,9 +162,7 @@ export function registerIpcHandlers(): void {
       buttonLabel: 'Import',
       properties: ['openDirectory', 'multiSelections']
     }
-    const result = win
-      ? await dialog.showOpenDialog(win, options)
-      : await dialog.showOpenDialog(options)
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled) return []
     return importForUi(event.sender, result.filePaths)
   })
@@ -176,9 +180,7 @@ export function registerIpcHandlers(): void {
         { name: 'All files', extensions: ['*'] }
       ]
     }
-    const result = win
-      ? await dialog.showOpenDialog(win, options)
-      : await dialog.showOpenDialog(options)
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
     return extractAudioToLibrary(result.filePaths[0])
   })
@@ -282,9 +284,7 @@ export function registerIpcHandlers(): void {
         { name: 'All files', extensions: ['*'] }
       ]
     }
-    const result = win
-      ? await dialog.showOpenDialog(win, options)
-      : await dialog.showOpenDialog(options)
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
     const path = result.filePaths[0]
     // An old project (media in the old shared library) becomes a project
@@ -384,9 +384,7 @@ export function registerIpcHandlers(): void {
       defaultPath: suggestedSavePath(project, app.getPath('documents')),
       filters: [{ name: 'Reel Project', extensions: [REEL_EXT] }]
     }
-    const result = win
-      ? await dialog.showSaveDialog(win, options)
-      : await dialog.showSaveDialog(options)
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
     if (result.canceled || !result.filePath) return null
     return saveProjectAs(project, result.filePath)
   })
@@ -402,9 +400,7 @@ export function registerIpcHandlers(): void {
         defaultPath,
         filters: [{ name: 'MP4 Video', extensions: ['mp4'] }]
       }
-      const result = win
-        ? await dialog.showSaveDialog(win, options)
-        : await dialog.showSaveDialog(options)
+      const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
       if (result.canceled || !result.filePath) return null
       return exportProject(project, opts, result.filePath)
     }
@@ -443,7 +439,13 @@ export function registerIpcHandlers(): void {
     const asset = await requireUsable(req.mediaId)
     const base = parse(asset.fileName).name
     const out = tmpOutput('still', 'png')
-    await generateStill(asset.originalPath, out, req.sourceSec, stillVfChain(asset, req), alphaInputDecoder(asset.probe.video))
+    await generateStill(
+      asset.originalPath,
+      out,
+      req.sourceSec,
+      stillVfChain(asset, req),
+      alphaInputDecoder(asset.probe.video)
+    )
     return importGenerated(out, `${base} (still).png`)
   })
 
@@ -462,7 +464,13 @@ export function registerIpcHandlers(): void {
       }
       const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
       if (result.canceled || !result.filePath) return null
-      await generateStill(asset.originalPath, result.filePath, req.sourceSec, stillVfChain(asset, req), alphaInputDecoder(asset.probe.video))
+      await generateStill(
+        asset.originalPath,
+        result.filePath,
+        req.sourceSec,
+        stillVfChain(asset, req),
+        alphaInputDecoder(asset.probe.video)
+      )
       return result.filePath
     }
   )

@@ -23,11 +23,27 @@ function fingerprintOf(path: string): { fp: { size: number; start: string; middl
   return { fp, id }
 }
 
-test('a card whose thumbnail was missing when it rendered shows it once it exists', async ({ electronApp, appPage: page, projectsDir }) => {
+test('a card whose thumbnail was missing when it rendered shows it once it exists', async ({
+  electronApp,
+  appPage: page,
+  projectsDir
+}) => {
   test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
   test.setTimeout(90_000)
   const synth = (out: string, src: string): void =>
-    execFileSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `${src}=size=640x480:rate=1`, '-frames:v', '1', out])
+    execFileSync(FFMPEG, [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      `${src}=size=640x480:rate=1`,
+      '-frames:v',
+      '1',
+      out
+    ])
 
   // A real probe for a 640x480 JPEG, from an import into the fixture project.
   const probeSrc = join(projectsDir, 'probe.jpg')
@@ -42,13 +58,33 @@ test('a card whose thumbnail was missing when it rendered shows it once it exist
   const { fp, id } = fingerprintOf(staged)
   const doc = JSON.parse(readFileSync(join(projectsDir, 'E2E', 'E2E.reel'), 'utf8'))
   const target = join(dir, 'photos', 'photo.jpg')
-  writeFileSync(join(dir, 'Later.reel'), JSON.stringify({
-    ...doc, id: 'later', name: 'Later', mediaIds: [id],
-    library: [{ id, fileName: 'photo.jpg', relativePath: 'photos/photo.jpg', absolutePath: target, fingerprint: fp, importedAt: new Date().toISOString(), probe, kind: 'image' }]
-  }))
-  await electronApp.evaluate(({ dialog }, reel) => {
-    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [reel] })) as typeof dialog.showOpenDialog
-  }, join(dir, 'Later.reel'))
+  writeFileSync(
+    join(dir, 'Later.reel'),
+    JSON.stringify({
+      ...doc,
+      id: 'later',
+      name: 'Later',
+      mediaIds: [id],
+      library: [
+        {
+          id,
+          fileName: 'photo.jpg',
+          relativePath: 'photos/photo.jpg',
+          absolutePath: target,
+          fingerprint: fp,
+          importedAt: new Date().toISOString(),
+          probe,
+          kind: 'image'
+        }
+      ]
+    })
+  )
+  await electronApp.evaluate(
+    ({ dialog }, reel) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [reel] })) as typeof dialog.showOpenDialog
+    },
+    join(dir, 'Later.reel')
+  )
   await page.evaluate(async () => {
     window.confirm = () => true // the fixture project has an unsaved import
     await window.__reelStores.useProject.getState().openFile()

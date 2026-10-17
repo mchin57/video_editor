@@ -56,12 +56,7 @@ export function buildThumbnailArgs(input: string, output: string, probe: ProbeIn
   ]
 }
 
-export async function generateThumbnail(
-  input: string,
-  output: string,
-  probe: ProbeInfo,
-  still = false
-): Promise<void> {
+export async function generateThumbnail(input: string, output: string, probe: ProbeInfo, still = false): Promise<void> {
   const { ffmpeg } = await getBinaries()
   await writeAtomically(output, (part) => runFfmpeg(ffmpeg, buildThumbnailArgs(input, part, probe, still), 0))
 }

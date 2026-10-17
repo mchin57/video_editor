@@ -71,13 +71,14 @@ async function placeClip(page: import('@playwright/test').Page, gainDb: number):
 
 /** The preview MIX follower — not the library card's own preview player, which
  *  is a separate <audio> on the same source. */
-const follower = (page: import('@playwright/test').Page): ReturnType<
-  import('@playwright/test').Page['getByTestId']
-> => page.getByTestId('audio-follower')
+const follower = (page: import('@playwright/test').Page): ReturnType<import('@playwright/test').Page['getByTestId']> =>
+  page.getByTestId('audio-follower')
 
 const followerVolume = async (page: import('@playwright/test').Page): Promise<number> => {
   await expect.poll(() => follower(page).count(), { timeout: 30_000 }).toBeGreaterThan(0)
-  return follower(page).first().evaluate((el: HTMLAudioElement) => el.volume)
+  return follower(page)
+    .first()
+    .evaluate((el: HTMLAudioElement) => el.volume)
 }
 
 /** The level actually in force — the GainNode's when routed, else `volume`. */
@@ -88,9 +89,7 @@ const followerGain = async (page: import('@playwright/test').Page): Promise<numb
     .evaluate((el: HTMLAudioElement) => window.__reelStores.appliedGain(el))
 }
 
-test('an attenuated clip reaches the element exactly, and stays off the graph', async ({
-  appPage: page
-}) => {
+test('an attenuated clip reaches the element exactly, and stays off the graph', async ({ appPage: page }) => {
   await placeClip(page, -6)
   // 10^(-6/20) ~= 0.5012 — the same linear gain the export's `volume=` applies.
   await expect.poll(() => followerVolume(page)).toBeCloseTo(0.5012, 3)
@@ -108,9 +107,7 @@ test('unity gain plays at unity', async ({ appPage: page }) => {
   await expect.poll(() => followerVolume(page)).toBe(1)
 })
 
-test('a boost is realised through the GainNode, matching the export', async ({
-  appPage: page
-}) => {
+test('a boost is realised through the GainNode, matching the export', async ({ appPage: page }) => {
   await placeClip(page, 6)
   // 10^(6/20) ~= 1.9953 — the same linear gain the export's `volume=` applies.
   // This is the assertion that would have caught a boost silently clamped to
@@ -129,9 +126,7 @@ test('a boost is realised through the GainNode, matching the export', async ({
   expect(await page.evaluate(() => window.__reelStores.previewAudioState())).toBe('running')
 })
 
-test('the CORS-clean element still loads — the precondition for audible gain', async ({
-  appPage: page
-}) => {
+test('the CORS-clean element still loads — the precondition for audible gain', async ({ appPage: page }) => {
   await placeClip(page, 0)
   await expect.poll(() => follower(page).count(), { timeout: 30_000 }).toBeGreaterThan(0)
   // This pair is the whole ballgame. `crossOrigin` is what keeps the element
@@ -143,11 +138,16 @@ test('the CORS-clean element still loads — the precondition for audible gain',
   expect(await follower(page).first().getAttribute('crossorigin')).toBe('anonymous')
   await expect
     .poll(
-      () => follower(page).first().evaluate((el: HTMLAudioElement) => el.readyState),
+      () =>
+        follower(page)
+          .first()
+          .evaluate((el: HTMLAudioElement) => el.readyState),
       { timeout: 30_000 }
     )
     .toBeGreaterThanOrEqual(1)
   expect(
-    await follower(page).first().evaluate((el: HTMLAudioElement) => el.error?.code ?? null)
+    await follower(page)
+      .first()
+      .evaluate((el: HTMLAudioElement) => el.error?.code ?? null)
   ).toBeNull()
 })

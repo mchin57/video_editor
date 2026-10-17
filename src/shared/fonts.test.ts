@@ -24,7 +24,9 @@ function readWinMetrics(file: string): { ascent: number; descent: number; unitsP
 
 describe('font catalog', () => {
   it('ships a file for every catalog entry, and an entry for every file', () => {
-    const files = readdirSync(FONTS_DIR).filter((f) => /\.(ttf|otf)$/i.test(f)).sort()
+    const files = readdirSync(FONTS_DIR)
+      .filter((f) => /\.(ttf|otf)$/i.test(f))
+      .sort()
     expect(FONTS.map((f) => f.file).sort()).toEqual(files)
   })
 

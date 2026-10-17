@@ -25,8 +25,7 @@ const layerState = (page: Page): Promise<{ startSec: number; endSec: number; c: 
   })
 
 /** px per second of the timeline (persisted zoom; 48 on a fresh profile). */
-const pps = (page: Page): Promise<number> =>
-  page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)
+const pps = (page: Page): Promise<number> => page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)
 
 test('trimming the right edge of a frozen clip keeps the hold time', async ({ appPage: page }) => {
   await arrangeFrozenClip(page)
@@ -79,9 +78,7 @@ test('dragging a block moves it in time without changing its duration', async ({
   expect(endSec - startSec).toBeCloseTo(12, 1) // window (incl. hold) preserved
 })
 
-test('S splits the selected clip at the playhead, partitioning the hold', async ({
-  appPage: page
-}) => {
+test('S splits the selected clip at the playhead, partitioning the hold', async ({ appPage: page }) => {
   await arrangeFrozenClip(page)
   // Playhead at 7s (after the hold: source 5s) then split via the keybind.
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(7))

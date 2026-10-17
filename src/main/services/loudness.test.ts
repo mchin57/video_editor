@@ -50,15 +50,21 @@ describe('createLimiter', () => {
 describe('buildLoudnessArgs', () => {
   it('measures the first audio stream at 48 kHz in 0.1 s frames, printing to a bare file name', () => {
     expect(buildLoudnessArgs('C:\\clips\\a.mp4', 'loudness.print.txt')).toEqual([
-      '-hide_banner', '-nostdin', '-nostats',
-      '-i', 'C:\\clips\\a.mp4',
-      '-map', '0:a:0',
+      '-hide_banner',
+      '-nostdin',
+      '-nostats',
+      '-i',
+      'C:\\clips\\a.mp4',
+      '-map',
+      '0:a:0',
       '-vn',
       '-af',
       'aresample=48000,asetnsamples=n=4800:p=0,' +
         'astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=Peak_level,' +
         'ebur128=metadata=1,ametadata=mode=print:file=loudness.print.txt',
-      '-f', 'null', '-'
+      '-f',
+      'null',
+      '-'
     ])
   })
 
@@ -86,14 +92,15 @@ const frame = (n: number, ptsTime: string, peak: string, m: string): string =>
 
 describe('parseLoudnessPrint', () => {
   it('turns each frame into one 0.1 s step of momentary loudness + peak', () => {
-    const text = [
-      frame(0, '0', '-18.063423', '-120.691'),
-      frame(1, '0.1', '-18.063423', '-120.691'),
-      frame(2, '0.2', '-18.063423', '-120.691'),
-      frame(3, '0.3', '-18.063423', '-21.757'),
-      frame(4, '0.4', '-77.025396', '-23.017'),
-      frame(5, '0.5', '-inf', 'nan')
-    ].join('\n') + '\n'
+    const text =
+      [
+        frame(0, '0', '-18.063423', '-120.691'),
+        frame(1, '0.1', '-18.063423', '-120.691'),
+        frame(2, '0.2', '-18.063423', '-120.691'),
+        frame(3, '0.3', '-18.063423', '-21.757'),
+        frame(4, '0.4', '-77.025396', '-23.017'),
+        frame(5, '0.5', '-inf', 'nan')
+      ].join('\n') + '\n'
     expect(parseLoudnessPrint(text)).toEqual({
       version: 1,
       stepSec: 0.1,

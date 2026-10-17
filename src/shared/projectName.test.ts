@@ -3,7 +3,15 @@ import { PROJECT_NAME_MAX, validateProjectName } from './projectName'
 
 describe('validateProjectName', () => {
   it('accepts ordinary names, judged after trimming', () => {
-    for (const ok of ['My Reel', 'reel-01', 'Trip (2026)', 'café', '  padded  ', 'v1.2 final', 'a'.repeat(PROJECT_NAME_MAX)]) {
+    for (const ok of [
+      'My Reel',
+      'reel-01',
+      'Trip (2026)',
+      'café',
+      '  padded  ',
+      'v1.2 final',
+      'a'.repeat(PROJECT_NAME_MAX)
+    ]) {
       expect(validateProjectName(ok), ok).toBeNull()
     }
   })
@@ -33,7 +41,20 @@ describe('validateProjectName', () => {
   })
 
   it('rejects reserved device names, any case, with or without an extension', () => {
-    for (const bad of ['CON', 'con', 'Prn', 'AUX', 'nul', 'COM1', 'com9', 'LPT1', 'lpt9', 'con.txt', 'NUL.tar.gz', ' aux ']) {
+    for (const bad of [
+      'CON',
+      'con',
+      'Prn',
+      'AUX',
+      'nul',
+      'COM1',
+      'com9',
+      'LPT1',
+      'lpt9',
+      'con.txt',
+      'NUL.tar.gz',
+      ' aux '
+    ]) {
       expect(validateProjectName(bad), bad).not.toBeNull()
     }
   })

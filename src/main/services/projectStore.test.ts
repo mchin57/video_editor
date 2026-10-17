@@ -83,9 +83,22 @@ describe('project-scoped media migration', () => {
         { id: 'c2', mediaId: 'vid', inSec: 3, outSec: 6, crop: null, mute: false, gainDb: 0 } // dupe id
       ],
       overlays: [],
-      imageOverlays: [{ id: 'o1', mediaId: 'logo', startSec: 0, endSec: 3, x: 0, y: 0, w: 1, h: 1, anchor: 'center', opacity: 1 }],
+      imageOverlays: [
+        { id: 'o1', mediaId: 'logo', startSec: 0, endSec: 3, x: 0, y: 0, w: 1, h: 1, anchor: 'center', opacity: 1 }
+      ],
       audioClips: [
-        { id: 'a1', mediaId: 'song', startSec: 0, inSec: 0, outSec: 0, gainDb: 0, fadeInSec: 0, fadeOutSec: 0, duck: false, kind: 'music' }
+        {
+          id: 'a1',
+          mediaId: 'song',
+          startSec: 0,
+          inSec: 0,
+          outSec: 0,
+          gainDb: 0,
+          fadeInSec: 0,
+          fadeOutSec: 0,
+          duck: false,
+          kind: 'music'
+        }
       ],
       captions: { enabled: false, stylePreset: 'reels-bold', yBaseline: 1340, segments: [] },
       script: [],

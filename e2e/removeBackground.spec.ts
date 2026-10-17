@@ -49,10 +49,27 @@ async function arrange(
 
   const mp4 = join(mkdtempSync(join(tmpdir(), 'reel-matte-')), 'clip.mp4')
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `testsrc2=duration=${clip.sec}:size=${clip.w}x${clip.h}:rate=30`,
-    '-f', 'lavfi', '-i', `sine=frequency=440:duration=${clip.sec}`,
-    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=duration=${clip.sec}:size=${clip.w}x${clip.h}:rate=30`,
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=440:duration=${clip.sec}`,
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-c:a',
+    'aac',
+    '-shortest',
     mp4
   ])
   const sourceId = await page.evaluate(async (p) => {
@@ -119,7 +136,11 @@ test.describe('remove background', () => {
 
     // One undo step back to the original clip and trim.
     await page.evaluate(() => window.__reelStores.useProject.getState().undo())
-    expect(await layerV(page)).toMatchObject({ startSec: 10, endSec: 12, content: { mediaId: sourceId, inSec: 3, outSec: 5 } })
+    expect(await layerV(page)).toMatchObject({
+      startSec: 10,
+      endSec: 12,
+      content: { mediaId: sourceId, inSec: 3, outSec: 5 }
+    })
   })
 
   test('Cancel stops the job and leaves nothing behind', async ({ appPage: page }) => {
@@ -140,17 +161,24 @@ test.describe('remove background', () => {
       .poll(
         () =>
           page.evaluate(() =>
-            Object.values(window.__reelStores.useEditor.getState().jobs).some((j) => j.type === 'matte' && j.progress > 0)
+            Object.values(window.__reelStores.useEditor.getState().jobs).some(
+              (j) => j.type === 'matte' && j.progress > 0
+            )
           ),
         { timeout: 60_000 }
       )
       .toBe(true)
-    await page.getByTestId('jobs-indicator').getByRole('button', { name: /^Cancel/ }).click()
+    await page
+      .getByTestId('jobs-indicator')
+      .getByRole('button', { name: /^Cancel/ })
+      .click()
 
     await expect
       .poll(
         () =>
-          page.evaluate(() => Object.values(window.__reelStores.useEditor.getState().jobs).find((j) => j.type === 'matte')?.status),
+          page.evaluate(
+            () => Object.values(window.__reelStores.useEditor.getState().jobs).find((j) => j.type === 'matte')?.status
+          ),
         { timeout: 30_000 }
       )
       .toBe('canceled')
@@ -159,7 +187,9 @@ test.describe('remove background', () => {
 
     // Nothing changed or leaked: same clip, no new library asset, no partial WebM.
     expect((await layerV(page))!.content.mediaId).toBe(sourceId)
-    expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)).toEqual(mediaIdsBefore)
+    expect(await page.evaluate(() => window.__reelStores.useProject.getState().project!.mediaIds)).toEqual(
+      mediaIdsBefore
+    )
     const tmp = join(dataDir, 'tmp')
     const leftovers = existsSync(tmp) ? readdirSync(tmp).filter((f) => f.startsWith('nobg-')) : []
     expect(leftovers).toEqual([])

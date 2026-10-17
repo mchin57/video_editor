@@ -55,14 +55,60 @@ export function videoArgs(v: VideoStreamInfo, enc: FfmpegEncoders): string[] {
   ]
   if (hevc && enc.hevc_nvenc) {
     const depth = tenBit ? ['-profile:v', 'main10', '-pix_fmt', 'p010le'] : ['-pix_fmt', 'yuv420p']
-    return ['-c:v', 'hevc_nvenc', '-preset', 'p6', '-tune', 'hq', '-rc', 'vbr', '-cq', CQ, '-b:v', '0', ...depth, ...color, '-tag:v', 'hvc1']
+    return [
+      '-c:v',
+      'hevc_nvenc',
+      '-preset',
+      'p6',
+      '-tune',
+      'hq',
+      '-rc',
+      'vbr',
+      '-cq',
+      CQ,
+      '-b:v',
+      '0',
+      ...depth,
+      ...color,
+      '-tag:v',
+      'hvc1'
+    ]
   }
   if (hevc && enc.libx265) {
     const depth = ['-pix_fmt', tenBit ? 'yuv420p10le' : 'yuv420p']
-    return ['-c:v', 'libx265', '-preset', 'medium', '-crf', CQ, ...depth, '-x265-params', 'log-level=error', ...color, '-tag:v', 'hvc1']
+    return [
+      '-c:v',
+      'libx265',
+      '-preset',
+      'medium',
+      '-crf',
+      CQ,
+      ...depth,
+      '-x265-params',
+      'log-level=error',
+      ...color,
+      '-tag:v',
+      'hvc1'
+    ]
   }
   if (!hevc && enc.h264_nvenc) {
-    return ['-c:v', 'h264_nvenc', '-preset', 'p6', '-tune', 'hq', '-rc', 'vbr', '-cq', CQ, '-b:v', '0', '-pix_fmt', 'yuv420p', ...color]
+    return [
+      '-c:v',
+      'h264_nvenc',
+      '-preset',
+      'p6',
+      '-tune',
+      'hq',
+      '-rc',
+      'vbr',
+      '-cq',
+      CQ,
+      '-b:v',
+      '0',
+      '-pix_fmt',
+      'yuv420p',
+      ...color
+    ]
   }
   // No HEVC encoder: 10-bit H.264 keeps the depth (ffmpeg reads it fine; the
   // preview plays the 8-bit proxy anyway).

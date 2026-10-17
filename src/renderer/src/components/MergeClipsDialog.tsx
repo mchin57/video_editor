@@ -127,9 +127,13 @@ export function MergeClipsDialog({
                     at >= 0 ? 'bg-sky-500/20 text-sky-100' : 'bg-white/5 text-zinc-300 hover:bg-white/10'
                   }`}
                 >
-                  <span className="w-5 shrink-0 text-center font-mono text-[11px] text-sky-300">{at >= 0 ? at + 1 : ''}</span>
+                  <span className="w-5 shrink-0 text-center font-mono text-[11px] text-sky-300">
+                    {at >= 0 ? at + 1 : ''}
+                  </span>
                   <span className="min-w-0 flex-1 truncate">{c.fileName}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-zinc-500">{c.probe.durationSec.toFixed(1)}s</span>
+                  <span className="shrink-0 font-mono text-[11px] text-zinc-500">
+                    {c.probe.durationSec.toFixed(1)}s
+                  </span>
                 </button>
               </li>
             )
@@ -184,7 +188,13 @@ export function MergeClipsDialog({
         )}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" data-testid="merge-cancel" onClick={onClose} disabled={busy} className={`${btnCls} px-4 ${disabledCls}`}>
+          <button
+            type="button"
+            data-testid="merge-cancel"
+            onClick={onClose}
+            disabled={busy}
+            className={`${btnCls} px-4 ${disabledCls}`}
+          >
             Cancel
           </button>
           <button

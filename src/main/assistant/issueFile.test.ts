@@ -18,7 +18,10 @@ afterEach(() => {
 })
 
 const rows = (): { title: string; body: string; labels: string[] }[] =>
-  readFileSync(sink, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  readFileSync(sink, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
 
 describe('formatIssue', () => {
   it('puts the problem, proposal and optional workaround in the body', () => {
@@ -28,7 +31,7 @@ describe('formatIssue', () => {
     )
     expect(title).toBe('Beat snap')
     expect(body).toBe(
-      '**Problem.** needed beats\n\n**Proposal.** detect_beats\n\n**Workaround used.** by ear\n\n_Requested by the editor\'s assistant, 2026-10-16._'
+      "**Problem.** needed beats\n\n**Proposal.** detect_beats\n\n**Workaround used.** by ear\n\n_Requested by the editor's assistant, 2026-10-16._"
     )
   })
 })
@@ -47,6 +50,10 @@ describe('fileFeatureRequest', () => {
       fileFeatureRequest({ title: 'One', problem: 'p1', proposal: 'q1' }),
       fileFeatureRequest({ title: 'Two', problem: 'p2', proposal: 'q2' })
     ])
-    expect(rows().map((r) => r.title).sort()).toEqual(['One', 'Two'])
+    expect(
+      rows()
+        .map((r) => r.title)
+        .sort()
+    ).toEqual(['One', 'Two'])
   })
 })

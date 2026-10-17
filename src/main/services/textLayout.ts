@@ -68,9 +68,7 @@ export function groupLines(m: RawBlockMeasure): LaidOutLine[] {
     const right = Math.max(...visible.map((c) => c.right))
     const mid = (row.top + row.bottom) / 2
     const pill = m.pills.length
-      ? m.pills.reduce((best, p) =>
-          Math.abs(p.y + p.h / 2 - mid) < Math.abs(best.y + best.h / 2 - mid) ? p : best
-        )
+      ? m.pills.reduce((best, p) => (Math.abs(p.y + p.h / 2 - mid) < Math.abs(best.y + best.h / 2 - mid) ? p : best))
       : undefined
     out.push({
       start: first.i,

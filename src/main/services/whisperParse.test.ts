@@ -182,7 +182,13 @@ describe('parseWhisperTranscript', () => {
     // clip lost its last word.
     const silences = [{ start: 10.590375, end: 16.1025 }]
     const { words } = parseWhisperTranscript(
-      { transcription: [dtw(' of', 1021, 10200, 10500), dtw(' months.', 1049, 10500, 11700), dtw(' Not', 1635, 16340, 16660)] },
+      {
+        transcription: [
+          dtw(' of', 1021, 10200, 10500),
+          dtw(' months.', 1049, 10500, 11700),
+          dtw(' Not', 1635, 16340, 16660)
+        ]
+      },
       silences
     )
     expect(words[1].text).toBe('months.')
@@ -215,7 +221,9 @@ describe('parseWhisperTranscript', () => {
  * keeps. Each spoken entry gets its own increasing DTW time and segment slot.
  */
 function captionTexts(raw: string[]): { dtw: string[]; segment: string[] } {
-  const dtwJson = { transcription: raw.map((text, i) => dtw(text, text.trim() ? 100 + i * 20 : null, i * 200, (i + 1) * 200)) }
+  const dtwJson = {
+    transcription: raw.map((text, i) => dtw(text, text.trim() ? 100 + i * 20 : null, i * 200, (i + 1) * 200))
+  }
   const segJson = { transcription: raw.map((text, i) => ({ text, offsets: { from: i * 200, to: (i + 1) * 200 } })) }
   const d = parseWhisperTranscript(dtwJson)
   const s = parseWhisperTranscript(segJson)
@@ -237,25 +245,53 @@ describe('annotations split across -ml 1 entries', () => {
 
   it('drops a ♪ lyric span and the annotation after it (FTP test)', () => {
     both(
-      ['', ' ♪', ' I', ' could', ' break', ' you', ' to', ' say', ' the', ' last', ' ♪', ' (dramatic', ' music)', '', ' (dramatic', ' music)'],
+      [
+        '',
+        ' ♪',
+        ' I',
+        ' could',
+        ' break',
+        ' you',
+        ' to',
+        ' say',
+        ' the',
+        ' last',
+        ' ♪',
+        ' (dramatic',
+        ' music)',
+        '',
+        ' (dramatic',
+        ' music)'
+      ],
       []
     )
   })
 
   it('drops a multi-word annotation before speech (recovery)', () => {
     both(
-      ['', ' (inhaling', ' and', ' exhaling)', ' Your', ' favorite', ' recovery', ' method.', '', ' (clicking)', ' Your', ' favorite'],
+      [
+        '',
+        ' (inhaling',
+        ' and',
+        ' exhaling)',
+        ' Your',
+        ' favorite',
+        ' recovery',
+        ' method.',
+        '',
+        ' (clicking)',
+        ' Your',
+        ' favorite'
+      ],
       ['Your', 'favorite', 'recovery', 'method.', 'Your', 'favorite']
     )
   })
 
   it('drops a spaced-out [ Pause ] marker (tritips)', () => {
-    both(['', ' [', ' Pause', ' ]', ' Number', ' two.', ' [', ' Pause', ' ]', ' Number', ' two.'], [
-      'Number',
-      'two.',
-      'Number',
-      'two.'
-    ])
+    both(
+      ['', ' [', ' Pause', ' ]', ' Number', ' two.', ' [', ' Pause', ' ]', ' Number', ' two.'],
+      ['Number', 'two.', 'Number', 'two.']
+    )
   })
 
   it('drops an annotation that is the whole clip (run club)', () => {
@@ -282,7 +318,10 @@ describe('annotations split across -ml 1 entries', () => {
   // annotation's mark and swallow the speech between them.
   it('a stray ( does not pair with the next annotation: the speech between stays', () => {
     both([' (laughs', ' So', ' today', ' we', ' swim', ' (applause)'], ['So', 'today', 'we', 'swim'])
-    both([' (laughs', ' So', ' today', ' (inhaling', ' and', ' exhaling)', ' we', ' swim'], ['So', 'today', 'we', 'swim'])
+    both(
+      [' (laughs', ' So', ' today', ' (inhaling', ' and', ' exhaling)', ' we', ' swim'],
+      ['So', 'today', 'we', 'swim']
+    )
     both([' [', ' So', ' today', ' [', ' Pause', ' ]', ' swim'], ['So', 'today', 'swim'])
   })
 
@@ -295,7 +334,10 @@ describe('annotations split across -ml 1 entries', () => {
   })
 
   it('keeps a word with a bracket inside it; only marks at an entry’s edge count', () => {
-    both([' my', ' friend(s)', ' did', ' 50(ish)', ' laps', ' a[b]c'], ['my', 'friend(s)', 'did', '50(ish)', 'laps', 'a[b]c'])
+    both(
+      [' my', ' friend(s)', ' did', ' 50(ish)', ' laps', ' a[b]c'],
+      ['my', 'friend(s)', 'did', '50(ish)', 'laps', 'a[b]c']
+    )
   })
 
   it('bounds the word before a multi-entry annotation by the annotation', () => {

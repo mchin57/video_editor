@@ -32,10 +32,7 @@ export function LayoutPickerModal({
   const aspect = target.width / target.height
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[600] flex items-center justify-center bg-black/70 p-8"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/70 p-8" onClick={onClose}>
       <div
         data-testid="layout-picker"
         className="max-h-full w-[560px] max-w-full overflow-y-auto rounded-xl border border-white/10 bg-zinc-900 p-5 shadow-2xl"
@@ -65,9 +62,7 @@ export function LayoutPickerModal({
                 }`}
               >
                 <LayoutPresetPreview preset={p} aspect={aspect} height={112} />
-                <span
-                  className={`text-[10px] font-medium ${active ? 'text-fuchsia-200' : 'text-zinc-300'}`}
-                >
+                <span className={`text-[10px] font-medium ${active ? 'text-fuchsia-200' : 'text-zinc-300'}`}>
                   {p.label}
                 </span>
               </button>

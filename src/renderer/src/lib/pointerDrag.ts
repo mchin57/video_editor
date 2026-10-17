@@ -25,10 +25,7 @@ import { beginInteraction } from './interaction'
  * release, AFTER `onUp` has committed — so assistant calls wait for it and
  * keyboard shortcuts are ignored instead of being overwritten by the next move.
  */
-export function startPointerDrag(
-  onMove: (ev: PointerEvent) => void,
-  onUp?: (ev: PointerEvent) => void
-): void {
+export function startPointerDrag(onMove: (ev: PointerEvent) => void, onUp?: (ev: PointerEvent) => void): void {
   const end = beginInteraction()
   const move = (ev: PointerEvent): void => onMove(ev)
   const up = (ev: PointerEvent): void => {

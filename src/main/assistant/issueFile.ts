@@ -49,16 +49,20 @@ function gh(args: string[]): Promise<string> {
 
 async function fileToSink(sink: string, title: string, body: string): Promise<FileResult> {
   const existing = await fsp.readFile(sink, 'utf8').catch(() => '')
-  const rows = existing.split('\n').filter(Boolean).map((l) => JSON.parse(l) as { title: string })
+  const rows = existing
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as { title: string })
   if (rows.some((r) => sameTitle(r.title, title))) return { status: 'duplicate', where: sink }
   await fsp.appendFile(sink, JSON.stringify({ title, body, labels: ASSISTANT_LABELS }) + '\n')
   return { status: 'added', entry: title, where: sink }
 }
 
 async function fileToGitHub(title: string, body: string): Promise<FileResult> {
-  const open = JSON.parse(
-    await gh(['issue', 'list', '--state', 'open', '--limit', '500', '--json', 'title,url'])
-  ) as { title: string; url: string }[]
+  const open = JSON.parse(await gh(['issue', 'list', '--state', 'open', '--limit', '500', '--json', 'title,url'])) as {
+    title: string
+    url: string
+  }[]
   const dup = open.find((i) => sameTitle(i.title, title))
   if (dup) return { status: 'duplicate', where: dup.url }
   const args = ['issue', 'create', '--title', title, '--body', body]

@@ -341,7 +341,11 @@ interface ProjectState {
   /** Split an audio clip into its speech `ranges` (source seconds), dropping
    *  the silent stretches. A LINKED clip cuts its whole group at the same
    *  timeline seconds (`links.splitGroupOnSilence`; needs `srcDur`). One undo step. */
-  splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[], srcDur?: links.SourceDuration) => void
+  splitAudioOnSilence: (
+    audioId: string,
+    ranges: { start: number; end: number }[],
+    srcDur?: links.SourceDuration
+  ) => void
 
   // --- Volume levels (root-level list; shared/volumeLevels.ts) ---
   /** Create a level named `name` (the default target) and put the ACTIVE
@@ -501,9 +505,7 @@ export const useProject = create<ProjectState>((set, get) => {
       }),
 
     removeMedia: (id) =>
-      commit((p) =>
-        p.mediaIds.includes(id) ? { ...p, mediaIds: p.mediaIds.filter((m) => m !== id) } : p
-      ),
+      commit((p) => (p.mediaIds.includes(id) ? { ...p, mediaIds: p.mediaIds.filter((m) => m !== id) } : p)),
 
     liveUpdate: (transform) => {
       const current = get().project
@@ -626,9 +628,7 @@ export const useProject = create<ProjectState>((set, get) => {
     setLayoutPreset: (id, presetId) =>
       commitComp((p) =>
         mapLayer(p, id, (l) =>
-          l.content.kind === 'layout'
-            ? { ...l, content: applyLayoutPreset(l.content, presetId) }
-            : l
+          l.content.kind === 'layout' ? { ...l, content: applyLayoutPreset(l.content, presetId) } : l
         )
       ),
 
@@ -695,9 +695,7 @@ export const useProject = create<ProjectState>((set, get) => {
     updateLayer: (id, patch) => commitComp((p) => mapLayer(p, id, (l) => ({ ...l, ...patch }))),
 
     updateLayerContent: (id, patch) =>
-      commitComp((p) =>
-        mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))
-      ),
+      commitComp((p) => mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))),
 
     setVideoCrop: (id, crop, sourceAspect) => {
       const frame = projectFormat(get()).frame
@@ -864,8 +862,7 @@ export const useProject = create<ProjectState>((set, get) => {
         })
       ),
 
-    clearLayerKeyframes: (id) =>
-      commitComp((p) => mapLayer(p, id, (l) => ({ ...l, keyframes: undefined }))),
+    clearLayerKeyframes: (id) => commitComp((p) => mapLayer(p, id, (l) => ({ ...l, keyframes: undefined }))),
 
     applyBackgroundRemoval: (path, layerId, matte) => {
       const { window } = matte
@@ -936,8 +933,7 @@ export const useProject = create<ProjectState>((set, get) => {
     // --- Captions / script / audio ---
     setCaptions: (captions) => commitComp((p) => ({ ...p, captions })),
 
-    addScriptLine: (atSec) =>
-      commit((p) => ({ ...p, script: [...p.script, { id: newId(), text: '', atSec }] })),
+    addScriptLine: (atSec) => commit((p) => ({ ...p, script: [...p.script, { id: newId(), text: '', atSec }] })),
 
     updateScriptLine: (id, patch) =>
       commit((p) => ({ ...p, script: updateById(p.script, id, (l) => ({ ...l, ...patch })) })),
@@ -1008,9 +1004,7 @@ export const useProject = create<ProjectState>((set, get) => {
     replaceAudioFxRender: (fromMediaId, toMediaId, fx) =>
       commitComp((p) => ({
         ...p,
-        audioClips: p.audioClips.map((a) =>
-          a.fx && a.mediaId === fromMediaId ? { ...a, mediaId: toMediaId, fx } : a
-        )
+        audioClips: p.audioClips.map((a) => (a.fx && a.mediaId === fromMediaId ? { ...a, mediaId: toMediaId, fx } : a))
       })),
 
     setDenoiseDefault: (on) => commit((p) => (p.denoiseDefault === on ? p : { ...p, denoiseDefault: on })),

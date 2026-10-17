@@ -25,9 +25,20 @@ const media = (page: Page, ids: string[]): Promise<MediaAsset[]> =>
 /** A tiny H.264 clip; `pattern` + `duration` make files with different bytes. */
 const synth = (out: string, duration: number, pattern = 'testsrc2'): void => {
   execFileSync(FFMPEG, [
-    '-y', '-hide_banner', '-loglevel', 'error',
-    '-f', 'lavfi', '-i', `${pattern}=size=320x568:rate=30:duration=${duration}`,
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `${pattern}=size=320x568:rate=30:duration=${duration}`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
     out
   ])
 }
@@ -93,7 +104,10 @@ const boxes = (app: ElectronApplication): Promise<Box[]> =>
  * saved; then a DIFFERENT 3 s file written over it at the same path, and the
  * library re-checked (the user coming back from Explorer) → Missing.
  */
-async function arrangeMismatch(page: Page, projectsDir: string): Promise<{ id: string; source: string; before: MediaAsset }> {
+async function arrangeMismatch(
+  page: Page,
+  projectsDir: string
+): Promise<{ id: string; source: string; before: MediaAsset }> {
   const root = join(projectsDir, 'E2E')
   mkdirSync(join(root, 'footage'))
   const source = join(root, 'footage', 'IMG_0010.mp4')
@@ -203,11 +217,7 @@ test('relink one, fix the rest: the other missing clip in the picked folder reco
   // A mismatch would mean the wrong card was relinked: the stub cancels it.
   const movedA = join(root, 'footage2', 'A.mp4')
   await stubRelink(electronApp, movedA, { warning: 'cancel' })
-  await page
-    .getByTestId('media-missing')
-    .filter({ hasText: 'A.mp4' })
-    .getByRole('button', { name: 'Relink…' })
-    .click()
+  await page.getByTestId('media-missing').filter({ hasText: 'A.mp4' }).getByRole('button', { name: 'Relink…' }).click()
   await expect(page.getByTestId('media-missing')).toHaveCount(0)
 
   const asked = await boxes(electronApp)
