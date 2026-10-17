@@ -9,6 +9,7 @@ import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent } from
 import { playedBetween, sourceAfterPlayed } from './speed'
 import { DEFAULT_FONT_ID } from './fonts'
 import { FRAME, FULL_FRAME, type FrameRect } from './frame'
+import { LAYER_KINDS } from './layerKinds'
 
 // The canonical space + output-frame window live in the leaf `frame.ts` (see its
 // header for the init-order reason); re-exported so `layers.ts` stays the one
@@ -439,11 +440,8 @@ export function frontIndex(layers: Layer[]): number {
 export function layerLabel(layer: Layer): string {
   if (layer.name && layer.name.trim()) return layer.name.trim()
   const c = layer.content
-  if (c.kind === 'text') return c.text.trim() || 'Text'
-  if (c.kind === 'image') return 'Image'
-  if (c.kind === 'layout') return 'Layout'
-  if (c.kind === 'compound') return 'Compound clip'
-  return 'Video'
+  if (c.kind === 'text' && c.text.trim()) return c.text.trim()
+  return LAYER_KINDS[c.kind].name
 }
 
 /**

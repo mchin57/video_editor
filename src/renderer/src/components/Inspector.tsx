@@ -39,6 +39,7 @@ import {
 } from '@shared/layers'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect } from '@shared/media'
+import { kindInfo, layerMediaId } from '@shared/layerKinds'
 import { hasColorEmoji } from '@shared/textStyle'
 import { isJobActive } from '@shared/jobs'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
@@ -492,30 +493,26 @@ function LayerEditor(): JSX.Element | null {
   const id = layer.id
   const mut = setLayer(id)
   const c = layer.content
-  const asset = c.kind === 'video' || c.kind === 'image' ? assets.find((a) => a.id === c.mediaId) : undefined
+  const kind = kindInfo(layer)
+  const mediaId = layerMediaId(c)
+  const asset = mediaId ? assets.find((a) => a.id === mediaId) : undefined
   // Position and zoom READ frame-relative (0,0 = the frame's top-left, 100% =
   // fits the frame); the document stays in canonical coords, so a format switch
   // never rewrites them. Identity in 9:16.
   const frame = format.frame
   const zoomBase = layerFitScale(layer, assetAspect(asset), frame)
-  const kindName =
-    c.kind === 'video'
-      ? 'Video layer'
-      : c.kind === 'image'
-        ? 'Image layer'
-        : c.kind === 'layout'
-          ? 'Layout layer'
-          : 'Text layer'
   // Keyframes override the base transform for media layers; grey those fields.
   // A text layer's keyframes are its straight-line motion: they own its
   // POSITION only (its size is never keyframed).
   const hasKfs = (layer.keyframes?.length ?? 0) > 0
-  const keyframed = c.kind !== 'text' && c.kind !== 'layout' && hasKfs
-  const posKeyframed = keyframed || (c.kind === 'text' && hasKfs)
+  const keyframed = kind.keyframes === 'transform' && hasKfs
+  const posKeyframed = keyframed || (kind.keyframes === 'path' && hasKfs)
 
   return (
     <div>
-      <div className="mb-1 text-sm font-medium text-zinc-200">{kindName}</div>
+      <div className="mb-1 text-sm font-medium text-zinc-200" data-testid="inspector-kind">
+        {kind.title}
+      </div>
       {asset && (
         <div className="mb-2 truncate text-xs text-zinc-400" title={asset.fileName}>
           {asset.fileName}
@@ -594,7 +591,7 @@ function LayerEditor(): JSX.Element | null {
 
         {/* Rotation: the same control captions use, paired with the canvas
           handle. Layouts and compound clips don't rotate (yet). */}
-        {(c.kind === 'video' || c.kind === 'image' || c.kind === 'text') && (
+        {kind.rotatable && (
           <AngleField
             value={layer.rotationDeg ?? 0}
             onChange={(deg) => update(id, { rotationDeg: deg || undefined })}
@@ -651,7 +648,7 @@ function LayerEditor(): JSX.Element | null {
       {/* Straight-line motion: start point → end point over a duration. Two
           keyframes under the hood (shared/motion.ts), so for media the
           Keyframes list below is the advanced view of the same data. */}
-      {(c.kind === 'video' || c.kind === 'image' || c.kind === 'text') && (
+      {kind.motion && (
         <CollapsibleSection id="motion" title="Motion">
           <MotionFields layer={layer} frame={frame} />
         </CollapsibleSection>
@@ -659,7 +656,7 @@ function LayerEditor(): JSX.Element | null {
 
       {/* Keyframed motion (video/image; text animates via its own presets;
           layouts and compounds have no export keyframe path) */}
-      {c.kind !== 'text' && c.kind !== 'layout' && c.kind !== 'compound' && (
+      {kind.keyframes === 'transform' && (
         <CollapsibleSection id="keyframes" title="Keyframes">
           <KeyframesSection layer={layer} frame={frame} zoomBase={zoomBase} />
         </CollapsibleSection>
