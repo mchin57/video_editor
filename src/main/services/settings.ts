@@ -4,6 +4,7 @@ import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import type { Settings } from '@shared/settings'
 import { DEFAULT_BRAND_COLORS, DEFAULT_KEYWORD_BANK, withAssistantDefaults, withAutoJoinDefault } from '@shared/settings'
+import { sanitizeTextStyles } from '@shared/textStylePresets'
 import { getDataDir, getSubdir } from '../config'
 
 let cache: Settings | null = null
@@ -23,7 +24,8 @@ export async function getSettings(): Promise<Settings> {
     keywordBank: Array.isArray(loaded.keywordBank) ? loaded.keywordBank : DEFAULT_KEYWORD_BANK,
     brandColors: Array.isArray(loaded.brandColors) ? loaded.brandColors : DEFAULT_BRAND_COLORS,
     assistant: withAssistantDefaults(loaded.assistant),
-    autoJoinDefaultLevel: withAutoJoinDefault(loaded.autoJoinDefaultLevel)
+    autoJoinDefaultLevel: withAutoJoinDefault(loaded.autoJoinDefaultLevel),
+    textStyles: sanitizeTextStyles(loaded.textStyles)
   }
   return cache
 }

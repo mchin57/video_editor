@@ -874,7 +874,12 @@ function LayerEditor(): JSX.Element | null {
           <Field label="Text">
             <textarea value={c.text} rows={2} onChange={(e) => updateContent(id, { text: e.target.value })} className={inputCls} />
           </Field>
-          <TextStyleControls style={c} onPatch={(patch) => updateContent(id, patch)} />
+          <TextStyleControls
+            style={c}
+            onPatch={(patch) => updateContent(id, patch)}
+            animation={c.animation ?? null}
+            onApplyStyle={(st, anim) => updateContent(id, anim !== undefined ? { ...st, animation: anim } : st)}
+          />
           <TextAnimationFields content={c} onPatch={(patch) => updateContent(id, patch)} />
         </CollapsibleSection>
       )}
