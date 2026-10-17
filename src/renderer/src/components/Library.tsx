@@ -20,6 +20,7 @@ import { usePlayback } from '@/state/playback'
 import { makeImageLayer, visualDuration } from '@shared/layers'
 import { ClipCard } from '@/components/ClipCard'
 import { btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/components/ui'
+import { newId } from '@shared/ids'
 
 /**
  * A library row: the shared `ClipCard` shell (thumbnail + hover preview + meta),
@@ -148,14 +149,14 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   const endOfTimeline = (): number => visualDuration(useProject.getState().project?.layers ?? [])
   const addVideoAt = (startSec: number): void => {
     if (!ready) return
-    const id = crypto.randomUUID()
+    const id = newId()
     addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio, assetAspect(asset))
     // A clip with audio lands as a LINKED pair — select the whole group.
     selectTile(useProject.getState().project, { kind: 'layer', id })
   }
   const addImageAt = (startSec: number): void => {
     if (!ready) return
-    const id = crypto.randomUUID()
+    const id = newId()
     addLayer(
       makeImageLayer(id, asset.id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) })
     )
@@ -202,7 +203,7 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
           onClick={(e) => {
             e.stopPropagation()
             if (!ready) return
-            const id = crypto.randomUUID()
+            const id = newId()
             addAudioClip({
               id,
               mediaId: asset.id,

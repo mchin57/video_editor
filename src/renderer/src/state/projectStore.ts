@@ -70,6 +70,7 @@ import {
   saveProjectAs,
   saveProjectFile
 } from '@/ipc/client'
+import { newId } from '@shared/ids'
 
 const HISTORY_LIMIT = 50
 
@@ -86,8 +87,6 @@ function cancelScheduledSave(): boolean {
   saveTimer = null
   return true
 }
-
-const newId = (): string => crypto.randomUUID()
 
 /** A partial patch over a layer's content (the caller guards the content kind).
  *  A union of partials rather than Record<string, unknown> so a typo'd field

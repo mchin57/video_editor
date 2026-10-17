@@ -7,9 +7,9 @@ import { useUi } from '@/state/ui'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { imageUrl } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
+import { clamp01 } from '@shared/math'
 
 const FULL: NormCrop = { x: 0, y: 0, w: 1, h: 1 }
-const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
 const isFull = (c: NormCrop): boolean => c.x <= 0.001 && c.y <= 0.001 && c.w >= 0.999 && c.h >= 0.999
 
 /**

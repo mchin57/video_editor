@@ -10,7 +10,6 @@
  */
 
 import net from 'node:net'
-import { randomUUID } from 'node:crypto'
 import {
   LineDecoder,
   encodeLine,
@@ -18,6 +17,7 @@ import {
   type PipeResponse,
   type ToolContent
 } from '@shared/assistant/pipeProtocol'
+import { newId } from '@shared/ids'
 
 export type PipeHandler = (tool: string, args: unknown) => Promise<ToolContent[]>
 
@@ -88,7 +88,7 @@ async function answer(sock: net.Socket, req: PipeRequest, handle: PipeHandler): 
 
 export function callPipe(path: string, tool: string, args: unknown): Promise<ToolContent[]> {
   return new Promise((resolve, reject) => {
-    const id = randomUUID()
+    const id = newId()
     const decoder = new LineDecoder()
     let settled = false
     const settle = (fn: () => void): void => {

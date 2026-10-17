@@ -19,6 +19,7 @@ import { normalizeDeg, rotatedBounds } from '@shared/rotation'
 import type { AudioClip } from '@shared/project'
 import { effectiveDenoise, effectiveOut } from '@shared/project'
 import { clipGain, type GainContext } from '@shared/volumeLevels'
+import { clampInt } from '@shared/math'
 
 /**
  * Per-frame opacity animation for a visual: `sendcmd` (reading `cmdFile`,
@@ -340,8 +341,6 @@ export interface StabilizeJob {
   /** Relative output (stabilized intermediate) name. */
   outFile: string
 }
-
-const clampInt = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, Math.round(n)))
 
 /** Pass 1: analyse camera motion → transforms file (writes no real output). */
 export function buildVidstabDetectArgs(j: StabilizeJob): string[] {

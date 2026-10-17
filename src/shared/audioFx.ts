@@ -17,6 +17,8 @@
  * filter is unusable, so both stacking effects are built from primitives.
  */
 
+import { clamp, clampInt } from './math'
+
 export type AudioFxKind = 'echo' | 'ensemble' | 'chorus'
 
 /**
@@ -111,9 +113,6 @@ export const CHORUS_RANGE = {
   rateHz: { min: 0.2, max: 6 },
   depth: { min: 0.05, max: 1 }
 } as const
-
-const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
-const clampInt = (n: number, lo: number, hi: number): number => clamp(Math.round(n), lo, hi)
 
 /** Clamp user input to the supported range (also guards a hand-edited project). */
 export function normalizeEcho(e: EchoEffect): EchoEffect {
