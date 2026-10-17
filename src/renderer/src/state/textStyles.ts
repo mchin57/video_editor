@@ -10,6 +10,7 @@ import type { TextStyleBase } from '@shared/project'
 import type { TextAnimation } from '@shared/textAnim'
 import { sanitizeTextStyles, upsertTextStyle, type TextStylePreset } from '@shared/textStylePresets'
 import { getSettings, updateSettings } from '@/ipc/client'
+import { newId } from '@shared/ids'
 
 interface TextStylesState {
   styles: TextStylePreset[]
@@ -34,7 +35,7 @@ export const useTextStyles = create<TextStylesState>((set, get) => ({
     }
   },
   save: (name, style, animation) => {
-    const styles = upsertTextStyle(get().styles, name, style, animation, crypto.randomUUID())
+    const styles = upsertTextStyle(get().styles, name, style, animation, newId())
     if (styles === get().styles) return
     set({ styles })
     void updateSettings({ textStyles: styles })

@@ -39,6 +39,7 @@ import { useUi } from '@/state/ui'
 import { useAppSettings } from '@/state/appSettings'
 import { useLoudness } from '@/state/loudness'
 import { makeTextLayer } from '@shared/layers'
+import { newId } from '@shared/ids'
 
 /**
  * File ▸ New's window (docs/MEDIA-POINTERS.md "The project folder"): a name
@@ -269,7 +270,7 @@ export default function App(): JSX.Element {
         const { selection } = useUi.getState()
         if (selection.length) project.toggleMuteItems(selection)
       } else if (e.key.toLowerCase() === 't') {
-        const id = crypto.randomUUID()
+        const id = newId()
         const start = usePlayback.getState().time
         project.addLayer(makeTextLayer(id, start, start + 3, getFormat().frame))
         useUi.getState().selectLayer(id)

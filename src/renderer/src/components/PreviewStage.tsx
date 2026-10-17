@@ -61,9 +61,9 @@ import { useEditor } from '@/state/store'
 import { activeComp, getActiveComp, projectFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
+import { clamp } from '@shared/math'
 
 const pct = (value: number, total: number): string => `${(value / total) * 100}%`
-const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 /** The layer with its keyframed transform baked in for rendering at time `t`
  *  (text layers ignore keyframes — they animate via `TextContent.animation`;

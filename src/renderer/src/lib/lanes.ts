@@ -1,3 +1,4 @@
+import { clamp } from '@shared/math'
 /**
  * Greedy interval packing for timeline lanes: assign each time-span block to the
  * lowest row whose previous block has already ended, so overlapping blocks stack
@@ -34,8 +35,6 @@ export function rowCount(rows: Map<string, number>, min = 1): number {
   for (const r of rows.values()) max = Math.max(max, r + 1)
   return Math.max(min, max)
 }
-
-const clampN = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(n, hi))
 
 /** Per-lane view preference: a manual height-per-row and/or a collapsed flag.
  *  Persisted (localStorage) so the timeline layout survives reloads. */
@@ -90,7 +89,7 @@ export function layoutLanes<K extends string>(
   const lanes = defs.map((d) => {
     const v = view[d.key] ?? {}
     const collapsed = !!v.collapsed
-    const rowH = clampN(v.rowH ?? geom.rowH, geom.minRowH, geom.maxRowH)
+    const rowH = clamp(v.rowH ?? geom.rowH, geom.minRowH, geom.maxRowH)
     const top = acc
     const height = collapsed ? geom.collapsedH : d.rows * rowH
     acc += height + geom.gap
@@ -103,5 +102,5 @@ export function layoutLanes<K extends string>(
 /** New height-per-row for a lane resize: the pointer's vertical delta spread
  *  across the lane's rows, clamped to [min,max]. */
 export function resizeRowH(startRowH: number, dyPx: number, rows: number, geom: LaneGeometry): number {
-  return clampN(startRowH + dyPx / Math.max(1, rows), geom.minRowH, geom.maxRowH)
+  return clamp(startRowH + dyPx / Math.max(1, rows), geom.minRowH, geom.maxRowH)
 }

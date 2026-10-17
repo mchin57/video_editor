@@ -9,6 +9,7 @@ import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
 import { idle } from '@/lib/interaction'
 import { captureStillToDisk, captureStillToLibrary, imageUrl } from '@/ipc/client'
+import { newId } from '@shared/ids'
 
 /**
  * Floating gallery for grabbing still frames out of the selected video layer.
@@ -79,7 +80,7 @@ export function StillsPopout(): JSX.Element | null {
   const addAsLayer = (asset: MediaAsset): void => {
     const start = usePlayback.getState().time
     addLayer({
-      id: crypto.randomUUID(),
+      id: newId(),
       hidden: false,
       startSec: start,
       endSec: start + 3,

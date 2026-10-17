@@ -1,9 +1,9 @@
 /** In-memory job registry that broadcasts progress to all renderer windows. */
 
 import { BrowserWindow } from 'electron'
-import { randomUUID } from 'node:crypto'
 import { IPC_EVENT } from '@shared/ipc'
 import type { Job, JobType, JobProgressEvent } from '@shared/jobs'
+import { newId } from '@shared/ids'
 
 const jobs = new Map<string, Job>()
 /** Abort controllers of cancelable jobs still in flight, by job id. */
@@ -58,7 +58,7 @@ export function createJob(
 
   const cancelable = !!opts.cancelable
   const job: Job = {
-    id: randomUUID(),
+    id: newId(),
     type,
     status: 'running',
     progress: 0,

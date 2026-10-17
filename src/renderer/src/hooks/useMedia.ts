@@ -24,6 +24,7 @@ import { useUi } from '@/state/ui'
 import { activeComp, useProject } from '@/state/projectStore'
 import { useLoudness } from '@/state/loudness'
 import { idle } from '@/lib/interaction'
+import { newId } from '@shared/ids'
 
 const LIBRARY_KEY = 'library'
 
@@ -227,7 +228,7 @@ export function useAddAudioFx(): ReturnType<typeof useMutation<MediaAsset, Error
         return
       }
       store.addAudioClip({
-        id: crypto.randomUUID(),
+        id: newId(),
         mediaId: asset.id,
         startSec: input.startSec,
         inSec: 0,
