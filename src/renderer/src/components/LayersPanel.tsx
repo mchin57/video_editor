@@ -122,6 +122,9 @@ export function LayersPanel(): JSX.Element {
           checked={!l.hidden}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={() => toggleHidden(l.id)}
+          // Checked = visible, so it is named for that state ("Hide layer" on a
+          // checked box read backwards to a screen reader); the tooltip says what a click does.
+          aria-label="Visible"
           title={l.hidden ? 'Show layer' : 'Hide layer'}
           className="shrink-0 accent-sky-400"
         />

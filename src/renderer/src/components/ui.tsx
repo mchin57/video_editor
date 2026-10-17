@@ -171,6 +171,30 @@ export function NumberInput({
 }
 
 /**
+ * A text box whose whole TYPING SESSION is one undo step: focus opens a store
+ * gesture and blur closes it, so Undo takes back what was typed in one go
+ * instead of a character at a time. Spread the result on the input. An input
+ * unmounted while focused never blurs, so unmounting closes the gesture too
+ * (otherwise later edits would record no history).
+ */
+export function useTypingGesture(): { onFocus: () => void; onBlur: () => void } {
+  const open = useRef(false)
+  const end = useCallback((): void => {
+    if (!open.current) return
+    open.current = false
+    useProject.getState().endGesture()
+  }, [])
+  useEffect(() => end, [end])
+  return {
+    onFocus: () => {
+      open.current = true
+      useProject.getState().beginGesture()
+    },
+    onBlur: end
+  }
+}
+
+/**
  * Stock range slider whose whole DRAG is one undo step. `onChange` edits through
  * ordinary store actions (e.g. an Inspector `onPatch`); the pointer drag is
  * wrapped in a store gesture (`beginGesture`/`endGesture`), so the preview

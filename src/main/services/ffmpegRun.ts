@@ -47,16 +47,18 @@ export function startFfmpeg(
 
 /**
  * Run ffmpeg, reporting progress (0..1) parsed from `-progress pipe:1` output.
- * Resolves on exit 0, rejects with the tail of stderr otherwise.
+ * Resolves on exit 0, rejects with the tail of stderr otherwise. `signal`
+ * kills the run (a cancelable job's signal).
  */
 export function runFfmpeg(
   ffmpeg: string,
   args: string[],
   durationSec: number,
   onProgress?: (p: number) => void,
-  cwd?: string
+  cwd?: string,
+  signal?: AbortSignal
 ): Promise<void> {
-  const { child, exited } = startFfmpeg(ffmpeg, args, { cwd })
+  const { child, exited } = startFfmpeg(ffmpeg, args, { cwd, signal })
   child.stdout.on('data', (buf: Buffer) => {
     const last = [...buf.toString().matchAll(/out_time_(?:us|ms)=(\d+)/g)].at(-1)
     if (last && durationSec > 0 && onProgress) {

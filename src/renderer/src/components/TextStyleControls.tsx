@@ -1,8 +1,11 @@
-import { useEffect, type JSX } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 import type { TextStyleBase } from '@shared/project'
 import { DEFAULT_GRADIENT, DEFAULT_SHADOW, DEFAULT_STROKE } from '@shared/project'
 import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN, TEXT_PILL_PAD_MAX } from '@shared/textStyle'
+import type { TextAnimation } from '@shared/textAnim'
+import { pickTextStyle, TEXT_STYLE_NAME_MAX } from '@shared/textStylePresets'
 import { useBrandColors } from '@/state/brandColors'
+import { useTextStyles } from '@/state/textStyles'
 import { FontPicker } from './FontPicker'
 import { Check, Field, NumberInput, Slider, colorCls, inputCls } from './ui'
 
@@ -74,16 +77,113 @@ function BrandSwatches({ current, onPick }: { current: string; onPick: (hex: str
 }
 
 /**
+ * Saved text styles (#45): each chip applies its look in one click (one undo
+ * step); × deletes it. "＋ Save style" names the current look and keeps it
+ * editor-wide (settings.json) — saving under an existing name overwrites it.
+ * A text layer's save carries its animation too (`animation` given); a caption's
+ * doesn't, and applying a style never touches a caption's animation.
+ */
+function TextStylePicker({
+  style,
+  animation,
+  onApply
+}: {
+  style: TextStyleLike
+  animation?: TextAnimation | null
+  onApply: (style: TextStyleLike, animation?: TextAnimation | null) => void
+}): JSX.Element {
+  const styles = useTextStyles((s) => s.styles)
+  const save = useTextStyles((s) => s.save)
+  const remove = useTextStyles((s) => s.remove)
+  const [naming, setNaming] = useState<string | null>(null)
+  useEffect(() => void useTextStyles.getState().load(), [])
+  const commit = (): void => {
+    if (naming?.trim()) save(naming, style, animation)
+    setNaming(null)
+  }
+  return (
+    <div className="mb-2" data-testid="text-style-picker">
+      <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Saved styles</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {styles.map((p) => (
+          <span key={p.id} className="flex items-center rounded bg-white/10 text-[11px] text-zinc-200">
+            <button
+              type="button"
+              onClick={() => onApply(p.style, p.animation)}
+              title={`Apply “${p.name}”`}
+              className="rounded-l px-1.5 py-0.5 hover:bg-white/20"
+              style={{ fontWeight: 600 }}
+            >
+              {p.name}
+            </button>
+            <button
+              type="button"
+              onClick={() => remove(p.id)}
+              aria-label={`Delete style ${p.name}`}
+              title="Delete this saved style"
+              className="rounded-r px-1 py-0.5 text-zinc-500 hover:bg-rose-500/30 hover:text-rose-200"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {naming === null ? (
+          <button
+            type="button"
+            onClick={() => setNaming('')}
+            title="Save this look (font, size, colours, pill, outline, shadow, gradient) as a named style"
+            className="rounded border border-dashed border-white/30 px-1.5 py-0.5 text-[11px] text-zinc-400 hover:text-zinc-200"
+          >
+            ＋ Save style
+          </button>
+        ) : (
+          <span className="flex w-full items-center gap-1">
+            <input
+              autoFocus
+              aria-label="Style name"
+              placeholder="Style name"
+              maxLength={TEXT_STYLE_NAME_MAX}
+              value={naming}
+              onChange={(e) => setNaming(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commit()
+                else if (e.key === 'Escape') setNaming(null)
+              }}
+              className={`${inputCls} min-w-0 flex-1`}
+            />
+            <button
+              type="button"
+              onClick={commit}
+              disabled={!naming.trim()}
+              className="rounded bg-sky-500/80 px-2 py-1 text-[11px] text-white hover:bg-sky-400 disabled:opacity-40"
+            >
+              Save
+            </button>
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
  * The shared text/caption styling block: font, size, fill (+brand swatches),
  * gradient, pill (with opacity), stroke and shadow. Drives every control from
  * one `style` shape so text overlays and captions stay in lockstep.
  */
 export function TextStyleControls({
   style,
-  onPatch
+  onPatch,
+  animation,
+  onApplyStyle
 }: {
   style: TextStyleLike
   onPatch: (patch: TextStylePatch) => void
+  /** A text layer's animation, saved with its style (captions pass none). */
+  animation?: TextAnimation | null
+  /** Apply a saved style as ONE edit (a text layer folds the animation in);
+   *  default: `onPatch` with the style alone. */
+  onApplyStyle?: (style: TextStyleLike, animation?: TextAnimation | null) => void
 }): JSX.Element {
   const pill = style.pill
   const stroke = style.stroke
@@ -92,6 +192,11 @@ export function TextStyleControls({
 
   return (
     <div>
+      <TextStylePicker
+        style={style}
+        animation={animation}
+        onApply={(st, anim) => (onApplyStyle ? onApplyStyle(pickTextStyle(st), anim) : onPatch(pickTextStyle(st)))}
+      />
       <Field label="Font">
         <FontPicker value={style.fontFamily} onChange={(id) => onPatch({ fontFamily: id })} />
       </Field>
