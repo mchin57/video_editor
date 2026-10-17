@@ -376,6 +376,12 @@ export function extractAudioPieces(
  * whole-source clips (outSec<=0) `sourceDurationSec` resolves where they end;
  * pass <=0 when unknown (only the lower edge is then guarded).
  */
+/** The TIMELINE second at which an audio clip plays source second `sourceSec`
+ *  (audio has no speed or holds: a straight offset). */
+export function audioTimelineAt(clip: Pick<AudioClip, 'startSec' | 'inSec'>, sourceSec: number): number {
+  return clip.startSec + (sourceSec - clip.inSec)
+}
+
 export function splitAudioClip(
   clip: AudioClip,
   atSec: number,

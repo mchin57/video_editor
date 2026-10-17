@@ -142,3 +142,33 @@ test('Start (s) cannot be set past End (s) — the layer never inverts', async (
   expect(l.startSec).toBeLessThan(l.endSec)
   expect(l.startSec).toBeCloseTo(3.8)
 })
+
+// Regressions for #13 (chaos QA 2026-10-15).
+const layerT1 = (page: Page): Promise<{ y: number; startSec: number }> =>
+  page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'T1')!)
+
+test('letters in Position Y are not read as 0 — the text stays put', async ({ appPage: page }) => {
+  // THE BUG: "abc" set y to 0, jumping the text to the top edge.
+  await addTextLayer(page)
+  const before = (await layerT1(page)).y
+  const field = page.getByRole('spinbutton', { name: 'Position Y' })
+  await field.click()
+  await page.keyboard.press('Control+a')
+  await page.keyboard.type('abc')
+  expect((await layerT1(page)).y).toBe(before)
+  await field.blur()
+  expect((await layerT1(page)).y).toBe(before)
+  await expect(field).not.toHaveValue('0')
+})
+
+test('a decimal comma reads as a decimal point ("3,5" is 3.5, not 35)', async ({ appPage: page }) => {
+  // THE BUG: Chromium's number input reads "," as a thousands separator, so "3,0" became 30.
+  await addTextLayer(page)
+  await page.evaluate(() => window.__reelStores.useProject.getState().updateLayer('T1', { endSec: 40 }))
+  const start = page.getByRole('spinbutton', { name: 'Start (s)' })
+  await start.click()
+  await page.keyboard.press('Control+a')
+  await page.keyboard.type('3,5')
+  await start.press('Enter')
+  expect((await layerT1(page)).startSec).toBe(3.5)
+})

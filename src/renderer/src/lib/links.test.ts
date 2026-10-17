@@ -16,6 +16,7 @@ import {
   pruneLinkGroups,
   removeItems,
   snapToPreviousDelta,
+  splitGroupOnSilence,
   splitItemsAt,
   splittableAt,
   toggleMuteItems,
@@ -392,6 +393,57 @@ describe('splitItemsAt', () => {
     expect((left.content as VideoContent).outSec).toBeCloseTo(5, 5)
     expect((left.content as VideoContent).freezes).toEqual([{ atSec: 3, holdSec: 2 }])
     expect(right.endSec).toBe(12)
+  })
+})
+
+describe('splitGroupOnSilence', () => {
+  const srcDur = (): number => 0 // explicit out-points everywhere in these fixtures
+  const gid = (p: Composition, ref: TimelineItemRef): string | undefined =>
+    timelineTiles(p).find((t) => t.ref.kind === ref.kind && t.ref.id === ref.id)?.linkGroupId
+  const synced = (): Project =>
+    project({ layers: [layer('L1', 0, 10, 'g1')], audioClips: [audio('A1', 0, 10, 'g1')] })
+
+  it('cuts the whole group at every speech boundary and pairs the speech slices', () => {
+    const next = splitGroupOnSilence(synced(), 'A1', [{ start: 1, end: 3 }, { start: 5, end: 8 }], srcDur, ids())
+    // The video is cut at 1, 3, 5 and 8 and keeps every slice (no black gaps)…
+    expect(next.layers.map((l) => [l.startSec, l.endSec])).toEqual([[0, 1], [1, 3], [3, 5], [5, 8], [8, 10]])
+    // …the audio keeps only its speech.
+    expect(next.audioClips.map((a) => [a.startSec, a.inSec, a.outSec])).toEqual([[1, 1, 3], [5, 5, 8]])
+    // Speech slice N of the audio ↔ the video's slice N, each pair its own group.
+    const [s1, s2] = next.audioClips
+    const v = next.layers
+    expect(gid(next, A(s1.id))).toBeDefined()
+    expect(gid(next, L(v[1].id))).toBe(gid(next, A(s1.id)))
+    expect(gid(next, L(v[3].id))).toBe(gid(next, A(s2.id)))
+    expect(gid(next, A(s1.id))).not.toBe(gid(next, A(s2.id)))
+    // The video's silent slices have no partner left: unlinked.
+    for (const i of [0, 2, 4]) expect(v[i].linkGroupId).toBeUndefined()
+  })
+
+  it('maps source boundaries through the audio clip placement (offset start + trimmed in)', () => {
+    const p = project({ layers: [layer('L1', 0, 10, 'g1')], audioClips: [{ ...audio('A1', 2, 6, 'g1'), inSec: 4, outSec: 10 }] })
+    // Source 5–7 plays at timeline 3–5.
+    const next = splitGroupOnSilence(p, 'A1', [{ start: 5, end: 7 }], srcDur, ids())
+    expect(next.layers.map((l) => [l.startSec, l.endSec])).toEqual([[0, 3], [3, 5], [5, 10]])
+    expect(next.audioClips).toHaveLength(1)
+    expect(next.audioClips[0]).toMatchObject({ startSec: 3, inSec: 5, outSec: 7 })
+    expect(gid(next, L(next.layers[1].id))).toBe(gid(next, A(next.audioClips[0].id)))
+  })
+
+  it('leaves a member no boundary crosses whole', () => {
+    const p = project({
+      layers: [layer('L1', 0, 10, 'g1')],
+      audioClips: [audio('A1', 0, 10, 'g1')],
+      segments: [caption('C1', 6, 1, 'g1')]
+    })
+    const next = splitGroupOnSilence(p, 'A1', [{ start: 1, end: 3 }], srcDur, ids())
+    expect(next.captions.segments.map((s) => [s.startSec, s.endSec])).toEqual([[6, 7]])
+  })
+
+  it('is a no-op when the speech covers the whole clip', () => {
+    const p = synced()
+    expect(splitGroupOnSilence(p, 'A1', [{ start: 0, end: 10 }], srcDur, ids())).toBe(p)
+    expect(splitGroupOnSilence(p, 'A1', [], srcDur, ids())).toBe(p)
   })
 })
 

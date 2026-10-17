@@ -155,7 +155,12 @@ export function NumberInput({
       }}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
+        // Chromium's number input reads "," as a thousands separator ("3,0" is
+        // 30); nothing here is in the thousands, so it is a decimal comma.
+        if (e.key === ',') {
+          e.preventDefault()
+          document.execCommand('insertText', false, '.')
+        } else if (e.key === 'Enter') e.currentTarget.blur()
         else if (e.key === 'Escape') {
           putDraft(null)
           e.currentTarget.blur()

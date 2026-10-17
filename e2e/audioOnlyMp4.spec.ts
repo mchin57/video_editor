@@ -13,11 +13,12 @@
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { JobProgressEvent } from '../src/shared/jobs'
 import { test, expect } from './fixtures'
 
-const FFMPEG = resolve(__dirname, '..', 'resources', 'bin', 'ffmpeg', 'ffmpeg.exe')
+// The shared lookup (`e2e/bin.ts`): a worktree finds the main checkout's binaries.
+import { FFMPEG } from './bin'
 
 type Probe = { __jobs: JobProgressEvent[] }
 

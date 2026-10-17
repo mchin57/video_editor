@@ -541,23 +541,19 @@ function LayerEditor(): JSX.Element | null {
       )}
       <div className="flex gap-2">
         <Field label="Position X">
-          <input
-            type="number"
+          <NumberInput
             step="5"
             value={Math.round(layer.x - frame.x)}
             disabled={posKeyframed}
-            onChange={(e) => update(id, { x: Number(e.target.value) + frame.x })}
-            className={inputCls}
+            onCommit={(v) => update(id, { x: v + frame.x })}
           />
         </Field>
         <Field label="Position Y">
-          <input
-            type="number"
+          <NumberInput
             step="5"
             value={Math.round(layer.y - frame.y)}
             disabled={posKeyframed}
-            onChange={(e) => update(id, { y: Number(e.target.value) + frame.y })}
-            className={inputCls}
+            onCommit={(v) => update(id, { y: v + frame.y })}
           />
         </Field>
       </div>
@@ -1047,16 +1043,12 @@ function KeyframesSection({
                 <span className="flex-1 truncate text-zinc-500">
                   x{Math.round(k.x - frame.x)} y{Math.round(k.y - frame.y)} · {Math.round((k.scale / zoomBase) * 100)}%
                 </span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   max={100}
                   step={5}
                   value={Math.round(kfOpacity(k) * 100)}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    if (Number.isFinite(v)) setKfOpacity(layer.id, i, v / 100)
-                  }}
+                  onCommit={(v) => setKfOpacity(layer.id, i, v / 100)}
                   className={`${inputCls} w-12 flex-none`}
                   title="Layer opacity at this keyframe (%) — fades linearly between keyframes"
                 />
@@ -1157,19 +1149,13 @@ function SpeedControl({
               {v}×
             </button>
           ))}
-          <input
-            type="number"
+          <NumberInput
             min={MIN_VIDEO_SPEED}
             max={MAX_VIDEO_SPEED}
             step={0.05}
             value={cur}
             disabled={ramped}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              if (Number.isFinite(v) && v > 0) {
-                setSpeed(layerId, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
-              }
-            }}
+            onCommit={(v) => setSpeed(layerId, v)}
             className={`${inputCls} w-16 flex-none`}
           />
         </div>
@@ -1198,18 +1184,12 @@ function SpeedControl({
                     ▸
                   </button>
                   <span className="w-10 font-mono">{k.atSec.toFixed(2)}s</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={MIN_VIDEO_SPEED}
                     max={MAX_VIDEO_SPEED}
                     step={0.05}
                     value={k.speed}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      if (Number.isFinite(v) && v > 0) {
-                        updateRampKf(layerId, i, Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, v)))
-                      }
-                    }}
+                    onCommit={(v) => updateRampKf(layerId, i, v)}
                     className={`${inputCls} w-14 flex-none`}
                     title="Playback speed at this source point"
                   />
@@ -1357,22 +1337,10 @@ function CaptionStyleFields({
       <TextStyleControls style={style} onPatch={onPatch} />
       <div className="flex gap-2">
         <Field label="Position X">
-          <input
-            type="number"
-            step="5"
-            value={Math.round(style.x)}
-            onChange={(e) => onPatch({ x: Number(e.target.value) })}
-            className={inputCls}
-          />
+          <NumberInput step="5" value={Math.round(style.x)} onCommit={(x) => onPatch({ x })} />
         </Field>
         <Field label="Position Y">
-          <input
-            type="number"
-            step="5"
-            value={Math.round(style.y)}
-            onChange={(e) => onPatch({ y: Number(e.target.value) })}
-            className={inputCls}
-          />
+          <NumberInput step="5" value={Math.round(style.y)} onCommit={(y) => onPatch({ y })} />
         </Field>
       </div>
       <AngleField value={style.rotationDeg} onChange={(rotationDeg) => onPatch({ rotationDeg })} />
@@ -1558,7 +1526,9 @@ function AudioClipEditor(): JSX.Element | null {
       const silences = await detectSilence(clip.mediaId)
       const ranges = speechSegments(silences, clip.inSec, effectiveOut(clip, dur), 0.4)
       await idle() // detection can finish mid-drag; the split waits for the release
-      if (ranges.length > 1) splitOnSilence(clip.id, ranges)
+      // A linked clip cuts its partners too, at the same timeline seconds.
+      const srcDur = (mediaId: string): number => assets.find((a) => a.id === mediaId)?.probe.durationSec ?? 0
+      if (ranges.length > 1) splitOnSilence(clip.id, ranges, srcDur)
       else setSplitNote('No silence gaps found to split on.')
     } finally {
       setSplitting(false)
@@ -1634,11 +1604,11 @@ function AudioClipEditor(): JSX.Element | null {
 
       <button
         onClick={() => void runSplitOnSilence()}
-        disabled={splitting || linked}
+        disabled={splitting}
         className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 disabled:opacity-50 ${disabledCls}`}
         title={
           linked
-            ? 'Not available on a linked tile — the pieces would cut only this one (unlink first)'
+            ? 'Detect silence and split this clip into its speech segments; its linked tiles are cut at the same points'
             : 'Detect silence and split this clip into its speech segments'
         }
       >

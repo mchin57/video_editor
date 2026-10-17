@@ -338,7 +338,10 @@ interface ProjectState {
   setDenoiseDefault: (on: boolean) => void
   /** Set the project-wide stabilization default (per-clip overrides still win). */
   setStabilizeDefault: (stab: import('@shared/project').Stabilize | null) => void
-  splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[]) => void
+  /** Split an audio clip into its speech `ranges` (source seconds), dropping
+   *  the silent stretches. A LINKED clip cuts its whole group at the same
+   *  timeline seconds (`links.splitGroupOnSilence`; needs `srcDur`). One undo step. */
+  splitAudioOnSilence: (audioId: string, ranges: { start: number; end: number }[], srcDur?: links.SourceDuration) => void
 
   // --- Volume levels (root-level list; shared/volumeLevels.ts) ---
   /** Create a level named `name` (the default target) and put the ACTIVE
@@ -1014,8 +1017,11 @@ export const useProject = create<ProjectState>((set, get) => {
 
     setStabilizeDefault: (stab) => commit((p) => ({ ...p, stabilizeDefault: stab })),
 
-    splitAudioOnSilence: (audioId, ranges) =>
+    splitAudioOnSilence: (audioId, ranges, srcDur = () => 0) =>
       commitComp((p) => {
+        if (links.isLinked(p, { kind: 'audio', id: audioId })) {
+          return links.splitGroupOnSilence(p, audioId, ranges, srcDur, newId)
+        }
         const idx = p.audioClips.findIndex((a) => a.id === audioId)
         if (idx < 0 || ranges.length === 0) return p
         const orig = p.audioClips[idx]

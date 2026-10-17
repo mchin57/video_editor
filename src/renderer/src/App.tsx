@@ -319,7 +319,7 @@ export default function App(): JSX.Element {
     >
       <Section name="header">
         {/* One line always: labels never wrap; a running job's indicator truncates instead (JobsIndicator). */}
-        <header className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2">
+        <header data-app-header className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2">
           <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
           <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
           <FileMenu />

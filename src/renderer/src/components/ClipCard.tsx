@@ -18,6 +18,7 @@ import { formatDuration } from '@/lib/format'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
 import { useHoverGuard, useHoverIntent } from '@/hooks/useHoverIntent'
+import { headerBottom, popoutPlacement } from '@/lib/popoutPlacement'
 import { DescriptionBox } from './DescriptionBox'
 
 /** Width of the description panel beside the preview pop-out. */
@@ -159,7 +160,10 @@ function HoverPopout({
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<HTMLDivElement>(null)
-  useHoverGuard({ enter: onEnter, leave: onLeave }, () => [anchor, rootRef.current, bridgeRef.current])
+  // The pop-out sits beside the whole card, which joins the hover group so the
+  // cursor can cross the card's name and buttons on its way to the pop-out.
+  const card = anchor.closest('[data-clip-card]') ?? anchor
+  useHoverGuard({ enter: onEnter, leave: onLeave }, () => [anchor, card, rootRef.current, bridgeRef.current])
 
   // An image's pane follows the decoded picture once it loads: the probe's size
   // ignores a JPEG's EXIF orientation (TODO.md ▸ Bugs ▸ "EXIF orientation").
@@ -167,8 +171,8 @@ function HoverPopout({
   const v = asset.probe.video
   const probed = v && v.displayWidth > 0 && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 9 / 16
   const aspect = media === 'image' && loadedAspect ? loadedAspect : probed
-  const margin = 12
-  const maxH = Math.min(560, window.innerHeight - 16)
+  const minTop = headerBottom() + 8
+  const maxH = Math.min(560, window.innerHeight - minTop - 8)
   let width = 0
   let height = AUDIO_POPOUT_H
   if (media !== 'none') {
@@ -179,28 +183,26 @@ function HoverPopout({
       width = Math.round(height * aspect)
     }
   }
-  const rect = anchor.getBoundingClientRect()
   const total = width + DESC_W
-  let left = rect.right + margin
-  // Flip to the left near the viewport edge; the description stays on the far side.
-  const onRight = left + total <= window.innerWidth - 8
-  if (!onRight) left = rect.left - margin - total
-  left = Math.max(8, left)
-  const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, window.innerHeight - height - 8))
-
-  // Invisible strip covering the card→popout gap, tall enough to span both.
-  const bridgeLeft = left >= rect.right ? rect.right : left + total
-  const bridgeWidth = left >= rect.right ? left - rect.right : rect.left - (left + total)
-  const bridgeTop = Math.min(top, rect.top)
-  const bridgeHeight = Math.max(top + height, rect.bottom) - bridgeTop
+  // Beside the card (flipped near the viewport edge; the description stays on
+  // the far side), below the header, with an invisible bridge over the gap.
+  const { left, top, onRight, bridge } = popoutPlacement({
+    card: card.getBoundingClientRect(),
+    thumb: anchor.getBoundingClientRect(),
+    width: total,
+    height,
+    viewportW: window.innerWidth,
+    viewportH: window.innerHeight,
+    minTop
+  })
 
   const divider = media === 'none' ? '' : onRight ? 'border-l border-white/10' : 'border-r border-white/10'
   return createPortal(
     <>
-      {bridgeWidth > 0 && (
+      {bridge.width > 0 && (
         <div
           ref={bridgeRef}
-          style={{ position: 'fixed', left: bridgeLeft, top: bridgeTop, width: bridgeWidth, height: bridgeHeight }}
+          style={{ position: 'fixed', ...bridge }}
           className="z-[499]"
           onMouseEnter={onEnter}
           onMouseLeave={onLeave}
@@ -432,6 +434,7 @@ export function ClipCard({
   const clickable = !!onClick
   return (
     <div
+      data-clip-card
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? -1 : undefined}
       onClick={onClick}
