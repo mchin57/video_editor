@@ -51,7 +51,7 @@ homes — check it before writing any of these:**
 
 - a labelled form field / checkbox / stock input or button class → `components/ui.tsx`
 - a pointer drag handler → `lib/pointerDrag.ts`
-- a Default/On/Off override control → `OverrideToggle` in `Inspector.tsx`
+- a Default/On/Off override control → `OverrideToggle` in `components/inspector/controls.tsx`
 - an array map-by-id / splice in a store action → `lib/arrays.ts`
 - a text/caption style type → extend `TextStyleBase` (`shared/project.ts`)
 - how a text block looks (box, wrap, leading, paint, pill) → `shared/textStyle.ts` — text layers

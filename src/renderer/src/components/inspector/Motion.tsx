@@ -16,13 +16,6 @@ import {
 } from '@shared/motion'
 
 /**
- * Position/scale keyframes for a media layer. "＋ Keyframe" captures the
- * layer's effective transform at the playhead; with keyframes present, canvas
- * drags/corner-resizes write keyframes at the playhead too (PreviewStage).
- * Motion previews and exports through the same shared interpolation
- * (`layerTransformAt`).
- */
-/**
  * The simple Motion editor: "Add motion" starts a straight-line move AT THE
  * PLAYHEAD from where the layer is now; then the start/end points, start time
  * and duration are editable here (and the two points by dragging their dots on
@@ -129,6 +122,14 @@ export function MotionFields({ layer, frame }: { layer: Layer; frame: FrameRect 
     </>
   )
 }
+
+/**
+ * Position/scale keyframes for a media layer. "＋ Keyframe" captures the
+ * layer's effective transform at the playhead; with keyframes present, canvas
+ * drags/corner-resizes write keyframes at the playhead too (PreviewStage).
+ * Motion previews and exports through the same shared interpolation
+ * (`layerTransformAt`).
+ */
 export function KeyframesSection({
   layer,
   frame,
