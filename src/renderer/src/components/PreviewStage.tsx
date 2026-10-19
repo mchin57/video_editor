@@ -18,14 +18,7 @@ import type { CaptionSegment, Layer } from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle } from '@shared/project'
 import { assetAspect } from '@shared/media'
 import { textWrapWidth } from '@shared/textStyle'
-import {
-  layersAtTime,
-  layerTransformAt,
-  makeVideoLayer,
-  upsertKeyframe,
-  visualDuration,
-  type ResizeHandle
-} from '@shared/layers'
+import { layersAtTime, makeVideoLayer, visualDuration, type ResizeHandle } from '@shared/layers'
 import { kindInfo } from '@shared/layerKinds'
 import { isSimpleMotion, simpleMotion } from '@shared/motion'
 import { pointerAngleDeg, resizeRotatedBox, rotateDragDeg } from '@shared/rotation'
@@ -36,18 +29,11 @@ import { useEditor } from '@/state/store'
 import { activeComp, getActiveComp, projectFormat, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
-import { clamp } from '@shared/math'
 import { pct, EMPTY_LAYERS, EMPTY_AUDIO, FrameCtx, frameCanvasStyle } from './preview/frame'
-import {
-  withKeyframedTransform,
-  onPath,
-  movePath,
-  layerRotation,
-  MeasuredBox,
-  measureSelectedBox
-} from './preview/geometry'
+import { withKeyframedTransform, layerRotation, MeasuredBox, measureSelectedBox } from './preview/geometry'
 import { StyledText, TextBlock } from './preview/text'
 import { HANDLE_SETS, ResizeHandles, MotionPath } from './preview/handles'
+import { dragKeyframe, dragMode, movedLayer, movedMotionEnd, resizedLayer, withCaptionStyle } from '@/lib/canvasDrag'
 import { CompAudioTrack } from './preview/audio'
 import { StackLayer } from './preview/layers'
 
@@ -130,7 +116,19 @@ export function PreviewStage(): JSX.Element {
     return () => cancelAnimationFrame(raf)
   }, [playing])
 
-  // Drag a layer to move it (logical coords), one undo step on release.
+  /** The canvas's px → canonical logical px factor (it is 1080 logical px wide). */
+  const logicalPerPx = (stage: HTMLElement): number => LOGICAL.width / stage.getBoundingClientRect().width
+
+  /** Rewrite layer `id` of the active composition, live (one undo step on release). */
+  const liveLayer = (id: string, fn: (l: Layer) => Layer): void =>
+    useProject.getState().liveUpdate((p) => ({ ...p, layers: p.layers.map((l) => (l.id === id ? fn(l) : l)) }))
+
+  /** The stored form of a layer the drag started on (its keyframes, unbaked). */
+  const rawLayer = (layer: Layer): Layer => getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
+
+  // Drag a layer to move it (logical coords), one undo step on release. A layer
+  // on a PATH moves as a whole; a keyframed one gets a keyframe at the playhead
+  // (`canvasDrag.ts`). `layer.x/y` are already the effective values at `time`.
   const startLayerMove = (e: ReactPointerEvent, layer: Layer): void => {
     e.stopPropagation()
     e.preventDefault()
@@ -139,40 +137,16 @@ export function PreviewStage(): JSX.Element {
     useUi.getState().selectTile(useProject.getState().project, { kind: 'layer', id: layer.id })
     const stage = stageRef.current
     if (!stage) return
-    const scale = LOGICAL.width / stage.getBoundingClientRect().width
+    const scale = logicalPerPx(stage)
     const startX = e.clientX
     const startY = e.clientY
-    // A layer on a PATH (a simple two-keyframe move, or any text keyframes)
-    // moves as a whole: the drag shifts both ends. Otherwise, on a keyframed
-    // layer, dragging writes/updates a keyframe at the playhead (standard editor
-    // behavior) instead of the base transform, which keyframes override.
-    // `layer.x/y` are already the effective values at `time`.
-    const raw = getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
-    const path = onPath(raw)
-    const kfd = !path && !!layer.keyframes?.length && kindInfo(layer).keyframes !== 'path'
-    const t0 = usePlayback.getState().time
-    const kfT = clamp(t0 - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
-    const tr0 = layerTransformAt(layer, t0)
-    const kfScale = tr0.scale
-    // A drag writes position — the keyframe keeps the opacity in effect there.
-    const kfExtra = tr0.opacity < 1 ? { opacity: tr0.opacity } : {}
+    const raw = rawLayer(layer)
+    const mode = dragMode(raw, layer)
+    const kf = dragKeyframe(layer, usePlayback.getState().time)
     startDragWithUndo((ev) => {
       const nx = layer.x + (ev.clientX - startX) * scale
       const ny = layer.y + (ev.clientY - startY) * scale
-      useProject.getState().liveUpdate((p) => ({
-        ...p,
-        layers: p.layers.map((l) => {
-          if (l.id !== layer.id) return l
-          if (path) return movePath(l, raw, nx - layer.x, ny - layer.y)
-          if (kfd) {
-            return {
-              ...l,
-              keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x: nx, y: ny, scale: kfScale, ...kfExtra })
-            }
-          }
-          return { ...l, x: nx, y: ny }
-        })
-      }))
+      liveLayer(layer.id, (l) => movedLayer(l, layer, raw, mode, nx, ny, kf))
     })
   }
 
@@ -187,63 +161,24 @@ export function PreviewStage(): JSX.Element {
     if (!stage) return
     const startBox = measureSelectedBox(stage)
     if (!startBox) return
-    const s = LOGICAL.width / stage.getBoundingClientRect().width
+    const s = logicalPerPx(stage)
     const startX = e.clientX
     const startY = e.clientY
-    const isCorner = handle.length === 2
-    const isText = layer.content.kind === 'text'
-    // Corner-resizing a keyframed layer writes a keyframe at the playhead
-    // (like a canvas move) — unless it is on a PATH, which shifts (and, from a
-    // corner, scales) as a whole so a simple move stays two keyframes.
-    // `layer.scale` is already the effective value.
-    const raw = getActiveComp()?.layers.find((l) => l.id === layer.id) ?? layer
-    const path = onPath(raw)
-    const kfd = !path && !!layer.keyframes?.length && !isText
-    const kfT = clamp(usePlayback.getState().time - layer.startSec, 0, Math.max(0, layer.endSec - layer.startSec))
-    const rOp = layerTransformAt(layer, usePlayback.getState().time).opacity
-    const kfExtra = rOp < 1 ? { opacity: rOp } : {}
+    const raw = rawLayer(layer)
+    const mode = dragMode(raw, layer)
+    const kf = dragKeyframe(layer, usePlayback.getState().time)
     startDragWithUndo((ev) => {
       const dx = (ev.clientX - startX) * s
       const dy = (ev.clientY - startY) * s
       // Turned into the box's own axes, so a rotated edge stretches along its side.
-      const nb = resizeRotatedBox(startBox, handle, dx, dy, isCorner, startBox.rotationDeg)
+      const nb = resizeRotatedBox(startBox, handle, dx, dy, handle.length === 2, startBox.rotationDeg)
       // The centre moves by the box's shift — BOTH axes, since on a rotated box
       // even a side handle moves the centre diagonally. Applied as a delta, so a
       // measured centre that sits off the layer's own (a text slide mid-way)
       // can't leak into the position.
       const x = layer.x + (nb.cx - startBox.cx)
       const y = layer.y + (nb.cy - startBox.cy)
-      const pathed = (l: Layer): Layer => {
-        if (!path) return l
-        const f = isCorner ? nb.w / startBox.w : 1
-        const moved = movePath(l, raw, x - layer.x, y - layer.y)
-        return f === 1
-          ? moved
-          : { ...moved, keyframes: moved.keyframes?.map((k) => ({ ...k, scale: clamp(k.scale * f, 0.05, 8) })) }
-      }
-      useProject.getState().liveUpdate((p) => ({
-        ...p,
-        layers: p.layers.map((l0) => {
-          if (l0.id !== layer.id) return l0
-          const l = pathed(l0)
-          if (isCorner) {
-            const ns = clamp(layer.scale * (nb.w / startBox.w), 0.05, 8)
-            if (kfd) {
-              return { ...l, keyframes: upsertKeyframe(layer.keyframes, { tSec: kfT, x, y, scale: ns, ...kfExtra }) }
-            }
-            return { ...l, ...(path ? {} : { x, y }), scale: path && !isText ? raw.scale : ns }
-          }
-          const xy = path ? {} : { x, y }
-          if (isText && l.content.kind === 'text') {
-            // widthPx is the pre-scale wrap width; the measured box is post-scale.
-            return { ...l, ...xy, content: { ...l.content, widthPx: nb.w / layer.scale } }
-          }
-          if (handle === 'e' || handle === 'w') {
-            return { ...l, ...xy, stretchX: (layer.stretchX ?? 1) * (nb.w / startBox.w) }
-          }
-          return { ...l, ...xy, stretchY: (layer.stretchY ?? 1) * (nb.h / startBox.h) }
-        })
-      }))
+      liveLayer(layer.id, (l) => resizedLayer(l, layer, raw, mode, handle, startBox, nb, x, y, kf))
     })
   }
 
@@ -257,25 +192,13 @@ export function PreviewStage(): JSX.Element {
     if (!global) useUi.getState().selectCaption(seg.id)
     const stage = stageRef.current
     if (!stage) return
-    const scale = LOGICAL.width / stage.getBoundingClientRect().width
+    const scale = logicalPerPx(stage)
     const startX = e.clientX
     const startY = e.clientY
     startDragWithUndo((ev, before) => {
       const base = effectiveCaptionStyle(before.captions, seg)
-      const nx = base.x + (ev.clientX - startX) * scale
-      const ny = base.y + (ev.clientY - startY) * scale
-      useProject.getState().liveUpdate((p) => {
-        if (global) return { ...p, captions: { ...p.captions, style: { ...p.captions.style, x: nx, y: ny } } }
-        return {
-          ...p,
-          captions: {
-            ...p.captions,
-            segments: p.captions.segments.map((s) =>
-              s.id === seg.id ? { ...s, style: { ...(s.style ?? p.captions.style), x: nx, y: ny } } : s
-            )
-          }
-        }
-      })
+      const patch = { x: base.x + (ev.clientX - startX) * scale, y: base.y + (ev.clientY - startY) * scale }
+      useProject.getState().liveUpdate((p) => ({ ...p, captions: withCaptionStyle(p.captions, seg.id, global, patch) }))
     })
   }
 
@@ -298,12 +221,7 @@ export function PreviewStage(): JSX.Element {
   }
 
   const startLayerRotate = (e: ReactPointerEvent, layer: Layer): void =>
-    startRotate(e, layerRotation(layer), (deg) =>
-      useProject.getState().liveUpdate((p) => ({
-        ...p,
-        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, rotationDeg: deg || undefined } : l))
-      }))
-    )
+    startRotate(e, layerRotation(layer), (deg) => liveLayer(layer.id, (l) => ({ ...l, rotationDeg: deg || undefined })))
 
   // Drag one end of a simple move (`MotionPath` dot): that keyframe's position
   // follows the pointer; the other end, and both times, stay put.
@@ -313,18 +231,12 @@ export function PreviewStage(): JSX.Element {
     const stage = stageRef.current
     const kfs = layer.keyframes
     if (!stage || !isSimpleMotion(kfs)) return
-    const s = LOGICAL.width / stage.getBoundingClientRect().width
-    const sortedKfs = [...kfs].sort((a, b) => a.tSec - b.tSec)
-    const k0 = sortedKfs[end]
+    const s = logicalPerPx(stage)
     const startX = e.clientX
     const startY = e.clientY
     startDragWithUndo((ev) => {
-      const moved = { ...k0, x: k0.x + (ev.clientX - startX) * s, y: k0.y + (ev.clientY - startY) * s }
-      const next = end === 0 ? [moved, sortedKfs[1]] : [sortedKfs[0], moved]
-      useProject.getState().liveUpdate((p) => ({
-        ...p,
-        layers: p.layers.map((l) => (l.id === layer.id ? { ...l, keyframes: next } : l))
-      }))
+      const next = movedMotionEnd(kfs, end, (ev.clientX - startX) * s, (ev.clientY - startY) * s)
+      liveLayer(layer.id, (l) => ({ ...l, keyframes: next }))
     })
   }
 
@@ -335,18 +247,10 @@ export function PreviewStage(): JSX.Element {
     const comp = getActiveComp()
     if (!comp) return
     startRotate(e, effectiveCaptionStyle(comp.captions, seg).rotationDeg, (deg) =>
-      useProject.getState().liveUpdate((p) => {
-        if (global) return { ...p, captions: { ...p.captions, style: { ...p.captions.style, rotationDeg: deg } } }
-        return {
-          ...p,
-          captions: {
-            ...p.captions,
-            segments: p.captions.segments.map((x) =>
-              x.id === seg.id ? { ...x, style: { ...(x.style ?? p.captions.style), rotationDeg: deg } } : x
-            )
-          }
-        }
-      })
+      useProject.getState().liveUpdate((p) => ({
+        ...p,
+        captions: withCaptionStyle(p.captions, seg.id, global, { rotationDeg: deg })
+      }))
     )
   }
 

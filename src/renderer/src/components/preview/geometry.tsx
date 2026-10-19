@@ -5,7 +5,6 @@ import type { Layer, VideoContent } from '@shared/project'
 import { type MediaAsset } from '@shared/media'
 import { layerTransformAt, stretchedBox, type ResizeBox } from '@shared/layers'
 import { kindInfo } from '@shared/layerKinds'
-import { isSimpleMotion, shiftKeyframes } from '@shared/motion'
 import { normalizeDeg } from '@shared/rotation'
 import { LOGICAL } from '@/lib/coords'
 import { pct } from './frame'
@@ -36,19 +35,7 @@ export function mediaBox(layer: Layer, aspect: number): CSSProperties {
     ...(rot ? { transform: `rotate(${rot}deg)` } : {})
   }
 }
-/** A layer that moves as a PATH on the canvas: a simple two-keyframe move, or
- *  a text layer with any keyframes (text only ever follows its motion). Drags
- *  and resizes shift the whole path instead of writing a keyframe. */
-export const onPath = (l: Layer): boolean =>
-  !!l.keyframes?.length && (isSimpleMotion(l.keyframes) || kindInfo(l).keyframes === 'path')
-/** `l` with its whole path — base position and every keyframe — moved by
- *  (dx, dy) from the drag-start snapshot `raw`. */
-export const movePath = (l: Layer, raw: Layer, dx: number, dy: number): Layer => ({
-  ...l,
-  x: raw.x + dx,
-  y: raw.y + dy,
-  keyframes: raw.keyframes ? shiftKeyframes(raw.keyframes, dx, dy) : raw.keyframes
-})
+
 /** A layer's rotation, normalised (0 = upright). @see shared/rotation.ts */
 export const layerRotation = (layer: Pick<Layer, 'rotationDeg'>): number =>
   layer.rotationDeg ? normalizeDeg(layer.rotationDeg) : 0
