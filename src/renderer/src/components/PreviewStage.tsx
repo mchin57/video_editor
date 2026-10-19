@@ -5,15 +5,7 @@
  * `components/preview/`.
  */
 
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type JSX,
-  type PointerEvent as ReactPointerEvent
-} from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { CaptionSegment, Layer } from '@shared/project'
 import { audioClipEnd, effectiveCaptionStyle } from '@shared/project'
 import { assetAspect } from '@shared/media'
@@ -33,6 +25,7 @@ import { pct, EMPTY_LAYERS, EMPTY_AUDIO, FrameCtx, frameCanvasStyle } from './pr
 import { withKeyframedTransform, layerRotation, MeasuredBox, measureSelectedBox } from './preview/geometry'
 import { StyledText, TextBlock } from './preview/text'
 import { HANDLE_SETS, ResizeHandles, MotionPath } from './preview/handles'
+import { usePlaybackClock } from '@/hooks/usePlaybackClock'
 import { dragKeyframe, dragMode, movedLayer, movedMotionEnd, resizedLayer, withCaptionStyle } from '@/lib/canvasDrag'
 import { CompAudioTrack } from './preview/audio'
 import { StackLayer } from './preview/layers'
@@ -86,35 +79,9 @@ export function PreviewStage(): JSX.Element {
     [audioClips, assetById]
   )
   const duration = Math.max(visualDuration(previewLayers), audioEnd)
-  const durationRef = useRef(duration)
-  durationRef.current = duration
+  usePlaybackClock(duration)
 
   const stageRef = useRef<HTMLDivElement>(null)
-
-  // Master clock: a wall clock advances `time` while playing (so any number of
-  // video layers can play at once); each video follows it independently.
-  useEffect(() => {
-    if (!playing) return undefined
-    if (usePlayback.getState().time >= durationRef.current - 0.05) usePlayback.getState().setTime(0)
-    let raf = 0
-    let last = performance.now()
-    const tick = (): void => {
-      if (!usePlayback.getState().playing) return
-      const now = performance.now()
-      const dt = (now - last) / 1000
-      last = now
-      const nt = usePlayback.getState().time + dt
-      if (nt >= durationRef.current - 0.001) {
-        usePlayback.getState().setPlaying(false)
-        usePlayback.getState().setTime(Math.max(0, durationRef.current))
-        return
-      }
-      usePlayback.getState().setTime(nt)
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [playing])
 
   /** The canvas's px → canonical logical px factor (it is 1080 logical px wide). */
   const logicalPerPx = (stage: HTMLElement): number => LOGICAL.width / stage.getBoundingClientRect().width
