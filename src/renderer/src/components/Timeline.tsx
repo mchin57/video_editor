@@ -1,3 +1,11 @@
+/**
+ * The timeline panel: the lanes of the composition being edited, with their
+ * tiles, the ruler, the playhead and the toolbar, and every timeline
+ * interaction (select, move, trim, split, link, drop, scrub, zoom, lane resize).
+ * Its pieces live in `components/timeline/`; the tile rules in `lib/links.ts`
+ * and `lib/timeline.ts`; the checklist in docs/TIMELINE.md.
+ */
+
 import {
   useEffect,
   useMemo,
@@ -7,40 +15,20 @@ import {
   type JSX,
   type PointerEvent as ReactPointerEvent
 } from 'react'
-import type {
-  AudioClip,
-  CaptionSegment,
-  Composition,
-  Layer,
-  Project,
-  ScriptLine,
-  TimelineItemRef,
-  VolumeLevel
-} from '@shared/project'
+import type { AudioClip, CaptionSegment, Composition, Layer, Project, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
 import { assetAspect, assetKind, type MediaAsset } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
-import { createPortal } from 'react-dom'
 import { useLibrary } from '@/hooks/useMedia'
-import { useHoverGuard, useHoverIntent } from '@/hooks/useHoverIntent'
+import { useHoverIntent } from '@/hooks/useHoverIntent'
 import { interactionOpen } from '@/lib/interaction'
-import type { HoverIntent } from '@/lib/hoverIntent'
-import { DescriptionBox } from '@/components/DescriptionBox'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
-import {
-  layoutLanes,
-  packRows,
-  resizeRowH,
-  rowCount,
-  type LaneGeometry,
-  type LaneViewPref,
-  type Span
-} from '@/lib/lanes'
+import { layoutLanes, packRows, resizeRowH, rowCount, type LaneViewPref } from '@/lib/lanes'
 import { useDragDepth } from '@/lib/dragDepth'
 import { CompBreadcrumb } from '@/components/CompBreadcrumb'
 import {
@@ -53,7 +41,6 @@ import {
   snapToPreviousDelta,
   layerLane,
   audioLane,
-  type TileLane,
   refKey,
   refKeys,
   tileOf,
@@ -66,280 +53,40 @@ import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
 import { makeCaption } from '@/lib/captions'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
-import { thumbUrl, waveformUrl } from '@/ipc/client'
+import { waveformUrl } from '@/ipc/client'
 import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 import { levelOf } from '@shared/volumeLevels'
 import { clamp } from '@shared/math'
 import { kindInfo, layerMediaId } from '@shared/layerKinds'
-import { enumPref, numberPref, objectPref } from '@/lib/persisted'
 import { usePersistedState } from '@/hooks/usePersistedState'
 import { newId } from '@shared/ids'
-
-const DEFAULT_PPS = 48
-const HOOK_SEC = 3
-const SNAP_PX = 7
-/** Pointer slop (px) below which a press+release counts as a click, not a drag. */
-const CLICK_SLOP = 2
-const GUTTER = 84
-const RULER_H = 20
-const ROW_H = 26
-const MIN_ROW_H = 16
-const MAX_ROW_H = 60
-const COLLAPSED_H = 14
-const GAP = 4
-const SCALE_H = 18
-const DND_MIME = 'application/x-reel-asset'
-
-const EMPTY_LAYERS: Layer[] = []
-const EMPTY_CAPTIONS: CaptionSegment[] = []
-const EMPTY_SCRIPT: ScriptLine[] = []
-const EMPTY_AUDIO: AudioClip[] = []
-const EMPTY_LEVELS: VolumeLevel[] = []
-
-const spanOf = (l: { id: string; startSec: number; endSec: number }): Span => ({
-  id: l.id,
-  startSec: l.startSec,
-  endSec: l.endSec
-})
-
-/**
- * A layer tile's thumbnail. Hidden while it can't load — but only for the asset
- * data it failed for: the next library refresh (new object) tries again, so a
- * tile drawn a moment before its thumb existed doesn't stay blank for good.
- */
-/** Row packing for an audio band (a whole-source clip ends at its source's length). */
-function packAudioRows(clips: AudioClip[], assetById: Map<string, MediaAsset>): Map<string, number> {
-  return packRows(
-    clips.map((a) => ({
-      id: a.id,
-      startSec: a.startSec,
-      endSec: audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec)
-    }))
-  )
-}
-
-/** Snap targets: layer + audio boundaries, 0 and the end. `skip` (ref keys)
- *  drops the tiles currently being dragged, so a moving group never snaps to
- *  its own members. */
-function snapTargetsFor(
-  layers: Layer[],
-  audioClips: AudioClip[],
-  assetById: Map<string, MediaAsset>,
-  total: number,
-  skip?: Set<string>
-): number[] {
-  const t = new Set<number>([0, total])
-  for (const l of layers) {
-    if (skip?.has(refKey({ kind: 'layer', id: l.id }))) continue
-    t.add(l.startSec)
-    t.add(l.endSec)
-  }
-  for (const a of audioClips) {
-    if (skip?.has(refKey({ kind: 'audio', id: a.id }))) continue
-    t.add(a.startSec)
-    t.add(audioClipEnd(a, assetById.get(a.mediaId)?.probe.durationSec ?? a.outSec))
-  }
-  return [...t]
-}
-
-function TileThumb({ asset }: { asset: MediaAsset }): JSX.Element | null {
-  const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
-  if (failedFor === asset) return null
-  return (
-    <img
-      src={thumbUrl(asset)}
-      alt=""
-      onError={() => setFailedFor(asset)}
-      className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"
-    />
-  )
-}
-
-/** Where a hovered media tile (video, image, audio) is, for its description box. */
-interface TileDescriptionAt {
-  mediaId: string
-  /** The tile itself (a member of the hover group) and where it was on entering. */
-  el: HTMLElement
-  rect: DOMRect
-  /** Cursor x on entering: the box centres there, so moving straight up reaches it. */
-  x: number
-}
-
-/**
- * The hovered media tile's clip description, floating just above the tile
- * (below it when there's no room) and editable in place (`DescriptionBox`). Tile,
- * box and the bridge over the gap form one hover group (`HoverIntent`), so the
- * cursor can travel from the tile up into the box; typing pins it open.
- * Portaled: the timeline's scroll area would clip it.
- */
-function TileDescription({
-  asset,
-  at,
-  intent
-}: {
-  asset: MediaAsset
-  at: TileDescriptionAt
-  intent: HoverIntent<TileDescriptionAt>
-}): JSX.Element {
-  const W = 260
-  const GAP = 6
-  const ROOM = 120 // about the box's height
-  const left = Math.max(8, Math.min(at.x - W / 2, window.innerWidth - W - 8))
-  const below = at.rect.top - GAP - ROOM < 8
-  const box = below ? { top: at.rect.bottom + GAP } : { bottom: window.innerHeight - at.rect.top + GAP }
-  // The bridge overlaps the tile and the box by a pixel so the crossing never reads as a leave.
-  const bridgeTop = below ? at.rect.bottom - 1 : at.rect.top - GAP - 1
-  const group = { onMouseEnter: () => intent.enter(), onMouseLeave: () => intent.leave() }
-  const boxRef = useRef<HTMLDivElement>(null)
-  const bridgeRef = useRef<HTMLDivElement>(null)
-  useHoverGuard({ enter: () => intent.enter(), leave: () => intent.leave() }, () => [
-    at.el,
-    boxRef.current,
-    bridgeRef.current
-  ])
-  return createPortal(
-    <>
-      <div
-        ref={bridgeRef}
-        data-description-panel
-        style={{ position: 'fixed', left, width: W, top: bridgeTop, height: GAP + 2 }}
-        className="z-[499]"
-        {...group}
-      />
-      <div
-        ref={boxRef}
-        data-testid="timeline-description"
-        data-description-panel
-        style={{ position: 'fixed', left, width: W, ...box }}
-        className="z-[500] rounded-lg border border-white/15 bg-zinc-900/95 p-2 shadow-2xl"
-        {...group}
-      >
-        <div className="mb-1 truncate text-[10px] font-semibold text-zinc-400" title={asset.fileName}>
-          {asset.fileName}
-        </div>
-        <DescriptionBox
-          asset={asset}
-          rows={3}
-          onFocusChange={(on) => intent.pin(on, !!boxRef.current?.matches(':hover'))}
-        />
-      </div>
-    </>,
-    document.body
-  )
-}
-
-function tc(sec: number): string {
-  const s = Math.max(0, sec)
-  const m = Math.floor(s / 60)
-  const rem = (s % 60).toFixed(1)
-  return `${m}:${rem.padStart(4, '0')}`
-}
-
-function ToolbarButton({
-  onClick,
-  disabled,
-  title,
-  children
-}: {
-  onClick: () => void
-  disabled?: boolean
-  title: string
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="rounded px-2 py-1 text-xs text-zinc-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
-    >
-      {children}
-    </button>
-  )
-}
-
-// Lane visual identity (the labeled bands the user likes — now purely a visual
-// grouping over the unified layer stack). Keyed by `TileLane`, and the
-// `satisfies` makes that exhaustive: adding a band to the tile model without
-// giving it colours here is a compile error, so the two can't drift apart.
-const LANE_STYLE = {
-  clips: {
-    dot: 'bg-sky-400',
-    tint: 'border-sky-400/30 bg-sky-500/10',
-    block: 'border-sky-400/40 bg-sky-500/20',
-    sel: 'border-sky-300 ring-1 ring-sky-300/50'
-  },
-  layout: {
-    dot: 'bg-fuchsia-400',
-    tint: 'border-fuchsia-400/30 bg-fuchsia-500/10',
-    block: 'border-fuchsia-400/40 bg-fuchsia-500/20',
-    sel: 'border-fuchsia-300 ring-1 ring-fuchsia-300/50'
-  },
-  text: {
-    dot: 'bg-violet-400',
-    tint: 'border-violet-400/30 bg-violet-500/10',
-    block: 'border-violet-400/40 bg-violet-500/20',
-    sel: 'border-violet-300 ring-1 ring-violet-300/50'
-  },
-  image: {
-    dot: 'bg-orange-400',
-    tint: 'border-orange-400/30 bg-orange-500/10',
-    block: 'border-orange-400/40 bg-orange-500/20',
-    sel: 'border-orange-300 ring-1 ring-orange-300/50'
-  },
-  caption: {
-    dot: 'bg-emerald-400',
-    tint: 'border-emerald-400/30 bg-emerald-500/10',
-    block: 'border-emerald-400/40 bg-emerald-500/25',
-    sel: 'border-emerald-300 ring-1 ring-emerald-300/50'
-  },
-  audio: {
-    dot: 'bg-sky-300',
-    tint: 'border-sky-300/30 bg-sky-500/10',
-    block: 'border-sky-400/40 bg-sky-500/15',
-    sel: 'border-sky-300 ring-1 ring-sky-300/50'
-  },
-  fx: {
-    dot: 'bg-teal-300',
-    tint: 'border-teal-300/30 bg-teal-500/10',
-    block: 'border-teal-400/40 bg-teal-500/15',
-    sel: 'border-teal-300 ring-1 ring-teal-300/50'
-  }
-} as const satisfies Record<TileLane, { dot: string; tint: string; block: string; sel: string }>
-
-type LaneKey = TileLane
-
-// Vertical geometry passed to the pure lane-layout math in `lib/lanes.ts`.
-const LANE_GEOM: LaneGeometry = {
-  rulerH: RULER_H,
-  rowH: ROW_H,
-  minRowH: MIN_ROW_H,
-  maxRowH: MAX_ROW_H,
-  collapsedH: COLLAPSED_H,
-  gap: GAP,
-  scaleH: SCALE_H
-}
-
-/** Per-lane view prefs — height-per-row (so clips scale with the lane) and a
- *  collapsed flag. Purely a UI preference like the zoom level, so it lives in
- *  localStorage (`timelineView`), not the project document. */
-type TimelineView = Partial<Record<LaneKey, LaneViewPref>>
-
-/** How the track scroll tracks the playhead during playback: stay put, jump a
- *  page when the playhead exits the view (DAW default), or keep it centered.
- *  A view preference like zoom, so it lives in localStorage. */
-type FollowMode = 'none' | 'page' | 'centered'
-
-const FOLLOW_OPTIONS: { mode: FollowMode; label: string; title: string }[] = [
-  { mode: 'none', label: 'Off', title: 'Timeline stays where you scrolled it during playback' },
-  { mode: 'page', label: 'Page', title: 'Jump forward a page when the playhead reaches the right edge' },
-  { mode: 'centered', label: 'Center', title: 'Continuously scroll to keep the playhead centered' }
-]
-
-// View preferences (lib/persisted.ts): zoom, follow mode, per-lane sizes.
-const PPS_PREF = numberPref(DEFAULT_PPS, 8, 240)
-const FOLLOW_PREF = enumPref<FollowMode>(['none', 'page', 'centered'], 'none')
-const VIEW_PREF = objectPref<TimelineView>(() => ({}))
+import {
+  HOOK_SEC,
+  SNAP_PX,
+  CLICK_SLOP,
+  GUTTER,
+  RULER_H,
+  ROW_H,
+  MIN_ROW_H,
+  MAX_ROW_H,
+  SCALE_H,
+  DND_MIME,
+  EMPTY_LAYERS,
+  EMPTY_CAPTIONS,
+  EMPTY_SCRIPT,
+  EMPTY_AUDIO,
+  EMPTY_LEVELS,
+  LANE_STYLE,
+  LaneKey,
+  LANE_GEOM,
+  FOLLOW_OPTIONS,
+  PPS_PREF,
+  FOLLOW_PREF,
+  VIEW_PREF
+} from './timeline/constants'
+import { spanOf, packAudioRows, snapTargetsFor, tc } from './timeline/geometry'
+import { TileThumb, ToolbarButton } from './timeline/parts'
+import { TileDescriptionAt, TileDescription } from './timeline/TileDescription'
 
 export function Timeline(): JSX.Element {
   // The timeline renders the ACTIVE composition (the root, or the nested comp
