@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DEFAULT_STABILIZE } from '@shared/project'
 import { activeComp, useProject } from '@/state/projectStore'
-import { StabilizeSliders } from './Inspector'
+import { StabilizeSliders } from './inspector/controls'
 
 /**
  * Project settings dropdown (next to the File menu): project-wide export
