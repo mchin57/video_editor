@@ -1411,6 +1411,7 @@ export function Timeline(): JSX.Element {
         >
           <div
             ref={gutterInnerRef}
+            data-testid="timeline-gutter"
             className="absolute inset-x-0 top-0 will-change-transform"
             style={{ height: totalH }}
           >
@@ -1429,6 +1430,7 @@ export function Timeline(): JSX.Element {
               return (
                 <div
                   key={lane.key}
+                  data-testid={`lane-${lane.key}`}
                   // Drag the bubble body vertically to resize; double-click to
                   // collapse/expand. Caption bubbles also select on press.
                   onPointerDown={(e) => {
@@ -1459,6 +1461,7 @@ export function Timeline(): JSX.Element {
                     <div
                       onPointerDown={(e) => startLaneResize(e, lane.key, lane.rows)}
                       onDoubleClick={(e) => e.stopPropagation()}
+                      data-testid={`lane-resize-${lane.key}`}
                       title="Drag to resize lane"
                       className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize hover:bg-white/30"
                     />
