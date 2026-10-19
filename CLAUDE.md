@@ -94,6 +94,36 @@ messages can say `Closes #N`). Leave the issue open, labelled `needs-verificatio
 for work that is built but not yet passing or not yet tested. Docs must never
 assert untested behavior as fact.
 
+## Scope every change first
+
+Before starting any change, classify it and say the size out loud:
+
+- **Small**: straightforward, no design decision, minimal regression risk.
+- **Medium**: design decisions needed but with clear recommendations, some
+  regression risk, small behavior changes.
+- **Large**: multiple ambiguous design decisions, significant behavior changes,
+  high regression risk.
+- **Enormous**: re-architecting, some tests likely to become irrelevant, changes
+  spanning the whole codebase.
+
+What each size does:
+
+- **Small**: just implement it.
+- **Medium**: present the design decisions (with a recommendation for each) and
+  wait for the owner's call before implementing. After completion, run an
+  auditor sub-agent.
+- **Large**: back-and-forth with clarifying questions first. Present options only
+  once confident every relevant option has been considered. After completion,
+  run an auditor sub-agent.
+- **Enormous**: the Large process, then also a full multi-phase plan listing the
+  regression tests, the risks, and every file to add or change by name. After
+  completion, run an auditor sub-agent.
+
+The auditor sub-agent (Medium and up) checks that the task was completed
+correctly and follows the project design guidelines in this file and
+`docs/SHARED.md`. It never edits; findings come back to the main agent to fix or
+raise with the owner.
+
 ## Backlog = GitHub Issues
 
 The backlog is **GitHub Issues** on `mchin57/video_editor` (`gh issue list`,
