@@ -29,6 +29,7 @@ import { seriesNeeded } from '@shared/volumeLevels'
 import { getBundledFontsDir } from '../config'
 import { audioProxyIfReady, getAsset } from './mediaStore'
 import { ensureLoudness } from './loudness'
+import type { ProjectSession } from './projectSession'
 import { setProgress } from './jobs'
 import { runFfmpeg } from './ffmpegRun'
 import { buildOpacityCmdLines } from './ffmpegFilters'
@@ -68,6 +69,8 @@ export type OutputMap = ReturnType<typeof frameToOutput>
  * denoise/stabilize defaults, which only exist on the root document).
  */
 export interface RenderCtx {
+  /** The project the export started in: a switch mid-export doesn't move it. */
+  session: ProjectSession
   target: Target
   caps: FfmpegCapabilities
   ffmpeg: string
@@ -289,7 +292,7 @@ export class CompositionRender {
     const durs = new Map<string, number>()
     for (const a of nested.audioClips) {
       if (a.outSec <= 0 && !durs.has(a.mediaId)) {
-        durs.set(a.mediaId, (await getAsset(a.mediaId))?.probe.durationSec ?? 0)
+        durs.set(a.mediaId, (await getAsset(a.mediaId, this.ctx.session))?.probe.durationSec ?? 0)
       }
     }
     const len = compositionDuration(nested, (id) => durs.get(id) ?? 0)
@@ -382,12 +385,12 @@ export class CompositionRender {
     const series = new Map<string, LoudnessSeries | null>()
     for (const a of comp.audioClips) {
       if (!sources.has(a.mediaId)) {
-        const asset = await getAsset(a.mediaId)
+        const asset = await getAsset(a.mediaId, ctx.session)
         sources.set(
           a.mediaId,
           asset
             ? {
-                path: audioProxyIfReady(a.mediaId) ?? asset.originalPath,
+                path: audioProxyIfReady(a.mediaId, ctx.session) ?? asset.originalPath,
                 durationSec: asset.probe.durationSec,
                 foldChannel: asset.probe.audio?.monoFoldChannel ?? null
               }
@@ -395,7 +398,7 @@ export class CompositionRender {
         )
       }
       const need = seriesNeeded(a, comp.audioClips, ctx.volumeLevels)
-      if (need && !series.has(need)) series.set(need, await ensureLoudness(need))
+      if (need && !series.has(need)) series.set(need, await ensureLoudness(need, ctx.session))
     }
     this.audio.push(
       ...exportAudioClips(

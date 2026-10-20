@@ -40,7 +40,8 @@ import { createProject, openProject } from './projectStore'
 import { makeVideoLayer } from '@shared/layers'
 import { createEmptyProject } from '@shared/project'
 import { importFile, importGenerated, renameFailureMessage, renameMedia } from './mediaStore'
-import { getEntry } from './library'
+import { currentSession } from './projectSession'
+const getEntry = (id: string) => currentSession()!.library.getEntry(id)
 import { createJob, finishJob } from './jobs'
 import { loudnessPassReading } from './loudness'
 

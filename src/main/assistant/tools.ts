@@ -22,6 +22,7 @@ import { ensureProxy, getProjectMedia, setMediaDescription } from '../services/m
 import { describeUndo } from '@shared/assistant/undoSummary'
 import { importManyReport } from '../services/importMany'
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
+import { requireSession } from '../services/projectSession'
 import { generateStill } from '../services/still'
 import { cutToLibrary } from '../services/quickCut'
 import { mergeToLibrary } from '../services/merge'
@@ -121,10 +122,11 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
   get_transcript: async ({ mediaId, fromSec, toSec, words }) => {
     const asset = requireAsset(await projectAssets(), mediaId)
     if (!asset.probe.audio) throw new Error(`${asset.fileName} has no audio track to transcribe`)
-    let transcript = await getTranscript(mediaId)
+    const session = requireSession() // a transcription finishes in the project it started in
+    let transcript = await getTranscript(mediaId, session)
     if (!transcript) {
       if (!whisperAvailable()) throw new Error('whisper.cpp is not installed, so clips cannot be transcribed')
-      transcript = await transcribeMedia(mediaId)
+      transcript = await transcribeMedia(mediaId, session)
     }
     const range =
       fromSec !== undefined || toSec !== undefined ? { fromSec: fromSec ?? 0, toSec: toSec ?? Infinity } : undefined

@@ -42,7 +42,7 @@ export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
 
 async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoContent): Promise<void> {
   const { ctx, m, s } = pass
-  const asset = await getAsset(c.mediaId)
+  const asset = await getAsset(c.mediaId, ctx.session)
   if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
   const v = asset.probe.video
   const aspect = c.crop
@@ -134,10 +134,10 @@ function rampPoints(c: VideoContent): { u: number; v: number }[] {
 }
 
 async function exportImageLayer(pass: CompositionRender, l: Layer, c: ImageContent): Promise<void> {
-  const { m, s } = pass
-  const imgPath = await ensureImagePath(c.mediaId)
+  const { ctx, m, s } = pass
+  const imgPath = await ensureImagePath(c.mediaId, ctx.session)
   if (!existsSync(imgPath)) return // display PNG missing → skip rather than fail
-  const v = (await getAsset(c.mediaId))?.probe.video
+  const v = (await getAsset(c.mediaId, ctx.session))?.probe.video
   const base = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
   // base aspect, reshaped by crop, swapped for 90°/270° rotation (shared helper).
   const aspect = effectiveImageAspect(base, c.crop, c.rotateQuarters)
@@ -257,7 +257,7 @@ async function exportLayoutLayer(pass: CompositionRender, l: Layer, c: LayoutCon
     if (!cell.mediaId) continue
     const span = Math.min(cellSpan(cell), window)
     if (span <= 0.01) continue
-    const asset = await getAsset(cell.mediaId)
+    const asset = await getAsset(cell.mediaId, ctx.session)
     if (!asset?.probe.video) continue
     const v = asset.probe.video
     const rect = layoutCellRect(l, cell.rect, frame)

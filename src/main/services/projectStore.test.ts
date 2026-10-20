@@ -9,6 +9,7 @@ import { join } from 'node:path'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 import { readProjectFile, writeProjectFile } from './projectStore'
+import { ProjectSession } from './projectSession'
 import { createEmptyProject, migrateProject } from '@shared/project'
 import { makeVideoLayer } from '@shared/layers'
 
@@ -27,7 +28,7 @@ describe('portable .reel files', () => {
     p.layers.push(makeVideoLayer('c1', 'm1', 0, 3))
     const path = join(dir, 'my-reel.reel')
 
-    const saved = await writeProjectFile(path, p)
+    const saved = await writeProjectFile(new ProjectSession(dir), path, p)
     expect(Number.isNaN(Date.parse(saved.updatedAt))).toBe(false) // updatedAt bumped to a real time
 
     const loaded = await readProjectFile(path)
@@ -41,7 +42,7 @@ describe('portable .reel files', () => {
 
   it('writes atomically — no leftover .tmp file', async () => {
     const path = join(dir, 'atomic.reel')
-    await writeProjectFile(path, createEmptyProject('x', 'X'))
+    await writeProjectFile(new ProjectSession(dir), path, createEmptyProject('x', 'X'))
     await expect(fsp.access(`${path}.tmp`)).rejects.toThrow()
   })
 

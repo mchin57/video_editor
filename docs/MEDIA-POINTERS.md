@@ -60,6 +60,10 @@ like anything else.
 
 - Main owns the open project's library in memory: import, probe, verification and proxies are its
   work. The renderer shows it, as it does now.
+- The library, the project folder and the state of its running jobs (single-flights, remembered
+  failures) all belong to one `ProjectSession` (`main/services/projectSession.ts`), made when a
+  project opens and dropped when another opens. A job that started in one project finishes there:
+  it keeps its session, and a library whose project is gone refuses new records.
 - Import, relinking and path fixes found on open all change the library **in memory** and mark the
   project as having unsaved changes.
 - **Save** writes the document and the library into the `.reel`. Nothing else writes the `.reel`.

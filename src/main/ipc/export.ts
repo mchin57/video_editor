@@ -12,6 +12,7 @@ import { generateStill } from '../services/still'
 import { hdrToSdrChain } from '../services/proxy'
 import { cropFilter, eqFilter } from '../services/ffmpegFilters'
 import { importGenerated, requireUsable, tmpOutput } from '../services/mediaStore'
+import { requireSession } from '../services/projectSession'
 import { dialogsFor, handle } from './handle'
 
 /** ffmpeg -vf chain to make a still match the preview (HDR → SDR, crop, color). */
@@ -50,10 +51,11 @@ export function registerExportHandlers(): void {
   // Stills: capture an exact frame from a clip, matching the preview's HDR
   // tonemap / crop / color, into the library or to a user-chosen file.
   handle('captureStillToLibrary', async (_event, req) => {
-    const asset = await requireUsable(req.mediaId)
+    const session = requireSession()
+    const asset = await requireUsable(req.mediaId, session)
     const out = tmpOutput('still', 'png')
     await renderStill(asset, req, out)
-    return importGenerated(out, `${parse(asset.fileName).name} (still).png`)
+    return importGenerated(out, `${parse(asset.fileName).name} (still).png`, session)
   })
 
   handle('captureStillToDisk', async (event, req, suggestedName) => {

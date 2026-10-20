@@ -26,6 +26,7 @@ import { ensureProxy, importGenerated, requireUsable, tmpOutput, transcriptFile 
 import { hdrToSdrChain } from './proxy'
 import { isTenBit, videoArgs } from './quickCut'
 import { getTranscript } from './whisper'
+import { requireSession } from './projectSession'
 import { createLogger } from '@shared/log'
 
 const log = createLogger('merge')
@@ -133,10 +134,11 @@ export function buildMergeArgs(inputs: MergeInput[], output: string, enc: Ffmpeg
  * invalid or a clip unusable; a failed encode leaves nothing behind.
  */
 export async function mergeToLibrary(segments: MergeSegment[]): Promise<MediaAsset> {
+  const session = requireSession() // the merge finishes in the project it started in
   const ids = [...new Set(segments.map((s) => s.mediaId))]
   const assets = new Map<string, MediaAsset>()
   for (const id of ids) {
-    const a = await requireUsable(id)
+    const a = await requireUsable(id, session)
     if (assetKind(a) !== 'video' || !a.probe.video) throw new Error(`${a.fileName} is not a video clip.`)
     assets.set(id, a)
   }
@@ -154,7 +156,7 @@ export async function mergeToLibrary(segments: MergeSegment[]): Promise<MediaAss
 
   // Transcripts: carried only when every clip with audio has one.
   const transcripts = new Map<string, Transcript | null>()
-  for (const id of ids) transcripts.set(id, assets.get(id)!.probe.audio ? await getTranscript(id) : null)
+  for (const id of ids) transcripts.set(id, assets.get(id)!.probe.audio ? await getTranscript(id, session) : null)
   const words = mergeWords(segments, (s) =>
     assets.get(s.mediaId)!.probe.audio ? (transcripts.get(s.mediaId)?.words ?? null) : []
   )
@@ -169,11 +171,11 @@ export async function mergeToLibrary(segments: MergeSegment[]): Promise<MediaAss
     await writeAtomically(tmp, (part) =>
       runFfmpeg(ffmpeg, buildMergeArgs(inputs, part, caps.encoders), total, (p) => setProgress(job.id, p))
     )
-    asset = await importGenerated(tmp, name)
+    asset = await importGenerated(tmp, name, session)
     if (words && firstTranscript) {
       const { model, createdAt, timing, version } = firstTranscript
       const t: Transcript = { mediaId: asset.id, words, model, createdAt, timing, version }
-      const path = transcriptFile(asset.id)
+      const path = transcriptFile(asset.id, session)
       await fsp.mkdir(join(path, '..'), { recursive: true })
       await replaceFile(path, JSON.stringify(t, null, 2))
     }
@@ -182,6 +184,7 @@ export async function mergeToLibrary(segments: MergeSegment[]): Promise<MediaAss
     failJob(job.id, error instanceof Error ? error.message : String(error))
     throw error
   }
-  if (!asset.proxyReady) void ensureProxy(asset.id).catch((err) => log.error(`proxy failed for ${asset.id}`, err))
+  if (!asset.proxyReady)
+    void ensureProxy(asset.id, session).catch((err) => log.error(`proxy failed for ${asset.id}`, err))
   return asset
 }

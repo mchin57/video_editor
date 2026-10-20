@@ -26,6 +26,7 @@ import { runFfmpeg } from './ffmpegRun'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import { ensureProxy, importGenerated, requireUsable, tmpOutput, transcriptFile } from './mediaStore'
 import { getTranscript } from './whisper'
+import { requireSession, type ProjectSession } from './projectSession'
 import { createLogger } from '@shared/log'
 
 const log = createLogger('quick-cut')
@@ -169,14 +170,19 @@ export function buildCutArgs(
 }
 
 /** Give a cut the original's transcript, re-timed to the piece (no whisper run). */
-async function carryTranscript(source: Transcript, piece: CutPiece, toId: string): Promise<void> {
+async function carryTranscript(
+  session: ProjectSession,
+  source: Transcript,
+  piece: CutPiece,
+  toId: string
+): Promise<void> {
   const t: Transcript = {
     ...source,
     mediaId: toId,
     words: sliceWords(source.words, piece),
     ...(source.decodeStartSec !== undefined ? { decodeStartSec: Math.max(0, source.decodeStartSec - piece.inSec) } : {})
   }
-  const path = transcriptFile(toId)
+  const path = transcriptFile(toId, session)
   await fsp.mkdir(join(path, '..'), { recursive: true })
   await replaceFile(path, JSON.stringify(t, null, 2))
 }
@@ -188,7 +194,8 @@ async function carryTranscript(source: Transcript, piece: CutPiece, toId: string
  * the whole call — pieces already adopted stay in the library.
  */
 export async function cutToLibrary(mediaId: string, pieces: CutPiece[]): Promise<MediaAsset[]> {
-  const source = await requireUsable(mediaId)
+  const session = requireSession() // the cut finishes in the project it started in
+  const source = await requireUsable(mediaId, session)
   if (assetKind(source) !== 'video' || !source.probe.video) throw new Error(`${source.fileName} is not a video clip.`)
   const problem = cutProblem(pieces, source.probe.durationSec)
   if (problem) throw new Error(problem)
@@ -196,7 +203,7 @@ export async function cutToLibrary(mediaId: string, pieces: CutPiece[]): Promise
   const [{ ffmpeg }, caps] = await Promise.all([getBinaries(), getCapabilities()])
   const ext = cutExt(source.probe)
   const names = cutDisplayNames(source.fileName, pieces.length, ext)
-  const transcript = source.probe.audio ? await getTranscript(mediaId) : null
+  const transcript = source.probe.audio ? await getTranscript(mediaId, session) : null
   const total = pieces.reduce((s, p) => s + p.outSec - p.inSec, 0)
 
   const job = createJob('proxy', `Quick cut · ${source.fileName}`, undefined, { uses: [mediaId] })
@@ -212,8 +219,8 @@ export async function cutToLibrary(mediaId: string, pieces: CutPiece[]): Promise
         )
       )
       done += len
-      const asset = await importGenerated(tmp, names[i])
-      if (transcript) await carryTranscript(transcript, piece, asset.id)
+      const asset = await importGenerated(tmp, names[i], session)
+      if (transcript) await carryTranscript(session, transcript, piece, asset.id)
       made.push(asset)
     }
     finishJob(job.id)
@@ -223,7 +230,7 @@ export async function cutToLibrary(mediaId: string, pieces: CutPiece[]): Promise
   }
   // Each cut needs its own preview proxy; build them in the background as for an import.
   for (const a of made) {
-    if (!a.proxyReady) void ensureProxy(a.id).catch((err) => log.error(`proxy failed for ${a.id}`, err))
+    if (!a.proxyReady) void ensureProxy(a.id, session).catch((err) => log.error(`proxy failed for ${a.id}`, err))
   }
   return made
 }
