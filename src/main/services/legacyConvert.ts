@@ -42,6 +42,9 @@ import {
   noRecordLine,
   type ConversionReport
 } from './legacyPlan'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('convert')
 
 export type { ConversionReport } from './legacyPlan'
 export { reportLine } from './legacyPlan'
@@ -238,8 +241,8 @@ async function carryFiles(root: string, id: string): Promise<void> {
   for (const name of LEGACY_CACHE_FILES) {
     const src = join(from, name)
     if (!existsSync(src)) continue
-    await fsp.mkdir(cacheDir(root, id), { recursive: true }).catch(() => {})
-    await linkOrCopy(src, join(cacheDir(root, id), name)).catch(() => {})
+    await bestEffort(fsp.mkdir(cacheDir(root, id), { recursive: true }), `creating cache/${id}`, log)
+    await bestEffort(linkOrCopy(src, join(cacheDir(root, id), name)), `carrying ${name} into cache/${id}`, log)
   }
 }
 
@@ -294,7 +297,7 @@ export async function convertLegacyProject(
     }
     if (!record) continue
     library.push(record)
-    await carryFiles(root, id).catch(() => {})
+    await bestEffort(carryFiles(root, id), `carrying the cached files of ${id}`, log)
   }
   if (unrecorded) report.missing.push(noRecordLine(unrecorded))
 
@@ -311,7 +314,8 @@ export async function convertLegacyProject(
     }
     await replaceFile(docPath(root), JSON.stringify(saved, null, 2))
   } catch (error) {
-    await fsp.rename(backup, reelPath).catch(() => {})
+    // Put the original back; if even that fails, the .reel-legacy backup still holds it.
+    await bestEffort(fsp.rename(backup, reelPath), `restoring ${reelPath} from its backup`, log)
     throw error
   }
   report.to = docPath(root)

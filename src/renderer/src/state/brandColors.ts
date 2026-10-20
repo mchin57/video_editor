@@ -7,6 +7,9 @@
 import { create } from 'zustand'
 import { DEFAULT_BRAND_COLORS } from '@shared/settings'
 import { getSettings, updateSettings } from '@/ipc/client'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('settings')
 
 interface BrandColorsState {
   colors: string[]
@@ -27,8 +30,8 @@ export const useBrandColors = create<BrandColorsState>((set, get) => ({
     try {
       const s = await getSettings()
       if (Array.isArray(s.brandColors) && s.brandColors.length) set({ colors: s.brandColors })
-    } catch {
-      /* keep defaults */
+    } catch (error) {
+      log.warn('loading brand colours failed; keep defaults', error)
     }
   },
   add: (hex) => {

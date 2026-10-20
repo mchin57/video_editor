@@ -11,6 +11,9 @@
 import { readdir, stat } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('import')
 
 /** Every extension the library can import, without the leading dot. */
 export const MEDIA_EXTS: readonly string[] = [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS]
@@ -74,7 +77,7 @@ export async function expandImportPaths(
     try {
       entries = (await readdir(dir)).sort()
     } catch (err) {
-      console.error('import scan failed for', dir, err)
+      log.error(`scanning ${dir} failed`, err)
       return
     }
     // Files first, then subdirectories, so a folder's own clips land in the

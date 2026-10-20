@@ -36,6 +36,9 @@
  */
 
 import { useEffect } from 'react'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('audio')
 
 /** dB → linear gain. The same conversion the export applies in `dbToGain`
  *  (`main/services/audio.ts`); the two must stay in step. */
@@ -80,7 +83,8 @@ function routeThroughGain(el: HTMLMediaElement): GainNode | null {
     graphs.set(el, gain)
     resumeIfSuspended()
     return gain
-  } catch {
+  } catch (error) {
+    log.warn('WebAudio routing failed; this clip plays at most at unity gain', error)
     graphs.set(el, null)
     return null
   }

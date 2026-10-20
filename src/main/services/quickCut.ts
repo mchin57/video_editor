@@ -26,6 +26,9 @@ import { runFfmpeg } from './ffmpegRun'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
 import { ensureProxy, importGenerated, requireUsable, tmpOutput, transcriptFile } from './mediaStore'
 import { getTranscript } from './whisper'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('quick-cut')
 
 /** A cut keeps quality close to the source: it is a new original, not a proxy. */
 const CQ = '18'
@@ -220,7 +223,7 @@ export async function cutToLibrary(mediaId: string, pieces: CutPiece[]): Promise
   }
   // Each cut needs its own preview proxy; build them in the background as for an import.
   for (const a of made) {
-    if (!a.proxyReady) void ensureProxy(a.id).catch((err) => console.error('quick cut proxy failed', a.id, err))
+    if (!a.proxyReady) void ensureProxy(a.id).catch((err) => log.error(`proxy failed for ${a.id}`, err))
   }
   return made
 }

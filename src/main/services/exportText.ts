@@ -20,6 +20,9 @@ import type { TextImageSpec } from './textImage'
 import { decorationScale, scaledPill, scaledShadow, scaledStroke } from './textScale'
 import { r } from './ffmpegFilters'
 import type { CompositionRender, OutputMap } from './exportRender'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('export')
 
 /**
  * One text block — a text layer or a caption, the same thing — as the export
@@ -183,7 +186,8 @@ export async function exportTextLayer(pass: CompositionRender, l: Layer, c: Text
         pass.visuals.push({ kind: 'text', assFile: sparkleAss })
       }
       return
-    } catch {
+    } catch (error) {
+      log.warn(`rasterising text failed; burning it flat: ${JSON.stringify(c.text.slice(0, 40))}`, error)
       // Rasterising failed — fall through to a flat-colour ASS burn so the
       // overlay still appears (losing the gradient or the emoji colour; the
       // layout keeps the wrap width).
@@ -226,7 +230,8 @@ export async function addCaptions(pass: CompositionRender): Promise<void> {
       try {
         pass.captionOverlays.push(await pass.renderTextImage(spec, seg.startSec, seg.endSec))
         continue
-      } catch {
+      } catch (error) {
+        log.warn(`rasterising a caption failed; burning it flat: ${JSON.stringify(seg.text.slice(0, 40))}`, error)
         // un-rendered → burns flat below
       }
     }

@@ -39,6 +39,9 @@ import {
   rawFrames,
   type MatteWindow
 } from './removeBackgroundArgs'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('matte')
 
 type OrtModule = typeof import('onnxruntime-node')
 type OrtTensor = import('onnxruntime-node').Tensor
@@ -82,7 +85,9 @@ export async function segmentAvailable(): Promise<boolean> {
   try {
     await loadOrt()
     return true
-  } catch {
+  } catch (error) {
+    // Hidden, not failed at click time — but say why (an ABI mismatch, a missing DLL).
+    log.warn('onnxruntime-node did not load; background removal is unavailable', error)
     return false
   }
 }
@@ -127,7 +132,7 @@ async function bestSession(ort: OrtModule, modelPath: string): Promise<{ session
     try {
       return { session: await getSession(ort, modelPath, 'gpu'), device: 'gpu' }
     } catch (err) {
-      console.warn('matte: DirectML unavailable, using the CPU', err)
+      log.warn('DirectML unavailable, using the CPU', err)
     }
   }
   return { session: await getSession(ort, modelPath, 'cpu'), device: 'cpu' }
@@ -220,7 +225,7 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
         return await tryShapes(session)
       } catch (err) {
         if (device !== 'gpu') throw err
-        console.warn('matte: GPU inference failed, retrying on the CPU', err)
+        log.warn('GPU inference failed, retrying on the CPU', err)
         gpuUnusable = true
         session = await getSession(ort, modelPath, 'cpu')
         device = 'cpu'
@@ -278,7 +283,7 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
       decode.child.kill()
       encode.child.kill()
       await Promise.allSettled([decode.exited, encode.exited]) // release the file before rm
-      await fsp.rm(tmpOut, { force: true }).catch(() => {})
+      await bestEffort(fsp.rm(tmpOut, { force: true }), 'removing the partial matte', log)
       throw err
     }
 
@@ -293,7 +298,7 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
       (await ensureProxy(result.id).then(
         () => true,
         (e) => {
-          console.error('alpha proxy failed', e)
+          log.error('alpha proxy failed', e)
           return false
         }
       ))

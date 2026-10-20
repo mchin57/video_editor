@@ -3,6 +3,9 @@ import type { ImportSkip, MediaAsset } from '@shared/media'
 import { importFailureReason } from './importFailure'
 import { expandImportPaths } from './importScan'
 import { ensureProxy, importFile } from './mediaStore'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('import')
 
 export interface ImportReport {
   assets: MediaAsset[]
@@ -25,10 +28,10 @@ export async function importManyReport(paths: string[]): Promise<ImportReport> {
       const asset = await importFile(path)
       report.assets.push(asset)
       if (!asset.proxyReady) {
-        void ensureProxy(asset.id).catch((err) => console.error('proxy generation failed', err))
+        void ensureProxy(asset.id).catch((err) => log.error(`proxy generation failed for ${asset.id}`, err))
       }
     } catch (err) {
-      console.error('import failed for', path, err)
+      log.error(`import failed for ${path}`, err)
       const size = await stat(path).then(
         (s) => s.size,
         () => undefined

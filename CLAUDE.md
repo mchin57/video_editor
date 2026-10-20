@@ -65,6 +65,8 @@ homes — check it before writing any of these:**
 - aspect-fit box / image rotate-aspect math → `containBox`/`effectiveImageAspect` (`shared/layers.ts`)
 - an ffmpeg `crop=`/`eq=` fragment or `toFixed(3)`/round → `services/ffmpegFilters.ts`
 - an IPC call → add the name to the destructure in `ipc/client.ts` (don't re-wrap `window.api`)
+- a log line or a step allowed to fail → `createLogger` / `bestEffort` (`shared/log.ts`), never a bare
+  `console.*` or an empty `catch {}` (expected outcomes — a missing file, an autoplay rejection — stay control flow)
 
 When you extend or add a shared helper, update `docs/SHARED.md` too.
 

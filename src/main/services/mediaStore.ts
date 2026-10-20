@@ -56,6 +56,9 @@ import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
 import { forgetLoudnessFailure, kickLoudness, loudnessPassReading, type LoudnessSource } from './loudness'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('media')
 
 /** Full-content hash (first 12 hex of sha1) — the id scheme before
  *  fingerprints. Only legacy conversion still needs it. */
@@ -132,7 +135,7 @@ async function makeArtifact(
       await generate(out)
     } catch (error) {
       artifactFailed.add(out)
-      console.error(`${what} failed for`, id, error)
+      log.error(`${what} failed for ${id}`, error)
     }
   })
 }
@@ -549,7 +552,7 @@ function kickProxy(r: string, id: string): void {
   if (proxyFailed.has(key)) return
   void proxyFlight(key, () => buildProxy(r, id)).catch((error) => {
     proxyFailed.add(key)
-    console.error('proxy generation failed', id, error)
+    log.error(`proxy generation failed for ${id}`, error)
   })
 }
 
@@ -655,7 +658,7 @@ export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset
     // Kick the AAC proxy + waveform in the background (its own job), so the
     // library row flips to "ready to drag onto the music track" when done.
     if (!asset.proxyReady) {
-      void ensureProxy(asset.id).catch((err) => console.error('audio proxy generation failed', err))
+      void ensureProxy(asset.id).catch((err) => log.error(`audio proxy generation failed for ${asset.id}`, err))
     }
     return asset
   } catch (error) {
@@ -697,7 +700,7 @@ export async function renderAudioFxToLibrary(
     // AAC proxy + waveform in the background, as for any imported audio — the
     // effect track needs both to be playable and to draw on the timeline.
     if (!asset.proxyReady) {
-      void ensureProxy(asset.id).catch((err) => console.error('audio fx proxy generation failed', err))
+      void ensureProxy(asset.id).catch((err) => log.error(`effect proxy generation failed for ${asset.id}`, err))
     }
     return asset
   } catch (error) {

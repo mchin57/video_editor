@@ -16,6 +16,9 @@ import { expandSelection, isLinked, timelineTiles } from '@/lib/links'
 import { assistantRespond, onAssistantRequest } from '@/ipc/client'
 import { interactionOpen, whenIdle } from '@/lib/interaction'
 import { exportSaveSkipReason } from '@/lib/exportSave'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('assistant')
 
 type Handlers = {
   [K in keyof AssistantOps]: (
@@ -95,7 +98,7 @@ async function answer(req: AssistantRequest): Promise<void> {
   // by a dialog, or the user held a drag past the deadline: running it now would apply
   // an edit nobody is told about. Main has already answered.
   if (Date.now() > req.deadline) {
-    console.warn(`[assistant] dropped expired "${req.op}" request`)
+    log.warn(`dropped expired "${req.op}" request`)
     return
   }
   let res: AssistantResponse
@@ -114,7 +117,7 @@ export function installAssistantBridge(): () => void {
   // waits while the user is mid-drag: a drag recomputes from its pointerdown
   // snapshot, so an edit landing in between would be overwritten (lib/interaction.ts).
   return onAssistantRequest((req: AssistantRequest) => {
-    if (interactionOpen()) console.info(`[assistant] "${req.op}" waits for the user's drag to end`)
+    if (interactionOpen()) log.info(`"${req.op}" waits for the user's drag to end`)
     whenIdle(() => void answer(req))
   })
 }

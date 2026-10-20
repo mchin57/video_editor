@@ -11,6 +11,9 @@ import type { TextAnimation } from '@shared/textAnim'
 import { sanitizeTextStyles, upsertTextStyle, type TextStylePreset } from '@shared/textStylePresets'
 import { getSettings, updateSettings } from '@/ipc/client'
 import { newId } from '@shared/ids'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('settings')
 
 interface TextStylesState {
   styles: TextStylePreset[]
@@ -30,8 +33,8 @@ export const useTextStyles = create<TextStylesState>((set, get) => ({
     try {
       const s = await getSettings()
       set({ styles: sanitizeTextStyles(s.textStyles) })
-    } catch {
-      /* keep none */
+    } catch (error) {
+      log.warn('loading saved text styles failed; keep none', error)
     }
   },
   save: (name, style, animation) => {

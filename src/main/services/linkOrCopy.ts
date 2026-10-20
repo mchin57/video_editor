@@ -13,6 +13,9 @@
  */
 
 import { promises as fsp } from 'node:fs'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('files')
 
 export type Placement = 'link' | 'copy'
 
@@ -31,7 +34,7 @@ export async function copyAtomic(src: string, dest: string): Promise<void> {
     await fsp.copyFile(src, part)
     await fsp.rename(part, dest)
   } catch (error) {
-    await fsp.rm(part, { force: true }).catch(() => {})
+    await bestEffort(fsp.rm(part, { force: true }), `removing the partial copy ${part}`, log)
     throw error
   }
 }

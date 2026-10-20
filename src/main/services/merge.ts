@@ -26,6 +26,9 @@ import { ensureProxy, importGenerated, requireUsable, tmpOutput, transcriptFile 
 import { hdrToSdrChain } from './proxy'
 import { isTenBit, videoArgs } from './quickCut'
 import { getTranscript } from './whisper'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('merge')
 
 /** One segment with the file and probe it reads from. */
 export interface MergeInput {
@@ -179,6 +182,6 @@ export async function mergeToLibrary(segments: MergeSegment[]): Promise<MediaAss
     failJob(job.id, error instanceof Error ? error.message : String(error))
     throw error
   }
-  if (!asset.proxyReady) void ensureProxy(asset.id).catch((err) => console.error('merge proxy failed', asset.id, err))
+  if (!asset.proxyReady) void ensureProxy(asset.id).catch((err) => log.error(`proxy failed for ${asset.id}`, err))
   return asset
 }

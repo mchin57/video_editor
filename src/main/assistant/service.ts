@@ -11,6 +11,9 @@ import type { AssistantStatus } from '@shared/assistant/protocol'
 import { getSettings } from '../services/settings'
 import { servePipe } from './pipe'
 import { handleTool } from './tools'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('assistant')
 
 /** reel-mcp's built entry, beside this bundle (out/main/mcp.js). */
 export const mcpScriptPath = (): string => join(__dirname, 'mcp.js')
@@ -70,13 +73,13 @@ export const startAssistant = (): Promise<AssistantStatus> =>
           state = { state: 'listening' }
         } else {
           state = { state: 'error', message: r.message }
-          console.error('[assistant]', r.message)
+          log.error(r.message)
         }
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       state = { state: 'error', message }
-      console.error('[assistant]', message)
+      log.error(message)
     }
     return assistantStatus()
   })

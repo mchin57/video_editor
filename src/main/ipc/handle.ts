@@ -22,6 +22,9 @@ import {
 import type { z } from 'zod'
 import { IPC, type InvokeArgs, type InvokeName, type InvokeResult, type IpcSend } from '@shared/ipc'
 import { argsProblem, INVOKE_SCHEMAS, SEND_SCHEMAS } from './schemas'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('ipc')
 
 /** Handle an invoke channel. The handler gets the ORIGINAL arguments once they
  *  pass the check (validation gates, it never rewrites a call). */
@@ -44,7 +47,7 @@ export function onSend<K extends keyof IpcSend>(name: K, fn: (...args: IpcSend[K
   ipcMain.on(IPC[name], (_event, ...args: unknown[]) => {
     const problem = argsProblem(schema, args)
     if (problem) {
-      console.error(`Dropped a bad ${IPC[name]} message: ${problem}`)
+      log.error(`dropped a bad ${IPC[name]} message: ${problem}`)
       return
     }
     fn(...(args as IpcSend[K]))

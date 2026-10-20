@@ -25,6 +25,9 @@ import { activeComp, useProject } from '@/state/projectStore'
 import { useLoudness } from '@/state/loudness'
 import { idle } from '@/lib/interaction'
 import { newId } from '@shared/ids'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('media')
 
 const LIBRARY_KEY = 'library'
 
@@ -269,7 +272,7 @@ export function useRepairMedia(): {
     if (result.cutsReset) useProject.getState().resetMediaCuts(asset.id, asset.probe.durationSec)
     if (!asset.proxyReady) {
       void ensureProxy(asset.id)
-        .catch((err) => console.error('proxy rebuild failed', err))
+        .catch((err) => log.error('proxy rebuild failed', err))
         .finally(() => void qc.invalidateQueries({ queryKey: [LIBRARY_KEY] }))
     }
   }
