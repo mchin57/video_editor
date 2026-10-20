@@ -1,10 +1,14 @@
 # Timeline behaviors — regression checklist
 
-`Timeline.tsx` is the densest interaction surface in the app and **is not
-covered end-to-end by tests** (pointer drag, edge auto-scroll, and scroll math
-need a real DOM with layout + rAF, which jsdom fakes badly). A lane
-resize/collapse feature was once lost this way — silently dropped by an unrelated
-timeline refactor because nothing failed.
+`Timeline.tsx` (with its pieces in `components/timeline/`: view-state and
+effect hooks in `hooks.ts`, tile press / move / trim in `useTileDrags.ts`, the
+toolbar and the lane gutter) is the densest interaction surface in the app.
+Pointer drag, edge auto-scroll and scroll math need a real DOM with layout +
+rAF, which jsdom fakes badly, so its guarantees live in the e2e suite below. A
+lane resize/collapse feature was once lost — silently dropped by an unrelated
+timeline refactor because nothing failed; the 2026-10 split of the component was
+done only after the manual list below was automated
+(`e2e/timelineInteractions.spec.ts`).
 
 **Rule:** before you refactor `Timeline.tsx`, skim this list; after, verify each
 item still works. Anything with a test file is guarded automatically — keep it
