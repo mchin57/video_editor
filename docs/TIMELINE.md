@@ -1,10 +1,14 @@
 # Timeline behaviors — regression checklist
 
-`Timeline.tsx` is the densest interaction surface in the app and **is not
-covered end-to-end by tests** (pointer drag, edge auto-scroll, and scroll math
-need a real DOM with layout + rAF, which jsdom fakes badly). A lane
-resize/collapse feature was once lost this way — silently dropped by an unrelated
-timeline refactor because nothing failed.
+`Timeline.tsx` (with its pieces in `components/timeline/`: view-state and
+effect hooks in `hooks.ts`, tile press / move / trim in `useTileDrags.ts`, the
+toolbar and the lane gutter) is the densest interaction surface in the app.
+Pointer drag, edge auto-scroll and scroll math need a real DOM with layout +
+rAF, which jsdom fakes badly, so its guarantees live in the e2e suite below. A
+lane resize/collapse feature was once lost — silently dropped by an unrelated
+timeline refactor because nothing failed; the 2026-10 split of the component was
+done only after the manual list below was automated
+(`e2e/timelineInteractions.spec.ts`).
 
 **Rule:** before you refactor `Timeline.tsx`, skim this list; after, verify each
 item still works. Anything with a test file is guarded automatically — keep it
@@ -44,6 +48,13 @@ item, move it into the guarded table below.
 | No horizontal shrink runaway — dragging the rightmost tile leftwards never shrinks the scrollable width mid-drag (the clamp used to feed back into the drag and accelerate it), including a mid-drag REVERSAL (right then left without releasing, which a non-ratcheting pin misses); the pin is released afterwards | `e2e/edgeScrollShrink.spec.ts` |
 | Numeric Inspector fields keep a draft while typing — clearable, below-minimum intermediates survive, in-range commits live, blur/Enter clamp, Escape abandons | `e2e/numberInput.spec.ts` |
 | OS-file import overlay can't get stuck (depth counter; the Timeline drop-ring shares the hook) | `e2e/dropOverlay.spec.ts` |
+| Video LEFT-edge trim (end kept, source in-point follows); caption and audio tiles move and trim from both edges (audio's source window follows) | `e2e/timelineInteractions.spec.ts` |
+| Playhead: pressing the track scrubs there and follows the drag (playback stops); Space toggles playback | `e2e/timelineInteractions.spec.ts` |
+| Zoom: Ctrl+wheel zooms, anchored at the cursor (the second under it stays under it) | `e2e/timelineInteractions.spec.ts` |
+| Drop from Library: a clip dropped on the track lands as a layer at the drop point | `e2e/timelineInteractions.spec.ts` |
+| Gutter sync: the lane-header gutter follows a vertical scroll of the track | `e2e/timelineInteractions.spec.ts` |
+| Lane resize from the header bubble AND the bottom-edge handle, clips scaling with it; collapse/expand from the chevron and by double-clicking the bubble (blocks and handle hidden while collapsed); the Captions bubble selects the lane-wide caption style | `e2e/timelineInteractions.spec.ts` |
+| Persistence: lane heights and zoom survive a reload | `e2e/timelineInteractions.spec.ts` |
 
 If you change any of the above, the math change should show up as a test diff —
 if it doesn't, the logic probably drifted back inline into the component (where
@@ -51,20 +62,12 @@ it can be deleted silently). Push it back into `lib/`.
 
 ## Manual — smoke-test in `npm run dev`
 
-- **Block edits:** video move + right-edge trim are e2e-guarded; still manual:
-  video LEFT-edge trim, and caption/audio block move + both trims.
 - **Horizontal edge auto-scroll:** drag a block near the left/right edge → the
   track scrolls and the block keeps following. The rate is deliberately FLAT
   (12 px/frame anywhere in the 40px band) — judge whether that speed feels
   right; the constant is `EDGE_SCROLL_SPEED` in `lib/pointerDrag.ts`.
-- **Playhead:** click/drag on the track scrubs; space toggles play.
-- **Zoom:** Ctrl/Cmd + wheel zooms anchored at the cursor.
-- **Drop from Library:** drag a library asset onto the track → video/image layer
-  or audio clip lands at the drop point.
-- **Gutter sync:** the left lane-header gutter stays aligned as the track scrolls
-  vertically.
-- **Lane resize:** drag a lane's header bubble vertically **and** its bottom-edge
-  handle — clips scale with the lane.
+- **Drop from Library, other kinds:** an IMAGE or AUDIO asset dropped on the
+  track (the video case is guarded).
 - **Vertical edge auto-scroll:** resize a lane past the top/bottom edge → the
   track scrolls with you and keeps growing the lane.
 - **No shrink runaway:** while shrinking a lane, the scrollable height holds
@@ -73,9 +76,6 @@ it can be deleted silently). Push it back into `lib/`.
   the same way (`dragFloorW`) and covered by `e2e/edgeScrollShrink.spec.ts`.
   The floor RATCHETS, so a drag that reverses (right, then left, still held) is
   guarded too — a pin snapshotted at grab time silently misses that case.
-- **Collapse/expand:** the ▾/▸ chevron and double-clicking the bubble both
-  toggle; collapsed lanes become a thin strip with blocks + resize handle hidden.
-- **Caption gutter bubble:** clicking it selects the lane-wide caption style.
 - **Link groups (visuals + the paths e2e can't reach):** the 🔗 badge and
   `· linked` tooltip on a linked tile; the Inspector's "Linked to N other tiles"
   banner with its greyed-out re-timing controls (start/end, trim in/out, speed,
@@ -87,8 +87,6 @@ it can be deleted silently). Push it back into `lib/`.
   🔗 and highlight together), trimming either edge trims both, and A/V stays in
   sync on playback after a group trim/move — the thing only real media can tell
   you. A clip with no audio track still lands as a single unlinked tile.
-- **Persistence:** lane heights/collapse (`timelineView`) and zoom
-  (`timelinePps`) survive an app reload.
 - **Container:** the Timeline is a dockview panel (`lib/dockLayout.ts` manifest);
   its height/position live in the dock layout (`dockLayout` localStorage key,
   not the retired `panelSizes`). It must always sit in a sized flex container —
