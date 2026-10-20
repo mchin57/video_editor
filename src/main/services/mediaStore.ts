@@ -7,9 +7,10 @@
  * rebuilt on demand whenever they are missing; `generated/` holds media the
  * editor made; `transcripts/` holds whisper output.
  *
- * Paths come from `projectLayout`; the folder from `projectRoot`. Every public
- * entry point captures the root ONCE, so a job outlives a project switch in the
- * folder it started in.
+ * Paths come from `projectLayout`; the folder, library and per-project job
+ * state from the `ProjectSession`. Every public entry point takes the session
+ * (default: the open project's, read once at the call), so a job outlives a
+ * project switch in the project it started in.
  */
 
 import { createHash } from 'node:crypto'
@@ -26,23 +27,12 @@ import { generateDisplayImage } from './image'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { activeJobUsing, createJob, failJob, finishJob } from './jobs'
 import { splitFileName, validateFileStem } from '@shared/fileName'
-import { singleFlight } from './atomicWrite'
 import { moveFile } from './linkOrCopy'
-import { getProjectRoot } from './projectRoot'
+import { requireSession, type ProjectSession } from './projectSession'
 import { unusableMessage } from './mediaHealth'
 import { fingerprintDiff, fingerprintId, isUnknownFingerprint, sameFingerprint } from './fingerprint'
 import { toRelativePath } from './mediaRef'
-import {
-  allEntries,
-  findByFingerprint,
-  fingerprintOf,
-  freeIdFor,
-  getEntry,
-  markTranscriptStale,
-  putEntry,
-  resolveEntry,
-  type LibraryEntry
-} from './library'
+import type { LibraryEntry } from './library'
 import {
   cacheDir,
   cachePath,
@@ -104,55 +94,51 @@ const playableProxyPath = (r: string, a: MediaAsset): string =>
  * Existence-gating is also what makes cache/ disposable: delete it and every
  * file comes back the next time it is asked for.
  */
-const proxyFlight = singleFlight<void>() // keyed by cache path of the proxy
-const artifactFlight = singleFlight<void>() // keyed by output path
-const importFlight = singleFlight<MediaAsset>() // keyed by media id
-
-/** Derived files whose generator failed this session (by output path): the
- *  library load runs on every refetch and must not retry — and log — a file
- *  that can't be made over and over. Relaunching retries. */
-const artifactFailed = new Set<string>()
+// The single-flight maps and the failure memory (artifactFailed, proxyFailed)
+// live on the ProjectSession: the import flight is keyed by media id, which is
+// the same in every project holding the same file.
 
 /** Forget the failures remembered for one asset's cache dir (proxy + artifacts). */
-function forgetFailures(dir: string): void {
-  for (const out of [...artifactFailed]) if (out.startsWith(dir)) artifactFailed.delete(out)
-  proxyFailed.delete(dir)
-  forgetLoudnessFailure(dir)
+function forgetFailures(s: ProjectSession, dir: string): void {
+  for (const out of [...s.artifactFailed]) if (out.startsWith(dir)) s.artifactFailed.delete(out)
+  s.proxyFailed.delete(dir)
+  forgetLoudnessFailure(s, dir)
 }
 
 /** Best-effort derived file: skipped if present, generated once however many
  *  callers race for it, and never throws (a missing thumb must not fail an import). */
 async function makeArtifact(
+  s: ProjectSession,
   out: string,
   what: string,
   id: string,
   generate: (out: string) => Promise<void>
 ): Promise<void> {
-  if (existsSync(out) || artifactFailed.has(out)) return
-  await artifactFlight(out, async () => {
+  if (existsSync(out) || s.artifactFailed.has(out)) return
+  await s.artifactFlight(out, async () => {
     try {
       await fsp.mkdir(join(out, '..'), { recursive: true })
       await generate(out)
     } catch (error) {
-      artifactFailed.add(out)
+      s.artifactFailed.add(out)
       log.error(`${what} failed for ${id}`, error)
     }
   })
 }
 
 /** Best-effort first-frame thumbnail; never fails the import if it errors. */
-async function makeThumb(r: string, asset: MediaAsset): Promise<void> {
+async function makeThumb(s: ProjectSession, asset: MediaAsset): Promise<void> {
   if (!asset.probe.video) return
-  await makeArtifact(thumbPath(r, asset.id), 'thumbnail', asset.id, (out) =>
+  await makeArtifact(s, thumbPath(s.root, asset.id), 'thumbnail', asset.id, (out) =>
     generateThumbnail(asset.originalPath, out, asset.probe, isImageAsset(asset))
   )
 }
 
 /** Best-effort waveform for any asset with audio (video included, for the
  *  audio lane when its audio is extracted onto the track). */
-async function makeWaveform(r: string, asset: MediaAsset): Promise<void> {
+async function makeWaveform(s: ProjectSession, asset: MediaAsset): Promise<void> {
   if (!asset.probe.audio) return
-  await makeArtifact(waveformPath(r, asset.id), 'waveform', asset.id, (out) =>
+  await makeArtifact(s, waveformPath(s.root, asset.id), 'waveform', asset.id, (out) =>
     generateWaveform(asset.originalPath, out, asset.probe.durationSec)
   )
 }
@@ -166,79 +152,82 @@ const loudnessSource = (asset: MediaAsset): LoudnessSource => ({
 })
 
 /** Best-effort display PNG (alpha-preserving) for an imported image. */
-async function makeImage(r: string, asset: MediaAsset): Promise<void> {
+async function makeImage(s: ProjectSession, asset: MediaAsset): Promise<void> {
   if (!isImageAsset(asset)) return
-  await makeArtifact(imagePath(r, asset.id), 'display image', asset.id, (out) =>
+  await makeArtifact(s, imagePath(s.root, asset.id), 'display image', asset.id, (out) =>
     generateDisplayImage(asset.originalPath, out)
   )
 }
 
 /** A library entry as the app uses it (runtime facts filled in from disk). */
-function toAsset(r: string, entry: LibraryEntry): MediaAsset {
+function toAsset(s: ProjectSession, entry: LibraryEntry): MediaAsset {
   const asset: MediaAsset = {
     ...entry.record,
     originalPath: entry.path ?? entry.record.absolutePath,
     status: entry.path ? 'ok' : 'missing',
     proxyReady: false,
     // A transcript a forced relink made stale is hidden until Save deletes it.
-    transcribed: !entry.staleTranscript && existsSync(transcriptPath(r, entry.record.id)),
+    transcribed: !entry.staleTranscript && existsSync(transcriptPath(s.root, entry.record.id)),
     // Changes exactly when the content does, so the renderer's media URLs do too.
     rev: fingerprintId(entry.record.fingerprint)
   }
-  asset.proxyReady = existsSync(playableProxyPath(r, asset))
+  asset.proxyReady = existsSync(playableProxyPath(s.root, asset))
   return asset
 }
 
 /** An asset of the open project, its original located now (null = unknown id). */
-async function readAsset(r: string, id: string): Promise<MediaAsset | null> {
-  const res = await resolveEntry(id)
-  return res ? toAsset(r, res.entry) : null
+async function readAsset(s: ProjectSession, id: string): Promise<MediaAsset | null> {
+  const res = await s.library.resolveEntry(id)
+  return res ? toAsset(s, res.entry) : null
 }
 
-/** Public accessor for a single asset of the open project. */
-export const getAsset = (id: string): Promise<MediaAsset | null> => readAsset(getProjectRoot(), id)
+// The public entry points below take the session last; the default is the open
+// project's, read when the function is CALLED. A long job passes the one it
+// started under, so a project switch mid-job doesn't move it.
+
+/** A single asset of the project, its original located now. */
+export const getAsset = (id: string, s: ProjectSession = requireSession()): Promise<MediaAsset | null> =>
+  readAsset(s, id)
 
 /** Where an asset's transcript lives (project-owned: slow to rebuild). */
-export const transcriptFile = (id: string): string => transcriptPath(getProjectRoot(), id)
+export const transcriptFile = (id: string, s: ProjectSession = requireSession()): string => transcriptPath(s.root, id)
 
 /** Scratch dir for an asset's intermediate files (whisper's 16 kHz wav) — in
  *  the disposable cache, created on demand. */
-export async function scratchDirFor(id: string): Promise<string> {
-  const dir = cacheDir(getProjectRoot(), id)
+export async function scratchDirFor(id: string, s: ProjectSession = requireSession()): Promise<string> {
+  const dir = cacheDir(s.root, id)
   await fsp.mkdir(dir, { recursive: true })
   return dir
 }
 
 /** The audio proxy for an asset if it exists (export prefers it), else null. */
-export function audioProxyIfReady(id: string): string | null {
-  const p = audioProxyPath(getProjectRoot(), id)
+export function audioProxyIfReady(id: string, s: ProjectSession = requireSession()): string | null {
+  const p = audioProxyPath(s.root, id)
   return existsSync(p) ? p : null
 }
 
 /** Absolute path to an image asset's display PNG, rebuilt first if the cache
  *  lost it (used by preview + export). */
-export async function ensureImagePath(id: string): Promise<string> {
-  const r = getProjectRoot()
-  const asset = await readAsset(r, id)
-  if (asset?.status === 'ok') await makeImage(r, asset)
-  return imagePath(r, id)
+export async function ensureImagePath(id: string, s: ProjectSession = requireSession()): Promise<string> {
+  const asset = await readAsset(s, id)
+  if (asset?.status === 'ok') await makeImage(s, asset)
+  return imagePath(s.root, id)
 }
 
 /** The asset, if its original was found; else a clear error (jobs call this
  *  instead of letting ffmpeg fail on a missing file). */
-export async function requireUsable(id: string): Promise<MediaAsset> {
-  const asset = await readAsset(getProjectRoot(), id)
+export async function requireUsable(id: string, s: ProjectSession = requireSession()): Promise<MediaAsset> {
+  const asset = await readAsset(s, id)
   if (!asset) throw new Error('That media is no longer in the library.')
   if (asset.status !== 'ok') throw new Error(unusableMessage([{ fileName: asset.fileName, status: asset.status! }]))
   return asset
 }
 
 /** Throw (naming every file) unless all these assets are usable: export's gate. */
-export async function assertMediaUsable(ids: string[]): Promise<void> {
-  const r = getProjectRoot()
+export async function assertMediaUsable(ids: string[], s: ProjectSession = requireSession()): Promise<void> {
   const items: { fileName: string; status: 'ok' | 'missing' }[] = []
   for (const id of new Set(ids)) {
-    const asset = await readAsset(r, id)
+    const asset = await readAsset(s, id)
     if (!asset) continue // the exporter already skips unknown media
     items.push({ fileName: asset.fileName, status: asset.status === 'ok' ? 'ok' : 'missing' })
   }
@@ -269,11 +258,15 @@ export interface RelinkCheck {
   foundSize: number
 }
 
-export async function relinkCheck(id: string, srcPath: string): Promise<RelinkCheck> {
-  const entry = getEntry(id)
+export async function relinkCheck(
+  id: string,
+  srcPath: string,
+  s: ProjectSession = requireSession()
+): Promise<RelinkCheck> {
+  const entry = s.library.getEntry(id)
   if (!entry) throw new Error('That media is no longer in the library.')
   const recorded = entry.record.fingerprint
-  const found = await fingerprintOf(srcPath)
+  const found = await s.library.fingerprintOf(srcPath)
   const unknown = isUnknownFingerprint(recorded)
   const differs = fingerprintDiff(recorded, found)
   return {
@@ -296,14 +289,19 @@ export async function relinkCheck(id: string, srcPath: string): Promise<RelinkCh
  * the renderer resets the clip's cuts. Afterwards the picked file's folder is
  * searched for the project's other missing clips (relink one, fix the rest).
  */
-export async function relinkMedia(id: string, srcPath: string, force = false): Promise<RelinkResult> {
-  const r = getProjectRoot()
-  const entry = getEntry(id)
+export async function relinkMedia(
+  id: string,
+  srcPath: string,
+  force = false,
+  s: ProjectSession = requireSession()
+): Promise<RelinkResult> {
+  const r = s.root
+  const entry = s.library.getEntry(id)
   if (!entry) throw new Error('That media is no longer in the library.')
-  const fp = await fingerprintOf(srcPath)
+  const fp = await s.library.fingerprintOf(srcPath)
   let cutsReset = false
   if (sameFingerprint(fp, entry.record.fingerprint)) {
-    putEntry(pointAt(r, entry.record, srcPath), srcPath, r)
+    s.library.putEntry(pointAt(r, entry.record, srcPath), srcPath, r)
   } else {
     if (!force) throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
     const probe = await probeFile(srcPath)
@@ -320,12 +318,12 @@ export async function relinkMedia(id: string, srcPath: string, force = false): P
     // transcript isn't: hide it, and let Save delete it (not saving brings
     // the old record back, and with it the transcript that matches).
     await fsp.rm(cacheDir(r, id), { recursive: true, force: true })
-    forgetFailures(cacheDir(r, id)) // new content: its derived files get a fresh try
-    putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe, ...identity }, srcPath, r)
-    markTranscriptStale(id)
+    forgetFailures(s, cacheDir(r, id)) // new content: its derived files get a fresh try
+    s.library.putEntry({ ...pointAt(r, entry.record, srcPath), fingerprint: fp, probe, ...identity }, srcPath, r)
+    s.library.markTranscriptStale(id)
   }
-  const asset = await hydrate(r, toAsset(r, getEntry(id)!))
-  return { asset, cutsReset, alsoFound: await relinkSiblings(r, dirname(srcPath)) }
+  const asset = await hydrate(s, toAsset(s, s.library.getEntry(id)!))
+  return { asset, cutsReset, alsoFound: await relinkSiblings(s, r, dirname(srcPath)) }
 }
 
 /** A failed `fs.rename` in words. Windows answers a file another program
@@ -354,12 +352,12 @@ export function renameFailureMessage(error: unknown, fileName: string): string {
  * transcript are untouched: the bytes are the same. The change is NOT
  * broadcast: the caller marks the library changed and saves.
  */
-export async function renameMedia(id: string, stem: string): Promise<MediaAsset> {
-  const r = getProjectRoot()
-  const entry = getEntry(id)
+export async function renameMedia(id: string, stem: string, s: ProjectSession = requireSession()): Promise<MediaAsset> {
+  const r = s.root
+  const entry = s.library.getEntry(id)
   if (!entry) throw new Error('That media is no longer in the library.')
   if (isUnknownClip(entry.record)) throw new Error('This clip has no known file to rename. Relink it first.')
-  const found = await resolveEntry(id)
+  const found = await s.library.resolveEntry(id)
   const from = found?.entry.path
   if (!found || !from)
     throw new Error(`“${entry.record.fileName}” is missing, so there is no file to rename. Relink it first.`)
@@ -368,7 +366,7 @@ export async function renameMedia(id: string, stem: string): Promise<MediaAsset>
   if (reason) throw new Error(reason)
   const busy = activeJobUsing(id)
   if (busy) throw new Error(`“${current}” is in use by “${busy.label}”. Wait for it to finish, then rename.`)
-  if (loudnessPassReading(r, id))
+  if (loudnessPassReading(s, id))
     throw new Error(`“${current}” is still being measured for volume levels. Try again in a moment.`)
 
   const target = renameTarget(from, stem)
@@ -387,19 +385,20 @@ export async function renameMedia(id: string, stem: string): Promise<MediaAsset>
   const record = { ...pointAt(r, found.entry.record, target.path), fileName: target.name }
   // Quiet: the renderer marks the change and saves right after this returns
   // (docs/MEDIA-POINTERS.md "Rename").
-  if (!target.unchanged || record.fileName !== found.entry.record.fileName) putEntry(record, target.path, r, true)
-  return hydrate(r, toAsset(r, getEntry(id)!))
+  if (!target.unchanged || record.fileName !== found.entry.record.fileName)
+    s.library.putEntry(record, target.path, r, true)
+  return hydrate(s, toAsset(s, s.library.getEntry(id)!))
 }
 
 /**
  * Relink one, fix the rest: every other missing clip whose file is in `dir`
  * (matched by size, then fingerprint) is pointed at it. Returns their names.
  */
-async function relinkSiblings(r: string, dir: string): Promise<string[]> {
+async function relinkSiblings(s: ProjectSession, r: string, dir: string): Promise<string[]> {
   const missing: LibraryEntry[] = []
-  for (const entry of allEntries()) {
+  for (const entry of s.library.allEntries()) {
     if (isUnknownFingerprint(entry.record.fingerprint)) continue
-    const res = await resolveEntry(entry.record.id)
+    const res = await s.library.resolveEntry(entry.record.id)
     if (res && !res.entry.path) missing.push(res.entry)
   }
   if (!missing.length) return []
@@ -413,9 +412,9 @@ async function relinkSiblings(r: string, dir: string): Promise<string[]> {
   const found: string[] = []
   for (const entry of missing) {
     for (const path of bySize.get(entry.record.fingerprint.size) ?? []) {
-      const fp = await fingerprintOf(path).catch(() => null)
+      const fp = await s.library.fingerprintOf(path).catch(() => null)
       if (!fp || !sameFingerprint(fp, entry.record.fingerprint)) continue
-      putEntry(pointAt(r, entry.record, path), path, r)
+      s.library.putEntry(pointAt(r, entry.record, path), path, r)
       found.push(entry.record.fileName)
       break
     }
@@ -428,14 +427,14 @@ async function relinkSiblings(r: string, dir: string): Promise<string[]> {
  * any other library edit: the change notice marks the project, and Save
  * writes it into the `.reel`. Works for a Missing clip too — no file is read.
  */
-export function setMediaDescription(id: string, text: string): void {
-  const r = getProjectRoot()
-  const entry = getEntry(id)
+export function setMediaDescription(id: string, text: string, s: ProjectSession = requireSession()): void {
+  const r = s.root
+  const entry = s.library.getEntry(id)
   if (!entry) throw new Error(`No media "${id}" in this project.`)
   const description = normalizeDescription(text)
   if ((entry.record.description ?? '') === description) return
   const { description: _old, ...rest } = entry.record
-  putEntry(description ? { ...rest, description } : rest, entry.path, r)
+  s.library.putEntry(description ? { ...rest, description } : rest, entry.path, r)
 }
 
 /**
@@ -443,7 +442,8 @@ export function setMediaDescription(id: string, text: string): void {
  * building the instant artifacts (thumb, display PNG).
  */
 async function register(
-  r: string,
+  s: ProjectSession,
+  r: string, // the project folder the caller started under (Save As mid-import refuses the write)
   id: string,
   path: string,
   fileName: string,
@@ -468,11 +468,11 @@ async function register(
     probe,
     kind
   }
-  const asset = toAsset(r, putEntry(record, path, r))
-  await makeThumb(r, asset)
-  await makeImage(r, asset) // images: build the display PNG now (it is their "proxy")
-  kickLoudness(r, loudnessSource(asset))
-  asset.proxyReady = existsSync(playableProxyPath(r, asset))
+  const asset = toAsset(s, s.library.putEntry(record, path, r))
+  await makeThumb(s, asset)
+  await makeImage(s, asset) // images: build the display PNG now (it is their "proxy")
+  kickLoudness(s, loudnessSource(asset))
+  asset.proxyReady = existsSync(playableProxyPath(s.root, asset))
   return asset
 }
 
@@ -482,18 +482,23 @@ async function register(
  * the library already holds reuses that item — and repoints it here if its
  * original had gone missing.
  */
-export async function importFile(srcPath: string, displayName?: string): Promise<MediaAsset> {
-  const r = getProjectRoot()
-  const fp = await fingerprintOf(srcPath)
-  const id = freeIdFor(fingerprintId(fp), fp)
-  return importFlight(id, async () => {
-    const existing = findByFingerprint(fp)
+export async function importFile(
+  srcPath: string,
+  displayName?: string,
+  s: ProjectSession = requireSession()
+): Promise<MediaAsset> {
+  const { library } = s
+  const r = s.root
+  const fp = await library.fingerprintOf(srcPath)
+  const id = library.freeIdFor(fingerprintId(fp), fp)
+  return s.importFlight(id, async () => {
+    const existing = library.findByFingerprint(fp)
     if (existing) {
-      const res = await resolveEntry(existing.record.id)
-      if (res && !res.entry.path) putEntry(pointAt(r, res.entry.record, srcPath), srcPath, r)
-      return hydrate(r, toAsset(r, getEntry(existing.record.id)!))
+      const res = await library.resolveEntry(existing.record.id)
+      if (res && !res.entry.path) library.putEntry(pointAt(r, res.entry.record, srcPath), srcPath, r)
+      return hydrate(s, toAsset(s, library.getEntry(existing.record.id)!))
     }
-    return register(r, id, srcPath, displayName ?? basename(srcPath), fp, false)
+    return register(s, r, id, srcPath, displayName ?? basename(srcPath), fp, false)
   })
 }
 
@@ -502,16 +507,21 @@ export async function importFile(srcPath: string, displayName?: string): Promise
  * project's `generated/` under a readable, unique name. Identical output
  * reuses the existing item, which gives re-rendering a cache for free.
  */
-export async function importGenerated(tmpPath: string, displayName: string): Promise<MediaAsset> {
-  const r = getProjectRoot()
-  const fp = await fingerprintOf(tmpPath)
-  const id = freeIdFor(fingerprintId(fp), fp)
-  return importFlight(id, async () => {
-    const existing = findByFingerprint(fp)
-    const found = existing ? await resolveEntry(existing.record.id) : null
+export async function importGenerated(
+  tmpPath: string,
+  displayName: string,
+  s: ProjectSession = requireSession()
+): Promise<MediaAsset> {
+  const { library } = s
+  const r = s.root
+  const fp = await library.fingerprintOf(tmpPath)
+  const id = library.freeIdFor(fingerprintId(fp), fp)
+  return s.importFlight(id, async () => {
+    const existing = library.findByFingerprint(fp)
+    const found = existing ? await library.resolveEntry(existing.record.id) : null
     if (found?.entry.path) {
       await fsp.rm(tmpPath, { force: true })
-      return hydrate(r, toAsset(r, found.entry))
+      return hydrate(s, toAsset(s, found.entry))
     }
     const dir = generatedRoot(r)
     await fsp.mkdir(dir, { recursive: true })
@@ -522,8 +532,10 @@ export async function importGenerated(tmpPath: string, displayName: string): Pro
       uniqueFileName(safeFileName(displayName), (n) => existsSync(join(dir, n)))
     )
     await moveFile(tmpPath, dest)
-    if (existing) return hydrate(r, toAsset(r, putEntry(pointAt(r, existing.record, dest), dest, r)))
-    return register(r, id, dest, displayName, fp, true)
+    if (existing) {
+      return hydrate(s, toAsset(s, library.putEntry(pointAt(r, existing.record, dest), dest, r)))
+    }
+    return register(s, r, id, dest, displayName, fp, true)
   })
 }
 
@@ -533,31 +545,32 @@ export async function importGenerated(tmpPath: string, displayName: string): Pro
  * the renderer can all ask), and every caller's promise settles only once the
  * proxy is on disk in full — or the build failed.
  */
-export function ensureProxy(id: string): Promise<void> {
-  const r = getProjectRoot()
-  return proxyFlight(cacheDir(r, id), () => buildProxy(r, id))
+export function ensureProxy(id: string, s: ProjectSession = requireSession()): Promise<void> {
+  return s.proxyFlight(cacheDir(s.root, id), () => buildProxy(s, id))
 }
 
-/** Proxies whose build failed this session (keyed by cache dir): the library
- *  load doesn't retry them on every refetch. An explicit `ensureProxy` (import,
- *  re-import, the assistant) still tries again. */
-const proxyFailed = new Set<string>()
+// `proxyFailed` (on the session, keyed by cache dir): the library load doesn't
+// retry a failed build on every refetch. An explicit `ensureProxy` (import,
+// re-import, the assistant) still tries again.
 
 /** Start a missing proxy in the background — what makes cache/ disposable for
  *  proxies too, and what builds them for media that arrived without one
  *  (an encode interrupted by quitting, a converted project). Progress and the
  *  library refresh ride on the proxy job, as for an import. */
-function kickProxy(r: string, id: string): void {
-  const key = cacheDir(r, id)
-  if (proxyFailed.has(key)) return
-  void proxyFlight(key, () => buildProxy(r, id)).catch((error) => {
-    proxyFailed.add(key)
-    log.error(`proxy generation failed for ${id}`, error)
-  })
+function kickProxy(s: ProjectSession, id: string): void {
+  const key = cacheDir(s.root, id)
+  if (s.proxyFailed.has(key)) return
+  void s
+    .proxyFlight(key, () => buildProxy(s, id))
+    .catch((error) => {
+      s.proxyFailed.add(key)
+      log.error(`proxy generation failed for ${id}`, error)
+    })
 }
 
-async function buildProxy(r: string, id: string): Promise<void> {
-  const asset = await readAsset(r, id)
+async function buildProxy(s: ProjectSession, id: string): Promise<void> {
+  const r = s.root
+  const asset = await readAsset(s, id)
   if (!asset) throw new Error(`unknown media ${id}`)
   if (existsSync(playableProxyPath(r, asset))) return
   if (asset.status !== 'ok') {
@@ -567,7 +580,7 @@ async function buildProxy(r: string, id: string): Promise<void> {
 
   // Images need no transcode — just the display PNG (built best-effort at import).
   if (isImageAsset(asset)) {
-    await makeImage(r, asset)
+    await makeImage(s, asset)
     return
   }
 
@@ -576,7 +589,7 @@ async function buildProxy(r: string, id: string): Promise<void> {
     const job = createJob('proxy', `Audio · ${asset.fileName}`, id, { uses: [id] })
     try {
       await generateAudioProxy(asset.originalPath, audioProxyPath(r, id), asset.probe.audio?.monoFoldChannel ?? null)
-      await makeWaveform(r, asset)
+      await makeWaveform(s, asset)
       finishJob(job.id)
     } catch (error) {
       failJob(job.id, error instanceof Error ? error.message : String(error))
@@ -585,7 +598,7 @@ async function buildProxy(r: string, id: string): Promise<void> {
     return
   }
 
-  await makeThumb(r, asset) // ensure a thumbnail exists even if import-time gen failed
+  await makeThumb(s, asset) // ensure a thumbnail exists even if import-time gen failed
   const job = createJob('proxy', `Proxy · ${asset.fileName}`, id, { uses: [id] })
   try {
     // Alpha clips (background-removed) proxy to a VP9 WebM so preview keeps
@@ -595,7 +608,7 @@ async function buildProxy(r: string, id: string): Promise<void> {
     } else {
       await generateProxy(asset.originalPath, proxyPath(r, id), asset.probe, job.id)
     }
-    await makeWaveform(r, asset) // for the audio lane if this clip's audio is extracted
+    await makeWaveform(s, asset) // for the audio lane if this clip's audio is extracted
     finishJob(job.id)
   } catch (error) {
     failJob(job.id, error instanceof Error ? error.message : String(error))
@@ -606,14 +619,14 @@ async function buildProxy(r: string, id: string): Promise<void> {
 /** Backfill derived artifacts (thumb/image/waveform), refresh proxyReady, and
  *  start a missing proxy and loudness series (both in the background). A
  *  missing original gets no new artifacts; whatever cache exists still shows. */
-async function hydrate(r: string, asset: MediaAsset): Promise<MediaAsset> {
+async function hydrate(s: ProjectSession, asset: MediaAsset): Promise<MediaAsset> {
   if (asset.status !== 'ok') return asset
-  await makeThumb(r, asset)
-  await makeImage(r, asset)
-  await makeWaveform(r, asset)
-  kickLoudness(r, loudnessSource(asset))
-  asset.proxyReady = existsSync(playableProxyPath(r, asset))
-  if (!asset.proxyReady) kickProxy(r, asset.id)
+  await makeThumb(s, asset)
+  await makeImage(s, asset)
+  await makeWaveform(s, asset)
+  kickLoudness(s, loudnessSource(asset))
+  asset.proxyReady = existsSync(playableProxyPath(s.root, asset))
+  if (!asset.proxyReady) kickProxy(s, asset.id)
   return asset
 }
 
@@ -622,12 +635,11 @@ async function hydrate(r: string, asset: MediaAsset): Promise<MediaAsset> {
  * project's `mediaIds`), each original located now. Unknown ids are skipped.
  * Sorted newest-import first.
  */
-export async function getProjectMedia(ids: string[]): Promise<MediaAsset[]> {
-  const r = getProjectRoot()
+export async function getProjectMedia(ids: string[], s: ProjectSession = requireSession()): Promise<MediaAsset[]> {
   const assets: MediaAsset[] = []
   for (const id of ids) {
-    const asset = await readAsset(r, id)
-    if (asset) assets.push(await hydrate(r, asset))
+    const asset = await readAsset(s, id)
+    if (asset) assets.push(await hydrate(s, asset))
   }
   return assets.sort((a, b) => b.importedAt.localeCompare(a.importedAt))
 }
@@ -644,7 +656,10 @@ export const tmpOutput = (prefix: string, ext: string): string =>
  * proxy + waveform in the background.
  * Throws if the source has no audio stream.
  */
-export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset> {
+export async function extractAudioToLibrary(
+  srcPath: string,
+  s: ProjectSession = requireSession()
+): Promise<MediaAsset> {
   const probe = await probeFile(srcPath)
   if (!probe.audio) throw new Error('That file has no audio track to extract.')
 
@@ -653,12 +668,12 @@ export async function extractAudioToLibrary(srcPath: string): Promise<MediaAsset
   try {
     const tmp = tmpOutput('extract', 'wav')
     await extractAudio(srcPath, tmp)
-    const asset = await importGenerated(tmp, `${name} (audio).wav`)
+    const asset = await importGenerated(tmp, `${name} (audio).wav`, s)
     finishJob(job.id)
     // Kick the AAC proxy + waveform in the background (its own job), so the
     // library row flips to "ready to drag onto the music track" when done.
     if (!asset.proxyReady) {
-      void ensureProxy(asset.id).catch((err) => log.error(`audio proxy generation failed for ${asset.id}`, err))
+      void ensureProxy(asset.id, s).catch((err) => log.error(`audio proxy generation failed for ${asset.id}`, err))
     }
     return asset
   } catch (error) {
@@ -683,9 +698,10 @@ export async function renderAudioFxToLibrary(
   settings: AudioFxSettings,
   sourceMediaId: string,
   inSec: number,
-  outSec: number
+  outSec: number,
+  s: ProjectSession = requireSession()
 ): Promise<MediaAsset> {
-  const source = await requireUsable(sourceMediaId)
+  const source = await requireUsable(sourceMediaId, s)
   if (!source.probe.audio) throw new Error('That clip has no audio to build an effect from.')
   if (!(outSec > inSec)) throw new Error('That clip’s in/out points do not span any audio.')
 
@@ -695,12 +711,12 @@ export async function renderAudioFxToLibrary(
   try {
     const tmp = tmpOutput('fx', 'wav')
     await renderAudioFx(settings, source.originalPath, inSec, outSec, tmp)
-    const asset = await importGenerated(tmp, `${name} (${label}).wav`)
+    const asset = await importGenerated(tmp, `${name} (${label}).wav`, s)
     finishJob(job.id)
     // AAC proxy + waveform in the background, as for any imported audio — the
     // effect track needs both to be playable and to draw on the timeline.
     if (!asset.proxyReady) {
-      void ensureProxy(asset.id).catch((err) => log.error(`effect proxy generation failed for ${asset.id}`, err))
+      void ensureProxy(asset.id, s).catch((err) => log.error(`effect proxy generation failed for ${asset.id}`, err))
     }
     return asset
   } catch (error) {

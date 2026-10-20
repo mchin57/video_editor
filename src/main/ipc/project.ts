@@ -23,7 +23,7 @@ import {
   saveProjectFile,
   suggestedSavePath
 } from '../services/projectStore'
-import { currentProjectRoot } from '../services/projectRoot'
+import { currentSession } from '../services/projectSession'
 import { getSettings } from '../services/settings'
 import { createJob, finishJob, setProgress } from '../services/jobs'
 import { dialogsFor, handle, pickedPath } from './handle'
@@ -36,7 +36,7 @@ export function registerProjectHandlers(): void {
   handle('loadProject', () => loadProject())
   handle('saveProject', (_event, project) => saveProject(project))
   handle('saveProjectFile', (_event, project) => saveProjectFile(project))
-  handle('getProjectDir', () => currentProjectRoot())
+  handle('getProjectDir', () => currentSession()?.root ?? null)
 
   // File ▸ New: the New project window's Create (name + location), its
   // "Choose location…" folder picker, and the location it starts from.

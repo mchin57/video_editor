@@ -13,13 +13,12 @@
 import { existsSync, promises as fsp } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { isLoudnessSeries, LOUDNESS_STEP_SEC, LOUDNESS_VERSION, type LoudnessSeries } from '@shared/loudness'
-import { singleFlight, writeAtomically } from './atomicWrite'
+import { writeAtomically } from './atomicWrite'
 import { monoFoldPan } from './audio'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
-import { getEntry, resolveEntry } from './library'
 import { cachePath } from './projectLayout'
-import { currentProjectRoot, getProjectRoot } from './projectRoot'
+import { requireSession, type ProjectSession } from './projectSession'
 import { createLogger, bestEffort } from '@shared/log'
 
 const log = createLogger('loudness')
@@ -140,14 +139,11 @@ export interface LoudnessSource {
   foldChannel: number | null
 }
 
-/** One measurement per file in flight; at most two passes at once (opening a
- *  project kicks one per asset, each reading its whole original). */
-const flight = singleFlight<LoudnessSeries | null>()
-/** Series whose measurement failed this session (by output path): not retried
- *  until relaunch or a relink to new content (`forgetLoudnessFailure`). */
-const failed = new Set<string>()
-/** Series whose pass is running — its ffmpeg has the original open (by output path). */
-const reading = new Set<string>()
+// One measurement per file in flight, the failures to not retry until the
+// project reopens or a relink gives new content (`forgetLoudnessFailure`), and
+// the passes currently reading an original are all on the ProjectSession.
+// At most two passes run at once, across projects (opening a project kicks one
+// per asset, each reading its whole original): that cap is the machine's.
 const MAX_PASSES = 2
 
 /**
@@ -182,9 +178,9 @@ const limited = createLimiter(MAX_PASSES)
  * may be gone. After a project switch the captured path stands (the pass
  * finishes in the project it started in, like any long job).
  */
-function inputNow(root: string, src: LoudnessSource): string | null {
-  if (currentProjectRoot() !== root) return src.path ?? null
-  const entry = getEntry(src.id)
+function inputNow(s: ProjectSession, src: LoudnessSource): string | null {
+  if (!s.isCurrent) return src.path ?? null
+  const entry = s.library.getEntry(src.id)
   return entry ? entry.path : (src.path ?? null)
 }
 
@@ -193,17 +189,17 @@ function inputNow(root: string, src: LoudnessSource): string | null {
  * concurrent caller). Null when the asset has no audio, its original is
  * missing (and nothing is cached), or measuring failed — never throws.
  */
-export async function ensureLoudnessFor(root: string, src: LoudnessSource): Promise<LoudnessSeries | null> {
+export async function ensureLoudnessFor(s: ProjectSession, src: LoudnessSource): Promise<LoudnessSeries | null> {
   if (!src.hasAudio) return null
-  const out = loudnessPath(root, src.id)
+  const out = loudnessPath(s.root, src.id)
   const cached = existsSync(out) ? await readLoudnessFile(out) : null
   if (cached) return cached
-  if (!src.path || failed.has(out)) return null
-  return flight(out, () =>
+  if (!src.path || s.loudnessFailed.has(out)) return null
+  return s.loudnessFlight(out, () =>
     limited(async () => {
-      const input = inputNow(root, src)
+      const input = inputNow(s, src)
       if (!input) return null // gone missing while queued: not a failure to remember
-      reading.add(out)
+      s.loudnessReading.add(out)
       try {
         await fsp.mkdir(dirname(out), { recursive: true })
         // A stale (other-version) file is replaced; the rename needs it gone.
@@ -212,11 +208,11 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
       } catch (error) {
         // A file that vanished under the pass (renamed or moved meanwhile) says
         // nothing about its content: leave it to be measured at its new path.
-        if (existsSync(input)) failed.add(out)
+        if (existsSync(input)) s.loudnessFailed.add(out)
         log.error(`measuring ${src.id} failed`, error)
         return null
       } finally {
-        reading.delete(out)
+        s.loudnessReading.delete(out)
       }
     })
   )
@@ -225,37 +221,39 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
 /** Whether a loudness pass is reading the asset's original right now (a
  *  queued one isn't: it reads the path when it starts). Rename refuses then —
  *  Windows won't rename a file ffmpeg holds open. */
-export function loudnessPassReading(root: string, id: string): boolean {
-  return reading.has(loudnessPath(root, id))
+export function loudnessPassReading(s: ProjectSession, id: string): boolean {
+  return s.loudnessReading.has(loudnessPath(s.root, id))
 }
 
 /** Start a missing series in the background (the media store's hydrate: new
  *  imports and already-imported files alike). Cheap when the file exists. */
-export function kickLoudness(root: string, src: LoudnessSource): void {
+export function kickLoudness(s: ProjectSession, src: LoudnessSource): void {
   if (!src.hasAudio || !src.path) return
-  const out = loudnessPath(root, src.id)
-  if (existsSync(out) || failed.has(out)) return
-  void ensureLoudnessFor(root, src)
+  const out = loudnessPath(s.root, src.id)
+  if (existsSync(out) || s.loudnessFailed.has(out)) return
+  void ensureLoudnessFor(s, src)
 }
 
 /** Forget a remembered failure for everything under an asset's cache dir
  *  (its content changed: measure afresh). */
-export function forgetLoudnessFailure(dir: string): void {
-  for (const out of [...failed]) if (out.startsWith(dir)) failed.delete(out)
+export function forgetLoudnessFailure(s: ProjectSession, dir: string): void {
+  for (const out of [...s.loudnessFailed]) if (out.startsWith(dir)) s.loudnessFailed.delete(out)
 }
 
 /**
- * A media asset's series in the OPEN project, by id — read from the cache, or
+ * A media asset's series in the project (default: the open one), by id — read from the cache, or
  * measured now if it is missing. The export reads levels through this (and the
  * `getLoudness` IPC is this). Null = unknown id, no audio, original missing
  * with nothing cached, or the measurement failed.
  */
-export async function ensureLoudness(mediaId: string): Promise<LoudnessSeries | null> {
-  const root = getProjectRoot()
-  const res = await resolveEntry(mediaId)
+export async function ensureLoudness(
+  mediaId: string,
+  s: ProjectSession = requireSession()
+): Promise<LoudnessSeries | null> {
+  const res = await s.library.resolveEntry(mediaId)
   if (!res) return null
   const { record } = res.entry
-  return ensureLoudnessFor(root, {
+  return ensureLoudnessFor(s, {
     id: mediaId,
     path: res.entry.path,
     hasAudio: !!record.probe.audio,

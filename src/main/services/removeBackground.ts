@@ -26,6 +26,7 @@ import { getSubdir, getBundledModelsDir } from '../config'
 import { getBinaries } from './ffmpeg'
 import { startFfmpeg } from './ffmpegRun'
 import { importGenerated, ensureProxy, requireUsable } from './mediaStore'
+import { requireSession } from './projectSession'
 import { hdrToSdrChain } from './proxy'
 import { createJob, failJob, finishJob, setLabel, setProgress } from './jobs'
 import {
@@ -173,7 +174,8 @@ function clampWindow(req: RemoveBackgroundRequest, sourceSec: number): MatteWind
 export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): Promise<MediaAsset | null> {
   const modelPath = discoverMatteModel()
   if (!modelPath) throw new Error('Background-removal model is not installed (resources/models).')
-  const asset = await requireUsable(req.mediaId)
+  const project = requireSession() // the matte finishes in the project it started in
+  const asset = await requireUsable(req.mediaId, project)
   const v = asset.probe.video
   if (!v) throw new Error('That clip has no video track.')
   const window = clampWindow(req, asset.probe.durationSec || 0)
@@ -289,13 +291,13 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
 
     // Content-address the result, then register it as a normal library asset.
     const span = `${clock(window.startSec)}–${clock(window.startSec + window.durationSec)}`
-    const result = await importGenerated(tmpOut, `${parse(asset.fileName).name} (no bg ${span}).webm`)
+    const result = await importGenerated(tmpOut, `${parse(asset.fileName).name} (no bg ${span}).webm`, project)
     // Build the alpha (WebM) preview proxy before reporting done, so the caller
     // can swap the clip in and it plays at once. Its own job shows its progress.
     setLabel(job.id, `${onDevice(device)} · preparing preview`)
     const proxyReady =
       result.proxyReady ||
-      (await ensureProxy(result.id).then(
+      (await ensureProxy(result.id, project).then(
         () => true,
         (e) => {
           log.error('alpha proxy failed', e)

@@ -21,6 +21,7 @@ import { newId } from '@shared/ids'
 import { getSubdir } from '../config'
 import { getBinaries, getCapabilities } from './ffmpeg'
 import { assertMediaUsable } from './mediaStore'
+import { requireSession, type ProjectSession } from './projectSession'
 import { createJob, failJob, finishJob } from './jobs'
 import { targetForPreset } from './exporterArgs'
 import { assertWritableDir, writeAtomically } from './atomicWrite'
@@ -48,17 +49,18 @@ export function suggestedExportName(projectName: string, preset: PresetId): stri
 export const EXPORT_CANCELED = 'Export canceled'
 
 export async function exportProject(project: Project, opts: ExportOptions, outputPath: string): Promise<string> {
+  const session = requireSession() // the export finishes in the project it started in
   const mediaIds = referencedMediaIds(project)
   const job = createJob('export', `Export · ${project.name}`, project.id, { uses: mediaIds, cancelable: true })
   try {
     // Missing or changed originals block the export, naming every file — never
     // render a clip from different bytes than the user edited.
-    await assertMediaUsable(mediaIds)
+    await assertMediaUsable(mediaIds, session)
     await assertWritableDir(dirname(outputPath))
     // Encode to `<name>.part.mp4` and rename on success: a failed or killed run
     // never leaves a torn file at the chosen name, nor replaces one already there.
     await writeAtomically(outputPath, async (part) => {
-      await runExport(project, opts, job.id, part, job.signal)
+      await runExport(session, project, opts, job.id, part, job.signal)
     })
     finishJob(job.id, outputPath)
     return outputPath
@@ -74,6 +76,7 @@ export async function exportProject(project: Project, opts: ExportOptions, outpu
 /** The render context shared by every composition of one export or stills
  *  render (the caller creates and removes `tmpRoot`). */
 async function renderCtx(
+  session: ProjectSession,
   project: Project,
   opts: ExportOptions,
   jobId: string,
@@ -81,6 +84,7 @@ async function renderCtx(
   extra: Pick<RenderCtx, 'signal' | 'stills'> = {}
 ): Promise<RenderCtx> {
   return {
+    session,
     target: targetForPreset(opts.preset),
     caps: await getCapabilities(),
     ffmpeg: (await getBinaries()).ffmpeg,
@@ -97,6 +101,7 @@ async function renderCtx(
 }
 
 async function runExport(
+  session: ProjectSession,
   project: Project,
   opts: ExportOptions,
   jobId: string,
@@ -104,7 +109,7 @@ async function runExport(
   signal?: AbortSignal
 ): Promise<string> {
   const tmpRoot = join(getSubdir('tmp'), jobId)
-  const ctx = await renderCtx(project, opts, jobId, tmpRoot, { signal })
+  const ctx = await renderCtx(session, project, opts, jobId, tmpRoot, { signal })
   await fsp.mkdir(tmpRoot, { recursive: true })
   try {
     return await renderComposition(project, ctx, output, { alpha: false, depth: 1 })
@@ -130,10 +135,11 @@ export async function renderFrames(
   outDir: string,
   comp: Composition = project
 ): Promise<{ frames: { path: string; shownSec: number }[]; skippedStabilize: boolean }> {
-  await assertMediaUsable(referencedMediaIds(comp))
+  const session = requireSession()
+  await assertMediaUsable(referencedMediaIds(comp), session)
   const tmpRoot = join(getSubdir('tmp'), `frames-${newId()}`)
   const stills = { skippedStabilize: false }
-  const ctx = await renderCtx(project, { preset, preferNvenc: false }, '', tmpRoot, { stills })
+  const ctx = await renderCtx(session, project, { preset, preferNvenc: false }, '', tmpRoot, { stills })
   await fsp.mkdir(tmpRoot, { recursive: true })
   const frames: FrameRequest[] = times.map((timeSec, k) => ({ timeSec, path: join(outDir, `frame_${k}.jpg`) }))
   try {

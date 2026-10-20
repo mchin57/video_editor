@@ -20,6 +20,7 @@ import type { MediaAsset, ProbeInfo, VideoStreamInfo } from '@shared/media'
 import { createEmptyComposition, createEmptyProject, type AudioClip, type Layer, type Project } from '@shared/project'
 import { makeImageLayer, makeTextLayer, makeVideoLayer } from '@shared/layers'
 import { makeLayoutLayer } from '@shared/layouts'
+import { openSession } from './projectSession'
 
 const scratch = mkdtempSync(join(tmpdir(), 'reel-exporter-test-'))
 const tmpRoot = join(scratch, 'tmp')
@@ -68,7 +69,8 @@ vi.mock('./jobs', () => ({
   finishJob: () => {},
   setProgress: () => {}
 }))
-vi.mock('./atomicWrite', () => ({
+vi.mock('./atomicWrite', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./atomicWrite')>()), // the session's single-flights are real
   assertWritableDir: async () => {},
   writeAtomically: async (final: string, write: (part: string) => Promise<void>) => write(`${final}.part.mp4`)
 }))
@@ -369,6 +371,7 @@ function normalise(value: unknown): unknown {
 }
 
 beforeEach(() => {
+  openSession(join(scratch, 'project')) // the export runs against an open project (media itself is stubbed)
   runs.length = 0
   rendered.length = 0
   laidOut.length = 0

@@ -12,7 +12,7 @@
  *  - There is no untitled project: New asks for a name and a location and
  *    creates the folder. With nothing to reopen, the app shows a start screen.
  *
- * Which folder is open is main's state (`projectRoot`), remembered across
+ * Which folder is open is main's state (the `ProjectSession`), remembered across
  * launches in `<data>/projects/session.json`. All document writes go through
  * one queue, so a late autosave can never land after (and resurrect over) a
  * Save, and an autosave from a document that is no longer open is dropped.
@@ -28,21 +28,10 @@ import { validateProjectName } from '@shared/projectName'
 import { getSubdir } from '../config'
 import { replaceFile } from './atomicWrite'
 import { copyAtomic } from './linkOrCopy'
-import {
-  addOpeningRecords,
-  clearStaleTranscript,
-  closeLibrary,
-  getEntry,
-  openLibrary,
-  rebaseLibrary,
-  recordsFor,
-  resolveAll,
-  staleTranscriptIds
-} from './library'
 import { fromRelativePath, samePath } from './mediaRef'
 import { unknownRecords } from './unknownMedia'
 import { reprobeStale } from './reprobe'
-import { currentProjectRoot, getProjectRoot, setProjectRoot } from './projectRoot'
+import { closeSession, currentSession, openSession, requireSession, type ProjectSession } from './projectSession'
 import {
   autosavePath,
   cacheDir,
@@ -70,8 +59,6 @@ type SavedDoc = Project & { library?: MediaRecord[] }
 
 const sessionPath = (): string => join(getSubdir('projects'), 'session.json')
 
-/** Id of the document open in the renderer — autosaves for any other are stale. */
-let openId: string | null = null
 /** Why the last project couldn't be reopened at launch (for the start screen). */
 let launchMessage: string | null = null
 
@@ -94,9 +81,9 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 /** The document as written to disk: bumped version, its library attached. */
-function withLibrary(project: Project): SavedDoc {
+function withLibrary(session: ProjectSession, project: Project): SavedDoc {
   const doc = { ...project, version: PROJECT_VERSION, updatedAt: new Date().toISOString() }
-  return { ...doc, library: recordsFor(JSON.stringify(doc)) }
+  return { ...doc, library: session.library.recordsFor(JSON.stringify(doc)) }
 }
 
 // --- Formats -------------------------------------------------------------------
@@ -130,8 +117,8 @@ function assertOpenable(raw: unknown): void {
 
 // --- Session -------------------------------------------------------------------
 
+/** Remember `root` for the next launch (the session itself is made by the caller). */
 function rememberRoot(root: string): void {
-  setProjectRoot(root)
   try {
     writeFileSync(sessionPath(), JSON.stringify({ root }))
   } catch (error) {
@@ -150,7 +137,7 @@ export function initProjectRoot(): void {
     const s = JSON.parse(readFileSync(sessionPath(), 'utf8')) as { root?: unknown }
     if (typeof s.root === 'string') {
       if (existsSync(docPath(s.root))) {
-        setProjectRoot(s.root)
+        openSession(s.root)
         return
       }
       launchMessage = `Your last project couldn't be found: ${s.root}`
@@ -158,7 +145,7 @@ export function initProjectRoot(): void {
   } catch {
     /* no session yet */
   }
-  setProjectRoot(null)
+  closeSession()
 }
 
 // --- Folders -------------------------------------------------------------------
@@ -232,7 +219,8 @@ async function sweep(root: string): Promise<void> {
  * library, locating every original. A path fixed while locating makes the
  * project dirty (it changed in memory; only Save writes it).
  */
-async function readFolder(root: string): Promise<LoadedProject> {
+async function readFolder(session: ProjectSession): Promise<LoadedProject> {
+  const { root, library } = session
   const doc = docPath(root)
   let raw: SavedDoc | null = null
   let dirty = false
@@ -248,42 +236,42 @@ async function readFolder(root: string): Promise<LoadedProject> {
     /* no autosave: no unsaved changes */
   }
   raw ??= (await readJson(doc)) as SavedDoc
-  const { library, ...rest } = raw
+  const { library: saved, ...rest } = raw
   // A folder project is named by its folder (the folder is what the user sees,
   // renames and moves).
   let project = { ...migrateProject(rest), name: basename(root) }
   await ensureProjectFolders(root)
-  openLibrary(root, Array.isArray(library) ? library : [])
+  session.library.load(Array.isArray(saved) ? saved : [])
   // A clip the document uses but nothing describes still gets a library card
   // (Missing — unknown clip) so it can be relinked; one missing from the
   // library list joins it (an unsaved change).
-  const unknown = unknownRecords(project, (id) => !!getEntry(id))
+  const unknown = unknownRecords(project, (id) => !!library.getEntry(id))
   if (unknown.length) {
-    addOpeningRecords(unknown)
+    library.addOpeningRecords(unknown)
     const unlisted = unknown.map((r) => r.id).filter((id) => !project.mediaIds.includes(id))
     if (unlisted.length) {
       project = { ...project, mediaIds: [...project.mediaIds, ...unlisted] }
       dirty = true
     }
   }
-  if (await resolveAll()) dirty = true
-  if (await reprobeStale(root)) dirty = true
-  openId = project.id
+  if (await library.resolveAll()) dirty = true
+  if (await reprobeStale(session)) dirty = true
+  session.openId = project.id
   return { project, path: doc, dirty }
 }
 
 /** The project to show at launch: the last one, or none (start screen). */
 export function loadProject(): Promise<LaunchState> {
   return serial(async () => {
-    const root = currentProjectRoot()
-    if (!root) return { loaded: null, message: launchMessage }
+    const session = currentSession()
+    if (!session) return { loaded: null, message: launchMessage }
+    const { root } = session
     try {
       assertOpenable(await readJson(docPath(root)))
       await sweep(root)
-      return { loaded: await readFolder(root), message: null }
+      return { loaded: await readFolder(session), message: null }
     } catch (error) {
-      setProjectRoot(null)
-      closeLibrary()
+      closeSession()
       return { loaded: null, message: error instanceof Error ? error.message : String(error) }
     }
   })
@@ -291,7 +279,7 @@ export function loadProject(): Promise<LaunchState> {
 
 /** Throw away the open project's unsaved state — the renderer already asked. */
 async function discardCurrent(): Promise<void> {
-  const root = currentProjectRoot()
+  const root = currentSession()?.root
   if (root) await fsp.rm(autosavePath(root), { force: true })
 }
 
@@ -318,7 +306,7 @@ export function createProject(name: string, location: string): Promise<LoadedPro
     })
     await discardCurrent()
     rememberRoot(root)
-    return readFolder(root)
+    return readFolder(openSession(root))
   })
 }
 
@@ -345,8 +333,9 @@ export function openProject(reelPath: string): Promise<LoadedProject> {
     await ensureProjectFolders(root) // fails here (read-only media) before anything is discarded
     await discardCurrent()
     rememberRoot(root)
+    const session = openSession(root)
     await sweep(root)
-    return readFolder(root)
+    return readFolder(session)
   })
 }
 
@@ -355,16 +344,16 @@ export function openProject(reelPath: string): Promise<LoadedProject> {
 /** The renderer's debounced working-copy write (document + in-memory library). */
 export function saveProject(project: Project): Promise<void> {
   return serial(async () => {
-    const root = currentProjectRoot()
-    if (!root || project.id !== openId) return // a late write from a document no longer open
-    await writeJsonAtomic(autosavePath(root), withLibrary(project))
+    const session = currentSession()
+    if (!session || project.id !== session.openId) return // a late write from a document no longer open
+    await writeJsonAtomic(autosavePath(session.root), withLibrary(session, project))
   })
 }
 
 /** Write a document and the in-memory library records it uses to `path`,
  *  returning the document as saved (bumped version + time, no library). */
-export async function writeProjectFile(path: string, project: Project): Promise<Project> {
-  const saved = withLibrary(project)
+export async function writeProjectFile(session: ProjectSession, path: string, project: Project): Promise<Project> {
+  const saved = withLibrary(session, project)
   await writeJsonAtomic(path, saved)
   const { library, ...doc } = saved
   return doc
@@ -380,11 +369,12 @@ export async function readProjectFile(path: string): Promise<Project> {
  *  the autosave (there are no unsaved changes any more). */
 export function saveProjectFile(project: Project): Promise<Project> {
   return serial(async () => {
-    const root = getProjectRoot()
-    const saved = await writeProjectFile(docPath(root), { ...project, name: basename(root) })
+    const session = requireSession()
+    const { root } = session
+    const saved = await writeProjectFile(session, docPath(root), { ...project, name: basename(root) })
     await fsp.rm(autosavePath(root), { force: true })
-    await dropStaleTranscripts(root)
-    openId = saved.id
+    await dropStaleTranscripts(session)
+    session.openId = saved.id
     return saved
   })
 }
@@ -414,7 +404,8 @@ async function copyTree(from: string, to: string): Promise<void> {
  */
 export function saveProjectAs(project: Project, chosenPath: string): Promise<{ path: string; project: Project }> {
   return serial(async () => {
-    const from = getProjectRoot()
+    const session = requireSession()
+    const from = session.root
     const to = projectFolderFor(chosenPath)
     const moving = !samePath(to, from)
     // Never write over another project: its .reel, autosave and generated
@@ -427,14 +418,14 @@ export function saveProjectAs(project: Project, chosenPath: string): Promise<{ p
       await ensureProjectFolders(to)
       await copyTree(generatedRoot(from), generatedRoot(to))
       await copyTree(transcriptsRoot(from), transcriptsRoot(to))
-      rebaseLibrary(to, fromRelativePath)
+      session.reroot(to, fromRelativePath)
     }
     let saved: Project
     try {
-      saved = await writeProjectFile(docPath(to), { ...project, name: basename(to) })
+      saved = await writeProjectFile(session, docPath(to), { ...project, name: basename(to) })
     } catch (error) {
       // Nothing switched: the open project is still `from`, untouched.
-      if (moving) rebaseLibrary(from, fromRelativePath)
+      if (moving) session.reroot(from, fromRelativePath)
       throw error
     }
     await fsp.rm(autosavePath(to), { force: true })
@@ -442,18 +433,18 @@ export function saveProjectAs(project: Project, chosenPath: string): Promise<{ p
       await fsp.rm(autosavePath(from), { force: true }) // its unsaved edits now live in `to`
       rememberRoot(to)
     }
-    await dropStaleTranscripts(to)
-    openId = saved.id
+    await dropStaleTranscripts(session)
+    session.openId = saved.id
     return { path: docPath(to), project: saved }
   })
 }
 
 /** After a save: delete transcripts a forced relink made stale (the saved
  *  record now describes the new content). */
-async function dropStaleTranscripts(root: string): Promise<void> {
-  for (const id of staleTranscriptIds()) {
-    await fsp.rm(transcriptPath(root, id), { force: true })
-    clearStaleTranscript(id)
+async function dropStaleTranscripts(session: ProjectSession): Promise<void> {
+  for (const id of session.library.staleTranscriptIds()) {
+    await fsp.rm(transcriptPath(session.root, id), { force: true })
+    session.library.clearStaleTranscript(id)
   }
 }
 

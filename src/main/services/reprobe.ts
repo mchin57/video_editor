@@ -8,7 +8,7 @@
 import { promises as fsp } from 'node:fs'
 import { probeFile } from './ffprobe'
 import { needsReprobe } from './ffprobeParse'
-import { allEntries, patchOpeningRecord } from './library'
+import type { ProjectSession } from './projectSession'
 import { cachePath } from './projectLayout'
 
 /**
@@ -21,9 +21,10 @@ import { cachePath } from './projectLayout'
  * probe until a later open finds it. Call after `resolveAll` (it needs the
  * found paths).
  */
-export async function reprobeStale(root: string): Promise<boolean> {
+export async function reprobeStale(session: ProjectSession): Promise<boolean> {
+  const { root, library } = session
   let changed = false
-  for (const { record, path } of allEntries()) {
+  for (const { record, path } of library.allEntries()) {
     if (!path || !needsReprobe(record)) continue
     const probe = await probeFile(path).catch(() => null)
     if (!probe) continue
@@ -33,7 +34,7 @@ export async function reprobeStale(root: string): Promise<boolean> {
       await fsp.rm(cachePath(root, record.id, 'thumb.jpg'), { force: true })
       changed = true
     }
-    patchOpeningRecord(record.id, { probe })
+    library.patchOpeningRecord(record.id, { probe })
   }
   return changed
 }

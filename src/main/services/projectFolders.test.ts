@@ -25,14 +25,18 @@ import {
   saveProjectAs,
   saveProjectFile
 } from './projectStore'
-import { currentProjectRoot } from './projectRoot'
-import { getEntry, putEntry, resolveEntry } from './library'
+import { currentSession } from './projectSession'
+import type { Library } from './library'
 import { fingerprintFile, fingerprintId } from './fingerprint'
 import { toRelativePath } from './mediaRef'
 import { PROJECT_VERSION, type Project } from '@shared/project'
 import type { MediaRecord } from '@shared/media'
 
 const reels = join(scratch, 'Reels')
+const currentProjectRoot = (): string | null => currentSession()?.root ?? null
+const getEntry = (id: string) => currentSession()!.library.getEntry(id)
+const resolveEntry = (id: string) => currentSession()!.library.resolveEntry(id)
+const putEntry = (...args: Parameters<Library['putEntry']>) => currentSession()!.library.putEntry(...args)
 const reelOf = (root: string): Record<string, unknown> & { library: MediaRecord[] } =>
   JSON.parse(readFileSync(join(root, `${root.split(/[\\/]/).pop()}.reel`), 'utf8'))
 

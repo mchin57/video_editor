@@ -25,8 +25,7 @@ import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
 import { replaceFile } from './atomicWrite'
 import { requireUsable, scratchDirFor, transcriptFile } from './mediaStore'
-import { clearStaleTranscript, getEntry } from './library'
-import { singleFlight } from './atomicWrite'
+import { requireSession, type ProjectSession } from './projectSession'
 import { parseWhisperTranscript, type WhisperJson } from './whisperParse'
 import {
   buildTranscribeExtractArgs,
@@ -118,11 +117,11 @@ async function runTranscription(
   await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, null, offsetSec))
 }
 
-export async function getTranscript(mediaId: string): Promise<Transcript | null> {
+export async function getTranscript(mediaId: string, s: ProjectSession = requireSession()): Promise<Transcript | null> {
   // A forced relink gave the clip new content: its transcript is stale.
-  if (getEntry(mediaId)?.staleTranscript) return null
+  if (s.library.getEntry(mediaId)?.staleTranscript) return null
   try {
-    const cached = JSON.parse(await fsp.readFile(transcriptFile(mediaId), 'utf8')) as Transcript
+    const cached = JSON.parse(await fsp.readFile(transcriptFile(mediaId, s), 'utf8')) as Transcript
     // A transcript from an older pipeline can be missing words or mistime them
     // (see TRANSCRIPT_VERSION). Treat it as stale so the next caption run redoes
     // it instead of serving it forever.
@@ -132,28 +131,28 @@ export async function getTranscript(mediaId: string): Promise<Transcript | null>
   }
 }
 
-const transcribeFlight = singleFlight<Transcript>() // keyed by media id
-
 /**
  * Transcribe a media file (cached). Reports progress on the jobs channel.
- * Concurrent calls for one media coalesce onto a single run — they would
- * otherwise write the same audio16k.wav / transcript_raw files.
+ * Concurrent calls for one media in one project coalesce onto a single run —
+ * they would otherwise write the same audio16k.wav / transcript_raw files. The
+ * flight is the session's: the same clip in another project is another run,
+ * and a switch mid-run lets this one finish in the project it started in.
  */
-export function transcribeMedia(mediaId: string): Promise<Transcript> {
-  return transcribeFlight(mediaId, () => transcribeOnce(mediaId))
+export function transcribeMedia(mediaId: string, s: ProjectSession = requireSession()): Promise<Transcript> {
+  return s.transcribeFlight(mediaId, () => transcribeOnce(mediaId, s))
 }
 
-async function transcribeOnce(mediaId: string): Promise<Transcript> {
-  const cached = await getTranscript(mediaId)
+async function transcribeOnce(mediaId: string, s: ProjectSession): Promise<Transcript> {
+  const cached = await getTranscript(mediaId, s)
   if (cached) return cached
 
   const whisper = discoverWhisper()
   if (!whisper) throw new Error('whisper.cpp is not installed (bin/whisper).')
-  const asset = await requireUsable(mediaId)
+  const asset = await requireUsable(mediaId, s)
 
   const job = createJob('transcribe', `Captions · ${asset.fileName}`, mediaId, { uses: [mediaId] })
-  const transcriptPath = transcriptFile(mediaId) // captured now: the project may switch mid-job
-  const dir = await scratchDirFor(mediaId)
+  const transcriptPath = transcriptFile(mediaId, s)
+  const dir = await scratchDirFor(mediaId, s)
   const wav = join(dir, 'audio16k.wav')
   const rawPrefix = join(dir, 'transcript_raw')
   try {
@@ -162,7 +161,7 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
     // and the −30 dB silence gate otherwise hears quiet speech as silence. The
     // level comes from the volume-match loudness series (usually cached); no
     // series just means no boost.
-    const series = await ensureLoudness(mediaId)
+    const series = await ensureLoudness(mediaId, s)
     const level = series ? windowLoudness(series, 0, asset.probe.durationSec) : null
     const gainDb = transcribeGainDb(level?.status === 'ok' ? level.lufs : null)
     const fold = asset.probe.audio?.monoFoldChannel
@@ -197,7 +196,7 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
     // temp + rename, so a reader never sees a half-written transcript.
     await fsp.mkdir(join(transcriptPath, '..'), { recursive: true })
     await replaceFile(transcriptPath, JSON.stringify(transcript, null, 2))
-    clearStaleTranscript(mediaId) // it describes the clip's current content now
+    s.library.clearStaleTranscript(mediaId) // it describes the clip's current content now
 
     // Clean up scratch files. (`transcribed` is read from the file's existence.)
     await bestEffort(fsp.rm(wav, { force: true }), 'removing the scratch WAV', log)

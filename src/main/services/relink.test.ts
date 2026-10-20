@@ -35,7 +35,8 @@ import { makeVideoLayer } from '@shared/layers'
 import { isUnknownClip } from '@shared/media'
 import { createEmptyProject } from '@shared/project'
 import { importFile, relinkCheck, relinkMedia } from './mediaStore'
-import { getEntry } from './library'
+import { currentSession } from './projectSession'
+const getEntry = (id: string) => currentSession()!.library.getEntry(id)
 
 const reels = join(scratch, 'Reels')
 let root: string

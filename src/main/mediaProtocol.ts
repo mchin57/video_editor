@@ -13,7 +13,7 @@ import { createReadStream, promises as fsp } from 'node:fs'
 import { join, normalize, sep, extname } from 'node:path'
 import { Readable } from 'node:stream'
 import { getBundledFontsDir } from './config'
-import { getProjectRoot } from './services/projectRoot'
+import { requireSession } from './services/projectSession'
 import { cacheDir } from './services/projectLayout'
 
 export const MEDIA_SCHEME = 'reelmedia'
@@ -93,7 +93,7 @@ export function registerMediaProtocol(): void {
     // the protocol never hands out originals).
     let base: string | null
     try {
-      base = id === FONTS_HOST ? getBundledFontsDir() : cacheDir(getProjectRoot(), id)
+      base = id === FONTS_HOST ? getBundledFontsDir() : cacheDir(requireSession().root, id)
     } catch {
       base = null // no project open yet
     }
