@@ -323,7 +323,7 @@ export async function relinkMedia(
     s.library.markTranscriptStale(id)
   }
   const asset = await hydrate(s, toAsset(s, s.library.getEntry(id)!))
-  return { asset, cutsReset, alsoFound: await relinkSiblings(s, dirname(srcPath)) }
+  return { asset, cutsReset, alsoFound: await relinkSiblings(s, r, dirname(srcPath)) }
 }
 
 /** A failed `fs.rename` in words. Windows answers a file another program
@@ -394,7 +394,7 @@ export async function renameMedia(id: string, stem: string, s: ProjectSession = 
  * Relink one, fix the rest: every other missing clip whose file is in `dir`
  * (matched by size, then fingerprint) is pointed at it. Returns their names.
  */
-async function relinkSiblings(s: ProjectSession, dir: string): Promise<string[]> {
+async function relinkSiblings(s: ProjectSession, r: string, dir: string): Promise<string[]> {
   const missing: LibraryEntry[] = []
   for (const entry of s.library.allEntries()) {
     if (isUnknownFingerprint(entry.record.fingerprint)) continue
@@ -414,7 +414,7 @@ async function relinkSiblings(s: ProjectSession, dir: string): Promise<string[]>
     for (const path of bySize.get(entry.record.fingerprint.size) ?? []) {
       const fp = await s.library.fingerprintOf(path).catch(() => null)
       if (!fp || !sameFingerprint(fp, entry.record.fingerprint)) continue
-      s.library.putEntry(pointAt(s.root, entry.record, path), path, s.root)
+      s.library.putEntry(pointAt(r, entry.record, path), path, r)
       found.push(entry.record.fileName)
       break
     }
@@ -428,12 +428,13 @@ async function relinkSiblings(s: ProjectSession, dir: string): Promise<string[]>
  * writes it into the `.reel`. Works for a Missing clip too — no file is read.
  */
 export function setMediaDescription(id: string, text: string, s: ProjectSession = requireSession()): void {
+  const r = s.root
   const entry = s.library.getEntry(id)
   if (!entry) throw new Error(`No media "${id}" in this project.`)
   const description = normalizeDescription(text)
   if ((entry.record.description ?? '') === description) return
   const { description: _old, ...rest } = entry.record
-  s.library.putEntry(description ? { ...rest, description } : rest, entry.path, s.root)
+  s.library.putEntry(description ? { ...rest, description } : rest, entry.path, r)
 }
 
 /**
@@ -442,6 +443,7 @@ export function setMediaDescription(id: string, text: string, s: ProjectSession 
  */
 async function register(
   s: ProjectSession,
+  r: string, // the project folder the caller started under (Save As mid-import refuses the write)
   id: string,
   path: string,
   fileName: string,
@@ -458,7 +460,7 @@ async function register(
   const record: MediaRecord = {
     id,
     fileName,
-    relativePath: toRelativePath(s.root, path),
+    relativePath: toRelativePath(r, path),
     absolutePath: path,
     fingerprint,
     ...(generated ? { generated: true } : {}),
@@ -466,7 +468,7 @@ async function register(
     probe,
     kind
   }
-  const asset = toAsset(s, s.library.putEntry(record, path, s.root))
+  const asset = toAsset(s, s.library.putEntry(record, path, r))
   await makeThumb(s, asset)
   await makeImage(s, asset) // images: build the display PNG now (it is their "proxy")
   kickLoudness(s, loudnessSource(asset))
@@ -486,16 +488,17 @@ export async function importFile(
   s: ProjectSession = requireSession()
 ): Promise<MediaAsset> {
   const { library } = s
+  const r = s.root
   const fp = await library.fingerprintOf(srcPath)
   const id = library.freeIdFor(fingerprintId(fp), fp)
   return s.importFlight(id, async () => {
     const existing = library.findByFingerprint(fp)
     if (existing) {
       const res = await library.resolveEntry(existing.record.id)
-      if (res && !res.entry.path) library.putEntry(pointAt(s.root, res.entry.record, srcPath), srcPath, s.root)
+      if (res && !res.entry.path) library.putEntry(pointAt(r, res.entry.record, srcPath), srcPath, r)
       return hydrate(s, toAsset(s, library.getEntry(existing.record.id)!))
     }
-    return register(s, id, srcPath, displayName ?? basename(srcPath), fp, false)
+    return register(s, r, id, srcPath, displayName ?? basename(srcPath), fp, false)
   })
 }
 
@@ -510,6 +513,7 @@ export async function importGenerated(
   s: ProjectSession = requireSession()
 ): Promise<MediaAsset> {
   const { library } = s
+  const r = s.root
   const fp = await library.fingerprintOf(tmpPath)
   const id = library.freeIdFor(fingerprintId(fp), fp)
   return s.importFlight(id, async () => {
@@ -519,7 +523,7 @@ export async function importGenerated(
       await fsp.rm(tmpPath, { force: true })
       return hydrate(s, toAsset(s, found.entry))
     }
-    const dir = generatedRoot(s.root)
+    const dir = generatedRoot(r)
     await fsp.mkdir(dir, { recursive: true })
     // The display name (e.g. "clip (no bg 0:03–0:05).webm") may not be a legal
     // file name; the library keeps showing it, the file gets a safe one.
@@ -529,9 +533,9 @@ export async function importGenerated(
     )
     await moveFile(tmpPath, dest)
     if (existing) {
-      return hydrate(s, toAsset(s, library.putEntry(pointAt(s.root, existing.record, dest), dest, s.root)))
+      return hydrate(s, toAsset(s, library.putEntry(pointAt(r, existing.record, dest), dest, r)))
     }
-    return register(s, id, dest, displayName, fp, true)
+    return register(s, r, id, dest, displayName, fp, true)
   })
 }
 

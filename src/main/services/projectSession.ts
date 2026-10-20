@@ -13,8 +13,9 @@
  * Services reach the open project through `requireSession` / `currentSession`.
  * A long job (export, matte, transcribe, quick cut, merge, import) takes the
  * session once at its start and passes it on, so a switch mid-job lets it
- * finish in the project it started in; the disposed session refuses to
- * record anything new in its library.
+ * finish in the project it started in. A job that ends by adding a library
+ * item (import, quick cut, merge, matte) is refused at that last step: the
+ * disposed session takes no new records, and nothing lands in the new project.
  *
  * No Electron here: a session is constructible in a unit test.
  */
