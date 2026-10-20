@@ -10,6 +10,9 @@ import {
   saveDefaultLayout,
   saveDockLayout
 } from '@/lib/dockLayout'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('dock')
 
 /** Restore `layout`, falling back to the built-in arrangement when it's absent
  *  or dockview rejects it. The single restore path — startup and Reset both
@@ -19,7 +22,8 @@ export function applyLayout(api: DockviewApi, layout: object | null): void {
     try {
       api.fromJSON(layout as Parameters<DockviewApi['fromJSON']>[0])
       return
-    } catch {
+    } catch (error) {
+      log.warn('saved panel layout is unreadable; using the built-in one', error)
       // corrupt/incompatible — fall through to the built-in layout
     }
   }

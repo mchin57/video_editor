@@ -25,6 +25,9 @@ import { createJob, failJob, finishJob } from './jobs'
 import { targetForPreset } from './exporterArgs'
 import { assertWritableDir, writeAtomically } from './atomicWrite'
 import { renderComposition, type FrameRequest, type RenderCtx } from './exportRender'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('export')
 
 function sanitize(name: string): string {
   return (
@@ -106,7 +109,7 @@ async function runExport(
   try {
     return await renderComposition(project, ctx, output, { alpha: false, depth: 1 })
   } finally {
-    await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
+    await bestEffort(fsp.rm(tmpRoot, { recursive: true, force: true }), 'removing the render scratch folder', log)
   }
 }
 
@@ -136,7 +139,7 @@ export async function renderFrames(
   try {
     await renderComposition(comp, ctx, frames[0].path, { alpha: false, depth: 1, frames })
   } finally {
-    await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
+    await bestEffort(fsp.rm(tmpRoot, { recursive: true, force: true }), 'removing the render scratch folder', log)
   }
   return {
     frames: frames.map((f) => ({ path: f.path, shownSec: f.shownSec ?? f.timeSec })),

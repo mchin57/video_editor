@@ -40,6 +40,9 @@ import { monoFoldPan } from './audio'
 import { ensureLoudness } from './loudness'
 import { detectSilence } from './silence'
 import { createJob, failJob, finishJob, setProgress } from './jobs'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('transcribe')
 
 /** Whisper search roots, bundled (installer) first, then the user data dir. */
 function whisperDirs(): string[] {
@@ -106,7 +109,8 @@ async function runTranscription(
     try {
       await runWhisper(cli, buildWhisperArgs(model, wav, outPrefix, preset, offsetSec))
       return
-    } catch {
+    } catch (error) {
+      log.warn('word-timing (DTW) pass failed; transcribing with segment timings', error)
       // An older binary without -dtw/-nfa still transcribes; the parser will
       // fall back to segment offsets and stamp the transcript accordingly.
     }
@@ -196,8 +200,8 @@ async function transcribeOnce(mediaId: string): Promise<Transcript> {
     clearStaleTranscript(mediaId) // it describes the clip's current content now
 
     // Clean up scratch files. (`transcribed` is read from the file's existence.)
-    await fsp.rm(wav, { force: true }).catch(() => {})
-    await fsp.rm(`${rawPrefix}.json`, { force: true }).catch(() => {})
+    await bestEffort(fsp.rm(wav, { force: true }), 'removing the scratch WAV', log)
+    await bestEffort(fsp.rm(`${rawPrefix}.json`, { force: true }), 'removing the raw transcript', log)
 
     finishJob(job.id, transcript)
     return transcript

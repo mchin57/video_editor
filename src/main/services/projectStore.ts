@@ -58,6 +58,9 @@ import {
   transcriptsRoot
 } from './projectLayout'
 import { newId } from '@shared/ids'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('project')
 
 export { REEL_EXT } from './projectLayout'
 export type { LoadedProject } from '@shared/ipc'
@@ -132,7 +135,7 @@ function rememberRoot(root: string): void {
   try {
     writeFileSync(sessionPath(), JSON.stringify({ root }))
   } catch (error) {
-    console.error('could not record the open project', error)
+    log.error('could not record the open project', error)
   }
 }
 
@@ -210,10 +213,14 @@ async function sweep(root: string): Promise<void> {
   const ours = existsSync(join(generatedRoot(root), GENERATED_MARKER))
   const generated = ours ? files(generatedRoot(root)).filter((n) => n !== GENERATED_MARKER) : []
   const plan = cleanupPlan({ generated, transcripts: files(transcriptsRoot(root)) }, docs)
-  for (const name of plan.generated) await fsp.rm(join(generatedRoot(root), name), { force: true }).catch(() => {})
-  for (const name of plan.transcripts) await fsp.rm(join(transcriptsRoot(root), name), { force: true }).catch(() => {})
+  for (const name of plan.generated) {
+    await bestEffort(fsp.rm(join(generatedRoot(root), name), { force: true }), `sweeping generated/${name}`, log)
+  }
+  for (const name of plan.transcripts) {
+    await bestEffort(fsp.rm(join(transcriptsRoot(root), name), { force: true }), `sweeping transcripts/${name}`, log)
+  }
   for (const id of sweepPlan(listDir(cacheRoot(root)), docs)) {
-    await fsp.rm(cacheDir(root, id), { recursive: true, force: true }).catch(() => {})
+    await bestEffort(fsp.rm(cacheDir(root, id), { recursive: true, force: true }), `sweeping cache/${id}`, log)
   }
 }
 

@@ -8,6 +8,9 @@
 
 import { app, dialog } from 'electron'
 import electronUpdater from 'electron-updater'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('updater')
 
 const { autoUpdater } = electronUpdater
 
@@ -19,9 +22,9 @@ export function initAutoUpdate(): void {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
-  autoUpdater.on('error', (err) => console.error('[updater] error:', err?.message ?? err))
-  autoUpdater.on('update-available', (info) => console.log('[updater] update available:', info.version))
-  autoUpdater.on('update-not-available', () => console.log('[updater] already up to date'))
+  autoUpdater.on('error', (err) => log.error('error', err))
+  autoUpdater.on('update-available', (info) => log.info(`update available: ${info.version}`))
+  autoUpdater.on('update-not-available', () => log.info('already up to date'))
   autoUpdater.on('update-downloaded', async (info) => {
     const { response } = await dialog.showMessageBox({
       type: 'info',
@@ -35,5 +38,5 @@ export function initAutoUpdate(): void {
     if (response === 0) autoUpdater.quitAndInstall()
   })
 
-  autoUpdater.checkForUpdates().catch((err) => console.error('[updater] check failed:', err?.message ?? err))
+  autoUpdater.checkForUpdates().catch((err) => log.error('check failed', err))
 }

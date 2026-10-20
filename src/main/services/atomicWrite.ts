@@ -13,6 +13,9 @@
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { basename, join, parse } from 'node:path'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('files')
 
 /**
  * `…/proxy.mp4` → `…/proxy.part.mp4`: same directory (so the rename is atomic),
@@ -44,7 +47,7 @@ export async function writeAtomically(finalPath: string, write: (partPath: strin
       throw new Error(`${basename(finalPath)} was not written: the command finished without producing a file`)
     await fsp.rename(part, finalPath)
   } catch (error) {
-    await fsp.rm(part, { force: true }).catch(() => {})
+    await bestEffort(fsp.rm(part, { force: true }), `removing the partial ${basename(part)}`, log)
     throw error
   }
 }
@@ -83,7 +86,7 @@ export async function replaceFile(path: string, data: string): Promise<void> {
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (attempt >= 8 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
-        await fsp.rm(tmp, { force: true }).catch(() => {})
+        await bestEffort(fsp.rm(tmp, { force: true }), `removing the temp file ${tmp}`, log)
         throw error
       }
       await new Promise((r) => setTimeout(r, 15 * (attempt + 1)))
@@ -116,5 +119,5 @@ export async function assertWritableDir(dir: string): Promise<void> {
               : (code ?? String(error))
     throw new Error(`Can't write to ${dir}: ${why}. Choose another folder.`)
   }
-  await fsp.rm(probe, { force: true }).catch(() => {})
+  await bestEffort(fsp.rm(probe, { force: true }), `removing the write probe ${probe}`, log)
 }

@@ -54,6 +54,9 @@ import { createTextRenderer, type TextImageSpec, type TextRenderer } from './tex
 import type { LaidOutLine } from './textLayout'
 import { exportLayer } from './exportLayers'
 import { addCaptions, fullFrameImage } from './exportText'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('export')
 
 /** Canonical logical → output px for one render (`frameToOutput`). */
 export type OutputMap = ReturnType<typeof frameToOutput>
@@ -412,7 +415,8 @@ export class CompositionRender {
     let laid: LaidOutLine[][] | null = null
     try {
       laid = await this.textRenderer().layout(this.burned.map((b) => b.spec))
-    } catch {
+    } catch (error) {
+      log.warn('text layout pass failed; burning newline-only lines', error)
       laid = null
     }
     const byFile = new Map<string, AssOverlay[]>()

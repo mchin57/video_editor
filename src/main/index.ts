@@ -8,6 +8,9 @@ import { registerMediaProtocol, registerMediaSchemePrivileges } from './mediaPro
 import { getSubdir } from './config'
 import { initAutoUpdate } from './services/updater'
 import { startAssistant, stopAssistant } from './assistant/service'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('app')
 
 // Test isolation: relocate Electron's profile (localStorage, caches) so e2e
 // runs get a clean slate and can't pollute the real one. Must run pre-'ready'.
@@ -44,12 +47,12 @@ function createWindow(): void {
     win.webContents.on('console-message', (...args: unknown[]) => {
       const ev = args[0] as { message?: string; level?: string }
       const message = ev && typeof ev === 'object' && 'message' in ev ? ev.message : args[2]
-      console.log('[renderer]', message)
+      createLogger('renderer').info(String(message))
     })
     win.webContents.on('render-process-gone', (_e, details) =>
-      console.log('[render-process-gone]', JSON.stringify(details))
+      log.error(`render process gone: ${JSON.stringify(details)}`)
     )
-    win.webContents.on('preload-error', (_e, path, error) => console.log('[preload-error]', path, error?.message))
+    win.webContents.on('preload-error', (_e, path, error) => log.error(`preload error in ${path}`, error))
   }
 
   win.webContents.setWindowOpenHandler((details) => {
@@ -78,7 +81,7 @@ app.whenReady().then(() => {
   // Best-effort scratch sweep: exports clean their per-job tmp dirs, but a
   // crashed or failed job (export, matte) leaves partial files behind. Nothing
   // is running at startup, so the whole dir is safe to clear.
-  void fsp.rm(getSubdir('tmp'), { recursive: true, force: true }).catch(() => {})
+  void bestEffort(fsp.rm(getSubdir('tmp'), { recursive: true, force: true }), 'clearing the scratch folder', log)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

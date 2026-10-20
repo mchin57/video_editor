@@ -1,3 +1,6 @@
+import { createLogger } from '@shared/log'
+
+const log = createLogger('interaction')
 /**
  * "The user is mid-interaction" — held for the whole of every pointer drag
  * (`startPointerDrag` opens and closes it, so every drag surface gets it).
@@ -66,7 +69,7 @@ function scheduleFlush(): void {
       try {
         fn()
       } catch (e) {
-        console.error('[interaction] deferred call failed', e)
+        log.error('deferred call failed', e)
       }
     }
   })

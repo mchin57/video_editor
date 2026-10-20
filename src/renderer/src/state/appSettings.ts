@@ -10,6 +10,9 @@
 import { create } from 'zustand'
 import { withAutoJoinDefault } from '@shared/settings'
 import { getSettings, updateSettings } from '@/ipc/client'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('settings')
 
 interface AppSettingsState {
   autoJoinDefaultLevel: boolean
@@ -23,8 +26,8 @@ export const useAppSettings = create<AppSettingsState>((set) => ({
     try {
       const s = await getSettings()
       set({ autoJoinDefaultLevel: withAutoJoinDefault(s.autoJoinDefaultLevel) })
-    } catch {
-      /* keep the default */
+    } catch (error) {
+      log.warn('loading the auto-join setting failed; keep the default', error)
     }
   },
   setAutoJoinDefaultLevel: async (on) => {

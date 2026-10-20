@@ -6,6 +6,9 @@
 import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('audio')
 
 export function buildAudioProxyArgs(input: string, output: string, foldChannel: number | null = null): string[] {
   return [
@@ -263,7 +266,8 @@ export async function detectMonoFoldChannel(input: string): Promise<number | nul
       maxBuffer: 8 * 1024 * 1024
     })
     return monoFoldFrom(parseChannelPeaks(stderr))
-  } catch {
+  } catch (error) {
+    log.warn('per-channel analysis failed; no mono fold', error)
     return null
   }
 }

@@ -20,6 +20,9 @@ import { runFfmpeg } from './ffmpegRun'
 import { getEntry, resolveEntry } from './library'
 import { cachePath } from './projectLayout'
 import { currentProjectRoot, getProjectRoot } from './projectRoot'
+import { createLogger, bestEffort } from '@shared/log'
+
+const log = createLogger('loudness')
 
 /** 48 kHz × 0.1 s: the frame size that makes one metadata frame one series step. */
 const SAMPLE_RATE = 48000
@@ -111,7 +114,7 @@ export async function generateLoudness(
       await fsp.writeFile(part, JSON.stringify(series))
     })
   } finally {
-    await fsp.rm(printPath, { force: true }).catch(() => {})
+    await bestEffort(fsp.rm(printPath, { force: true }), 'removing the loudness print file', log)
   }
   return series!
 }
@@ -210,7 +213,7 @@ export async function ensureLoudnessFor(root: string, src: LoudnessSource): Prom
         // A file that vanished under the pass (renamed or moved meanwhile) says
         // nothing about its content: leave it to be measured at its new path.
         if (existsSync(input)) failed.add(out)
-        console.error('loudness measurement failed for', src.id, error)
+        log.error(`measuring ${src.id} failed`, error)
         return null
       } finally {
         reading.delete(out)

@@ -1,4 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { createLogger } from '@shared/log'
+
+const log = createLogger('ui')
 
 interface Props {
   /** Shown in the console line, e.g. "Dock panel". */
@@ -22,7 +25,7 @@ export class ErrorBoundary extends Component<Props, { error: Error | null }> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error(`${this.props.label} crashed:`, error, info.componentStack)
+    log.error(`${this.props.label} crashed${info.componentStack ?? ''}`, error)
   }
 
   componentDidUpdate(prev: Props): void {
