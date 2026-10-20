@@ -86,11 +86,11 @@ export const LANE_GEOM: LaneGeometry = {
 /** Per-lane view prefs — height-per-row (so clips scale with the lane) and a
  *  collapsed flag. Purely a UI preference like the zoom level, so it lives in
  *  localStorage (`timelineView`), not the project document. */
-type TimelineView = Partial<Record<LaneKey, LaneViewPref>>
+export type TimelineView = Partial<Record<LaneKey, LaneViewPref>>
 /** How the track scroll tracks the playhead during playback: stay put, jump a
  *  page when the playhead exits the view (DAW default), or keep it centered.
  *  A view preference like zoom, so it lives in localStorage. */
-type FollowMode = 'none' | 'page' | 'centered'
+export type FollowMode = 'none' | 'page' | 'centered'
 export const FOLLOW_OPTIONS: { mode: FollowMode; label: string; title: string }[] = [
   { mode: 'none', label: 'Off', title: 'Timeline stays where you scrolled it during playback' },
   { mode: 'page', label: 'Page', title: 'Jump forward a page when the playhead reaches the right edge' },

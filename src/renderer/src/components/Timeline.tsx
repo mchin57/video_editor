@@ -7,10 +7,8 @@
  */
 
 import {
-  useEffect,
   useMemo,
   useRef,
-  useState,
   type DragEvent as ReactDragEvent,
   type JSX,
   type PointerEvent as ReactPointerEvent
@@ -19,18 +17,15 @@ import type { AudioClip, CaptionSegment, Composition, Layer, Project, TimelineIt
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp, sourceAfterPlayed } from '@shared/speed'
-import { assetAspect, assetKind, type MediaAsset } from '@shared/media'
+import { assetAspect, assetKind } from '@shared/media'
 import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
-import { useHoverIntent } from '@/hooks/useHoverIntent'
-import { interactionOpen } from '@/lib/interaction'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
-import { layoutLanes, packRows, resizeRowH, rowCount, type LaneViewPref } from '@/lib/lanes'
+import { layoutLanes, packRows, resizeRowH, rowCount } from '@/lib/lanes'
 import { useDragDepth } from '@/lib/dragDepth'
-import { CompBreadcrumb } from '@/components/CompBreadcrumb'
 import {
   canLinkItems,
   canSplitItems,
@@ -58,13 +53,11 @@ import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/compone
 import { levelOf } from '@shared/volumeLevels'
 import { clamp } from '@shared/math'
 import { kindInfo, layerMediaId } from '@shared/layerKinds'
-import { usePersistedState } from '@/hooks/usePersistedState'
 import { newId } from '@shared/ids'
 import {
   HOOK_SEC,
   SNAP_PX,
   CLICK_SLOP,
-  GUTTER,
   RULER_H,
   ROW_H,
   MIN_ROW_H,
@@ -78,15 +71,21 @@ import {
   EMPTY_LEVELS,
   LANE_STYLE,
   LaneKey,
-  LANE_GEOM,
-  FOLLOW_OPTIONS,
-  PPS_PREF,
-  FOLLOW_PREF,
-  VIEW_PREF
+  LANE_GEOM
 } from './timeline/constants'
-import { spanOf, packAudioRows, snapTargetsFor, tc } from './timeline/geometry'
-import { TileThumb, ToolbarButton } from './timeline/parts'
-import { TileDescriptionAt, TileDescription } from './timeline/TileDescription'
+import { spanOf, packAudioRows, snapTargetsFor } from './timeline/geometry'
+import { TileThumb } from './timeline/parts'
+import { TileDescription } from './timeline/TileDescription'
+import { TimelineToolbar } from './timeline/TimelineToolbar'
+import { LaneGutter } from './timeline/LaneGutter'
+import {
+  useGutterSync,
+  usePlayheadFollow,
+  useScrollPins,
+  useTileDescriptionHover,
+  useTimelineView,
+  useWheelZoom
+} from './timeline/hooks'
 
 export function Timeline(): JSX.Element {
   // The timeline renders the ACTIVE composition (the root, or the nested comp
@@ -121,98 +120,35 @@ export function Timeline(): JSX.Element {
   const snapItemsToPrevious = useProject((s) => s.snapItemsToPrevious)
   const linkItems = useProject((s) => s.linkItems)
   const unlinkItems = useProject((s) => s.unlinkItems)
-  const canUndo = useProject((s) => s.past.length > 0)
-  const canRedo = useProject((s) => s.future.length > 0)
-  const undo = useProject((s) => s.undo)
-  const redo = useProject((s) => s.redo)
 
   const time = usePlayback((s) => s.time)
   const playing = usePlayback((s) => s.playing)
-  const togglePlay = usePlayback((s) => s.toggle)
   const setPlaying = usePlayback((s) => s.setPlaying)
   const setTime = usePlayback((s) => s.setTime)
 
   const { data: assets = [] } = useLibrary()
   const assetById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
-  // Hovering a media tile (video, image, audio) shows its clip's description above
-  // it (TileDescription). A short open delay, so sweeping across tiles doesn't
-  // flash a box over each.
-  const descHover = useHoverIntent<TileDescriptionAt>({ openMs: 400 })
-  /** The hover wiring for a tile showing library clip `asset` (none without one). */
-  const descHoverProps = (asset: MediaAsset | undefined): Partial<JSX.IntrinsicElements['div']> =>
-    asset
-      ? {
-          // A press (select, drag, trim) closes it.
-          onPointerDownCapture: () => descHover.intent.close(),
-          onMouseEnter: (e) => {
-            // Not mid-drag (any drag: a tile, a trim, the playhead).
-            if (interactionOpen()) return
-            const el = e.currentTarget
-            descHover.intent.enter({ mediaId: asset.id, el, rect: el.getBoundingClientRect(), x: e.clientX })
-          },
-          onMouseLeave: () => descHover.intent.leave()
-        }
-      : {}
-  const descAsset = descHover.target ? assetById.get(descHover.target.mediaId) : undefined
-  // The tiles move under a scroll or zoom: drop the box rather than leave it floating.
-  // A wheel inside the box scrolls its text instead (the box is portaled, so the
-  // tiles don't move under it); it closes only when the mouse leaves.
-  useEffect(() => {
-    if (!descHover.target) return undefined
-    const close = (): void => descHover.intent.close()
-    const onWheel = (e: WheelEvent): void => {
-      if (e.target instanceof Element && e.target.closest('[data-description-panel]')) return
-      close()
-    }
-    window.addEventListener('wheel', onWheel, { capture: true, passive: true })
-    window.addEventListener('resize', close)
-    return () => {
-      window.removeEventListener('wheel', onWheel, { capture: true })
-      window.removeEventListener('resize', close)
-    }
-  }, [descHover.target, descHover.intent])
+  const { descHover, descAsset, descHoverProps } = useTileDescriptionHover(assetById)
 
   const selectedLibId = useEditor((s) => s.selectedId)
   const previewAsset = layers.length === 0 && selectedLibId ? assetById.get(selectedLibId) : undefined
   const previewDur = previewAsset?.proxyReady ? previewAsset.probe.durationSec : 0
   const canPlay = layers.length > 0 || previewDur > 0
 
-  const [pxPerSec, setPxPerSec] = usePersistedState('timelinePps', PPS_PREF)
-  const pxPerSecRef = useRef(pxPerSec)
-  pxPerSecRef.current = pxPerSec
-
-  const [followMode, setFollowMode] = usePersistedState('timelineFollow', FOLLOW_PREF)
-  const followModeRef = useRef(followMode)
-  followModeRef.current = followMode
+  const {
+    pxPerSec,
+    setPxPerSec,
+    pxPerSecRef,
+    followMode,
+    setFollowMode,
+    followModeRef,
+    laneView,
+    patchLane,
+    toggleLaneCollapsed
+  } = useTimelineView()
   const playingRef = useRef(playing)
   playingRef.current = playing
-
-  // Per-lane height / collapse prefs, persisted across reloads.
-  const [laneView, setLaneView] = usePersistedState('timelineView', VIEW_PREF)
-  const patchLane = (key: LaneKey, patch: LaneViewPref): void =>
-    setLaneView((v) => ({ ...v, [key]: { ...v[key], ...patch } }))
-  const toggleLaneCollapsed = (key: LaneKey): void =>
-    setLaneView((v) => ({ ...v, [key]: { ...v[key], collapsed: !v[key]?.collapsed } }))
-  // While a lane resize is shrinking the track, we pin the scrollable height to
-  // the tallest it reached this drag so the browser can't clamp scrollTop out
-  // from under us (which would feed back into the height and run away). 0 = idle.
-  const [resizeFloorH, setResizeFloorH] = useState(0)
-  // The horizontal twin of `resizeFloorH`, and it exists for the same reason.
-  // The track's width is derived from `total`, so dragging the RIGHTMOST tile
-  // leftwards shrinks the scrollable area under the drag: the browser then
-  // clamps `scrollLeft` down to the new maximum, that clamp feeds straight into
-  // the drag's `dx` (which adds the live `scrollLeft`), the tile jumps further
-  // left, and the width shrinks again — a runaway that reads as the edge-scroll
-  // accelerating even though its rate is flat. Pinning the width breaks the loop.
-  //
-  // It must be a HIGH-WATER MARK maintained for the whole drag, not a snapshot
-  // taken at grab time: drag right and the natural width grows past a stale
-  // floor, so dragging back left without releasing is free to shrink again
-  // through that band and the runaway returns. `draggingX` gates the ratchet
-  // (below) and is cleared on release, when the track settles to its content.
-  const [dragFloorW, setDragFloorW] = useState(0)
-  const [draggingX, setDraggingX] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)
@@ -235,13 +171,7 @@ export function Timeline(): JSX.Element {
   // `dragFloorW` — the floor ratchets off this, so folding the floor back in
   // would make it feed itself and the track could only ever grow.
   const naturalW = Math.max(total * pxPerSec + 24, 200)
-  // Ratchet the floor up while a horizontal drag is live, so the pin tracks the
-  // widest the track has been THIS drag (drag right, then left without
-  // releasing). Settles immediately: the floor only changes when `naturalW`
-  // does, and re-running with an unchanged `naturalW` is a no-op.
-  useEffect(() => {
-    if (draggingX) setDragFloorW((f) => Math.max(f, naturalW))
-  }, [draggingX, naturalW])
+  const { resizeFloorH, setResizeFloorH, dragFloorW, startEdgeScrollX } = useScrollPins(naturalW)
 
   // Group the unified stack into typed lanes (a visual grouping only).
   // Compound clips are clip-like, so they ride in the Clips lane.
@@ -322,29 +252,6 @@ export function Timeline(): JSX.Element {
     })
   }
 
-  /**
-   * Start the edge auto-scroller for a HORIZONTAL drag, pinning the track's
-   * scrollable width for the drag's lifetime (see `dragFloorW`). Every
-   * horizontal drag goes through this rather than `edgeAutoScroll` directly, so
-   * none of them can re-open the shrink runaway; the vertical lane resize keeps
-   * calling `edgeAutoScroll` itself and pins the HEIGHT instead. Releasing the
-   * pin rides on the `stop()` every caller already runs in its `onUp`.
-   */
-  const startEdgeScrollX = (sc: HTMLElement, onScroll: () => void): { setX: (x: number) => void; stop: () => void } => {
-    // Arm the ratchet; the effect above seeds and then maintains the floor from
-    // the live content width, so it keeps up with a drag that reverses.
-    setDraggingX(true)
-    const s = edgeAutoScroll(sc, onScroll)
-    return {
-      setX: s.setX,
-      stop: () => {
-        s.stop()
-        setDraggingX(false)
-        setDragFloorW(0) // release; the track settles to its true width
-      }
-    }
-  }
-
   const collectSnapTargets = (skip?: Set<string>): number[] =>
     snapTargetsFor(layers, audioClips, assetById, total, skip)
   const snapTargets = useMemo(
@@ -357,72 +264,9 @@ export function Timeline(): JSX.Element {
    *  helpers use) — only whole-source audio clips need it. */
   const srcDur: SourceDuration = (mediaId) => assetById.get(mediaId)?.probe.durationSec ?? 0
 
-  // Ctrl/Cmd + scroll = horizontal zoom anchored at the cursor.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return undefined
-    const onWheel = (e: WheelEvent): void => {
-      if (!e.ctrlKey && !e.metaKey) {
-        // Centered follow owns the horizontal scroll during playback — swallow
-        // user horizontal wheel so it doesn't fight the auto-scroll (vertical
-        // lane scrolling stays live).
-        if (
-          followModeRef.current === 'centered' &&
-          playingRef.current &&
-          (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))
-        ) {
-          e.preventDefault()
-        }
-        return
-      }
-      e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const cursorX = e.clientX - rect.left
-      const cur = pxPerSecRef.current
-      const timeAtCursor = (el.scrollLeft + cursorX) / cur
-      const next = clamp(cur * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 8, 240)
-      if (next === cur) return
-      setPxPerSec(next)
-      requestAnimationFrame(() => {
-        el.scrollLeft = Math.max(0, timeAtCursor * next - cursorX)
-      })
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [setPxPerSec]) // stable: the setter's key and codec never change
-
-  // Playhead follow: while playing, keep the playhead in view per the selected
-  // mode. Runs on every playback tick (time updates each rAF), so user scrolls
-  // in centered mode are re-asserted away within a frame.
-  useEffect(() => {
-    if (!playing || followMode === 'none') return
-    const el = scrollRef.current
-    if (!el) return
-    const x = time * pxPerSec
-    if (followMode === 'centered') {
-      el.scrollLeft = Math.max(0, x - el.clientWidth / 2)
-    } else {
-      // Page jump: playhead exits the visible span → snap it back to the left
-      // edge (a page forward when it ran off the right, straight there on seeks).
-      const margin = 8
-      if (x > el.scrollLeft + el.clientWidth - margin || x < el.scrollLeft) {
-        el.scrollLeft = Math.max(0, x - margin)
-      }
-    }
-  }, [time, playing, followMode, pxPerSec])
-
-  // Keep the fixed gutter aligned as the track scrolls vertically.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return undefined
-    const sync = (): void => {
-      const g = gutterInnerRef.current
-      if (g) g.style.transform = `translateY(${-el.scrollTop}px)`
-    }
-    sync()
-    el.addEventListener('scroll', sync, { passive: true })
-    return () => el.removeEventListener('scroll', sync)
-  }, [])
+  useWheelZoom(scrollRef, pxPerSecRef, setPxPerSec, followModeRef, playingRef)
+  usePlayheadFollow(scrollRef, time, playing, followMode, pxPerSec)
+  useGutterSync(scrollRef, gutterInnerRef)
 
   const xToSec = (clientX: number): number => {
     const inner = trackInnerRef.current
@@ -1053,171 +897,31 @@ export function Timeline(): JSX.Element {
       {descHover.target && descAsset && (
         <TileDescription asset={descAsset} at={descHover.target} intent={descHover.intent} />
       )}
-      {/* Transport / edit toolbar */}
-      <div className="flex items-center gap-1 border-b border-white/10 px-3 py-1.5">
-        <CompBreadcrumb />
-        <button
-          onClick={togglePlay}
-          disabled={!canPlay}
-          className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-zinc-100 hover:bg-white/20 disabled:opacity-30"
-          title={playing ? 'Pause (space)' : 'Play (space)'}
-        >
-          {playing ? '❚❚' : '▶'}
-        </button>
-        <span className="ml-1 w-24 font-mono text-[11px] text-zinc-400">
-          {tc(time)} / {tc(Math.max(total, previewDur))}
-        </span>
-        <div className="mx-1 h-4 w-px bg-white/10" />
-        <ToolbarButton
-          title="Link the selected tiles so they move, split and delete together (Ctrl/Cmd-click tiles to multi-select). Layouts can't be linked."
-          onClick={linkSelected}
-          disabled={!canLink}
-        >
-          🔗 Link
-        </ToolbarButton>
-        <ToolbarButton
-          title="Unlink the selected tiles — the whole group they belong to"
-          onClick={unlinkSelected}
-          disabled={!canUnlink}
-        >
-          ⛓ Unlink
-        </ToolbarButton>
-        <div className="mx-1 h-4 w-px bg-white/10" />
-        <ToolbarButton
-          title="Split the selection at the playhead (S) — every linked tile the playhead crosses"
-          onClick={splitSelected}
-          disabled={!canSplit}
-        >
-          ✂ Split
-        </ToolbarButton>
-        <ToolbarButton
-          title="Butt the selection against the previous clip in its lane, closing the gap (N). With nothing before it, snaps to the start."
-          onClick={snapSelectedToPrevious}
-          disabled={!canSnapPrev}
-        >
-          ⇤ Snap
-        </ToolbarButton>
-        <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
-          ＋ Text
-        </ToolbarButton>
-        <ToolbarButton
-          title="Add a caption at the playhead, in the caption style (turns the caption lane on)"
-          onClick={addCaptionAtPlayhead}
-        >
-          ＋ Caption
-        </ToolbarButton>
-        <ToolbarButton
-          title="Delete the selection — every selected tile (Del)"
-          onClick={deleteSelected}
-          disabled={!canDelete}
-        >
-          🗑 Delete
-        </ToolbarButton>
-        <div className="flex-1" />
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">Follow</span>
-        <div
-          className="flex overflow-hidden rounded border border-white/10"
-          role="group"
-          aria-label="Playhead follow mode"
-        >
-          {FOLLOW_OPTIONS.map((o) => (
-            <button
-              key={o.mode}
-              onClick={() => setFollowMode(o.mode)}
-              title={o.title}
-              className={`px-1.5 py-0.5 text-[10px] ${
-                followMode === o.mode ? 'bg-white/20 text-zinc-100' : 'text-zinc-400 hover:bg-white/10'
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-        <div className="mx-1 h-4 w-px bg-white/10" />
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">Zoom</span>
-        <ToolbarButton title="Zoom out" onClick={() => setPxPerSec((p) => clamp(p / 1.3, 8, 240))}>
-          −
-        </ToolbarButton>
-        <ToolbarButton title="Zoom in" onClick={() => setPxPerSec((p) => clamp(p * 1.3, 8, 240))}>
-          ＋
-        </ToolbarButton>
-        <div className="mx-1 h-4 w-px bg-white/10" />
-        <ToolbarButton title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
-          ↶ Undo
-        </ToolbarButton>
-        <ToolbarButton title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}>
-          ↷ Redo
-        </ToolbarButton>
-      </div>
+      <TimelineToolbar
+        canPlay={canPlay}
+        durationSec={Math.max(total, previewDur)}
+        link={{ run: linkSelected, enabled: canLink }}
+        unlink={{ run: unlinkSelected, enabled: canUnlink }}
+        split={{ run: splitSelected, enabled: canSplit }}
+        snapToPrevious={{ run: snapSelectedToPrevious, enabled: canSnapPrev }}
+        remove={{ run: deleteSelected, enabled: canDelete }}
+        addText={addText}
+        addCaption={addCaptionAtPlayhead}
+        followMode={followMode}
+        setFollowMode={setFollowMode}
+        setPxPerSec={setPxPerSec}
+      />
 
       <div className="flex min-h-0 flex-1">
-        {/* Fixed left gutter with lane labels */}
-        <div
-          className="relative shrink-0 overflow-hidden border-r border-white/10 bg-zinc-900/50"
-          style={{ width: GUTTER }}
-        >
-          <div
-            ref={gutterInnerRef}
-            data-testid="timeline-gutter"
-            className="absolute inset-x-0 top-0 will-change-transform"
-            style={{ height: totalH }}
-          >
-            <div
-              className="absolute inset-x-0 top-0 flex items-center border-b border-white/10 px-2"
-              style={{ height: RULER_H }}
-            >
-              <span className="text-[8px] font-semibold uppercase tracking-wider text-zinc-600">Tracks</span>
-            </div>
-            {lanes.map((lane) => {
-              const st = LANE_STYLE[lane.key]
-              // The Captions label is also a control: click it to edit the
-              // lane-wide caption style (every caption without its own override).
-              const isCaption = lane.key === 'caption'
-              const selected = isCaption && captionsGlobalSelected
-              return (
-                <div
-                  key={lane.key}
-                  data-testid={`lane-${lane.key}`}
-                  // Drag the bubble body vertically to resize; double-click to
-                  // collapse/expand. Caption bubbles also select on press.
-                  onPointerDown={(e) => {
-                    if (isCaption) selectCaptionsGlobal()
-                    if (!lane.collapsed) startLaneResize(e, lane.key, lane.rows)
-                  }}
-                  onDoubleClick={() => toggleLaneCollapsed(lane.key)}
-                  title={`${isCaption ? 'Click to edit all captions · ' : ''}drag to resize · double-click to collapse`}
-                  className={`absolute inset-x-1 flex select-none items-center gap-1 overflow-hidden rounded-md border px-1 ${st.tint} ${
-                    lane.collapsed ? 'cursor-pointer' : 'cursor-ns-resize'
-                  } ${isCaption ? 'hover:brightness-125' : ''} ${selected ? st.sel : ''}`}
-                  style={{ top: lane.top + 1, height: Math.max(0, lane.height - 2) }}
-                >
-                  <button
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onDoubleClick={(e) => e.stopPropagation()}
-                    onClick={() => toggleLaneCollapsed(lane.key)}
-                    title={lane.collapsed ? 'Expand lane' : 'Collapse lane'}
-                    className="shrink-0 text-[9px] leading-none text-zinc-400 hover:text-zinc-100"
-                  >
-                    {lane.collapsed ? '▸' : '▾'}
-                  </button>
-                  <span className={`h-2 w-2 shrink-0 rounded-sm ${st.dot}`} />
-                  <span className="truncate text-[10px] font-medium leading-none text-zinc-200">{lane.label}</span>
-                  {isCaption && !lane.collapsed && <span className="ml-auto text-[9px] text-emerald-300/80">✎</span>}
-                  {/* Bottom-edge resize handle (hidden while collapsed). */}
-                  {!lane.collapsed && (
-                    <div
-                      onPointerDown={(e) => startLaneResize(e, lane.key, lane.rows)}
-                      onDoubleClick={(e) => e.stopPropagation()}
-                      data-testid={`lane-resize-${lane.key}`}
-                      title="Drag to resize lane"
-                      className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize hover:bg-white/30"
-                    />
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
+        <LaneGutter
+          lanes={lanes}
+          totalH={totalH}
+          gutterRef={gutterInnerRef}
+          captionsGlobalSelected={captionsGlobalSelected}
+          onCaptionLanePress={selectCaptionsGlobal}
+          onResizeStart={startLaneResize}
+          onToggleCollapsed={toggleLaneCollapsed}
+        />
 
         {/* Horizontally-scrolling track (also the library drop target) */}
         <div
