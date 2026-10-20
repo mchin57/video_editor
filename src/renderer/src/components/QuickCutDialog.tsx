@@ -17,6 +17,7 @@ import { formatClock } from '@/lib/format'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { usePlayback } from '@/state/playback'
 import { btnCls, disabledCls } from './ui'
+import { useLatest } from '@/hooks/useLatest'
 
 /**
  * Library ▸ right-click ▸ Quick cut… (docs/QUICK-CUT.md): the clip over a mini
@@ -73,8 +74,8 @@ export function QuickCutDialog({
     )
   const redo = (): void =>
     setHist((h) => (h.future.length ? { past: [...h.past, h.now], now: h.future[0], future: h.future.slice(1) } : h))
-  // Undo can shrink the list under the selection.
-  useEffect(() => setSelected((s) => Math.min(s, hist.now.length - 1)), [hist.now])
+  // Undo can shrink the list under the selection (adjusted while rendering).
+  if (selected > hist.now.length - 1) setSelected(hist.now.length - 1)
 
   const seek = useCallback(
     (t: number) => {
@@ -125,8 +126,7 @@ export function QuickCutDialog({
   const remove = (): void => commit(deletePiece(hist.now, selected), selected)
 
   // Keys: capture phase, swallowed, so the app's shortcuts don't act on the edit behind.
-  const keyActions = useRef({ split, remove, undo, redo, seek, time, busy, onClose, frame })
-  keyActions.current = { split, remove, undo, redo, seek, time, busy, onClose, frame }
+  const keyActions = useLatest({ split, remove, undo, redo, seek, time, busy, onClose, frame })
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       e.stopPropagation()
@@ -162,7 +162,7 @@ export function QuickCutDialog({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  }, [keyActions]) // stable (useLatest)
 
   const secAt = (clientX: number): number => {
     const r = trackRef.current!.getBoundingClientRect()

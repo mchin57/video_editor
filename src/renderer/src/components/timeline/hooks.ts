@@ -6,7 +6,7 @@
  * Guarded by e2e/timelineInteractions.spec.ts and edgeScrollShrink.spec.ts.
  */
 
-import { useEffect, useRef, useState, type JSX, type MutableRefObject, type RefObject } from 'react'
+import { useEffect, useState, type JSX, type RefObject } from 'react'
 import type { MediaAsset } from '@shared/media'
 import { clamp } from '@shared/math'
 import { useHoverIntent } from '@/hooks/useHoverIntent'
@@ -16,6 +16,7 @@ import { edgeAutoScroll } from '@/lib/pointerDrag'
 import type { LaneViewPref } from '@/lib/lanes'
 import { FOLLOW_PREF, PPS_PREF, VIEW_PREF, type FollowMode, type LaneKey, type TimelineView } from './constants'
 import type { TileDescriptionAt } from './TileDescription'
+import { useLatest } from '@/hooks/useLatest'
 
 /** Zoom (px per second), playhead follow mode and per-lane height / collapse —
  *  view preferences persisted in localStorage. The refs hold the latest values
@@ -23,21 +24,19 @@ import type { TileDescriptionAt } from './TileDescription'
 export function useTimelineView(): {
   pxPerSec: number
   setPxPerSec: (next: number | ((p: number) => number)) => void
-  pxPerSecRef: MutableRefObject<number>
+  pxPerSecRef: RefObject<number>
   followMode: FollowMode
   setFollowMode: (mode: FollowMode) => void
-  followModeRef: MutableRefObject<FollowMode>
+  followModeRef: RefObject<FollowMode>
   laneView: TimelineView
   patchLane: (key: LaneKey, patch: LaneViewPref) => void
   toggleLaneCollapsed: (key: LaneKey) => void
 } {
   const [pxPerSec, setPxPerSec] = usePersistedState('timelinePps', PPS_PREF)
-  const pxPerSecRef = useRef(pxPerSec)
-  pxPerSecRef.current = pxPerSec
+  const pxPerSecRef = useLatest(pxPerSec)
 
   const [followMode, setFollowMode] = usePersistedState('timelineFollow', FOLLOW_PREF)
-  const followModeRef = useRef(followMode)
-  followModeRef.current = followMode
+  const followModeRef = useLatest(followMode)
 
   // Per-lane height / collapse prefs, persisted across reloads.
   const [laneView, setLaneView] = usePersistedState('timelineView', VIEW_PREF)
@@ -94,11 +93,8 @@ export function useScrollPins(naturalW: number): {
 
   // Ratchet the floor up while a horizontal drag is live, so the pin tracks the
   // widest the track has been THIS drag (drag right, then left without
-  // releasing). Settles immediately: the floor only changes when `naturalW`
-  // does, and re-running with an unchanged `naturalW` is a no-op.
-  useEffect(() => {
-    if (draggingX) setDragFloorW((f) => Math.max(f, naturalW))
-  }, [draggingX, naturalW])
+  // releasing). Adjusted while rendering: it only ever rises to `naturalW`.
+  if (draggingX && naturalW > dragFloorW) setDragFloorW(naturalW)
 
   /**
    * Start the edge auto-scroller for a HORIZONTAL drag, pinning the track's
@@ -131,10 +127,10 @@ export function useScrollPins(naturalW: number): {
  *  playback (vertical lane scrolling stays live). */
 export function useWheelZoom(
   scrollRef: RefObject<HTMLDivElement | null>,
-  pxPerSecRef: MutableRefObject<number>,
+  pxPerSecRef: RefObject<number>,
   setPxPerSec: (next: number) => void,
-  followModeRef: MutableRefObject<FollowMode>,
-  playingRef: MutableRefObject<boolean>
+  followModeRef: RefObject<FollowMode>,
+  playingRef: RefObject<boolean>
 ): void {
   useEffect(() => {
     const el = scrollRef.current

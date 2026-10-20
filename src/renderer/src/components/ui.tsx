@@ -365,7 +365,9 @@ function MenuPanel({
   const ref = useRef<HTMLDivElement>(null)
   const rowRefs = useRef<(HTMLDivElement | null)[]>([])
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
-  const [openSub, setOpenSub] = useState<{ index: number; focus: boolean } | null>(null)
+  // The open submenu: its row, whether to focus its first item, and where the
+  // row was when it opened (measured then, so render never reads the DOM).
+  const [openSub, setOpenSub] = useState<{ index: number; focus: boolean; rect: DOMRect } | null>(null)
   const anyChecked = items.some((i) => i !== MENU_SEPARATOR && i.checked !== undefined)
 
   // Measured and placed once, where it opened; focused so the arrow keys work at once.
@@ -391,7 +393,8 @@ function MenuPanel({
     const item = items[index]
     if (item === MENU_SEPARATOR || item.disabled) return
     if (item.submenu) {
-      setOpenSub({ index, focus: viaKey })
+      const row = rowRefs.current[index]
+      if (row) setOpenSub({ index, focus: viaKey, rect: row.getBoundingClientRect() })
       return
     }
     onDone()
@@ -430,7 +433,6 @@ function MenuPanel({
       {items.map((item, i) => {
         if (item === MENU_SEPARATOR) return <div key={`sep-${i}`} role="separator" className="my-1 h-px bg-white/10" />
         const inert = !!item.disabled
-        const row = rowRefs.current[i]
         return (
           <div
             key={`${item.label}-${i}`}
@@ -444,7 +446,13 @@ function MenuPanel({
             aria-expanded={item.submenu ? openSub?.index === i : undefined}
             title={inert ? item.reason : undefined}
             data-testid={item.testId}
-            onMouseEnter={() => setOpenSub(item.submenu && !inert ? { index: i, focus: false } : null)}
+            onMouseEnter={(e) =>
+              setOpenSub(
+                item.submenu && !inert
+                  ? { index: i, focus: false, rect: e.currentTarget.getBoundingClientRect() }
+                  : null
+              )
+            }
             onClick={(e) => {
               // A click inside a nested panel bubbles through this row (the
               // panel is its DOM child); only a click on the row itself counts.
@@ -472,15 +480,15 @@ function MenuPanel({
             {(item.hint || item.submenu) && (
               <span className="shrink-0 text-[10px] text-zinc-500">{item.submenu ? '▸' : item.hint}</span>
             )}
-            {item.submenu && openSub?.index === i && row && (
+            {item.submenu && openSub?.index === i && (
               <MenuPanel
                 items={item.submenu}
-                anchor={{ kind: 'row', rect: row.getBoundingClientRect() }}
+                anchor={{ kind: 'row', rect: openSub.rect }}
                 onDone={onDone}
                 focusFirst={openSub.focus}
                 onBack={() => {
                   setOpenSub(null)
-                  row.focus()
+                  rowRefs.current[i]?.focus()
                 }}
               />
             )}

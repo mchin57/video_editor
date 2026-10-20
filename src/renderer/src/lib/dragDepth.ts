@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent } from 'react'
+import { useLatest } from '@/hooks/useLatest'
 
 export function useDragDepth(accepts: (types: readonly string[]) => boolean): {
   /** Whether an accepted drag is currently over the zone. */
@@ -20,8 +21,7 @@ export function useDragDepth(accepts: (types: readonly string[]) => boolean): {
   reset: () => void
 } {
   const depth = useRef(0)
-  const acceptsRef = useRef(accepts)
-  acceptsRef.current = accepts
+  const acceptsRef = useLatest(accepts)
   const [active, setActive] = useState(false)
 
   const reset = useCallback((): void => {
@@ -29,17 +29,23 @@ export function useDragDepth(accepts: (types: readonly string[]) => boolean): {
     setActive(false)
   }, [])
 
-  const onDragEnter = useCallback((e: ReactDragEvent): void => {
-    if (!acceptsRef.current(e.dataTransfer.types)) return
-    depth.current++
-    setActive(true)
-  }, [])
+  const onDragEnter = useCallback(
+    (e: ReactDragEvent): void => {
+      if (!acceptsRef.current(e.dataTransfer.types)) return
+      depth.current++
+      setActive(true)
+    },
+    [acceptsRef]
+  ) // stable (useLatest)
 
-  const onDragLeave = useCallback((e: ReactDragEvent): void => {
-    if (!acceptsRef.current(e.dataTransfer.types)) return
-    depth.current = Math.max(0, depth.current - 1)
-    if (depth.current === 0) setActive(false)
-  }, [])
+  const onDragLeave = useCallback(
+    (e: ReactDragEvent): void => {
+      if (!acceptsRef.current(e.dataTransfer.types)) return
+      depth.current = Math.max(0, depth.current - 1)
+      if (depth.current === 0) setActive(false)
+    },
+    [acceptsRef]
+  ) // stable (useLatest)
 
   // In-app drags that end anywhere (drop or abort) fire dragend on the source;
   // a drop claimed by a nested handler may skip our onDrop. Either way: clear.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import { useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { NormCrop } from '@shared/project'
 import { Popout } from './Popout'
 import { btnCls as btn, toggleCls as toggle } from './ui'
@@ -30,11 +30,12 @@ export function ImageEditPopout(): JSX.Element | null {
   const { data: assets = [] } = useLibrary()
   const asset = assets.find((a) => a.id === content?.mediaId)
 
-  // Re-sync when switching to a different image layer.
-  useEffect(() => {
+  // Re-sync when switching to a different image layer (adjusted while rendering).
+  const [boxFor, setBoxFor] = useState(selectedLayerId)
+  if (boxFor !== selectedLayerId) {
+    setBoxFor(selectedLayerId)
     setBox(content?.crop ?? FULL)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLayerId])
+  }
 
   if (!open) return null
   if (!content || !layer) {

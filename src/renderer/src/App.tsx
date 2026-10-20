@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react'
+import { useEffect, useState, type DragEvent, type JSX, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Dock } from '@/components/Dock'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -40,6 +40,7 @@ import { useAppSettings } from '@/state/appSettings'
 import { useLoudness } from '@/state/loudness'
 import { makeTextLayer } from '@shared/layers'
 import { newId } from '@shared/ids'
+import { useLatest } from '@/hooks/useLatest'
 
 /**
  * File ▸ New's window (docs/MEDIA-POINTERS.md "The project folder"): a name
@@ -151,8 +152,7 @@ export default function App(): JSX.Element {
   // Library assets via a ref so the (deps-[]) key handler can resolve an audio
   // clip's source duration without re-binding the listener on every refetch.
   const { data: assets = [] } = useLibrary()
-  const assetsRef = useRef(assets)
-  assetsRef.current = assets
+  const assetsRef = useLatest(assets)
   // OS-file drag highlight — depth-counted so dropping outside the app can't
   // leave the overlay stuck (library-item drags carry a custom type and are
   // filtered out here; the Timeline handles those).
@@ -287,7 +287,7 @@ export default function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [assetsRef]) // stable (useLatest)
 
   const loaded = useProject((s) => s.loaded)
   const hasProject = useProject((s) => !!s.project)

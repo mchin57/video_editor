@@ -80,6 +80,7 @@ import {
   useTimelineView,
   useWheelZoom
 } from './timeline/hooks'
+import { useLatest } from '@/hooks/useLatest'
 
 export function Timeline(): JSX.Element {
   // The timeline renders the ACTIVE composition (the root, or the nested comp
@@ -140,8 +141,7 @@ export function Timeline(): JSX.Element {
     patchLane,
     toggleLaneCollapsed
   } = useTimelineView()
-  const playingRef = useRef(playing)
-  playingRef.current = playing
+  const playingRef = useLatest(playing)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackInnerRef = useRef<HTMLDivElement>(null)

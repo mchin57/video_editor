@@ -19,11 +19,16 @@ export function SettingsModal(): JSX.Element | null {
   const [copied, setCopied] = useState(false)
   const refreshStatus = (): void => void assistantStatus().then(setStatus)
 
+  // Each opening reloads settings and the assistant's status, and forgets "Copied".
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setCopied(false)
+  }
   useEffect(() => {
     if (!open) return
     void getSettings().then(setSettings)
     refreshStatus()
-    setCopied(false)
   }, [open])
 
   if (!open) return null

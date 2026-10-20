@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { HoverIntent, type HoverTimers } from '@/lib/hoverIntent'
 import { interactionOpen } from '@/lib/interaction'
+import { useLatest } from '@/hooks/useLatest'
 
 /** A `HoverIntent` owned by a component: `target` is what the panel shows
  *  (null = closed); feed `intent.enter/leave/pin/close` from the target, the
@@ -10,10 +11,10 @@ export function useHoverIntent<T>(opts: { closeMs?: number; openMs?: number; tim
   intent: HoverIntent<T>
 } {
   const [target, setTarget] = useState<T | null>(null)
-  const ref = useRef<HoverIntent<T> | null>(null)
-  if (!ref.current) ref.current = new HoverIntent<T>(setTarget, opts)
-  useEffect(() => () => ref.current?.dispose(), [])
-  return { target, intent: ref.current }
+  // One instance for the component's life (created on the first render only).
+  const [intent] = useState(() => new HoverIntent<T>(setTarget, opts))
+  useEffect(() => () => intent.dispose(), [intent])
+  return { target, intent }
 }
 
 /**
@@ -30,8 +31,7 @@ export function useHoverGuard(
   group: { enter: () => void; leave: () => void },
   members: () => (Element | null | undefined)[]
 ): void {
-  const latest = useRef({ group, members })
-  latest.current = { group, members }
+  const latest = useLatest({ group, members })
   useEffect(() => {
     const onMove = (e: MouseEvent): void => {
       if (interactionOpen()) return
@@ -42,5 +42,5 @@ export function useHoverGuard(
     }
     window.addEventListener('mousemove', onMove, { capture: true, passive: true })
     return () => window.removeEventListener('mousemove', onMove, { capture: true })
-  }, [])
+  }, [latest]) // stable (useLatest)
 }
