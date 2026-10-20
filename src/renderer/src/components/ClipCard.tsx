@@ -279,12 +279,12 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
   const failed = failedFor === asset
   const { target: hover, intent } = useHoverIntent<true>()
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const [wrapEl, setWrapEl] = useState<HTMLDivElement | null>(null)
   // An image's "proxy" is its display PNG; a video's, the playable proxy.
   const canPreview = asset.proxyReady && !!asset.probe.video
   return (
     <div
-      ref={wrapRef}
+      ref={setWrapEl}
       className="relative h-full w-full"
       onMouseEnter={() => canPreview && intent.enter(true)}
       onMouseLeave={() => intent.leave()}
@@ -294,10 +294,10 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
       ) : (
         <img src={thumbUrl(asset)} alt="" onError={() => setFailedFor(asset)} className="h-full w-full object-cover" />
       )}
-      {hover && canPreview && wrapRef.current && (
+      {hover && canPreview && wrapEl && (
         <HoverPopout
           asset={asset}
-          anchor={wrapRef.current}
+          anchor={wrapEl}
           media={isImageAsset(asset) ? 'image' : 'video'}
           onEnter={() => intent.enter()}
           onLeave={() => intent.leave()}
@@ -312,14 +312,14 @@ export function ClipThumb({ asset }: { asset: MediaAsset }): JSX.Element {
  *  Hovering also pops out the clip's description beside the card. */
 export function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const wrapRef = useRef<HTMLSpanElement>(null)
+  const [wrapEl, setWrapEl] = useState<HTMLSpanElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [hover, setHover] = useState(false)
   const { target: popout, intent } = useHoverIntent<true>()
   const glyph = !asset.proxyReady ? '♪' : playing ? '⏸' : hover ? '▶' : '♪'
   return (
     <span
-      ref={wrapRef}
+      ref={setWrapEl}
       role="button"
       tabIndex={-1}
       onMouseEnter={() => {
@@ -348,10 +348,10 @@ export function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
       />
-      {popout && wrapRef.current && (
+      {popout && wrapEl && (
         <HoverPopout
           asset={asset}
-          anchor={wrapRef.current}
+          anchor={wrapEl}
           media="none"
           onEnter={() => intent.enter()}
           onLeave={() => intent.leave()}

@@ -80,14 +80,11 @@ export default defineConfig([
     extends: [reactHooks.configs.flat['recommended-latest']],
     languageOptions: { globals: { ...globals.browser } },
     rules: {
-      'no-restricted-imports': ['error', RENDERER_FORBIDDEN],
-      // Two React Compiler rules, off until the components are split up. The app
-      // doesn't run the compiler, and these flag deliberate idioms it relies on:
-      // the "latest value" ref written during render (read by a drag or timer
-      // callback) and resetting a draft from props in an effect. Replace those
-      // with `useEffectEvent` / keyed state, then turn these back on.
-      'react-hooks/refs': 'off',
-      'react-hooks/set-state-in-effect': 'off'
+      'no-restricted-imports': ['error', RENDERER_FORBIDDEN]
+      // All react-hooks rules are on, React Compiler ones included. A value a
+      // once-registered callback needs goes through `useLatest` (never a ref
+      // written while rendering); state that follows a prop is adjusted while
+      // rendering, not set in an effect.
     }
   },
   {

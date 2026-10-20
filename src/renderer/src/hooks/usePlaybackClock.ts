@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { usePlayback } from '@/state/playback'
+import { useLatest } from './useLatest'
 
 /**
  * The preview's master clock: while playing, a wall clock advances the
@@ -10,8 +11,7 @@ import { usePlayback } from '@/state/playback'
  */
 export function usePlaybackClock(duration: number): void {
   const playing = usePlayback((s) => s.playing)
-  const durationRef = useRef(duration)
-  durationRef.current = duration
+  const durationRef = useLatest(duration)
 
   useEffect(() => {
     if (!playing) return undefined
@@ -35,5 +35,5 @@ export function usePlaybackClock(duration: number): void {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing])
+  }, [playing, durationRef]) // durationRef: stable (useLatest)
 }

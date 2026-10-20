@@ -59,16 +59,20 @@ export function NewProjectDialog({
     }
   }, [])
 
-  // Each opening starts fresh at the caller's default location.
-  useEffect(() => {
-    if (!open) return
-    setName('')
-    setTouched(false)
-    setPicked(null)
-    setBusy(false)
-    setChoosing(false)
-    setError(null)
-  }, [open])
+  // Each opening starts fresh at the caller's default location (adjusted while
+  // rendering, when `open` turns on).
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setName('')
+      setTouched(false)
+      setPicked(null)
+      setBusy(false)
+      setChoosing(false)
+      setError(null)
+    }
+  }
 
   // After a failed create, put the user back in the name field (it was
   // disabled while pending, so this waits for the re-render that enables it).

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DESCRIPTION_MAX, normalizeDescription, type MediaAsset } from '@shared/media'
 import { useSetDescription } from '@/hooks/useMedia'
+import { useLatest } from '@/hooks/useLatest'
 
 /**
  * A clip's description (`MediaRecord.description`), editable in place. The
@@ -27,13 +28,15 @@ export function DescriptionBox({
   const saved = asset.description ?? ''
   const [draft, setDraft] = useState(saved)
   const [focused, setFocused] = useState(false)
-  // Follow the saved text (another view, the assistant) unless mid-edit.
-  useEffect(() => {
+  // Follow the saved text (another view, the assistant) unless mid-edit:
+  // adjusted while rendering, whenever either changes.
+  const [followed, setFollowed] = useState({ saved, focused })
+  if (followed.saved !== saved || followed.focused !== focused) {
+    setFollowed({ saved, focused })
     if (!focused) setDraft(saved)
-  }, [saved, focused])
+  }
 
-  const latest = useRef({ draft, saved, focused, id: asset.id })
-  latest.current = { draft, saved, focused, id: asset.id }
+  const latest = useLatest({ draft, saved, focused, id: asset.id })
   const skipCommit = useRef(false)
   const commit = (): void => {
     const l = latest.current
