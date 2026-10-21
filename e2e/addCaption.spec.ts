@@ -1,5 +1,5 @@
 /**
- * ＋ Caption (timeline toolbar, next to ＋ Text) adds a caption at the playhead
+ * Insert ▸ Caption (the header's Insert menu) adds a caption at the playhead
  * that behaves like every other caption: lane style (no override), in the
  * caption lane, selected, one undo step, and it splits with S.
  *
@@ -7,7 +7,7 @@
  */
 import { test, expect } from './fixtures'
 
-test('＋ Caption adds a lane-styled caption at the playhead; undo removes it; S splits it', async ({
+test('Insert ▸ Caption adds a lane-styled caption at the playhead; undo removes it; S splits it', async ({
   appPage: page
 }) => {
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1.5))
@@ -26,7 +26,8 @@ test('＋ Caption adds a lane-styled caption at the playhead; undo removes it; S
     })
   expect((await read()).segs).toHaveLength(0)
 
-  await page.getByRole('button', { name: '＋ Caption' }).click()
+  await page.getByTestId('insert-menu').click()
+  await page.getByTestId('insert-caption').click()
   const after = await read()
   expect(after.enabled).toBe(true)
   expect(after.segs).toHaveLength(1)

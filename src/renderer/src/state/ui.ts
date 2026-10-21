@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Composition, TimelineItemRef } from '@shared/project'
 import type { ImportSkip } from '@shared/media'
+import type { GraphicTool } from '@shared/graphics'
 import { expandGroup } from '@/lib/links'
 
 /** What the volume-level dialog is doing. */
@@ -71,9 +72,21 @@ interface UiState {
    *  (components/ImportFailures.tsx) shows them until dismissed. Empty = none. */
   importSkipped: ImportSkip[]
   setImportSkipped: (v: ImportSkip[]) => void
+  /** The drawing tool armed on the stage (null = none): the next press on the
+   *  canvas draws that mark into the selected graphics layer. Disarmed by any
+   *  selection change, so it can never draw into a layer you moved away from. */
+  graphicsTool: GraphicTool | null
+  setGraphicsTool: (t: GraphicTool | null) => void
+  /** The mark being edited in the selected graphics layer (its point handles on
+   *  the stage, its row in the Inspector). Cleared with the selection. */
+  selectedMarkId: string | null
+  selectMark: (id: string | null) => void
   /** Clear every selection (clip/caption/audio). */
   clearSelection: () => void
 }
+
+/** What every selection change resets: the armed graphics tool and the mark. */
+const NO_GRAPHICS_EDIT = { graphicsTool: null, selectedMarkId: null }
 
 /** The primary (last clicked) tile as a ref, or null when nothing is selected.
  *  The three `selected*Id` fields are mutually exclusive, so this is total. */
@@ -89,14 +102,18 @@ export function primaryRef(s: UiState): TimelineItemRef | null {
 const single = (
   kind: TimelineItemRef['kind'],
   id: string | null
-): Pick<UiState, 'selection' | 'selectedLayerId' | 'selectedCaptionId' | 'selectedAudioId'> & {
+): Pick<
+  UiState,
+  'selection' | 'selectedLayerId' | 'selectedCaptionId' | 'selectedAudioId' | 'graphicsTool' | 'selectedMarkId'
+> & {
   captionsGlobalSelected: boolean
 } => ({
   selection: id ? [{ kind, id }] : [],
   selectedLayerId: kind === 'layer' ? id : null,
   selectedCaptionId: kind === 'caption' ? id : null,
   selectedAudioId: kind === 'audio' ? id : null,
-  captionsGlobalSelected: false
+  captionsGlobalSelected: false,
+  ...NO_GRAPHICS_EDIT
 })
 
 export const useUi = create<UiState>((set) => ({
@@ -107,7 +124,8 @@ export const useUi = create<UiState>((set) => ({
       selectedLayerId: primary.kind === 'layer' ? primary.id : null,
       selectedCaptionId: primary.kind === 'caption' ? primary.id : null,
       selectedAudioId: primary.kind === 'audio' ? primary.id : null,
-      captionsGlobalSelected: false
+      captionsGlobalSelected: false,
+      ...NO_GRAPHICS_EDIT
     }),
   selectTile: (project, ref) => {
     const refs = project ? expandGroup(project, ref) : []
@@ -116,7 +134,8 @@ export const useUi = create<UiState>((set) => ({
       selectedLayerId: ref.kind === 'layer' ? ref.id : null,
       selectedCaptionId: ref.kind === 'caption' ? ref.id : null,
       selectedAudioId: ref.kind === 'audio' ? ref.id : null,
-      captionsGlobalSelected: false
+      captionsGlobalSelected: false,
+      ...NO_GRAPHICS_EDIT
     })
   },
   selectedLayerId: null,
@@ -132,7 +151,8 @@ export const useUi = create<UiState>((set) => ({
       selection: [],
       selectedLayerId: null,
       selectedCaptionId: null,
-      selectedAudioId: null
+      selectedAudioId: null,
+      ...NO_GRAPHICS_EDIT
     }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
@@ -152,12 +172,17 @@ export const useUi = create<UiState>((set) => ({
   setScriptOpen: (v) => set({ scriptOpen: v }),
   importSkipped: [],
   setImportSkipped: (v) => set({ importSkipped: v }),
+  graphicsTool: null,
+  setGraphicsTool: (t) => set({ graphicsTool: t }),
+  selectedMarkId: null,
+  selectMark: (id) => set({ selectedMarkId: id }),
   clearSelection: () =>
     set({
       selection: [],
       selectedLayerId: null,
       selectedCaptionId: null,
       selectedAudioId: null,
-      captionsGlobalSelected: false
+      captionsGlobalSelected: false,
+      ...NO_GRAPHICS_EDIT
     })
 }))

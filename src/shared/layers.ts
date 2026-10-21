@@ -552,6 +552,21 @@ export function makeTextLayer(id: string, startSec: number, endSec: number, fram
   }
 }
 
+/** An empty graphics layer (shapes and telestrator marks) for the given time
+ *  window, at the identity transform so marks land where they are drawn. */
+export function makeGraphicsLayer(id: string, startSec: number, endSec: number): Layer {
+  return {
+    id,
+    hidden: false,
+    startSec: Math.max(0, startSec),
+    endSec: Math.max(startSec + 0.5, endSec),
+    x: FRAME.width / 2,
+    y: FRAME.height / 2,
+    scale: 1,
+    content: { kind: 'graphics', marks: [] }
+  }
+}
+
 /** Narrow a layer's content to a kind (handy in TS-land render switches). */
 export function contentOfKind<K extends LayerContent['kind']>(
   content: LayerContent,

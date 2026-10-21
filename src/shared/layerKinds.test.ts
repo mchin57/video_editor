@@ -31,7 +31,8 @@ describe('LAYER_KINDS', () => {
   })
 
   it('keeps the capabilities the editor already had', () => {
-    // Rotation and straight-line motion: video, image, text.
+    // Rotation: video, image, text. Straight-line motion: those, plus graphics
+    // (a drawing moves/zooms as a whole; its marks are edited one by one).
     const rotatable = Object.entries(LAYER_KINDS)
       .filter(([, k]) => k.rotatable)
       .map(([id]) => id)
@@ -39,13 +40,17 @@ describe('LAYER_KINDS', () => {
     const motion = Object.entries(LAYER_KINDS)
       .filter(([, k]) => k.motion)
       .map(([id]) => id)
-    expect(motion).toEqual(['video', 'image', 'text'])
-    // Keyframes: media transform, text path, the comp kinds none (the export has no path for them).
+    expect(motion).toEqual(['video', 'image', 'text', 'graphics'])
+    // Keyframes: media + graphics transform, text path, the comp kinds none
+    // (the export has no path for them).
     expect(LAYER_KINDS.video.keyframes).toBe('transform')
     expect(LAYER_KINDS.image.keyframes).toBe('transform')
+    expect(LAYER_KINDS.graphics.keyframes).toBe('transform')
     expect(LAYER_KINDS.text.keyframes).toBe('path')
     expect(LAYER_KINDS.layout.keyframes).toBe('none')
     expect(LAYER_KINDS.compound.keyframes).toBe('none')
+    // A graphics layer has no box handles: its marks carry their own.
+    expect(LAYER_KINDS.graphics.handles).toBe('none')
   })
 })
 

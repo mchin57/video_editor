@@ -1,7 +1,8 @@
-/** Inspector ▸ the selected LAYER (video, image, text, layout, compound clip). */
+/** Inspector ▸ the selected LAYER (video, image, text, layout, compound clip, graphics). */
 
 import { type JSX } from 'react'
 import { layerFitScale } from '@shared/layers'
+import { shiftMarks } from '@shared/graphics'
 import { assetAspect } from '@shared/media'
 import { kindInfo, layerMediaId } from '@shared/layerKinds'
 import { useLibrary } from '@/hooks/useMedia'
@@ -15,6 +16,7 @@ import { useLinkGroupSize, useMaxEndSec, LinkedNote, useDeleteTile, LiveRange, s
 import { MotionFields, KeyframesSection } from './Motion'
 import { TextAnimationFields, LayerTextInput, TextEffectsFields } from './TextFields'
 import { VideoClipSections } from './VideoSections'
+import { GraphicsSection } from './GraphicsSection'
 
 export function LayerEditor(): JSX.Element | null {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
@@ -60,6 +62,9 @@ export function LayerEditor(): JSX.Element | null {
 
       {linked && <LinkedNote size={groupSize} />}
 
+      {/* A graphics tile is all about its marks: the drawing tools come first. */}
+      {c.kind === 'graphics' && <GraphicsSection layer={layer} content={c} />}
+
       <CollapsibleSection id="transform" title="Transform">
         {/* Start/End each move ONE edge (a trim, not a move), so they'd change this
           tile's length out from under the rest of its group. */}
@@ -72,7 +77,16 @@ export function LayerEditor(): JSX.Element | null {
               value={layer.startSec}
               format={(v) => v.toFixed(1)}
               disabled={linked}
-              onCommit={(v) => update(id, { startSec: v })}
+              onCommit={(v) =>
+                // A graphics tile's marks are timed from its start: keep each at
+                // its moment, like a left-edge trim on the timeline does.
+                update(
+                  id,
+                  c.kind === 'graphics'
+                    ? { startSec: v, content: { ...c, marks: shiftMarks(c.marks, v - layer.startSec) } }
+                    : { startSec: v }
+                )
+              }
               className={`${inputCls} ${disabledCls}`}
             />
           </Field>

@@ -21,7 +21,7 @@ import type { LayerContent, LayerKind } from './project'
 export type KeyframeMode = 'transform' | 'path' | 'none'
 
 /** Which canvas resize handles the kind gets (sets live in PreviewStage). */
-export type ResizeHandleSet = 'media' | 'text' | 'corners'
+export type ResizeHandleSet = 'media' | 'text' | 'corners' | 'none'
 
 export interface LayerKindInfo {
   /** Inspector heading for the selected layer. */
@@ -84,6 +84,17 @@ export const LAYER_KINDS = {
     motion: false,
     keyframes: 'none',
     handles: 'media'
+  },
+  graphics: {
+    title: 'Graphics layer',
+    name: 'Graphics',
+    icon: '✏️',
+    // The drawing is edited mark by mark (point handles), not as a box; the
+    // layer moves/zooms as a whole through its Motion keyframes.
+    rotatable: false,
+    motion: true,
+    keyframes: 'transform',
+    handles: 'none'
   }
 } as const satisfies Record<LayerKind, LayerKindInfo>
 

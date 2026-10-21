@@ -53,6 +53,12 @@ export const LANE_STYLE = {
     block: 'border-orange-400/40 bg-orange-500/20',
     sel: 'border-orange-300 ring-1 ring-orange-300/50'
   },
+  graphics: {
+    dot: 'bg-yellow-400',
+    tint: 'border-yellow-400/30 bg-yellow-500/10',
+    block: 'border-yellow-400/40 bg-yellow-500/20',
+    sel: 'border-yellow-300 ring-1 ring-yellow-300/50'
+  },
   caption: {
     dot: 'bg-emerald-400',
     tint: 'border-emerald-400/30 bg-emerald-500/10',

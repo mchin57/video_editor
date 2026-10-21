@@ -1,5 +1,110 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`exporter orchestration > exports a graphics layer: one overlay per mark, following the layer keyframes 1`] = `
+{
+  "runs": [
+    {
+      "args": [
+        "-y",
+        "-hide_banner",
+        "-nostdin",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=1080x1920:r=30:d=5.000",
+        "-ss",
+        "0.000",
+        "-t",
+        "5.000",
+        "-i",
+        "C:/media/vid.mp4",
+        "-loop",
+        "1",
+        "-t",
+        "4.000",
+        "-i",
+        "<scratch>\\tmp\\job1\\r0\\graphics_0_000.png",
+        "-loop",
+        "1",
+        "-t",
+        "4.000",
+        "-i",
+        "<scratch>\\tmp\\job1\\r0\\graphics_1_000.png",
+        "-framerate",
+        "30",
+        "-i",
+        "<scratch>\\tmp\\job1\\r0\\graphics_2_%03d.png",
+        "-i",
+        "C:/media/vid.mp4",
+        "-filter_complex",
+        "[1:v]scale=1080:1920:flags=bicubic,setsar=1,format=yuv420p,setpts=PTS-STARTPTS+0.000/TB[pv1];[0:v][pv1]overlay=0:0:enable='between(t,0.000,5.000)':eof_action=repeat[v0];[2:v]format=rgba,fps=30,scale=w='trunc((if(lt(t,1.000),379.200,if(lt(t,3.000),379.200+189.600*(t-1.000)/2.000,568.800)))/2)*2':h='trunc((if(lt(t,1.000),379.200,if(lt(t,3.000),379.200+189.600*(t-1.000)/2.000,568.800)))/2)*2':eval=frame,sendcmd=f=opacity_0.cmd,colorchannelmixer@op0=aa=1.000[pi2];[v0][pi2]overlay=x='(if(lt(t,1.000),350.000,if(lt(t,3.000),350.000+-35.000*(t-1.000)/2.000,315.000)))-overlay_w/2':y='(if(lt(t,1.000),1250.000,if(lt(t,3.000),1250.000+85.000*(t-1.000)/2.000,1335.000)))-overlay_h/2':enable='between(t,1.000,4.000)'[v1];[3:v]format=rgba,fps=30,fade=t=in:st=1.500:d=0.400:alpha=1,scale=w='trunc((if(lt(t,1.000),340.000,if(lt(t,3.000),340.000+170.000*(t-1.000)/2.000,510.000)))/2)*2':h='trunc((if(lt(t,1.000),240.000,if(lt(t,3.000),240.000+120.000*(t-1.000)/2.000,360.000)))/2)*2':eval=frame,sendcmd=f=opacity_1.cmd,colorchannelmixer@op1=aa=1.000[pi3];[v1][pi3]overlay=x='(if(lt(t,1.000),450.000,if(lt(t,3.000),450.000+15.000*(t-1.000)/2.000,465.000)))-overlay_w/2':y='(if(lt(t,1.000),400.000,if(lt(t,3.000),400.000+-340.000*(t-1.000)/2.000,60.000)))-overlay_h/2':enable='between(t,1.500,4.000)'[v2];[4:v]tpad=stop_mode=clone:stop_duration=1.567,setpts=PTS-STARTPTS+2.000/TB,format=rgba,fps=30,scale=w='trunc((if(lt(t,1.000),300.000,if(lt(t,3.000),300.000+150.000*(t-1.000)/2.000,450.000)))/2)*2':h='trunc((if(lt(t,1.000),340.000,if(lt(t,3.000),340.000+170.000*(t-1.000)/2.000,510.000)))/2)*2':eval=frame,sendcmd=f=opacity_2.cmd,colorchannelmixer@op2=aa=1.000[pi4];[v2][pi4]overlay=x='(if(lt(t,1.000),670.000,if(lt(t,3.000),670.000+125.000*(t-1.000)/2.000,795.000)))-overlay_w/2':y='(if(lt(t,1.000),750.000,if(lt(t,3.000),750.000+-165.000*(t-1.000)/2.000,585.000)))-overlay_h/2':enable='between(t,2.000,4.000)'[v3];[5:a]atrim=0.000:5.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=1.000[ac0];[ac0]anull[aout]",
+        "-map",
+        "[v3]",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "h264_nvenc",
+        "-preset",
+        "p5",
+        "-rc",
+        "vbr",
+        "-cq",
+        "23",
+        "-b:v",
+        "0",
+        "-r",
+        "30",
+        "-fps_mode",
+        "cfr",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        "<scratch>\\out\\graphics.mp4.part.mp4",
+      ],
+      "files": {
+        "opacity_0.cmd": "1.000-3.000 [expr] colorchannelmixer@op0 aa 'lerp(1.000,0.500,TI)';
+3.000-3603.000 [expr] colorchannelmixer@op0 aa '0.500';
+",
+        "opacity_1.cmd": "1.000-3.000 [expr] colorchannelmixer@op1 aa 'lerp(1.000,0.500,TI)';
+3.000-3603.000 [expr] colorchannelmixer@op1 aa '0.500';
+",
+        "opacity_2.cmd": "1.000-3.000 [expr] colorchannelmixer@op2 aa 'lerp(1.000,0.500,TI)';
+3.000-3603.000 [expr] colorchannelmixer@op2 aa '0.500';
+",
+      },
+    },
+  ],
+  "svgRendered": [
+    {
+      "count": 1,
+      "height": 568,
+      "last": "<svg xmlns="http://www.w3.org/2000/svg" width="568" height="568" viewBox="160.4 1060.4 379.2 379.2" preserveAspectRatio="none"><path d="M200 1400 L486.14 1113.86" fill="none" stroke="#FFD60A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><path d="M500 1100 L492.08 1131.68 L468.32 1107.92 Z" fill="#FFD60A" stroke="#FFD60A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>",
+      "width": 568,
+    },
+    {
+      "count": 1,
+      "height": 360,
+      "last": "<svg xmlns="http://www.w3.org/2000/svg" width="510" height="360" viewBox="280 280 340 240" preserveAspectRatio="none"><path d="M450 300 L580 300 L583.9 300.38 L587.65 301.52 L591.11 303.37 L594.14 305.86 L596.63 308.89 L598.48 312.35 L599.62 316.1 L600 320 L600 480 L599.62 483.9 L598.48 487.65 L596.63 491.11 L594.14 494.14 L591.11 496.63 L587.65 498.48 L583.9 499.62 L580 500 L320 500 L316.1 499.62 L312.35 498.48 L308.89 496.63 L305.86 494.14 L303.37 491.11 L301.52 487.65 L300.38 483.9 L300 480 L300 320 L300.38 316.1 L301.52 312.35 L303.37 308.89 L305.86 305.86 L308.89 303.37 L312.35 301.52 L316.1 300.38 L320 300 L450 300 Z" fill="#ffd60a66" stroke="#FFD60A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>",
+      "width": 510,
+    },
+    {
+      "count": 13,
+      "height": 510,
+      "last": "<svg xmlns="http://www.w3.org/2000/svg" width="450" height="510" viewBox="520 580 300 340" preserveAspectRatio="none"><path d="M800 900 L540 900 L540 600" fill="none" stroke="#FFD60A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><path d="M618 900 L617.91 896.17 L617.62 892.35 L617.16 888.56 L616.5 884.78 L615.66 881.05 L614.64 877.36 L613.44 873.72 L612.06 870.15 L610.51 866.65 L608.79 863.23 L606.9 859.9 L604.85 856.67 L602.65 853.54 L600.29 850.52 L597.79 847.62 L595.15 844.85 L592.38 842.21 L589.48 839.71 L586.46 837.35 L583.33 835.15 L580.1 833.1 L576.77 831.21 L573.35 829.49 L569.85 827.94 L566.28 826.56 L562.64 825.36 L558.95 824.34 L555.22 823.5 L551.44 822.84 L547.65 822.38 L543.83 822.09 L540 822" fill="none" stroke="#FFD60A" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/></svg>",
+      "width": 450,
+    },
+  ],
+}
+`;
+
 exports[`exporter orchestration > exports a project using every layer kind 1`] = `
 {
   "laidOut": [

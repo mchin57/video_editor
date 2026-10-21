@@ -3,7 +3,8 @@
  * steps on a `CompositionRender` (its visuals, its audio). `exportLayer`
  * dispatches with an exhaustive switch, so a new layer kind without an
  * exporter doesn't compile. Text layers live in exportText.ts with captions —
- * the two are one thing (docs/SHARED.md "Burned text").
+ * the two are one thing (docs/SHARED.md "Burned text"); graphics layers in
+ * exportGraphics.ts.
  */
 
 import type { CellRect, CompoundContent, ImageContent, Layer, LayoutContent, VideoContent } from '@shared/project'
@@ -20,6 +21,7 @@ import { eqFilter, r } from './ffmpegFilters'
 import type { ExportVideo } from './exporterArgs'
 import type { CompositionRender, Prerendered } from './exportRender'
 import { exportTextLayer } from './exportText'
+import { exportGraphicsLayer } from './exportGraphics'
 
 /** Add a visible layer's compositor steps to the pass. */
 export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
@@ -35,6 +37,8 @@ export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
       return exportCompoundLayer(pass, l, c)
     case 'text':
       return exportTextLayer(pass, l, c)
+    case 'graphics':
+      return exportGraphicsLayer(pass, l, c)
     default:
       return assertNever(c, 'layer kind')
   }

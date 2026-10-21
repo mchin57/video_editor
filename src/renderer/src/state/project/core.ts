@@ -10,6 +10,7 @@
 
 import type { StoreApi } from 'zustand'
 import type { Composition, Layer, Project, VideoContent } from '@shared/project'
+import type { GraphicMark } from '@shared/graphics'
 import { migrateProject } from '@shared/project'
 import {
   MAX_COMP_DEPTH,
@@ -179,6 +180,17 @@ export const mapVideoLayer = (
   id: string,
   fn: (l: Layer, content: VideoContent) => Layer
 ): Composition => mapLayer(c, id, (l) => (l.content.kind === 'video' ? fn(l, l.content) : l))
+
+/** `c` with GRAPHICS layer `id`'s marks replaced by `fn(marks)`; any other
+ *  kind is left as it is. */
+export const mapGraphicsMarks = (
+  c: Composition,
+  id: string,
+  fn: (marks: GraphicMark[]) => GraphicMark[]
+): Composition =>
+  mapLayer(c, id, (l) =>
+    l.content.kind === 'graphics' ? { ...l, content: { ...l.content, marks: fn(l.content.marks) } } : l
+  )
 
 /** Build the document core: its `Doc` for the slices, and its own state and
  *  history actions. */

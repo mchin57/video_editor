@@ -19,6 +19,7 @@ import { DEFAULT_PRESET_ID, isPresetId, type PresetId } from './formats'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
 import type { AudioFx } from './audioFx'
+import type { GraphicMark } from './graphics'
 import type { TextEffects } from './sparkle'
 import type { TextAnimation } from './textAnim'
 
@@ -344,7 +345,19 @@ export interface CompoundContent {
   comp: Composition
 }
 
-export type LayerContent = VideoContent | ImageContent | TextContent | LayoutContent | CompoundContent
+/**
+ * Shapes and telestrator marks (arrows, lines, rectangles, ellipses, angles)
+ * drawn over the picture, each appearing at its own time inside the layer
+ * window. Marks are in canonical px before the layer transform, which moves/
+ * zooms the whole drawing (keyframes included). How a mark looks and reveals
+ * is `shared/graphics.ts` — the preview and the export both draw from it.
+ */
+export interface GraphicsContent {
+  kind: 'graphics'
+  marks: GraphicMark[]
+}
+
+export type LayerContent = VideoContent | ImageContent | TextContent | LayoutContent | CompoundContent | GraphicsContent
 export type LayerKind = LayerContent['kind']
 
 /**
@@ -394,14 +407,14 @@ export interface Layer {
    * Free-angle rotation, CLOCKWISE degrees about the box centre (absent = 0).
    * A layer transform like x/y/scale — applied to the whole sized box, after
    * any crop — so it never changes the box's shape or fit. Honored for video,
-   * image and text layers (preview + export); layout and compound layers ignore
-   * it (no rotate handle is offered on them). One model with
+   * image and text layers (preview + export); layout, compound and graphics
+   * layers ignore it (no rotate handle is offered on them). One model with
    * `CaptionStyle.rotationDeg`; all the math lives in `shared/rotation.ts`.
    */
   rotationDeg?: number
   /**
    * Position/scale keyframes (absent/empty = static base transform). Honored
-   * for video and image layers by preview and export (`layerTransformAt`);
+   * for video, image and graphics layers by preview and export (`layerTransformAt`);
    * text layers ignore them (they animate via `TextContent.animation`).
    */
   keyframes?: LayerKeyframe[]
@@ -775,7 +788,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 26
+export const PROJECT_VERSION = 27
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1104,6 +1117,8 @@ export function migrateProject(raw: unknown): Project {
   // rewrite is the level list itself (normalised on every load, so a
   // hand-edited file can't lose Default either).
   p.volumeLevels = normalizeVolumeLevels(p.volumeLevels)
+  // v27 adds the `graphics` layer content kind (shapes + telestrator marks,
+  // shared/graphics.ts) — purely additive, old projects simply have none.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

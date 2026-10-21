@@ -30,6 +30,7 @@ import {
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
+import { shiftMarks } from '@shared/graphics'
 import { CLICK_SLOP, SNAP_PX } from './constants'
 
 export interface TileDragDeps {
@@ -261,7 +262,17 @@ export function useTileDrags({
                 const c = layer.content
                 return trimVideoStart(layer, c, clamp(sourceAfterPlayed(c, c.inSec, d), 0, c.outSec - 0.1))
               }
-              return { ...l, startSec: clamp(snapSec(startSec + d), 0, l.endSec - 0.2) }
+              const ns = clamp(snapSec(startSec + d), 0, l.endSec - 0.2)
+              // Graphics marks are timed from the start: re-base them (from the
+              // drag-start snapshot) so each keeps its moment on the clip.
+              if (layer.content.kind === 'graphics') {
+                return {
+                  ...l,
+                  startSec: ns,
+                  content: { ...layer.content, marks: shiftMarks(layer.content.marks, ns - layer.startSec) }
+                }
+              }
+              return { ...l, startSec: ns }
             }
             // end
             if (layer.content.kind === 'video') {

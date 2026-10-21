@@ -4,6 +4,7 @@
  *  which re-time a clip, are in videoTimingActions.ts. */
 
 import type { CropRect, ImageContent, Layer, LayoutCell, TextContent, VideoContent } from '@shared/project'
+import type { GraphicMark } from '@shared/graphics'
 import { videoSpeed } from '@shared/project'
 import {
   MAX_COMP_DEPTH,
@@ -37,7 +38,7 @@ import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
 import { applyTextEdits } from '@/lib/textEdits'
 import { useUi } from '@/state/ui'
 import { useAppSettings } from '@/state/appSettings'
-import { activeComp, mapLayer, mapVideoLayer, projectFormat, type Doc } from './core'
+import { activeComp, mapGraphicsMarks, mapLayer, mapVideoLayer, projectFormat, type Doc } from './core'
 
 /** A partial patch over a layer's content (the caller guards the content kind).
  *  A union of partials rather than Record<string, unknown> so a typo'd field
@@ -83,6 +84,10 @@ export interface LayerActions {
   convertLayerToComp: (layerId: string) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
   updateLayerContent: (id: string, patch: ContentPatch) => void
+  /** Rewrite graphics layer `id`'s marks (add / edit / remove / reorder) as
+   *  ONE undo step. Canvas drags go through `liveUpdate` + `mapGraphicsMarks`
+   *  instead, committing once on release. */
+  updateGraphicsMarks: (id: string, fn: (marks: GraphicMark[]) => GraphicMark[]) => void
   /** Set (or clear, with `null`) a video layer's crop. The crop reshapes the
    *  clip's aspect, so its scale follows (`rescaleForAspect`) to keep its size
    *  RELATIVE TO THE FRAME — "Crop to 16:9" fills a 16:9 frame the way "Crop to
@@ -255,6 +260,8 @@ export const layerActions = ({ get, commit, commitComp }: Doc): LayerActions => 
 
   updateLayerContent: (id, patch) =>
     commitComp((p) => mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))),
+
+  updateGraphicsMarks: (id, fn) => commitComp((p) => mapGraphicsMarks(p, id, fn)),
 
   setVideoCrop: (id, crop, sourceAspect) => {
     const frame = projectFormat(get()).frame
