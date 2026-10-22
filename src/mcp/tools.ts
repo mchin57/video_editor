@@ -165,6 +165,26 @@ export function registerTools(server: McpServer, call: CallEditor): void {
   )
 
   server.registerTool(
+    'link_items',
+    {
+      description:
+        "Link timeline items so they move, split and delete together, like the timeline's Link button. ids: layers and audio clips from get_timeline, captions from get_text; at least two that can be linked (layout layers cannot). Groups the items already belong to are merged in whole. Returns the whole group after linking and its linkGroupId. One undo step.",
+      inputSchema: { ids: z.array(z.string()).min(2) }
+    },
+    async (args) => result(await call('link_items', args))
+  )
+
+  server.registerTool(
+    'unlink_items',
+    {
+      description:
+        "Unlink timeline items, like the timeline's Unlink button: the WHOLE group each id belongs to is broken up, so every member can then be moved or deleted on its own. ids from get_timeline / get_text. Returns every item that was unlinked (empty when none was linked). One undo step.",
+      inputSchema: { ids: z.array(z.string()).min(1) }
+    },
+    async (args) => result(await call('unlink_items', args))
+  )
+
+  server.registerTool(
     'undo',
     {
       description:
