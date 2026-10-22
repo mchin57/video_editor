@@ -163,7 +163,7 @@ export function captionInWindow(seg: CaptionSegment, startSec: number, endSec: n
   return { ...seg, startSec, endSec, words }
 }
 
-/** The text a hand-added caption starts with (＋ Caption). */
+/** The text a hand-added caption starts with (Insert ▸ Caption). */
 export const NEW_CAPTION_TEXT = 'Your caption here'
 
 /**

@@ -11,6 +11,7 @@ import { layerTransformAt } from '@shared/layers'
 import { extractedAudioClip } from '@shared/volumeLevels'
 import { playedBetween, sourceAfterPlayed } from '@shared/speed'
 import { clamp } from '@shared/math'
+import { shiftMarks } from '@shared/graphics'
 
 /** Cut tolerance shared by every split below (and mirrored by
  *  `splittableAt` in `lib/links.ts`, which decides whether to offer the cut). */
@@ -137,7 +138,7 @@ export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => strin
 }
 
 /**
- * Split a TEXT or IMAGE layer at absolute timeline time `atSec` into
+ * Split a TEXT, IMAGE or GRAPHICS layer at absolute timeline time `atSec` into
  * [left, right], or null if the cut falls at/outside its span (or the layer is a
  * video/layout — those go through `splitVideoLayer`, or aren't splittable).
  *
@@ -149,15 +150,25 @@ export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => strin
  * - a text entrance/exit animation — the left half keeps the ENTRANCE and the
  *   right half keeps the EXIT (copying both onto both halves would replay the
  *   animation mid-block). `wordHighlight` is the exception: it spans the whole
- *   window rather than being an entrance, so both halves keep it.
+ *   window rather than being an entrance, so both halves keep it;
+ * - graphics marks (start-relative `atSec`): the left half keeps those that
+ *   appear before the cut, the right half all of them re-based to its start
+ *   (`shiftMarks` — one already on screen stays on, without revealing again).
  */
 export function splitStaticLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
   const kind = layer.content.kind
-  if (kind !== 'text' && kind !== 'image') return null
+  if (kind !== 'text' && kind !== 'image' && kind !== 'graphics') return null
   if (atSec <= layer.startSec + EPS || atSec >= layer.endSec - EPS) return null
   const [leftKfs, rightKfs] = splitLayerKeyframes(layer, atSec)
   const left: Layer = { ...layer, endSec: atSec, keyframes: leftKfs }
   const right: Layer = { ...layer, id: makeId(), startSec: atSec, keyframes: rightKfs }
+  if (layer.content.kind === 'graphics') {
+    const cut = atSec - layer.startSec
+    const marks = layer.content.marks
+    left.content = { ...layer.content, marks: marks.filter((m) => m.atSec < cut) }
+    // Fresh ids: the two halves are separate tiles with their own marks.
+    right.content = { ...layer.content, marks: shiftMarks(marks, cut).map((m) => ({ ...m, id: makeId() })) }
+  }
   const anim = layer.content.kind === 'text' ? layer.content.animation : null
   if (layer.content.kind === 'text' && anim) {
     const spansWindow = anim.in === 'wordHighlight'
@@ -247,6 +258,11 @@ export function trimLayerEdge(layer: Layer, edge: TrimEdge, deltaSec: number, sr
         : trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc))
   } else if (edge === 'start') {
     tile = { ...layer, startSec: clamp(layer.startSec + deltaSec, 0, layer.endSec - MIN_LAYER_SEC) }
+    // Graphics marks are timed from the start: re-base them so each keeps its
+    // moment on the clip underneath instead of riding the edge.
+    if (c.kind === 'graphics') {
+      tile.content = { ...c, marks: shiftMarks(c.marks, tile.startSec - layer.startSec) }
+    }
   } else {
     tile = { ...layer, endSec: Math.max(layer.startSec + MIN_LAYER_SEC, layer.endSec + deltaSec) }
   }

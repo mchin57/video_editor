@@ -18,7 +18,7 @@ import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, vid
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { assetAspect, assetKind } from '@shared/media'
-import { layerLabel, makeImageLayer, makeTextLayer, visualDuration } from '@shared/layers'
+import { layerLabel, makeImageLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
@@ -40,7 +40,6 @@ import {
 } from '@/lib/links'
 import { edgeAutoScroll, startPointerDrag } from '@/lib/pointerDrag'
 import { snap } from '@/lib/snap'
-import { makeCaption } from '@/lib/captions'
 import { formatTick, niceTimeStep, scaleTicks } from '@/lib/timescale'
 import { waveformUrl } from '@/ipc/client'
 import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/components/ui'
@@ -105,8 +104,6 @@ export function Timeline(): JSX.Element {
   const isSelected = (kind: TimelineItemRef['kind'], id: string): boolean => selKeys.has(refKey({ kind, id }))
 
   const addLayer = useProject((s) => s.addLayer)
-  const addCaption = useProject((s) => s.addCaption)
-  const selectCaption = useUi((s) => s.selectCaption)
   const addVideoLayer = useProject((s) => s.addVideoLayer)
   const addAudioClip = useProject((s) => s.addAudioClip)
   const removeItems = useProject((s) => s.removeItems)
@@ -173,15 +170,18 @@ export function Timeline(): JSX.Element {
     const layout = layers.filter((l) => layerLane(l) === 'layout')
     const text = layers.filter((l) => layerLane(l) === 'text')
     const image = layers.filter((l) => layerLane(l) === 'image')
+    const graphics = layers.filter((l) => layerLane(l) === 'graphics')
     return {
       video,
       layout,
       text,
       image,
+      graphics,
       vRows: packRows(video.map(spanOf)),
       lRows: packRows(layout.map(spanOf)),
       tRows: packRows(text.map(spanOf)),
-      iRows: packRows(image.map(spanOf))
+      iRows: packRows(image.map(spanOf)),
+      gRows: packRows(graphics.map(spanOf))
     }
   }, [layers])
   const capRows = useMemo(() => packRows(captionSegs.map(spanOf)), [captionSegs])
@@ -193,13 +193,18 @@ export function Timeline(): JSX.Element {
   const fxRows = useMemo(() => packAudioRows(fxClips, assetById), [fxClips, assetById])
 
   // Lane layout: Clips / Text / Image always show (≥1 row as drop targets),
-  // Captions only when present, Audio always.
+  // Graphics and Captions only when present, Audio always.
   const laneDefs = [
     { key: 'clips' as const, label: 'Clips', rows: rowCount(grouped.vRows) },
     // Layout lane only when a layout exists (rare enough not to burn a band).
     ...(grouped.layout.length > 0 ? [{ key: 'layout' as const, label: 'Layout', rows: rowCount(grouped.lRows) }] : []),
     { key: 'text' as const, label: 'Text', rows: rowCount(grouped.tRows) },
     { key: 'image' as const, label: 'Image', rows: rowCount(grouped.iRows) },
+    // Graphics (shapes + telestrator marks) only once a tile exists: nothing
+    // drops onto it — tiles come from Insert ▸ Graphics.
+    ...(grouped.graphics.length > 0
+      ? [{ key: 'graphics' as const, label: 'Graphics', rows: rowCount(grouped.gRows) }]
+      : []),
     ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
     { key: 'audio' as const, label: 'Audio', rows: rowCount(audRows) },
     ...(fxClips.length > 0 ? [{ key: 'fx' as const, label: 'FX', rows: rowCount(fxRows) }] : [])
@@ -358,25 +363,10 @@ export function Timeline(): JSX.Element {
   }, [comp])
   const isLinkedTile = (gid: string | undefined): boolean => !!gid && linkedGroups.has(gid)
 
-  const addText = (): void => {
-    const id = newId()
-    const start = usePlayback.getState().time
-    addLayer(makeTextLayer(id, start, start + 3, getFormat().frame))
-    selectLayer(id)
-  }
-
-  /** A caption at the playhead, in the lane-wide caption style like every other. */
-  const addCaptionAtPlayhead = (): void => {
-    const id = newId()
-    const start = usePlayback.getState().time
-    addCaption(makeCaption(id, start, start + 2))
-    selectCaption(id)
-  }
-
   // Render one layer block within its lane.
   const layerBlock = (
     l: Layer,
-    laneKey: 'clips' | 'layout' | 'text' | 'image',
+    laneKey: 'clips' | 'layout' | 'text' | 'image' | 'graphics',
     rows: Map<string, number>
   ): JSX.Element => {
     const left = l.startSec * pxPerSec
@@ -615,8 +605,6 @@ export function Timeline(): JSX.Element {
         split={{ run: splitSelected, enabled: canSplit }}
         snapToPrevious={{ run: snapSelectedToPrevious, enabled: canSnapPrev }}
         remove={{ run: deleteSelected, enabled: canDelete }}
-        addText={addText}
-        addCaption={addCaptionAtPlayhead}
         followMode={followMode}
         setFollowMode={setFollowMode}
         setPxPerSec={setPxPerSec}
@@ -693,6 +681,7 @@ export function Timeline(): JSX.Element {
             {!laneCollapsed('layout') && grouped.layout.map((l) => layerBlock(l, 'layout', grouped.lRows))}
             {!laneCollapsed('text') && grouped.text.map((l) => layerBlock(l, 'text', grouped.tRows))}
             {!laneCollapsed('image') && grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
+            {!laneCollapsed('graphics') && grouped.graphics.map((l) => layerBlock(l, 'graphics', grouped.gRows))}
 
             {/* Caption lane */}
             {!laneCollapsed('caption') &&

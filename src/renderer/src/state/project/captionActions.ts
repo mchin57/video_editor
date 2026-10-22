@@ -12,7 +12,7 @@ export interface CaptionActions {
   /** Patch one segment. New text without new words re-times the words to it. */
   updateCaption: (id: string, patch: Partial<CaptionSegment>) => void
   removeCaption: (id: string) => void
-  /** Add a caption segment (＋ Caption), kept in start order, and turn the
+  /** Add a caption segment (Insert ▸ Caption), kept in start order, and turn the
    *  caption lane on so it shows. One undo step. */
   addCaption: (seg: CaptionSegment) => void
   /** Patch the lane-wide caption style (applies to every non-overridden segment). */

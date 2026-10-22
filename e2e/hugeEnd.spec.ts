@@ -58,7 +58,8 @@ const expectUsable = async (page: Page): Promise<void> => {
   await expect(page.getByTestId('panel-error')).toHaveCount(0)
   await expect(page.getByTestId('timeline-scroll')).toBeVisible()
   const before = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length)
-  await page.getByRole('button', { name: '＋ Text' }).click()
+  await page.getByTestId('insert-menu').click()
+  await page.getByTestId('insert-text').click()
   await expect
     .poll(() => page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.length))
     .toBe(before + 1)
@@ -79,7 +80,8 @@ for (const typed of ['1e999', '300000']) {
   })
 
   test(`typing End (s) = ${typed} on a caption keeps the app usable`, async ({ appPage: page }) => {
-    await page.getByRole('button', { name: '＋ Caption' }).click()
+    await page.getByTestId('insert-menu').click()
+    await page.getByTestId('insert-caption').click()
     await typeEnd(page, typed)
     // No layers or audio: the edit is 0 s long (captions don't count, same as
     // set_text's measure), so End may reach 60 s.

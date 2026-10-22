@@ -7,6 +7,7 @@ import { StillsPopout } from '@/components/StillsPopout'
 import { ImageEditPopout } from '@/components/ImageEditPopout'
 import { ExportButton } from '@/components/ExportButton'
 import { FileMenu } from '@/components/FileMenu'
+import { InsertMenu } from '@/components/InsertMenu'
 import { ViewMenu } from '@/components/ViewMenu'
 import { FormatMenu } from '@/components/FormatMenu'
 import { ProjectSettingsMenu } from '@/components/ProjectSettingsMenu'
@@ -33,13 +34,12 @@ import {
   pathForFile
 } from '@/ipc/client'
 import { useEditor } from '@/state/store'
-import { getFormat, useProject } from '@/state/projectStore'
+import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { useAppSettings } from '@/state/appSettings'
 import { useLoudness } from '@/state/loudness'
-import { makeTextLayer } from '@shared/layers'
-import { newId } from '@shared/ids'
+import { insertText } from '@/lib/insert'
 import { useLatest } from '@/hooks/useLatest'
 
 /**
@@ -240,9 +240,14 @@ export default function App(): JSX.Element {
         e.preventDefault()
         project.redo()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Delete the whole selection (one tile, or every tile of a link group).
-        const { selection } = useUi.getState()
-        if (selection.length) {
+        // Delete the whole selection (one tile, or every tile of a link group) —
+        // or, with a graphics mark selected, just that mark.
+        const { selection, selectedLayerId, selectedMarkId } = useUi.getState()
+        if (selectedLayerId && selectedMarkId) {
+          e.preventDefault()
+          project.updateGraphicsMarks(selectedLayerId, (ms) => ms.filter((m) => m.id !== selectedMarkId))
+          useUi.getState().selectMark(null)
+        } else if (selection.length) {
           e.preventDefault()
           project.removeItems(selection)
         }
@@ -270,12 +275,14 @@ export default function App(): JSX.Element {
         const { selection } = useUi.getState()
         if (selection.length) project.toggleMuteItems(selection)
       } else if (e.key.toLowerCase() === 't') {
-        const id = newId()
-        const start = usePlayback.getState().time
-        project.addLayer(makeTextLayer(id, start, start + 3, getFormat().frame))
-        useUi.getState().selectLayer(id)
+        insertText()
       } else if (e.key === 'Escape') {
         const ui = useUi.getState()
+        // An armed drawing tool is disarmed first; the selection stays.
+        if (ui.graphicsTool) {
+          ui.setGraphicsTool(null)
+          return
+        }
         ui.setCropEditing(false)
         ui.setSettingsOpen(false)
         ui.setChecklistOpen(false)
@@ -335,11 +342,12 @@ export default function App(): JSX.Element {
         {/* One line always: labels never wrap; a running job's indicator truncates instead (JobsIndicator). */}
         <header
           data-app-header
-          className="flex items-center gap-3 whitespace-nowrap border-b border-white/10 px-4 py-2"
+          className="flex items-center gap-2 whitespace-nowrap border-b border-white/10 px-4 py-2"
         >
           <span className="text-sm font-bold tracking-tight text-zinc-100">Reel Editor</span>
           <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-zinc-400">prototype</span>
           <FileMenu />
+          <InsertMenu />
           <ViewMenu />
           <FormatMenu />
           <ProjectSettingsMenu />

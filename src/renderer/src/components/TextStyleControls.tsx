@@ -8,6 +8,7 @@ import { useBrandColors } from '@/state/brandColors'
 import { useTextStyles } from '@/state/textStyles'
 import { FontPicker } from './FontPicker'
 import { Check, Field, NumberInput, Slider, colorCls, inputCls } from './ui'
+import { getAlpha, hex6, withAlpha } from '@/lib/color'
 
 /** The styling knobs shared by a text overlay and a caption — the shared
  *  `TextStyleBase` that both `TextContent` and `CaptionStyle` extend. */
@@ -28,18 +29,6 @@ const GRADIENT_PRESETS: { name: string; from: string; to: string; angle: number 
   { name: 'Fire', from: '#FF416C', to: '#FF4B2B', angle: 90 },
   { name: 'Ice', from: '#FFFFFF', to: '#8AB4FF', angle: 180 }
 ]
-
-// --- 8-digit hex helpers (pill color carries alpha) -------------------------
-const hex6 = (c: string): string => '#' + c.replace('#', '').slice(0, 6).padEnd(6, '0')
-const getAlpha = (c: string): number => {
-  const h = c.replace('#', '')
-  return h.length >= 8 ? parseInt(h.slice(6, 8), 16) : 255
-}
-const withAlpha = (c: string, a: number): string =>
-  hex6(c) +
-  Math.max(0, Math.min(255, Math.round(a)))
-    .toString(16)
-    .padStart(2, '0')
 
 /** Saved-brand-color swatches: click to apply, ＋ saves the current color,
  *  right-click removes a swatch. */

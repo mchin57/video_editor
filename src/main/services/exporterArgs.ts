@@ -186,6 +186,15 @@ export interface ExportImage {
    *  already multiplied the static base opacity into these values. Also forces
    *  the `-loop 1` + `fps=30` frame stream (commands fire per frame). */
   opacityAnim?: OpacityAnim
+  /** An ANIMATED image (a graphics mark's draw-on): `path` is an image2
+   *  pattern of `frames` PNGs read at 30 fps, frame 0 shown at `startSec`, the
+   *  last held (tpad clone) until `endSec`. A real frame stream, so keyframes
+   *  and opacity commands apply as for a looped still. Verified — FFMPEG-NOTES
+   *  "Graphics marks". */
+  sequence?: { frames: number }
+  /** Fade the image in (alpha 0→1, linear) over this many seconds from
+   *  `startSec` — a graphics mark's fade reveal. Forces a frame stream. */
+  fadeInSec?: number
 }
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
@@ -446,10 +455,13 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     inputs.push('-ss', f3(v.inSec), '-t', f3(Math.max(0.01, v.len)), '-i', v.path)
   }
   for (const im of images) {
-    // A keyframed (transform OR opacity) image must be a real frame stream
-    // (not a single held frame) so the per-frame scale/overlay expressions —
-    // and sendcmd commands — have frames to evaluate on.
-    if ((im.keyframes && im.keyframes.length > 0) || im.opacityAnim) {
+    // A keyframed (transform OR opacity) or fading image must be a real frame
+    // stream (not a single held frame) so the per-frame scale/overlay
+    // expressions — and sendcmd commands, and the fade — have frames to
+    // evaluate on. A draw-on sequence already is one.
+    if (im.sequence) {
+      inputs.push('-framerate', '30', '-i', im.path)
+    } else if ((im.keyframes && im.keyframes.length > 0) || im.opacityAnim || im.fadeInSec) {
       inputs.push('-loop', '1', '-t', f3(Math.max(0.04, im.endSec)), '-i', im.path)
     } else {
       inputs.push('-i', im.path)
@@ -545,6 +557,15 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       const op = Math.max(0, Math.min(1, im.opacity))
       // Order: crop (source fractions) → rotate (90° steps) → flip → scale to box.
       const steps: string[] = []
+      if (im.sequence) {
+        // A draw-on: hold the finished frame to the window's end, then shift
+        // the stream so frame 0 lands at startSec — after that it runs on the
+        // output clock exactly like a looped still.
+        const hold = Math.max(0, im.endSec - im.startSec - im.sequence.frames / 30)
+        steps.push(`tpad=stop_mode=clone:stop_duration=${f3(hold)}`, `setpts=PTS-STARTPTS+${f3(im.startSec)}/TB`)
+      }
+      // A fade reveal ramps alpha from startSec (absolute: the stream runs on the output clock).
+      const fade = im.fadeInSec ? `fade=t=in:st=${f3(im.startSec)}:d=${f3(im.fadeInSec)}:alpha=1` : null
       if (im.crop) {
         const c = im.crop
         steps.push(`crop=iw*${f3(c.w)}:ih*${f3(c.h)}:iw*${f3(c.x)}:ih*${f3(c.y)}`)
@@ -568,6 +589,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         steps.push('format=rgba')
         if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
         steps.push('fps=30')
+        if (fade) steps.push(fade)
         if (irot) steps.push(rotateFilter(irot))
         const sk = irot ? rotatedKfs(ikfs, irot) : ikfs
         steps.push(`scale=w='${kfDimExpr(sk, 'w')}':h='${kfDimExpr(sk, 'h')}':eval=frame`)
@@ -575,7 +597,9 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
         if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
         if (irot) steps.push(rotateFilter(irot))
-        if (oanim) steps.push('fps=30') // real frame stream for the commands
+        // A real frame stream for the commands / the fade (a sequence is one already).
+        if ((oanim || fade) && !im.sequence) steps.push('fps=30')
+        if (fade) steps.push(fade)
       }
       if (oanim) {
         // Keyframed opacity (the exporter baked the static base opacity into

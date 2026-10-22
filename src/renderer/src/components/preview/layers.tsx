@@ -1,4 +1,4 @@
-/** Preview ▸ layers: `StackLayer` (how ONE layer renders, at any depth) and `CompFill` (a whole composition composited into a rect). */
+/** Preview ▸ layers: `StackLayer` (how ONE layer renders, at any depth) and `CompFill` (a whole composition composited into a rect). Graphics layers render in `graphics.tsx`. */
 
 import {
   useContext,
@@ -46,6 +46,7 @@ import { pct, FrameCtx, frameCanvasStyle } from './frame'
 import { mediaBox, withKeyframedTransform, layerRotation, flipTransform, videoFillStyle, mediaAspect } from './geometry'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
+import { StackGraphics } from './graphics'
 
 /** One composited video layer: a <video> that follows the master clock. */
 function VideoLayerView({
@@ -314,6 +315,18 @@ export function StackLayer(props: StackLayerProps): JSX.Element | null {
       return <StackCompound {...view} content={c} />
     case 'text':
       return <StackText {...view} content={c} />
+    case 'graphics':
+      return (
+        <StackGraphics
+          layer={layer}
+          rawLayer={props.rawLayer}
+          content={c}
+          z={props.z}
+          time={props.time}
+          selected={props.selected}
+          editable={!!props.editable}
+        />
+      )
     default:
       return assertNever(c, 'layer kind')
   }

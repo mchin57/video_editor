@@ -1,5 +1,6 @@
 /** Timeline ▸ the transport / edit toolbar: play, time, the selection's link /
- *  split / snap / delete, add text or caption, follow mode, zoom, undo / redo. */
+ *  split / snap / delete, follow mode, zoom, undo / redo. (New text, captions
+ *  and graphics come from the header's Insert menu.) */
 
 import type { JSX } from 'react'
 import { clamp } from '@shared/math'
@@ -24,8 +25,6 @@ export function TimelineToolbar({
   split,
   snapToPrevious,
   remove,
-  addText,
-  addCaption,
   followMode,
   setFollowMode,
   setPxPerSec
@@ -38,8 +37,6 @@ export function TimelineToolbar({
   split: SelectionAction
   snapToPrevious: SelectionAction
   remove: SelectionAction
-  addText: () => void
-  addCaption: () => void
   followMode: FollowMode
   setFollowMode: (mode: FollowMode) => void
   setPxPerSec: (next: (p: number) => number) => void
@@ -95,15 +92,6 @@ export function TimelineToolbar({
         disabled={!snapToPrevious.enabled}
       >
         ⇤ Snap
-      </ToolbarButton>
-      <ToolbarButton title="Add a text layer at the playhead (T)" onClick={addText}>
-        ＋ Text
-      </ToolbarButton>
-      <ToolbarButton
-        title="Add a caption at the playhead, in the caption style (turns the caption lane on)"
-        onClick={addCaption}
-      >
-        ＋ Caption
       </ToolbarButton>
       <ToolbarButton
         title="Delete the selection — every selected tile (Del)"

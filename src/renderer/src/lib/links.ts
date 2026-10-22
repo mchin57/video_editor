@@ -64,7 +64,7 @@ export const refKeys = (refs: TimelineItemRef[]): Set<string> => new Set(refs.ma
 export type SourceDuration = (mediaId: string) => number
 
 /** The timeline's visual bands, in render order. */
-export type TileLane = 'clips' | 'layout' | 'text' | 'image' | 'caption' | 'audio' | 'fx'
+export type TileLane = 'clips' | 'layout' | 'text' | 'image' | 'graphics' | 'caption' | 'audio' | 'fx'
 
 /**
  * Which band a layer is drawn in. The ONE definition — `timelineTiles` fills
@@ -81,6 +81,8 @@ export function layerLane(l: Layer): TileLane {
       return 'text'
     case 'image':
       return 'image'
+    case 'graphics':
+      return 'graphics'
     default:
       return 'clips'
   }

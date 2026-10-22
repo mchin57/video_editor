@@ -95,7 +95,7 @@ describe('buildTimelineCaptions', () => {
   })
 })
 
-describe('makeCaption (＋ Caption)', () => {
+describe('makeCaption (Insert ▸ Caption)', () => {
   it('follows the lane style (no override) and spreads its words over the window', () => {
     const seg = makeCaption('c1', 4, 6)
     expect(seg).toMatchObject({ id: 'c1', startSec: 4, endSec: 6, text: NEW_CAPTION_TEXT, enabled: true })

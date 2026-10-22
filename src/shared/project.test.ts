@@ -3,6 +3,7 @@ import {
   PROJECT_VERSION,
   DEFAULT_CAPTION_STYLE,
   audioClipAudible,
+  createEmptyProject,
   effectiveCaptionStyle,
   effectiveStabilize,
   migrateProject,
@@ -495,5 +496,39 @@ describe('migrateProject v23 (layer rotation + video flips)', () => {
     expect(migrateProject({ version: 23, preset: 'reel', layers: [layer], audioClips: [] }).layers[0].rotationDeg).toBe(
       -30
     )
+  })
+})
+
+describe('migrateProject — graphics layers (v27)', () => {
+  it('stamps a v26 document as v27 and keeps a graphics layer (with its marks) as saved', () => {
+    const marks = [
+      {
+        id: 'm',
+        tool: 'angle',
+        points: [
+          { x: 1, y: 2 },
+          { x: 3, y: 4 },
+          { x: 5, y: 6 }
+        ],
+        color: '#ffd60a',
+        widthPx: 8,
+        atSec: 0.5,
+        reveal: 'draw'
+      }
+    ]
+    const graphics = {
+      id: 'G',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'graphics', marks }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 26, layers: [graphics] })
+    expect(PROJECT_VERSION).toBe(27)
+    expect(p.version).toBe(27)
+    expect(p.layers[0]).toEqual(graphics)
   })
 })

@@ -1,12 +1,15 @@
 /**
  * The export's Chromium: a hidden, transparent Electron window that draws text
- * blocks with the SAME CSS the preview uses (`shared/textStyle.ts`). Two jobs:
+ * blocks with the SAME CSS the preview uses (`shared/textStyle.ts`), and
+ * graphics marks with the SAME SVG (`shared/graphics.ts`). Three jobs:
  *
  *  - RENDER gradient text/captions (and fixed-width text) to a transparent,
  *    output-sized PNG composited as an overlay — libass has no gradients.
  *  - LAY OUT every block libass burns (text layers and captions alike): line
  *    breaks, line positions and pill boxes come back from here, so each line
  *    burns exactly where the preview put it (see `textLayout.ts`).
+ *  - RENDER graphics marks (shapes, telestrator) to transparent PNGs, one per
+ *    mark — and one per frame of a draw-on.
  *
  * One window is reused for the whole export. All geometry is in OUTPUT px (the
  * exporter pre-scales). If it fails the caller falls back (a flat ASS burn for
@@ -154,10 +157,32 @@ export function normaliseCapture(img: NativeImage, width: number, height: number
   throw new Error(`text capture was ${w}x${h}, expected ${width}x${height} (cropped, not scaled)`)
 }
 
+/** The page a graphics mark's SVG is drawn on: transparent, the bundled faces
+ *  loaded (an angle's label), the SVG pinned to the top-left corner. */
+export function buildSvgPageHtml(W: number, H: number, fontsDir: string | null): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;width:${W}px;height:${H}px;background:transparent;overflow:hidden}
+${fontFaceCss(fontsDir)}
+#art{position:absolute;left:0;top:0;line-height:0}
+</style></head><body><div id="art"></div></body></html>`
+}
+
+/** Swap the SVG on the page, then wait for its fonts and two painted frames.
+ *  `fonts.ready` alone can resolve before the swap's style recalc has even
+ *  requested a label's face, so each label's font is loaded explicitly. */
+const showSvgScript = (svg: string): string =>
+  `(async()=>{const art=document.getElementById('art');art.innerHTML=${JSON.stringify(svg)};` +
+  `const fonts=[...art.querySelectorAll('text')].map(t=>getComputedStyle(t).fontSize+' '+(t.getAttribute('font-family')||''));` +
+  `try{await Promise.all(fonts.map(f=>document.fonts.load(f)));await document.fonts.ready}catch{};` +
+  `await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true})()`
+
 /** A reusable off-screen text rasteriser for one export run. */
 export interface TextRenderer {
   /** Render `spec` to `outPath` (a .png). Throws on failure. */
   render: (spec: TextImageSpec, outPath: string) => Promise<void>
+  /** Rasterise each SVG (`width`×`height` px, which must fit the window) to
+   *  its PNG in `outPaths`, on one page load. Throws on failure. */
+  renderSvgs: (svgs: string[], width: number, height: number, outPaths: string[]) => Promise<void>
   /** Lay every block out with the preview's CSS and report its lines (one
    *  page, one pass). Throws on failure. */
   layout: (specs: TextImageSpec[]) => Promise<LaidOutLine[][]>
@@ -211,6 +236,22 @@ export function createTextRenderer(
       await delay(70) // let a frame paint after show
       const img = await w.webContents.capturePage()
       await fsp.writeFile(outPath, normaliseCapture(img, width, height).toPNG())
+    },
+    async renderSvgs(svgs, w, h, outPaths) {
+      if (w > width || h > height) throw new Error(`mark raster ${w}x${h} exceeds the ${width}x${height} window`)
+      const win = ensureWin()
+      const htmlPath = join(tmpDir, `svg_page_${n++}.html`)
+      await fsp.writeFile(htmlPath, buildSvgPageHtml(width, height, fontsDir), 'utf8')
+      await win.loadFile(htmlPath)
+      win.showInactive()
+      await delay(70) // let a frame paint after show
+      for (let i = 0; i < svgs.length; i++) {
+        await win.webContents.executeJavaScript(showSvgScript(svgs[i]))
+        // A sub-rect capture comes back at the device scale like a full one —
+        // the same cropped-vs-scaled guard applies.
+        const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h })
+        await fsp.writeFile(outPaths[i], normaliseCapture(img, w, h).toPNG())
+      }
     },
     async layout(specs) {
       if (specs.length === 0) return []

@@ -310,6 +310,31 @@ black + `signalstats` YAVG readbacks (drives `buildOpacityCmdLines` /
 - A still image needs the `-loop 1` + `fps=30` treatment (like transform
   keyframes) so there are frames for the commands to fire on.
 
+## Graphics marks — draw-on sequences & alpha fade-in (verified ffmpeg 8.1.1, 2026-10-21)
+
+Each graphics mark is an ordinary image overlay (`exportGraphics.ts`); its
+two reveals add two input shapes. Verified with synthesized RGBA PNGs (a red
+bar growing 15px per frame) composited the compositor's way (base canvas +
+`overlay enable` + `-r 30 -fps_mode cfr`), counting red pixels per frame:
+
+- **Draw-on = image2 sequence + `tpad` + `setpts`.** `-framerate 30 -i
+  mark_%03d.png` (frames numbered from 000 — image2 finds a start in 0–4) →
+  `tpad=stop_mode=clone:stop_duration=<hold>` → `setpts=PTS-STARTPTS+<start>/TB`.
+  Sequence frame k lands on output frame start·30 + k EXACTLY (frame 30 showed
+  frame 0's 15px, frame 36 frame 6's 105px), and the clone holds the last
+  frame to the window's end (frame 89 still full). After the shift it runs on
+  the output clock like a looped still, so keyframe `t` expressions and
+  sendcmd intervals apply unchanged.
+- **Fade = `fade=t=in:st=<start>:d=<dur>:alpha=1`** on a `-loop 1` + `fps=30`
+  stream (after `format=rgba`; `st` is absolute — the looped stream starts at
+  0). Measured: 0 at the start frame, 50% at +0.2s of a 0.4s fade, full by
+  its end (±1 frame).
+- **Testing trap:** `drawbox` on an `rgba` canvas leaves ALPHA at 0 unless
+  `replace=1` — the synthesized bars were invisible until it was set (and
+  `drawbox` has no `n` variable; generate one PNG per frame instead).
+- The whole path, Chromium raster included, is pinned on real pixels by
+  `e2e/graphicsExport.spec.ts` (pop / fade / draw-on / layer motion / angle label).
+
 ## adelay after atrim — poisoned PTS kills the mux (verified ffmpeg 8.1.1, 2026-07)
 
 - **An `atrim`'d stream fed into a non-zero `adelay` emits ONE frame with a

@@ -19,7 +19,8 @@ const CORNER_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw']
 export const HANDLE_SETS: Record<ResizeHandleSet, ResizeHandle[]> = {
   media: MEDIA_HANDLES,
   text: TEXT_HANDLES,
-  corners: CORNER_HANDLES
+  corners: CORNER_HANDLES,
+  none: []
 }
 /** Resize cursor for a handle on a box rotated by `deg`: the handle's outward
  *  direction, turned with the box, picks the nearest of the four cursors. */

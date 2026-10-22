@@ -55,6 +55,9 @@ item, move it into the guarded table below.
 | Gutter sync: the lane-header gutter follows a vertical scroll of the track | `e2e/timelineInteractions.spec.ts` |
 | Lane resize from the header bubble AND the bottom-edge handle, clips scaling with it; collapse/expand from the chevron and by double-clicking the bubble (blocks and handle hidden while collapsed); the Captions bubble selects the lane-wide caption style | `e2e/timelineInteractions.spec.ts` |
 | Persistence: lane heights and zoom survive a reload | `e2e/timelineInteractions.spec.ts` |
+| New tiles come from the header's Insert menu (Text / Caption / Graphics, at the playhead; the toolbar has no ＋ Text / ＋ Caption); the Graphics lane shows only once a graphics tile exists | `e2e/insertMenu.spec.ts`, `e2e/addCaption.spec.ts` |
+| Drawing on a graphics tile: an armed tool draws one mark at the playhead (drag = size, click = default, angle = three clicks) then disarms; marks drag whole and by point handles, one undo step each; Escape disarms only; a mark on an unselected tile is grabbable from the stage; arming a tool from outside the tile brings the playhead in; Delete with a mark selected removes only that mark | `e2e/graphics.spec.ts` |
+| A graphics tile's left-edge trim (lone tile and group) and S-split keep every mark at its absolute moment (re-based `atSec`; one already on screen at the new start pops, a split's right half gets fresh mark ids). The tile's Motion keyframes still ride the start edge, like an image's | `e2e/graphics.spec.ts`, `lib/timeline.test.ts` |
 
 If you change any of the above, the math change should show up as a test diff —
 if it doesn't, the logic probably drifted back inline into the component (where

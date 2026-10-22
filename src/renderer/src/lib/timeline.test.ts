@@ -12,8 +12,9 @@ import {
   trimVideoEnd,
   trimVideoStart
 } from './timeline'
-import { layerTransformAt, makeVideoLayer, playedVideoDuration } from '@shared/layers'
-import type { AudioClip, CaptionSegment, Layer, TextContent, VideoContent } from '@shared/project'
+import { layerTransformAt, makeGraphicsLayer, makeVideoLayer, playedVideoDuration } from '@shared/layers'
+import { newMark, type GraphicMark } from '@shared/graphics'
+import type { AudioClip, CaptionSegment, GraphicsContent, Layer, TextContent, VideoContent } from '@shared/project'
 
 function audio(over: Partial<AudioClip> = {}): AudioClip {
   return {
@@ -348,6 +349,23 @@ describe('edge trims report what they achieved', () => {
     expect(trimCaptionEdge(seg, 'start', 10).tile.startSec).toBe(3.9)
   })
 
+  it('re-bases graphics marks on a start trim so they keep their moment, both ways', () => {
+    const g = makeGraphicsLayer('G', 2, 8)
+    g.content = {
+      kind: 'graphics',
+      marks: [{ ...newMark('arrow', 'a', { x: 0, y: 0 }, { x: 200, y: 0 }, 3), reveal: 'draw' }]
+    }
+    const marksOf = (l: Layer): GraphicMark[] => (l.content as GraphicsContent).marks
+    // Start 1s later: the arrow still appears at 5s, now 2s into the tile.
+    expect(marksOf(trimLayerEdge(g, 'start', 1).tile)[0]).toMatchObject({ atSec: 2, reveal: 'draw' })
+    // Start 1.5s earlier: 4.5s into the tile, still at 5s.
+    expect(marksOf(trimLayerEdge(g, 'start', -1.5).tile)[0].atSec).toBeCloseTo(4.5)
+    // Trimmed past it: on screen from the new start, without revealing again.
+    expect(marksOf(trimLayerEdge(g, 'start', 4).tile)[0]).toMatchObject({ atSec: 0, reveal: 'pop' })
+    // The end edge leaves the marks alone.
+    expect(marksOf(trimLayerEdge(g, 'end', -2).tile)).toBe(marksOf(g))
+  })
+
   it('moves an audio clip’s start with its in-point, and bounds its out by the source', () => {
     const clip = audio({ startSec: 4, inSec: 2, outSec: 8 })
     const left = trimAudioEdge(clip, 'start', 1, 10)
@@ -404,6 +422,24 @@ describe('splitStaticLayer', () => {
     expect(splitStaticLayer(text(), 10, makeId)).toBeNull()
     expect(splitStaticLayer(text(), 12, makeId)).toBeNull()
     expect(splitStaticLayer(makeVideoLayer('a', 'm', 0, 10), 4, makeId)).toBeNull()
+  })
+
+  it('splits a graphics tile so every mark keeps its moment: left before the cut, right re-based', () => {
+    const g = makeGraphicsLayer('G', 2, 10)
+    const mark = (id: string, atSec: number, reveal: GraphicMark['reveal'] = 'fade'): GraphicMark => ({
+      ...newMark('line', id, { x: 0, y: 0 }, { x: 100, y: 0 }, atSec),
+      reveal
+    })
+    g.content = { kind: 'graphics', marks: [mark('early', 1), mark('late', 5, 'draw')] }
+    const [left, right] = splitStaticLayer(g, 5, makeId)! // cut 3s into the tile
+    expect((left.content as GraphicsContent).marks.map((m) => m.id)).toEqual(['early'])
+    const r = (right.content as GraphicsContent).marks
+    // Already on screen at the cut: there from the right half's start, no second reveal.
+    expect(r[0]).toMatchObject({ atSec: 0, reveal: 'pop' })
+    // Still to come: same absolute time (2 + 5 = 7 = 5 + 2).
+    expect(r[1]).toMatchObject({ atSec: 2, reveal: 'draw' })
+    // The right half's marks are its own (fresh ids).
+    expect(r.map((m) => m.id)).toEqual(['new', 'new'])
   })
 
   it('gives the entrance to the left half and the exit to the right', () => {

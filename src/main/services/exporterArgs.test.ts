@@ -283,6 +283,45 @@ describe('buildExportArgs', () => {
     )
   })
 
+  it('a draw-on mark reads its PNG sequence at 30 fps, holds the last frame and starts at its time', () => {
+    const im = {
+      path: 'C:/t/graphics_0_%03d.png',
+      boxW: 200,
+      boxH: 100,
+      x: 10,
+      y: 20,
+      startSec: 1,
+      endSec: 4,
+      opacity: 1,
+      sequence: { frames: 13 }
+    }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: im }] }), 'o').join(' ')
+    expect(s).toContain('-framerate 30 -i C:/t/graphics_0_%03d.png')
+    expect(s).not.toContain('-loop 1')
+    // 3s window − 13/30s of drawing = 2.567s held.
+    expect(s).toContain(
+      '[1:v]tpad=stop_mode=clone:stop_duration=2.567,setpts=PTS-STARTPTS+1.000/TB,scale=200:100,format=rgba[pi1]'
+    )
+    expect(s).toContain("overlay=10:20:enable='between(t,1.000,4.000)'")
+  })
+
+  it('a fading mark becomes a -loop 1 + fps=30 stream with an alpha fade from its start', () => {
+    const im = {
+      path: 'C:/t/graphics_1_000.png',
+      boxW: 200,
+      boxH: 100,
+      x: 10,
+      y: 20,
+      startSec: 1.5,
+      endSec: 4,
+      opacity: 1,
+      fadeInSec: 0.4
+    }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: im }] }), 'o').join(' ')
+    expect(s).toContain('-loop 1 -t 4.000 -i C:/t/graphics_1_000.png')
+    expect(s).toContain('[1:v]scale=200:100,format=rgba,fps=30,fade=t=in:st=1.500:d=0.400:alpha=1[pi1]')
+  })
+
   it('tempo-matches a re-timed layer audio with an atempo chain', () => {
     const s = buildExportArgs(
       plan({

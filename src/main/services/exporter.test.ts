@@ -18,7 +18,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import type { MediaAsset, ProbeInfo, VideoStreamInfo } from '@shared/media'
 import { createEmptyComposition, createEmptyProject, type AudioClip, type Layer, type Project } from '@shared/project'
-import { makeImageLayer, makeTextLayer, makeVideoLayer } from '@shared/layers'
+import { makeGraphicsLayer, makeImageLayer, makeTextLayer, makeVideoLayer } from '@shared/layers'
+import { angleMark, newMark } from '@shared/graphics'
 import { makeLayoutLayer } from '@shared/layouts'
 import { openSession } from './projectSession'
 
@@ -32,6 +33,8 @@ const runs: { args: string[]; files: Record<string, string> }[] = []
 /** What the text renderer was asked to do. */
 const rendered: unknown[] = []
 const laidOut: unknown[] = []
+/** Graphics marks rasterised: each call's size, frame count and last SVG. */
+const svgRendered: unknown[] = []
 
 vi.mock('../config', () => ({
   getSubdir: () => tmpRoot,
@@ -92,6 +95,10 @@ vi.mock('./textImage', () => ({
           return l
         })
       })
+    },
+    renderSvgs: async (svgs: string[], width: number, height: number, outPaths: string[]) => {
+      svgRendered.push({ width, height, count: svgs.length, last: svgs[svgs.length - 1] })
+      for (const out of outPaths) writeFileSync(out, 'png')
     },
     dispose: () => {}
   })
@@ -375,6 +382,7 @@ beforeEach(() => {
   runs.length = 0
   rendered.length = 0
   laidOut.length = 0
+  svgRendered.length = 0
 })
 
 afterAll(async () => {
@@ -399,6 +407,34 @@ describe('exporter orchestration', () => {
   it('renders stills through the same graph, skipping stabilization', async () => {
     const r = await renderFrames(everything(), 'reel', [0.5, 3.2, 99], join(scratch, 'frames'))
     expect(normalise({ result: r, runs, rendered, laidOut })).toMatchSnapshot()
+  })
+
+  it('exports a graphics layer: one overlay per mark, following the layer keyframes', async () => {
+    const p = createEmptyProject('p3', 'Graphics')
+    const g = makeGraphicsLayer('G', 1, 4)
+    g.keyframes = [
+      { tSec: 0, x: 540, y: 960, scale: 1 },
+      { tSec: 2, x: 600, y: 900, scale: 1.5, opacity: 0.5 }
+    ]
+    const box = newMark('rect', 'R', { x: 300, y: 300 }, { x: 600, y: 500 }, 0.5)
+    g.content = {
+      kind: 'graphics',
+      marks: [
+        newMark('arrow', 'A', { x: 200, y: 1400 }, { x: 500, y: 1100 }, 0),
+        { ...box, fill: '#ffd60a66', radiusPx: 20, reveal: 'fade' },
+        { ...angleMark('N', { x: 540, y: 900 }, { x: 800, y: 900 }, { x: 540, y: 600 }, 1), reveal: 'draw' },
+        // Appears after the layer ends: never on screen, so not exported.
+        newMark('line', 'X', { x: 0, y: 0 }, { x: 100, y: 0 }, 5)
+      ]
+    }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'graphics.mp4'))
+    const args = runs[runs.length - 1].args.join(' ')
+    // Arrow and rectangle are one PNG each; the angle's draw-on is 13 frames.
+    expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([1, 1, 13])
+    expect(args).toMatch(/-framerate 30 -i \S+graphics_2_%03d\.png/)
+    expect(args).toContain('fade=t=in:st=1.500:d=0.400:alpha=1')
+    expect(normalise({ runs, svgRendered })).toMatchSnapshot()
   })
 
   it('refuses a timeline with no picture', async () => {

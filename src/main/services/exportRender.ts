@@ -278,6 +278,17 @@ export class CompositionRender {
     return fullFrameImage(pngPath, startSec, endSec, this.ctx.target)
   }
 
+  /** Rasterise SVGs (graphics marks, or the frames of one draw-on) at
+   *  `width`×`height` px to `graphics_N…png` files in this pass's temp dir;
+   *  returns their paths (`pattern` names them for an image2 sequence input). */
+  async renderSvgImages(svgs: string[], width: number, height: number): Promise<{ paths: string[]; pattern: string }> {
+    const n = this.seq.image++
+    const name = (i: number): string => `graphics_${n}_${String(i).padStart(3, '0')}.png`
+    const paths = svgs.map((_, i) => join(this.tmpDir, name(i)))
+    await this.textRenderer().renderSvgs(svgs, width, height, paths)
+    return { paths, pattern: join(this.tmpDir, `graphics_${n}_%03d.png`) }
+  }
+
   /**
    * Pre-render a nested composition to a transparent intermediate for the
    * caller to position. Cached by comp content, so the same comp used twice
