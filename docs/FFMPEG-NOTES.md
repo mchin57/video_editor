@@ -641,6 +641,12 @@ Things the check showed:
 - zscale on partially-tagged HDR needs explicit input characteristics
   (`tin`/`pin`/`min`) or it errors with "no path between colorspaces"
   (`hdrToSdrChain`).
+- **A graph from a file is `-/filter_complex <file>`** (verified 8.1.1,
+  2026-10-21): the old `-filter_complex_script <file>` still runs but warns
+  "deprecated, use -/filter_complex graph.txt instead". A relative file name
+  resolves against ffmpeg's cwd (the pass's temp dir), like the ASS files. The
+  compositor always uses it (`withFilterGraphFile`): every overlay grows the
+  graph, and Windows caps a whole command line at 32,767 characters.
 
 ## Text rasterisation — the capture window is CLAMPED (verified Electron 38 / Windows 11, 2026-09)
 

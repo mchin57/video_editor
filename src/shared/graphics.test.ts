@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DRAW_ON_FRAMES,
+  drawOnFrameCount,
   REVEAL_SEC,
   angleDeg,
   angleMark,
@@ -65,6 +66,17 @@ describe('markStateAt', () => {
     expect(drawOnProgress(m, 0)).toBe(0)
     expect(drawOnProgress(m, 6)).toBeCloseTo(0.5)
     expect(drawOnProgress(m, DRAW_ON_FRAMES - 1)).toBe(1)
+    expect(drawOnFrameCount(m)).toBe(DRAW_ON_FRAMES)
+  })
+
+  it('a tile that starts mid-reveal exports only the rest of the draw-on, from where it shows', () => {
+    // The mark's moment is 0.2s before the tile's start: half drawn at frame 0.
+    const m = { atSec: -0.2, reveal: 'draw' as const }
+    expect(drawOnProgress(m, 0)).toBeCloseTo(0.5)
+    expect(drawOnFrameCount(m)).toBe(7) // 6 frames to finish + the finished mark
+    expect(drawOnProgress(m, drawOnFrameCount(m) - 1)).toBe(1)
+    // Its reveal long over: a still.
+    expect(drawOnFrameCount({ atSec: -3 })).toBe(1)
   })
 })
 
@@ -252,10 +264,13 @@ describe('shiftMarks', () => {
   const ms = [mark({ id: 'a', atSec: 0.5, reveal: 'fade' }), mark({ id: 'b', atSec: 3, reveal: 'draw' })]
 
   it('keeps each mark at its absolute moment when the start moves later or earlier', () => {
-    expect(shiftMarks(ms, 1).map((m) => [m.atSec, m.reveal])).toEqual([
-      [0, 'pop'], // already on screen at the new start: just there, no second reveal
-      [2, 'draw']
-    ])
+    // A mark whose moment is now before the start keeps it (negative): on
+    // screen from the start, mid-fade if the start lands inside its reveal.
+    const shifted = shiftMarks(ms, 0.7)
+    expect(shifted[0].atSec).toBeCloseTo(-0.2)
+    expect(shifted[1].atSec).toBeCloseTo(2.3)
+    expect(shifted.map((m) => m.reveal)).toEqual(['fade', 'draw'])
+    expect(markStateAt(shiftMarks(ms, 0.7)[0], 0)!.opacity).toBeCloseTo(0.5)
     expect(shiftMarks(ms, -1).map((m) => m.atSec)).toEqual([1.5, 4])
     expect(shiftMarks(ms, 0)).toBe(ms)
   })

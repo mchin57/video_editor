@@ -192,9 +192,11 @@ export interface ExportImage {
    *  and opacity commands apply as for a looped still. Verified — FFMPEG-NOTES
    *  "Graphics marks". */
   sequence?: { frames: number }
-  /** Fade the image in (alpha 0→1, linear) over this many seconds from
-   *  `startSec` — a graphics mark's fade reveal. Forces a frame stream. */
-  fadeInSec?: number
+  /** Fade the image in (alpha 0→1, linear) over `durSec` from absolute
+   *  `startSec` — a graphics mark's fade reveal. The fade may start before the
+   *  overlay's own `startSec` (a mark trimmed mid-fade shows part-faded).
+   *  Forces a frame stream. */
+  fadeIn?: { startSec: number; durSec: number }
 }
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
@@ -323,6 +325,25 @@ export const STILL_MAX_SIDE = 1280
 export function buildFrameArgs(plan: ExportPlan, frames: { index: number; path: string }[]): string[] {
   if (frames.length === 0) throw new Error('buildFrameArgs needs at least one frame')
   return buildExportArgs({ ...plan, audio: [], alpha: false, frames }, frames[0].path)
+}
+
+/** The compositor's graph file, read from ffmpeg's cwd (the pass's temp dir). */
+export const FILTER_GRAPH_FILE = 'graph.txt'
+
+/**
+ * Move the `-filter_complex` graph out of the command line into
+ * `FILTER_GRAPH_FILE` (`-/filter_complex <file>` — ffmpeg 8's form; the old
+ * `-filter_complex_script` is deprecated). Every overlay adds to the graph (a
+ * keyframed one ~800 characters), and Windows caps a whole command line at
+ * 32,767 — a busy telestrator reel could exceed it. Returns the args to run and
+ * the graph text the caller writes; args without a graph come back unchanged.
+ */
+export function withFilterGraphFile(args: string[]): { args: string[]; graph: string | null } {
+  const i = args.indexOf('-filter_complex')
+  if (i < 0) return { args, graph: null }
+  const out = args.slice()
+  out.splice(i, 2, '-/filter_complex', FILTER_GRAPH_FILE)
+  return { args: out, graph: args[i + 1] }
 }
 
 /**
@@ -461,7 +482,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     // evaluate on. A draw-on sequence already is one.
     if (im.sequence) {
       inputs.push('-framerate', '30', '-i', im.path)
-    } else if ((im.keyframes && im.keyframes.length > 0) || im.opacityAnim || im.fadeInSec) {
+    } else if ((im.keyframes && im.keyframes.length > 0) || im.opacityAnim || im.fadeIn) {
       inputs.push('-loop', '1', '-t', f3(Math.max(0.04, im.endSec)), '-i', im.path)
     } else {
       inputs.push('-i', im.path)
@@ -565,7 +586,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         steps.push(`tpad=stop_mode=clone:stop_duration=${f3(hold)}`, `setpts=PTS-STARTPTS+${f3(im.startSec)}/TB`)
       }
       // A fade reveal ramps alpha from startSec (absolute: the stream runs on the output clock).
-      const fade = im.fadeInSec ? `fade=t=in:st=${f3(im.startSec)}:d=${f3(im.fadeInSec)}:alpha=1` : null
+      const fade = im.fadeIn ? `fade=t=in:st=${f3(im.fadeIn.startSec)}:d=${f3(im.fadeIn.durSec)}:alpha=1` : null
       if (im.crop) {
         const c = im.crop
         steps.push(`crop=iw*${f3(c.w)}:ih*${f3(c.h)}:iw*${f3(c.x)}:ih*${f3(c.y)}`)

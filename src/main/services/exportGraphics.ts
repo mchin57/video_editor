@@ -10,9 +10,10 @@
 
 import type { GraphicsContent, Layer } from '@shared/project'
 import {
-  DRAW_ON_FRAMES,
+  drawOnFrameCount,
   REVEAL_SEC,
   drawOnProgress,
+  revealLead,
   markBounds,
   markShapes,
   markSvg,
@@ -45,8 +46,12 @@ async function exportMark(pass: CompositionRender, l: Layer, mark: GraphicMark):
   const k = Math.min(s * maxScale, target.width / box.w, target.height / box.h)
   const pxW = Math.max(1, Math.floor(box.w * k))
   const pxH = Math.max(1, Math.floor(box.h * k))
-  const draw = mark.reveal === 'draw'
-  const frames = draw ? DRAW_ON_FRAMES : 1
+  // A mark whose moment fell before the tile's start (a trim or split — negative
+  // `atSec`) shows from the start with whatever is left of its reveal.
+  const lead = revealLead(mark)
+  const frames = mark.reveal === 'draw' ? drawOnFrameCount(mark) : 1
+  const draw = frames > 1
+  const fade = mark.reveal === 'fade' && lead < REVEAL_SEC
   const svgs = Array.from({ length: frames }, (_, i) =>
     markSvg(mark, draw ? drawOnProgress(mark, i) : 1, box, pxW, pxH, LABEL_FONT)
   )
@@ -75,6 +80,7 @@ async function exportMark(pass: CompositionRender, l: Layer, mark: GraphicMark):
     keyframes,
     opacityAnim: await pass.opacityAnim(l),
     ...(draw ? { sequence: { frames } } : {}),
-    ...(mark.reveal === 'fade' ? { fadeInSec: REVEAL_SEC } : {})
+    // The fade runs from the mark's own moment, which may be before it shows.
+    ...(fade ? { fadeIn: { startSec: l.startSec + mark.atSec, durSec: REVEAL_SEC } } : {})
   }
 }

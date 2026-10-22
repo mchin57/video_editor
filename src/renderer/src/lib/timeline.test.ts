@@ -360,8 +360,11 @@ describe('edge trims report what they achieved', () => {
     expect(marksOf(trimLayerEdge(g, 'start', 1).tile)[0]).toMatchObject({ atSec: 2, reveal: 'draw' })
     // Start 1.5s earlier: 4.5s into the tile, still at 5s.
     expect(marksOf(trimLayerEdge(g, 'start', -1.5).tile)[0].atSec).toBeCloseTo(4.5)
-    // Trimmed past it: on screen from the new start, without revealing again.
-    expect(marksOf(trimLayerEdge(g, 'start', 4).tile)[0]).toMatchObject({ atSec: 0, reveal: 'pop' })
+    // Trimmed past it: its moment is kept as a negative time (on screen from
+    // the new start), so trimming back out restores it exactly.
+    const past = trimLayerEdge(g, 'start', 4).tile
+    expect(marksOf(past)[0]).toMatchObject({ atSec: -1, reveal: 'draw' })
+    expect(marksOf(trimLayerEdge(past, 'start', -4).tile)[0].atSec).toBeCloseTo(3)
     // The end edge leaves the marks alone.
     expect(marksOf(trimLayerEdge(g, 'end', -2).tile)).toBe(marksOf(g))
   })
@@ -434,8 +437,8 @@ describe('splitStaticLayer', () => {
     const [left, right] = splitStaticLayer(g, 5, makeId)! // cut 3s into the tile
     expect((left.content as GraphicsContent).marks.map((m) => m.id)).toEqual(['early'])
     const r = (right.content as GraphicsContent).marks
-    // Already on screen at the cut: there from the right half's start, no second reveal.
-    expect(r[0]).toMatchObject({ atSec: 0, reveal: 'pop' })
+    // Already on screen at the cut: its moment is kept (before the right half's start).
+    expect(r[0]).toMatchObject({ atSec: -2, reveal: 'fade' })
     // Still to come: same absolute time (2 + 5 = 7 = 5 + 2).
     expect(r[1]).toMatchObject({ atSec: 2, reveal: 'draw' })
     // The right half's marks are its own (fresh ids).

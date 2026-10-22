@@ -60,7 +60,8 @@ vi.mock('./ffmpegRun', () => ({
     if (cwd) {
       for (const f of readdirSync(cwd).sort()) {
         const p = join(cwd, f)
-        if (statSync(p).isFile() && /\.(ass|cmd)$/.test(f)) files[f] = readFileSync(p, 'utf8')
+        // ASS / opacity command files, and the compositor's graph (graph.txt).
+        if (statSync(p).isFile() && (/\.(ass|cmd)$/.test(f) || f === 'graph.txt')) files[f] = readFileSync(p, 'utf8')
       }
     }
     runs.push({ args, files })
@@ -429,7 +430,8 @@ describe('exporter orchestration', () => {
     }
     p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
     await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'graphics.mp4'))
-    const args = runs[runs.length - 1].args.join(' ')
+    const last = runs[runs.length - 1]
+    const args = `${last.args.join(' ')} ${last.files['graph.txt']}`
     // Arrow and rectangle are one PNG each; the angle's draw-on is 13 frames.
     expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([1, 1, 13])
     expect(args).toMatch(/-framerate 30 -i \S+graphics_2_%03d\.png/)

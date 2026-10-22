@@ -40,6 +40,8 @@ import {
   buildVidstabTransformArgs,
   exportAudioClips,
   frameIndexAt,
+  FILTER_GRAPH_FILE,
+  withFilterGraphFile,
   type AudioClipSource,
   type ExportAudio,
   type ExportImage,
@@ -238,7 +240,11 @@ export class CompositionRender {
     // rewind it (weighting them across N+1 passes is a Stage 5 item). Stills have no job.
     const progress = o.depth === 1 && !o.frames ? (pr: number): void => setProgress(ctx.jobId, pr) : undefined
     ctx.signal?.throwIfAborted()
-    await runFfmpeg(ctx.ffmpeg, args, totalDur, progress, this.tmpDir, ctx.signal)
+    // The graph goes in a file next to the ASS / command files (cwd = tmpDir):
+    // a long one would overflow the Windows command line.
+    const scripted = withFilterGraphFile(args)
+    if (scripted.graph !== null) await fsp.writeFile(join(this.tmpDir, FILTER_GRAPH_FILE), scripted.graph, 'utf8')
+    await runFfmpeg(ctx.ffmpeg, scripted.args, totalDur, progress, this.tmpDir, ctx.signal)
     return output
   }
 
