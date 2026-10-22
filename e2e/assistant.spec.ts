@@ -742,6 +742,77 @@ test('set_text refuses bad edits and changes nothing', async ({ electronApp, app
   expect((await call(c, 'set_text', { edits: [{ id: 'c1', text: 'hello world' }] })).isError).toBeFalsy()
 })
 
+test('link_items / unlink_items work like the Link / Unlink buttons, one undo step each', async ({
+  electronApp,
+  appPage: page
+}) => {
+  await seedText(page)
+  // The user has only the title selected when the assistant links it.
+  await page.evaluate(() => {
+    const ref = { kind: 'layer' as const, id: 't1' }
+    window.__reelStores.useUi.getState().selectItems([ref], ref)
+  })
+  const c = await connect(await pipeOf(electronApp))
+  const linkState = (): Promise<{ groups: (string | undefined)[]; past: number; selection: string[] }> =>
+    page.evaluate(() => {
+      const s = window.__reelStores.useProject.getState()
+      const p = s.project!
+      return {
+        groups: [p.layers.find((l) => l.id === 't1')?.linkGroupId, p.captions.segments[0].linkGroupId],
+        past: s.past.length,
+        selection: window.__reelStores.useUi.getState().selection.map((r) => `${r.kind}:${r.id}`)
+      }
+    })
+  const unlinkButton = page.getByRole('button', { name: /Unlink/ })
+  const start = await linkState()
+  await expect(unlinkButton).toBeDisabled()
+
+  const linked = JSON.parse(textOf(await call(c, 'link_items', { ids: ['c1', 't1'] }))) as {
+    linked: { kind: string; id: string }[]
+    linkGroupId: string
+    changed: boolean
+  }
+  expect(linked.changed).toBe(true)
+  expect(linked.linked).toEqual([
+    { kind: 'layer', id: 't1' },
+    { kind: 'caption', id: 'c1' }
+  ])
+  const afterLink = await linkState()
+  expect(afterLink.groups).toEqual([linked.linkGroupId, linked.linkGroupId])
+  expect(afterLink.past).toBe(start.past + 1)
+  expect(afterLink.selection).toEqual(['layer:t1', 'caption:c1']) // grown to the whole group
+  await expect(unlinkButton).toBeEnabled()
+
+  // Linking them again changes nothing and adds no undo step.
+  const again = JSON.parse(textOf(await call(c, 'link_items', { ids: ['t1', 'c1'] }))) as {
+    changed: boolean
+    note: string
+  }
+  expect(again).toMatchObject({ changed: false, note: expect.stringMatching(/Already linked/) })
+  expect((await linkState()).past).toBe(afterLink.past)
+
+  // Refused, nothing changed: an unknown id, or fewer than two items.
+  expect(await refusal(c, 'link_items', { ids: ['t1', 'nope'] })).toMatch(/No timeline item with id nope/)
+  expect(await refusal(c, 'link_items', { ids: ['t1', 't1'] })).toMatch(/at least two/)
+  expect((await linkState()).past).toBe(afterLink.past)
+
+  // Unlinking from one member breaks the whole group.
+  const unlinked = JSON.parse(textOf(await call(c, 'unlink_items', { ids: ['c1'] }))) as {
+    unlinked: { kind: string; id: string }[]
+  }
+  expect(unlinked.unlinked.map((r) => r.id)).toEqual(['t1', 'c1'])
+  const afterUnlink = await linkState()
+  expect(afterUnlink.groups).toEqual([undefined, undefined])
+  expect(afterUnlink.past).toBe(afterLink.past + 1)
+  const none = JSON.parse(textOf(await call(c, 'unlink_items', { ids: ['t1'] }))) as { unlinked: unknown[] }
+  expect(none.unlinked).toEqual([])
+  expect((await linkState()).past).toBe(afterUnlink.past)
+
+  // One undo puts the link back.
+  await call(c, 'undo')
+  expect((await linkState()).groups).toEqual([linked.linkGroupId, linked.linkGroupId])
+})
+
 test('a caption fixed through set_text keeps the fix when it is split', async ({ electronApp, appPage: page }) => {
   await seedText(page)
   const c = await connect(await pipeOf(electronApp))
