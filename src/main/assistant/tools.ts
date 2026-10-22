@@ -209,6 +209,20 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
 
   remove_items: async ({ ids }) => json(await callRenderer('removeItems', { ids })),
 
+  link_items: async ({ ids }) => {
+    const r = await callRenderer('linkItems', { ids })
+    const note = r.changed ? 'One undo step: call undo to revert it.' : 'Already linked as one group; nothing changed.'
+    return json({ ...r, note })
+  },
+
+  unlink_items: async ({ ids }) => {
+    const r = await callRenderer('unlinkItems', { ids })
+    const note = r.unlinked.length
+      ? 'One undo step: call undo to revert it.'
+      : 'None of them was linked; nothing changed.'
+    return json({ ...r, note })
+  },
+
   undo: async () => {
     // Imports, trims and splits are undo steps too, and their undo leaves the
     // timeline as it was — so say what went, naming library clips by file.

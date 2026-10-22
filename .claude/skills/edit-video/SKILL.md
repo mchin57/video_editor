@@ -47,7 +47,9 @@ Call `place_sequence` ONCE with the whole cut as `{mediaId, inSec, outSec}` item
 order (`mode: "replace"` swaps out the existing video clips and their linked audio — titles,
 images, captions and music stay; `"append"`, the default, adds after the last clip).
 It is one undo step. Then `get_timeline` and check the clips, order and total length.
-Fix mistakes with `undo` or `remove_items` and place again.
+Fix mistakes with `undo` or `remove_items` and place again. `link_items` / `unlink_items`
+work like the timeline's Link / Unlink buttons: linked items move, split and delete
+together; unlinking breaks up the whole group the id belongs to.
 
 A cut on the timeline does NOT need new files: `inSec`/`outSec` already trim. Use
 `trim_clip` (one window) or `split_clip` (cut at one or more SOURCE seconds) only when
@@ -68,7 +70,7 @@ new library clip — again only when the user wants a joined clip in the library
   - **the lane:** `{id: "captions", visible, …style}` turns captions on/off or restyles
     all captions that don't have their own style.
 - Timing can't change on a linked item (a caption linked to its clip) — fix its text
-  and style, or tell the user.
+  and style, or tell the user. `unlink_items` frees it, but only when the user wants it unlinked.
 - `render_frame` shows the finished picture at up to 4 TIMELINE times — use it to see
   how text really sits on screen.
 - Only the open composition is covered: text inside nested compositions or layout

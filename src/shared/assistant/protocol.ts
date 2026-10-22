@@ -46,6 +46,14 @@ export interface AssistantOps {
   getTimeline: { args: NoArgs; result: TimelineSummary }
   placeSequence: { args: SequencePlan; result: PlacedClip[] }
   removeItems: { args: { ids: string[] }; result: { removed: TimelineItemRef[] } }
+  /** The Link button: `linked` = the whole group afterwards. `changed` false = they
+   *  already were exactly one group. `notLinkable` = named layouts, left out. */
+  linkItems: {
+    args: { ids: string[] }
+    result: { linked: TimelineItemRef[]; linkGroupId: string; changed: boolean; notLinkable?: string[] }
+  }
+  /** The Unlink button: `unlinked` = every member of the groups broken (empty = none was linked). */
+  unlinkItems: { args: { ids: string[] }; result: { unlinked: TimelineItemRef[] } }
   /** `changes`: what the step reverted (null when there was nothing to undo). */
   undo: { args: NoArgs; result: { undone: boolean; changes: UndoChanges | null; timeline: TimelineSummary } }
   getProject: { args: NoArgs; result: Project }

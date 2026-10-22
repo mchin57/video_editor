@@ -5,14 +5,24 @@
  */
 
 import type { AssistantOps, AssistantRequest, AssistantResponse } from '@shared/assistant/protocol'
-import type { Composition, Project } from '@shared/project'
+import type { Composition, Project, TimelineItemRef } from '@shared/project'
 import { summarizeTimeline } from '@shared/assistant/timelineSummary'
 import { summarizeText } from '@shared/assistant/onScreenText'
 import { undoChanges } from '@shared/assistant/undoSummary'
 import { compositionDuration } from '@shared/compositions'
 import { activeComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
-import { expandSelection, isLinked, timelineTiles } from '@/lib/links'
+import { primaryRef, useUi } from '@/state/ui'
+import {
+  canLinkItems,
+  expandGroup,
+  expandSelection,
+  isLinked,
+  refKey,
+  refsForIds,
+  tileOf,
+  timelineTiles
+} from '@/lib/links'
 import { assistantRespond, onAssistantRequest } from '@/ipc/client'
 import { interactionOpen, whenIdle } from '@/lib/interaction'
 import { exportSaveSkipReason } from '@/lib/exportSave'
@@ -38,6 +48,23 @@ function comp(): Composition {
   return c
 }
 
+/** The tiles `ids` name in the open composition, or an error naming the unknown ones. */
+function tilesNamed(c: Composition, ids: string[]): TimelineItemRef[] {
+  const { refs, unknown } = refsForIds(c, ids)
+  if (unknown.length) throw new Error(`No timeline item with id ${unknown.join(', ')}`)
+  return refs
+}
+
+/** After a link, grow the user's selection to whole groups, so a tile selected on
+ *  its own can't then be dragged or deleted away from its new partners. */
+function selectWholeGroups(): void {
+  const ui = useUi.getState()
+  const primary = primaryRef(ui)
+  if (!primary) return
+  const whole = expandSelection(comp(), ui.selection)
+  if (whole.length !== ui.selection.length) ui.selectItems(whole, primary)
+}
+
 const handlers: Handlers = {
   getMediaIds: () => project().mediaIds,
   addMedia: ({ ids }) => {
@@ -50,15 +77,43 @@ const handlers: Handlers = {
   placeSequence: (plan) => useProject.getState().addVideoSequence(plan),
   removeItems: ({ ids }) => {
     const c = comp()
-    const tiles = timelineTiles(c)
-    const unknown = ids.filter((id) => !tiles.some((t) => t.ref.id === id))
-    if (unknown.length) throw new Error(`No timeline item with id ${unknown.join(', ')}`)
-    const refs = expandSelection(
-      c,
-      tiles.filter((t) => ids.includes(t.ref.id)).map((t) => t.ref)
-    )
+    const refs = expandSelection(c, tilesNamed(c, ids))
     useProject.getState().removeItems(refs)
     return { removed: refs }
+  },
+  linkItems: ({ ids }) => {
+    const c = comp()
+    const refs = tilesNamed(c, ids)
+    const linkable = new Set(
+      timelineTiles(c)
+        .filter((t) => t.linkable)
+        .map((t) => refKey(t.ref))
+    )
+    const targets = refs.filter((r) => linkable.has(refKey(r)))
+    const notLinkable = refs.filter((r) => !linkable.has(refKey(r))).map((r) => r.id)
+    if (targets.length < 2) {
+      const layouts = notLinkable.length ? ` (${notLinkable.join(', ')}: a layout cannot be linked)` : ''
+      throw new Error(`Link needs at least two items that can be linked${layouts}`)
+    }
+    const changed = canLinkItems(c, refs)
+    if (changed) {
+      useProject.getState().linkItems(refs)
+      selectWholeGroups()
+    }
+    const after = comp()
+    return {
+      linked: expandGroup(after, targets[0]),
+      linkGroupId: tileOf(after, targets[0])?.linkGroupId ?? '',
+      changed,
+      ...(notLinkable.length ? { notLinkable } : {})
+    }
+  },
+  unlinkItems: ({ ids }) => {
+    const c = comp()
+    const refs = tilesNamed(c, ids)
+    const unlinked = expandSelection(c, refs).filter((r) => isLinked(c, r))
+    if (unlinked.length) useProject.getState().unlinkItems(refs)
+    return { unlinked }
   },
   undo: () => {
     const before = useProject.getState().past.length
