@@ -13,6 +13,7 @@
  */
 
 import { FRAME } from './frame'
+import { DEFAULT_FONT_ID, fontCssFamily } from './fonts'
 
 export interface Pt {
   x: number
@@ -131,14 +132,27 @@ export interface MarkState {
 
 /** The export's frame rate (`exporterArgs`: `-r 30`), which a draw-on is sampled at. */
 const EXPORT_FPS = 30
-/** Frames a draw-on export renders: one per output frame across the reveal,
- *  then the finished mark (held to the layer's end). */
+/** Frames a whole draw-on export renders: one per output frame across the
+ *  reveal, then the finished mark (held to the layer's end). */
 export const DRAW_ON_FRAMES = Math.round(REVEAL_SEC * EXPORT_FPS) + 1
 
-/** How much of a draw-on mark export frame `i` (from its `atSec`) shows — the
- *  preview's `markStateAt` at that same instant, so the two trace in step. */
+/** Seconds of a mark's reveal already past at its tile's start — non-zero only
+ *  for a mark whose moment fell before the start (a negative `atSec`). */
+export const revealLead = (m: Pick<GraphicMark, 'atSec'>): number => Math.max(0, -m.atSec)
+
+/** How many frames a draw-on export renders: the rest of the reveal from where
+ *  the mark first shows (all of it, unless the tile starts mid-reveal), then
+ *  the finished mark. 1 = nothing left to draw: a still. */
+export function drawOnFrameCount(m: Pick<GraphicMark, 'atSec'>): number {
+  const left = REVEAL_SEC - revealLead(m)
+  return left > 0 ? Math.ceil(left * EXPORT_FPS - 1e-9) + 1 : 1
+}
+
+/** How much of a draw-on mark export frame `i` shows, counted from when the
+ *  mark first shows in its tile — the preview's `markStateAt` at that same
+ *  instant, so the two trace in step. */
 export function drawOnProgress(m: Pick<GraphicMark, 'atSec' | 'reveal'>, i: number): number {
-  return markStateAt(m, m.atSec + i / EXPORT_FPS)?.progress ?? 0
+  return markStateAt(m, Math.max(0, m.atSec) + i / EXPORT_FPS)?.progress ?? 0
 }
 
 // --- Geometry ----------------------------------------------------------------------
@@ -352,6 +366,10 @@ export function markBounds(m: GraphicMark): { x: number; y: number; w: number; h
 
 // --- SVG markup (the export's page) ------------------------------------------------
 
+/** The face angle labels are set in — one CSS family list for the preview's
+ *  SVG and the export's Chromium page alike. */
+export const LABEL_FONT_FAMILY = fontCssFamily(DEFAULT_FONT_ID)
+
 const escAttr = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
@@ -386,9 +404,19 @@ export function markSvg(
   pxH: number,
   fontFamily: string
 ): string {
-  const body = markShapes(m, progress)
-    .map((s) => shapeSvg(s, fontFamily))
-    .join('')
+  return shapesSvg(markShapes(m, progress), box, pxW, pxH, fontFamily)
+}
+
+/** A standalone SVG of `shapes`, framing `box` of their space at `pxW`×`pxH`
+ *  — what the export's Chromium rasterises (a mark, a pose overlay frame). */
+export function shapesSvg(
+  shapes: MarkShape[],
+  box: { x: number; y: number; w: number; h: number },
+  pxW: number,
+  pxH: number,
+  fontFamily: string
+): string {
+  const body = shapes.map((s) => shapeSvg(s, fontFamily)).join('')
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${pxH}" ` +
     `viewBox="${f2(box.x)} ${f2(box.y)} ${f2(box.w)} ${f2(box.h)}" preserveAspectRatio="none">${body}</svg>`
@@ -455,15 +483,14 @@ export function angleMark(id: string, vertex: Pt, armA: Pt, armB: Pt, atSec: num
  * A tile's marks after its start moves by `shiftSec` (later > 0: a left-edge
  * trim inward, the right half of a split; earlier < 0: a trim outward). Each
  * mark keeps its moment in ABSOLUTE time, so it stays on the frame of the clip
- * it was drawn over. One already on screen at the new start is simply there
- * (pop at 0) instead of revealing again — mid-reveal, it completes at once.
+ * it was drawn over. A mark whose moment falls before the new start keeps it as
+ * a NEGATIVE `atSec`: it is on screen from the tile's start — mid-reveal if the
+ * cut lands inside its fade/draw-on (`markStateAt` continues it) — and
+ * extending the tile back out later puts it exactly where it was.
  */
 export function shiftMarks(marks: GraphicMark[], shiftSec: number): GraphicMark[] {
   if (shiftSec === 0) return marks
-  return marks.map((m) => {
-    const at = m.atSec - shiftSec
-    return at >= 0 ? { ...m, atSec: at } : { ...m, atSec: 0, reveal: 'pop' }
-  })
+  return marks.map((m) => ({ ...m, atSec: m.atSec - shiftSec }))
 }
 
 /** The mark moved by (dx, dy) in mark space. */

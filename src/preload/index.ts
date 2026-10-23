@@ -87,6 +87,9 @@ const api = {
   // Background removal and jobs
   segmentAvailable: invoke('segmentAvailable'),
   removeBackground: invoke('removeBackground'),
+  poseAvailable: invoke('poseAvailable'),
+  detectPose: invoke('detectPose'),
+  getPose: invoke('getPose'),
   cancelJob: invoke('cancelJob'),
   /** Subscribe to background job progress. Returns an unsubscribe function. */
   onJobProgress: subscribe('jobProgress'),

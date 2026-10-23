@@ -153,7 +153,8 @@ export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => strin
  *   window rather than being an entrance, so both halves keep it;
  * - graphics marks (start-relative `atSec`): the left half keeps those that
  *   appear before the cut, the right half all of them re-based to its start
- *   (`shiftMarks` — one already on screen stays on, without revealing again).
+ *   (`shiftMarks` — one already on screen keeps its moment as a negative
+ *   `atSec`, so it carries on mid-reveal and a later re-join restores it).
  */
 export function splitStaticLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
   const kind = layer.content.kind

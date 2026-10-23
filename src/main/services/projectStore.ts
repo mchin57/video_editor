@@ -44,6 +44,8 @@ import {
   projectSubdirs,
   sweepPlan,
   transcriptPath,
+  posePath,
+  poseRoot,
   transcriptsRoot
 } from './projectLayout'
 import { newId } from '@shared/ids'
@@ -418,6 +420,11 @@ export function saveProjectAs(project: Project, chosenPath: string): Promise<{ p
       await ensureProjectFolders(to)
       await copyTree(generatedRoot(from), generatedRoot(to))
       await copyTree(transcriptsRoot(from), transcriptsRoot(to))
+      // Detected poses too (created on first use, so only when there are any).
+      if (existsSync(poseRoot(from))) {
+        await fsp.mkdir(poseRoot(to), { recursive: true })
+        await copyTree(poseRoot(from), poseRoot(to))
+      }
       session.reroot(to, fromRelativePath)
     }
     let saved: Project
@@ -439,11 +446,12 @@ export function saveProjectAs(project: Project, chosenPath: string): Promise<{ p
   })
 }
 
-/** After a save: delete transcripts a forced relink made stale (the saved
- *  record now describes the new content). */
+/** After a save: delete transcripts (and detected poses) a forced relink made
+ *  stale (the saved record now describes the new content). */
 async function dropStaleTranscripts(session: ProjectSession): Promise<void> {
   for (const id of session.library.staleTranscriptIds()) {
     await fsp.rm(transcriptPath(session.root, id), { force: true })
+    await fsp.rm(posePath(session.root, id), { force: true })
     session.library.clearStaleTranscript(id)
   }
 }

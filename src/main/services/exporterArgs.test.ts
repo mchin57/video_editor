@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildExportArgs,
+  buildOverlayEncodeArgs,
   exportAudioClips,
   buildFrameArgs,
   frameIndexAt,
@@ -8,6 +9,8 @@ import {
   buildVidstabTransformArgs,
   escapeFilterPath,
   targetForPreset,
+  withFilterGraphFile,
+  FILTER_GRAPH_FILE,
   type ExportPlan,
   type ExportVideo,
   type StabilizeJob
@@ -283,6 +286,25 @@ describe('buildExportArgs', () => {
     )
   })
 
+  it('encodes a piped PNG animation to a qtrle ARGB intermediate at 30 fps', () => {
+    expect(buildOverlayEncodeArgs('o.mov').join(' ')).toBe(
+      '-y -hide_banner -nostdin -f image2pipe -framerate 30 -c:v png -i pipe:0 -c:v qtrle -pix_fmt argb o.mov'
+    )
+  })
+
+  it('moves the filtergraph out of the command line into graph.txt', () => {
+    const args = buildExportArgs(plan({ visuals: [{ kind: 'video', video: vid }] }), 'o')
+    const { args: run, graph } = withFilterGraphFile(args)
+    expect(graph).toBe(args[args.indexOf('-filter_complex') + 1])
+    expect(run).not.toContain('-filter_complex')
+    expect(run.slice(run.indexOf('-/filter_complex'), run.indexOf('-/filter_complex') + 2)).toEqual([
+      '-/filter_complex',
+      FILTER_GRAPH_FILE
+    ])
+    expect(run).toHaveLength(args.length)
+    expect(withFilterGraphFile(['-i', 'x'])).toEqual({ args: ['-i', 'x'], graph: null })
+  })
+
   it('a draw-on mark reads its PNG sequence at 30 fps, holds the last frame and starts at its time', () => {
     const im = {
       path: 'C:/t/graphics_0_%03d.png',
@@ -315,7 +337,7 @@ describe('buildExportArgs', () => {
       startSec: 1.5,
       endSec: 4,
       opacity: 1,
-      fadeInSec: 0.4
+      fadeIn: { startSec: 1.5, durSec: 0.4 }
     }
     const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: im }] }), 'o').join(' ')
     expect(s).toContain('-loop 1 -t 4.000 -i C:/t/graphics_1_000.png')

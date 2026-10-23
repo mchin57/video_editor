@@ -5,6 +5,7 @@
 
 import type { CropRect, ImageContent, Layer, LayoutCell, TextContent, VideoContent } from '@shared/project'
 import type { GraphicMark } from '@shared/graphics'
+import type { PoseSettings } from '@shared/pose'
 import { videoSpeed } from '@shared/project'
 import {
   MAX_COMP_DEPTH,
@@ -12,6 +13,7 @@ import {
   compositionDuration,
   makeCompFromCell,
   makeCompFromLayer,
+  mapVideoLayersDeep,
   resolveCompAtPath,
   updateCompAtPath,
   type CompPath
@@ -88,6 +90,13 @@ export interface LayerActions {
    *  ONE undo step. Canvas drags go through `liveUpdate` + `mapGraphicsMarks`
    *  instead, committing once on release. */
   updateGraphicsMarks: (id: string, fn: (marks: GraphicMark[]) => GraphicMark[]) => void
+  /** Rewrite the pose overlay of EVERY clip of `mediaId`, anywhere in the
+   *  project (nested comps included), as ONE undo step — a re-detection
+   *  renumbers people for all of them at once. */
+  updateMediaPose: (
+    mediaId: string,
+    fn: (pose: PoseSettings | null | undefined, layer: Layer) => PoseSettings | null | undefined
+  ) => void
   /** Set (or clear, with `null`) a video layer's crop. The crop reshapes the
    *  clip's aspect, so its scale follows (`rescaleForAspect`) to keep its size
    *  RELATIVE TO THE FRAME — "Crop to 16:9" fills a 16:9 frame the way "Crop to
@@ -262,6 +271,15 @@ export const layerActions = ({ get, commit, commitComp }: Doc): LayerActions => 
     commitComp((p) => mapLayer(p, id, (l) => ({ ...l, content: { ...l.content, ...patch } as Layer['content'] }))),
 
   updateGraphicsMarks: (id, fn) => commitComp((p) => mapGraphicsMarks(p, id, fn)),
+
+  updateMediaPose: (mediaId, fn) =>
+    commit((p) =>
+      mapVideoLayersDeep(p, (l, c) => {
+        if (c.mediaId !== mediaId) return l
+        const pose = fn(c.pose, l)
+        return pose === c.pose ? l : { ...l, content: { ...c, pose } }
+      })
+    ),
 
   setVideoCrop: (id, crop, sourceAspect) => {
     const frame = projectFormat(get()).frame

@@ -6,6 +6,7 @@ import {
   angleMark,
   fromCanvas,
   graphicsSvgTransform,
+  LABEL_FONT_FAMILY,
   markShapes,
   markStateAt,
   movedMark,
@@ -18,7 +19,6 @@ import {
   type GraphicsTransform,
   type Pt
 } from '@shared/graphics'
-import { DEFAULT_FONT_ID, fontCssFamily } from '@shared/fonts'
 import { layerTransformAt } from '@shared/layers'
 import { newId } from '@shared/ids'
 import { LOGICAL } from '@/lib/coords'
@@ -29,8 +29,6 @@ import { mapGraphicsMarks } from '@/state/project/core'
 import { useUi } from '@/state/ui'
 import { pct } from './frame'
 
-/** The angle label's face — the same CSS family the export's page uses. */
-const LABEL_FONT = fontCssFamily(DEFAULT_FONT_ID)
 /** Above every layer and the captions (300), under the frame's overlays (400). */
 const EDIT_Z = 350
 /** A mark's grab area: its stroke, fattened so a thin line is easy to catch. */
@@ -41,7 +39,7 @@ const GHOST_OPACITY = 0.3
 /** The same SVG markup the export rasterises (`shapeSvg`), so the two draw identical pixels. */
 function MarkArt({ mark, progress, opacity }: { mark: GraphicMark; progress: number; opacity: number }): JSX.Element {
   const html = markShapes(mark, progress)
-    .map((s) => shapeSvg(s, LABEL_FONT))
+    .map((s) => shapeSvg(s, LABEL_FONT_FAMILY))
     .join('')
   return <g data-mark-id={mark.id} opacity={opacity} dangerouslySetInnerHTML={{ __html: html }} />
 }

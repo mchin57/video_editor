@@ -13,6 +13,7 @@
  */
 import { mkdtempSync, promises as fsp, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { PassThrough } from 'node:stream'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
@@ -35,6 +36,17 @@ const rendered: unknown[] = []
 const laidOut: unknown[] = []
 /** Graphics marks rasterised: each call's size, frame count and last SVG. */
 const svgRendered: unknown[] = []
+/** Overlay animations streamed (pose): size, frame count and the middle frame's SVG. */
+const streamed: {
+  width: number
+  height: number
+  count: number
+  mid: string
+  distinct: number
+  drawn: number[]
+}[] = []
+/** Overlay encodes: their args and how many frames reached the encoder. */
+const encodes: { args: string[]; frames: number }[] = []
 
 vi.mock('../config', () => ({
   getSubdir: () => tmpRoot,
@@ -60,10 +72,20 @@ vi.mock('./ffmpegRun', () => ({
     if (cwd) {
       for (const f of readdirSync(cwd).sort()) {
         const p = join(cwd, f)
-        if (statSync(p).isFile() && /\.(ass|cmd)$/.test(f)) files[f] = readFileSync(p, 'utf8')
+        // ASS / opacity command files, and the compositor's graph (graph.txt).
+        if (statSync(p).isFile() && (/\.(ass|cmd)$/.test(f) || f === 'graph.txt')) files[f] = readFileSync(p, 'utf8')
       }
     }
     runs.push({ args, files })
+  },
+  // The pose overlay's encoder: counts the PNGs it is fed, then "exits".
+  startFfmpeg: (_ffmpeg: string, args: string[]) => {
+    const stdin = new PassThrough()
+    let frames = 0
+    stdin.on('data', () => frames++)
+    const exited = new Promise<void>((resolve) => stdin.on('end', () => resolve()))
+    void exited.then(() => encodes.push({ args, frames }))
+    return { child: { stdin, kill: () => {} }, exited, stderrTail: () => '' }
   }
 }))
 vi.mock('./jobs', () => ({
@@ -78,6 +100,33 @@ vi.mock('./atomicWrite', async (importOriginal) => ({
   writeAtomically: async (final: string, write: (part: string) => Promise<void>) => write(`${final}.part.mp4`)
 }))
 vi.mock('./loudness', () => ({ ensureLoudness: async () => null }))
+// Detected poses: one person walking right across 'vid' (1080×1920), 10 fps.
+vi.mock('./poseDetect', () => ({
+  getPose: async (mediaId: string) =>
+    mediaId === 'vid'
+      ? {
+          version: 1,
+          mediaId: 'vid',
+          startSec: 0,
+          durationSec: 10,
+          fps: 10,
+          frameCount: 100,
+          width: 1080,
+          height: 1920,
+          model: 'test',
+          tracks: [
+            {
+              id: 1,
+              first: 0,
+              weight: 1,
+              frames: Array.from({ length: 100 }, (_, f) =>
+                Array.from({ length: 26 }, (_, k) => [200 + f * 5 + k * 3, 600 + k * 40, 0.9]).flat()
+              )
+            }
+          ]
+        }
+      : null
+}))
 vi.mock('./textImage', () => ({
   createTextRenderer: () => ({
     render: async (spec: unknown, out: string) => {
@@ -95,6 +144,20 @@ vi.mock('./textImage', () => ({
           return l
         })
       })
+    },
+    streamSvgs: async (
+      count: number,
+      svgAt: (i: number) => string,
+      width: number,
+      height: number,
+      onPng: (png: Buffer, i: number) => Promise<void>
+    ) => {
+      // How many DIFFERENT pictures the frames are (the real rasteriser only
+      // captures a change), and which frames draw anything.
+      const svgs = Array.from({ length: count }, (_, i) => svgAt(i))
+      const drawn = svgs.flatMap((svg, i) => (svg.includes('<path') ? [i] : []))
+      streamed.push({ width, height, count, mid: svgs[Math.floor(count / 2)], distinct: new Set(svgs).size, drawn })
+      for (let i = 0; i < count; i++) await onPng(Buffer.from(`png${i}`), i)
     },
     renderSvgs: async (svgs: string[], width: number, height: number, outPaths: string[]) => {
       svgRendered.push({ width, height, count: svgs.length, last: svgs[svgs.length - 1] })
@@ -383,6 +446,8 @@ beforeEach(() => {
   rendered.length = 0
   laidOut.length = 0
   svgRendered.length = 0
+  streamed.length = 0
+  encodes.length = 0
 })
 
 afterAll(async () => {
@@ -429,12 +494,89 @@ describe('exporter orchestration', () => {
     }
     p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
     await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'graphics.mp4'))
-    const args = runs[runs.length - 1].args.join(' ')
+    const last = runs[runs.length - 1]
+    const args = `${last.args.join(' ')} ${last.files['graph.txt']}`
     // Arrow and rectangle are one PNG each; the angle's draw-on is 13 frames.
     expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([1, 1, 13])
     expect(args).toMatch(/-framerate 30 -i \S+graphics_2_%03d\.png/)
     expect(args).toContain('fade=t=in:st=1.500:d=0.400:alpha=1')
     expect(normalise({ runs, svgRendered })).toMatchSnapshot()
+  })
+
+  it('exports a pose overlay: one frame per output frame, composited with the clip’s box', async () => {
+    const p = createEmptyProject('p4', 'Pose')
+    const v = makeVideoLayer('V', 'vid', 0, 4)
+    v.x = 600
+    v.scale = 0.8
+    v.content = {
+      ...(v.content as Extract<Layer['content'], { kind: 'video' }>),
+      inSec: 2,
+      outSec: 6,
+      pose: { show: true, people: [{ tracks: [1], color: '#ff00ff' }], angles: ['leftKnee'], widthPx: 6 }
+    }
+    p.layers = [v]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'pose.mp4'))
+    // 4s at 30 fps = 120 frames, rendered at the clip box (0.8 × 1080×1920) …
+    expect(streamed).toHaveLength(1)
+    expect(streamed[0]).toMatchObject({ width: 864, height: 1536, count: 120 })
+    // … from the clip's SOURCE time (frame 60 = 2s in = source 4s = pose frame 40).
+    expect(streamed[0].mid).toContain('stroke="#ff00ff"')
+    expect(streamed[0].mid).toMatch(/viewBox="0 0 1080 1920"/)
+    // … and every frame reached the qtrle encoder.
+    expect(encodes).toHaveLength(1)
+    expect(encodes[0].frames).toBe(120)
+    expect(encodes[0].args.join(' ')).toMatch(/-c:v qtrle -pix_fmt argb \S+overlay_\d+\.mov$/)
+    // The overlay is the clip's second input, with the clip's own placement.
+    const last = runs[runs.length - 1]
+    const graph = last.files['graph.txt']
+    expect(last.args.join(' ')).toMatch(/-i C:\/media\/vid\.mp4 -ss 0\.000 -t 4\.000 -i \S+overlay_\d+\.mov/)
+    expect(graph).toContain(
+      '[2:v]scale=864:1536:flags=bicubic,setsar=1,format=yuva420p,setpts=PTS-STARTPTS+0.000/TB[pv2]'
+    )
+    const at = (i: number): string | undefined => graph.match(new RegExp(`\\[pv${i}\\]overlay=([^:]+:[^:]+):`))?.[1]
+    expect(at(2)).toBeDefined()
+    expect(at(2)).toBe(at(1))
+    expect(normalise({ runs, streamed, encodes })).toMatchSnapshot()
+  })
+
+  it('a still of a pose clip draws only the frames it shows', async () => {
+    const p = createEmptyProject('p5', 'Pose still')
+    const v = makeVideoLayer('V', 'vid', 0, 4)
+    v.content = {
+      ...(v.content as Extract<Layer['content'], { kind: 'video' }>),
+      pose: { show: true, people: [{ tracks: [1], color: '#ff00ff' }], angles: [], widthPx: 6 }
+    }
+    p.layers = [v]
+    await renderFrames(p, 'reel', [2], join(scratch, 'pose-frames'))
+    // Still one frame per output frame (so the overlay lines up in time) …
+    expect(streamed[0].count).toBe(120)
+    // … but only the ones around 2s are drawn; the rest are one cached blank.
+    expect(streamed[0].drawn).toEqual([59, 60, 61])
+    expect(streamed[0].distinct).toBe(4)
+  })
+
+  it('a graphics mark whose moment is before its tile’s start shows from the start, mid-reveal', async () => {
+    const p = createEmptyProject('p6', 'Trimmed marks')
+    const g = makeGraphicsLayer('G', 2, 5)
+    const line = (id: string, atSec: number, reveal: 'pop' | 'fade' | 'draw') => ({
+      ...newMark('line', id, { x: 100, y: 500 }, { x: 900, y: 500 }, atSec),
+      reveal
+    })
+    g.content = {
+      kind: 'graphics',
+      marks: [line('D', -0.2, 'draw'), line('F', -0.1, 'fade'), line('P', -3, 'draw')]
+    }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'trimmed.mp4'))
+    // The draw-on cut half-way renders only its remaining 6 frames + the finished
+    // mark; one whose reveal is long over is a plain still.
+    expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([7, 1, 1])
+    const last = runs[runs.length - 1]
+    const graph = last.files['graph.txt']
+    // All three show from the tile's start; the fade began 0.1s before it.
+    expect(graph.match(/enable='between\(t,2\.000,5\.000\)'/g)?.length).toBeGreaterThanOrEqual(3)
+    expect(graph).toContain('fade=t=in:st=1.900:d=0.400:alpha=1')
+    expect(graph).toContain('tpad=stop_mode=clone:stop_duration=2.767,setpts=PTS-STARTPTS+2.000/TB')
   })
 
   it('refuses a timeline with no picture', async () => {
