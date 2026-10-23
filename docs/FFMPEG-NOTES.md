@@ -335,6 +335,26 @@ bar growing 15px per frame) composited the compositor's way (base canvas +
 - The whole path, Chromium raster included, is pinned on real pixels by
   `e2e/graphicsExport.spec.ts` (pop / fade / draw-on / layer motion / angle label).
 
+## Pose overlay intermediate — piped frames → qtrle ARGB (verified ffmpeg 8.1.1, 2026-10-23)
+
+A clip's pose skeleton changes every frame, so the export renders it as an
+animation (`exportPose.ts`) and composites it like an alpha clip. Verified with
+synthesized BGRA frames (a half-alpha red square moving 10px a frame), encoded
+then composited over grey the compositor's way (`format=yuva420p`, `setpts`
+shift, `overlay enable`, `-r 30 -fps_mode cfr`):
+
+- **Both `-c:v qtrle -pix_fmt argb` and `-c:v png -pix_fmt rgba` (in .mov)
+  keep straight alpha through native decoding** — no forced decoder like VP9
+  needs. Half-alpha red over 128-grey composited to (191, 61, 62), exactly
+  (255+128)/2; transparent areas stayed grey; frame k landed on output frame
+  start·30 + k. The export uses qtrle (fast lossless encode).
+- **Frames go in as PNGs (`-f image2pipe -framerate 30 -c:v png -i pipe:0`),
+  not raw bitmaps.** Chromium's capture as a raw bitmap may be premultiplied;
+  fed to ffmpeg as straight `bgra` that darkens every anti-aliased edge. PNG
+  export is straight alpha by definition.
+- The whole path (Chromium raster → qtrle → composite at the clip's source
+  time) is pinned on real pixels by `e2e/poseExport.spec.ts`.
+
 ## adelay after atrim — poisoned PTS kills the mux (verified ffmpeg 8.1.1, 2026-07)
 
 - **An `atrim`'d stream fed into a non-zero `adelay` emits ONE frame with a

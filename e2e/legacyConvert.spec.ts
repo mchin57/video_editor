@@ -145,7 +145,7 @@ test('opening an old project converts it in place, keeping its clip id and point
     mediaIds: string[]
     library: MediaRecord[]
   }
-  expect(saved.version).toBe(27)
+  expect(saved.version).toBe(28)
   expect(saved.mediaIds).toEqual([oldId])
   expect(saved.library).toHaveLength(1)
   expect(saved.library[0]).toMatchObject({

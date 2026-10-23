@@ -4,7 +4,9 @@
  * (`shared/graphics.ts` → `markSvg`), cropped to the mark's bounds, then
  * composited where the layer transform puts that box — following the layer's
  * position/scale/opacity keyframes like any image layer. Each mark is gated to
- * `[layer start + atSec, layer end)`; a fade adds an alpha fade-in, a draw-on
+ * `[layer start + max(0, atSec), layer end)` — a mark whose moment fell before
+ * the tile's start (a trim) shows from the start, mid-reveal; a fade adds an
+ * alpha fade-in from the mark's own moment, a draw-on
  * becomes a short PNG sequence sampled from the preview's own reveal timing.
  */
 
@@ -13,6 +15,7 @@ import {
   drawOnFrameCount,
   REVEAL_SEC,
   drawOnProgress,
+  LABEL_FONT_FAMILY,
   revealLead,
   markBounds,
   markShapes,
@@ -21,12 +24,8 @@ import {
   placedBox,
   type GraphicMark
 } from '@shared/graphics'
-import { DEFAULT_FONT_ID, fontCssFamily } from '@shared/fonts'
 import type { ExportImage, ExportKeyframe } from './exporterArgs'
 import type { CompositionRender } from './exportRender'
-
-/** The angle label's face — what the preview's SVG names too. */
-const LABEL_FONT = fontCssFamily(DEFAULT_FONT_ID)
 
 export async function exportGraphicsLayer(pass: CompositionRender, l: Layer, c: GraphicsContent): Promise<void> {
   for (const mark of c.marks) {
@@ -53,7 +52,7 @@ async function exportMark(pass: CompositionRender, l: Layer, mark: GraphicMark):
   const draw = frames > 1
   const fade = mark.reveal === 'fade' && lead < REVEAL_SEC
   const svgs = Array.from({ length: frames }, (_, i) =>
-    markSvg(mark, draw ? drawOnProgress(mark, i) : 1, box, pxW, pxH, LABEL_FONT)
+    markSvg(mark, draw ? drawOnProgress(mark, i) : 1, box, pxW, pxH, LABEL_FONT_FAMILY)
   )
   // No fallback (unlike text, which can burn flat): a coaching mark that
   // silently vanished would be worse than a failed export that says why.

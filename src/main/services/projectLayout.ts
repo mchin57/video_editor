@@ -29,6 +29,10 @@ export const transcriptsRoot = (root: string): string => join(root, 'transcripts
 export const cacheRoot = (root: string): string => join(root, 'cache')
 export const cacheDir = (root: string, id: string): string => join(cacheRoot(root), id)
 export const transcriptPath = (root: string, id: string): string => join(transcriptsRoot(root), `${id}.json`)
+/** Detected body poses, one file per media item (shared/pose.ts `PoseData`).
+ *  Created on first use, like the data in it. */
+export const poseRoot = (root: string): string => join(root, 'pose')
+export const posePath = (root: string, id: string): string => join(poseRoot(root), `${id}.json`)
 
 /** Written into a `generated/` the app created. Cleanup only ever deletes in a
  *  `generated/` that has it: a footage folder taken over as a project may

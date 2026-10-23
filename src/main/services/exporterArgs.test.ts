@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildExportArgs,
+  buildOverlayEncodeArgs,
   exportAudioClips,
   buildFrameArgs,
   frameIndexAt,
@@ -282,6 +283,12 @@ describe('buildExportArgs', () => {
     expect(s).toContain('-loop 1 -t 4.000 -i C:/v/i.png')
     expect(s).toContain(
       '[1:v]scale=200:100,format=rgba,fps=30,sendcmd=f=opacity_1.cmd,colorchannelmixer@op1=aa=0.800[pi1]'
+    )
+  })
+
+  it('encodes a piped PNG animation to a qtrle ARGB intermediate at 30 fps', () => {
+    expect(buildOverlayEncodeArgs('o.mov').join(' ')).toBe(
+      '-y -hide_banner -nostdin -f image2pipe -framerate 30 -c:v png -i pipe:0 -c:v qtrle -pix_fmt argb o.mov'
     )
   })
 

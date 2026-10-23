@@ -527,8 +527,29 @@ describe('migrateProject — graphics layers (v27)', () => {
       content: { kind: 'graphics', marks }
     }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 26, layers: [graphics] })
-    expect(PROJECT_VERSION).toBe(27)
-    expect(p.version).toBe(27)
+    expect(p.version).toBe(PROJECT_VERSION)
     expect(p.layers[0]).toEqual(graphics)
+  })
+})
+
+describe('migrateProject — pose overlay (v28)', () => {
+  it('stamps a v27 document as v28; a clip’s pose settings load as saved, and an old clip has none', () => {
+    expect(PROJECT_VERSION).toBe(28)
+    const pose = { show: true, people: [{ tracks: [1, 3], color: '#FFD60A' }], angles: ['leftKnee'], widthPx: 6 }
+    const withPose = {
+      id: 'V',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'video', mediaId: 'm', inSec: 0, outSec: 2, mute: false, gainDb: 0, pose }
+    }
+    const old = { ...withPose, id: 'O', content: { ...withPose.content, pose: undefined } }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 27, layers: [withPose, old] })
+    expect(p.version).toBe(28)
+    expect(p.layers[0]).toEqual(withPose)
+    expect((p.layers[1].content as { pose?: unknown }).pose).toBeUndefined()
   })
 })

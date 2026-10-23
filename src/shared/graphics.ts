@@ -13,6 +13,7 @@
  */
 
 import { FRAME } from './frame'
+import { DEFAULT_FONT_ID, fontCssFamily } from './fonts'
 
 export interface Pt {
   x: number
@@ -365,6 +366,10 @@ export function markBounds(m: GraphicMark): { x: number; y: number; w: number; h
 
 // --- SVG markup (the export's page) ------------------------------------------------
 
+/** The face angle labels are set in — one CSS family list for the preview's
+ *  SVG and the export's Chromium page alike. */
+export const LABEL_FONT_FAMILY = fontCssFamily(DEFAULT_FONT_ID)
+
 const escAttr = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
@@ -399,9 +404,19 @@ export function markSvg(
   pxH: number,
   fontFamily: string
 ): string {
-  const body = markShapes(m, progress)
-    .map((s) => shapeSvg(s, fontFamily))
-    .join('')
+  return shapesSvg(markShapes(m, progress), box, pxW, pxH, fontFamily)
+}
+
+/** A standalone SVG of `shapes`, framing `box` of their space at `pxW`×`pxH`
+ *  — what the export's Chromium rasterises (a mark, a pose overlay frame). */
+export function shapesSvg(
+  shapes: MarkShape[],
+  box: { x: number; y: number; w: number; h: number },
+  pxW: number,
+  pxH: number,
+  fontFamily: string
+): string {
+  const body = shapes.map((s) => shapeSvg(s, fontFamily)).join('')
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${pxH}" ` +
     `viewBox="${f2(box.x)} ${f2(box.y)} ${f2(box.w)} ${f2(box.h)}" preserveAspectRatio="none">${body}</svg>`

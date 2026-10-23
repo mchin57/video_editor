@@ -72,7 +72,7 @@ test('New creates the project folder and opens it; an existing folder and an inv
   )
   for (const dir of ['generated', 'transcripts', 'cache']) expect(statSync(join(root, dir)).isDirectory()).toBe(true)
   const doc = JSON.parse(readFileSync(reel, 'utf8'))
-  expect(doc).toMatchObject({ name: 'My Reel', version: 27, library: [] })
+  expect(doc).toMatchObject({ name: 'My Reel', version: 28, library: [] })
   const reelMtime = statSync(reel).mtimeMs
 
   // File ▸ New… again, the SAME name and location: refused inline, nothing switched.

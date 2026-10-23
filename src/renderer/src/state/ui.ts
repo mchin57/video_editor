@@ -81,12 +81,17 @@ interface UiState {
    *  the stage, its row in the Inspector). Cleared with the selection. */
   selectedMarkId: string | null
   selectMark: (id: string | null) => void
+  /** The video layer whose detected people are shown as numbered boxes on the
+   *  stage to pick from (null = not picking). Cleared with the selection. */
+  posePickLayerId: string | null
+  setPosePickLayerId: (id: string | null) => void
   /** Clear every selection (clip/caption/audio). */
   clearSelection: () => void
 }
 
-/** What every selection change resets: the armed graphics tool and the mark. */
-const NO_GRAPHICS_EDIT = { graphicsTool: null, selectedMarkId: null }
+/** What every selection change resets: the stage's edit modes (the armed
+ *  graphics tool, the selected mark, pose picking). */
+const NO_STAGE_EDIT = { graphicsTool: null, selectedMarkId: null, posePickLayerId: null }
 
 /** The primary (last clicked) tile as a ref, or null when nothing is selected.
  *  The three `selected*Id` fields are mutually exclusive, so this is total. */
@@ -104,7 +109,13 @@ const single = (
   id: string | null
 ): Pick<
   UiState,
-  'selection' | 'selectedLayerId' | 'selectedCaptionId' | 'selectedAudioId' | 'graphicsTool' | 'selectedMarkId'
+  | 'selection'
+  | 'selectedLayerId'
+  | 'selectedCaptionId'
+  | 'selectedAudioId'
+  | 'graphicsTool'
+  | 'selectedMarkId'
+  | 'posePickLayerId'
 > & {
   captionsGlobalSelected: boolean
 } => ({
@@ -113,7 +124,7 @@ const single = (
   selectedCaptionId: kind === 'caption' ? id : null,
   selectedAudioId: kind === 'audio' ? id : null,
   captionsGlobalSelected: false,
-  ...NO_GRAPHICS_EDIT
+  ...NO_STAGE_EDIT
 })
 
 export const useUi = create<UiState>((set) => ({
@@ -125,7 +136,7 @@ export const useUi = create<UiState>((set) => ({
       selectedCaptionId: primary.kind === 'caption' ? primary.id : null,
       selectedAudioId: primary.kind === 'audio' ? primary.id : null,
       captionsGlobalSelected: false,
-      ...NO_GRAPHICS_EDIT
+      ...NO_STAGE_EDIT
     }),
   selectTile: (project, ref) => {
     const refs = project ? expandGroup(project, ref) : []
@@ -135,7 +146,7 @@ export const useUi = create<UiState>((set) => ({
       selectedCaptionId: ref.kind === 'caption' ? ref.id : null,
       selectedAudioId: ref.kind === 'audio' ? ref.id : null,
       captionsGlobalSelected: false,
-      ...NO_GRAPHICS_EDIT
+      ...NO_STAGE_EDIT
     })
   },
   selectedLayerId: null,
@@ -152,7 +163,7 @@ export const useUi = create<UiState>((set) => ({
       selectedLayerId: null,
       selectedCaptionId: null,
       selectedAudioId: null,
-      ...NO_GRAPHICS_EDIT
+      ...NO_STAGE_EDIT
     }),
   cropEditing: false,
   setCropEditing: (v) => set({ cropEditing: v }),
@@ -176,6 +187,8 @@ export const useUi = create<UiState>((set) => ({
   setGraphicsTool: (t) => set({ graphicsTool: t }),
   selectedMarkId: null,
   selectMark: (id) => set({ selectedMarkId: id }),
+  posePickLayerId: null,
+  setPosePickLayerId: (id) => set({ posePickLayerId: id }),
   clearSelection: () =>
     set({
       selection: [],
@@ -183,6 +196,6 @@ export const useUi = create<UiState>((set) => ({
       selectedCaptionId: null,
       selectedAudioId: null,
       captionsGlobalSelected: false,
-      ...NO_GRAPHICS_EDIT
+      ...NO_STAGE_EDIT
     })
 }))

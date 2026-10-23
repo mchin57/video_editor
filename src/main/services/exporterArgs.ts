@@ -327,6 +327,34 @@ export function buildFrameArgs(plan: ExportPlan, frames: { index: number; path: 
   return buildExportArgs({ ...plan, audio: [], alpha: false, frames }, frames[0].path)
 }
 
+/**
+ * Encode an overlay ANIMATION (a pose skeleton per output frame) from PNGs
+ * piped on stdin to a lossless alpha intermediate: QuickTime RLE in ARGB. The
+ * compositor reads it back as an ordinary alpha video input (no forced
+ * decoder needed — unlike VP9, qtrle's alpha survives native decoding).
+ * Verified — FFMPEG-NOTES "Pose overlay intermediate".
+ */
+export function buildOverlayEncodeArgs(output: string): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-f',
+    'image2pipe',
+    '-framerate',
+    '30',
+    '-c:v',
+    'png',
+    '-i',
+    'pipe:0',
+    '-c:v',
+    'qtrle',
+    '-pix_fmt',
+    'argb',
+    output
+  ]
+}
+
 /** The compositor's graph file, read from ffmpeg's cwd (the pass's temp dir). */
 export const FILTER_GRAPH_FILE = 'graph.txt'
 

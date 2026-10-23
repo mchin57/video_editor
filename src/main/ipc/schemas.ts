@@ -124,6 +124,11 @@ export const INVOKE_SCHEMAS = {
   removeBackground: args(
     z.object({ mediaId: id, startSec: num, durationSec: num, minSpeed: num, subjectId: z.string().optional() })
   ),
+  poseAvailable: args(),
+  detectPose: args(
+    z.object({ mediaId: id, startSec: num, durationSec: num, minSpeed: num, subjectId: z.string().optional() })
+  ),
+  getPose: args(id),
   cancelJob: args(id),
 
   captureStillToLibrary: args(stillRequest),

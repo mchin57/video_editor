@@ -1,10 +1,11 @@
 /** IPC: work on a clip's content — transcripts, silence, loudness, audio
- *  effects, background removal — and cancelling the jobs that run it. */
+ *  effects, background removal, body pose — and cancelling the jobs that run it. */
 
 import { getTranscript, transcribeMedia, whisperAvailable } from '../services/whisper'
 import { detectSilence } from '../services/silence'
 import { ensureLoudness } from '../services/loudness'
 import { removeBackgroundToLibrary, segmentAvailable } from '../services/removeBackground'
+import { detectPose, getPose, poseAvailable } from '../services/poseDetect'
 import { renderAudioFxToLibrary, requireUsable } from '../services/mediaStore'
 import { cancelJob } from '../services/jobs'
 import { handle } from './handle'
@@ -31,6 +32,11 @@ export function registerAnalysisHandlers(): void {
   // asset (null = the job was canceled).
   handle('segmentAvailable', () => segmentAvailable())
   handle('removeBackground', (_event, req) => removeBackgroundToLibrary(req))
+  // Body pose: detect a media item's keypoints over a source window (null =
+  // canceled), and read back what was detected (null = not yet).
+  handle('poseAvailable', () => poseAvailable())
+  handle('detectPose', (_event, req) => detectPose(req))
+  handle('getPose', (_event, mediaId) => getPose(mediaId))
   // Ask a cancelable background job to stop (false = nothing to cancel).
   handle('cancelJob', (_event, jobId) => cancelJob(jobId))
 }

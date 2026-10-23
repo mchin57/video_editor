@@ -8,6 +8,7 @@ import {
   compositionDuration,
   makeCompFromCell,
   makeCompFromLayer,
+  mapVideoLayersDeep,
   resolveCompAtPath,
   resetMediaCuts,
   stepInto,
@@ -268,5 +269,35 @@ describe('resetMediaCuts (relink to a different-length file)', () => {
   it('returns the input when nothing uses the media (no undo churn)', () => {
     const root = nestedRoot()
     expect(resetMediaCuts(root, 'nope', 5)).toBe(root)
+  })
+})
+
+describe('mapVideoLayersDeep', () => {
+  it('reaches video layers in nested comps and keeps identity when nothing changes', () => {
+    const inner = createEmptyComposition()
+    inner.layers = [makeVideoLayer('IV', 'm', 0, 2)]
+    const root = createEmptyComposition()
+    root.layers = [
+      makeVideoLayer('V', 'm', 0, 2),
+      {
+        id: 'C',
+        hidden: false,
+        startSec: 0,
+        endSec: 2,
+        x: 540,
+        y: 960,
+        scale: 1,
+        content: { kind: 'compound', comp: inner }
+      }
+    ]
+    expect(mapVideoLayersDeep(root, (l) => l)).toBe(root)
+    const seen: string[] = []
+    const out = mapVideoLayersDeep(root, (l, c) => {
+      seen.push(l.id)
+      return { ...l, content: { ...c, mute: true } }
+    })
+    expect(seen.sort()).toEqual(['IV', 'V'])
+    const nested = (out.layers[1].content as { comp: typeof inner }).comp.layers[0]
+    expect((nested.content as { mute: boolean }).mute).toBe(true)
   })
 })
