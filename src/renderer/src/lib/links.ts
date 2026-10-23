@@ -195,6 +195,20 @@ export function expandSelection(p: Composition, refs: TimelineItemRef[]): Timeli
   return tiles.filter((t) => wanted.has(refKey(t.ref))).map((t) => t.ref)
 }
 
+/**
+ * The tiles named by bare ids (what the assistant reads from `get_timeline` /
+ * `get_text`), deduped and in document order, plus every id that names no
+ * tile. An id is matched in all three arrays, like the kind-less ids it came from.
+ */
+export function refsForIds(p: Composition, ids: string[]): { refs: TimelineItemRef[]; unknown: string[] } {
+  const tiles = timelineTiles(p)
+  const wanted = new Set(ids)
+  return {
+    refs: tiles.filter((t) => wanted.has(t.ref.id)).map((t) => t.ref),
+    unknown: [...wanted].filter((id) => !tiles.some((t) => t.ref.id === id))
+  }
+}
+
 /** Every member of the group `ref` belongs to (including `ref`), in document
  *  order; just `[ref]` when it's unlinked, and `[]` if it no longer exists. */
 export function expandGroup(p: Composition, ref: TimelineItemRef): TimelineItemRef[] {

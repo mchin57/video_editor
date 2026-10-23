@@ -14,6 +14,7 @@ import {
   linkItems,
   moveItemsBy,
   pruneLinkGroups,
+  refsForIds,
   removeItems,
   snapToPreviousDelta,
   splitGroupOnSilence,
@@ -173,6 +174,22 @@ describe('selection expansion', () => {
 
   it('dedupes when several members of one group are selected', () => {
     expect(expandSelection(pair(), [A('A1'), L('L1'), A('A1')])).toEqual([L('L1'), A('A1')])
+  })
+})
+
+describe('refsForIds (the assistant names tiles by bare id)', () => {
+  it('resolves ids across all three lanes, deduped and in document order', () => {
+    const p = project({
+      layers: [layer('L1', 0, 10)],
+      audioClips: [audio('A1', 2, 6)],
+      segments: [caption('C1', 1, 2)]
+    })
+    expect(refsForIds(p, ['A1', 'C1', 'L1', 'A1'])).toEqual({ refs: [L('L1'), C('C1'), A('A1')], unknown: [] })
+  })
+
+  it('reports each id that names no tile, once', () => {
+    const p = project({ layers: [layer('L1', 0, 10)] })
+    expect(refsForIds(p, ['gone', 'L1', 'gone'])).toEqual({ refs: [L('L1')], unknown: ['gone'] })
   })
 })
 

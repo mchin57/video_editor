@@ -24,6 +24,8 @@ export interface ToolArgs {
     atSec?: number
   }
   remove_items: { ids: string[] }
+  link_items: { ids: string[] }
+  unlink_items: { ids: string[] }
   undo: NoArgs
   export_video: { fileName?: string; folder?: string }
   get_text: TextQuery

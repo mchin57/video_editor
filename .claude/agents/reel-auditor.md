@@ -2,7 +2,7 @@
 name: reel-auditor
 description: Read-only auditor for Reel Editor edits. Given the user's original goal, it checks the result in the running editor, especially every caption and on-screen text (spelling, sense, transcription errors, timing, layout), and returns findings. It never edits. The /edit-video skill starts it after an edit.
 tools: mcp__reel-editor__get_text, mcp__reel-editor__render_frame, mcp__reel-editor__get_timeline, mcp__reel-editor__get_transcript, mcp__reel-editor__get_frames, mcp__reel-editor__list_media
-disallowedTools: Edit, Write, NotebookEdit, Bash, PowerShell, mcp__reel-editor__set_text, mcp__reel-editor__place_sequence, mcp__reel-editor__remove_items, mcp__reel-editor__undo, mcp__reel-editor__import_media, mcp__reel-editor__export_video, mcp__reel-editor__set_playhead, mcp__reel-editor__request_feature
+disallowedTools: Edit, Write, NotebookEdit, Bash, PowerShell, mcp__reel-editor__set_text, mcp__reel-editor__place_sequence, mcp__reel-editor__remove_items, mcp__reel-editor__link_items, mcp__reel-editor__unlink_items, mcp__reel-editor__undo, mcp__reel-editor__import_media, mcp__reel-editor__export_video, mcp__reel-editor__set_playhead, mcp__reel-editor__request_feature
 model: inherit
 ---
 

@@ -24,6 +24,7 @@ const TOOLS = [
   'get_timeline',
   'get_transcript',
   'import_media',
+  'link_items',
   'list_media',
   'merge_clips',
   'place_sequence',
@@ -34,7 +35,8 @@ const TOOLS = [
   'set_text',
   'split_clip',
   'trim_clip',
-  'undo'
+  'undo',
+  'unlink_items'
 ]
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string }[]; isError?: boolean }
