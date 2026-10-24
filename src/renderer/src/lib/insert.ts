@@ -1,7 +1,8 @@
 /**
- * The Insert actions: a new text layer, caption or graphics tile at the
- * playhead, selected so the Inspector opens on it. ONE home for them — the
- * header's Insert menu and the `T` shortcut both call these.
+ * The Insert actions: a new text layer, caption or graphics tile — or a
+ * template — at the playhead, selected so the Inspector opens on it. ONE home
+ * for them — the header's Insert menu, the `T` shortcut and the template
+ * gallery call these.
  */
 
 import { makeGraphicsLayer, makeTextLayer } from '@shared/layers'
@@ -11,6 +12,9 @@ import { getFormat, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { makeCaption } from '@/lib/captions'
+import { idle } from '@/lib/interaction'
+import type { SourceDuration } from '@/lib/links'
+import { instantiateTemplate } from '@/ipc/client'
 
 /** A text layer at the playhead (3s), a third of the way down the frame. */
 export function insertText(): void {
@@ -36,4 +40,21 @@ export function insertGraphics(): void {
   const start = usePlayback.getState().time
   useProject.getState().addLayer(makeGraphicsLayer(id, start, start + GRAPHICS_DEFAULT_SEC))
   useUi.getState().selectLayer(id)
+}
+
+/**
+ * Drop template `id` at the playhead (where it was when this was called): main
+ * copies its media into the project's library first, then one store edit
+ * places it (`dropTemplate`, one undo step). `durationOf` gives the library's
+ * source lengths (a whole-source audio clip needs one to be cut). Resolves
+ * whether its clip effect found no clip under the playhead.
+ */
+export async function insertTemplate(id: string, durationOf: SourceDuration): Promise<{ effectSkipped: boolean }> {
+  const at = usePlayback.getState().time
+  const { template, assets } = await instantiateTemplate(id)
+  await idle() // the copy can finish mid-drag
+  const store = useProject.getState()
+  if (assets.length) store.addMedia(assets.map((a) => a.id))
+  const fresh = new Map(assets.map((a) => [a.id, a.probe.durationSec]))
+  return store.dropTemplate(template, at, (m) => fresh.get(m) ?? durationOf(m))
 }

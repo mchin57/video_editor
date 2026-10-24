@@ -10,6 +10,7 @@ import { registerExportHandlers } from './export'
 import { registerMediaHandlers } from './media'
 import { registerProjectHandlers } from './project'
 import { registerSettingsHandlers } from './settings'
+import { registerTemplateHandlers } from './templates'
 
 export function registerIpcHandlers(): void {
   registerAssistantBridge()
@@ -18,4 +19,5 @@ export function registerIpcHandlers(): void {
   registerProjectHandlers()
   registerExportHandlers()
   registerAnalysisHandlers()
+  registerTemplateHandlers()
 }

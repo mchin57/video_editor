@@ -18,6 +18,7 @@ import type { InvokeArgs, InvokeName, IpcSend } from '@shared/ipc'
 import type { Project } from '@shared/project'
 import { EXPORT_PRESETS, type PresetId } from '@shared/formats'
 import type { Settings } from '@shared/settings'
+import type { ReelTemplate } from '@shared/templates'
 
 /** Why `args` don't fit `schema`, or null when they do. Paths count from the
  *  first argument at 0 (`argument 0.pieces.1.inSec`). */
@@ -45,6 +46,13 @@ const project = z.custom<Project>(
     Array.isArray(v.audioClips) &&
     isRecord(v.captions),
   { message: 'not a project document' }
+)
+
+/** A template from the renderer: a structural check here; the handler runs
+ *  the full `sanitizeTemplate` before anything is written. */
+const template = z.custom<ReelTemplate>(
+  (v) => isRecord(v) && typeof v.name === 'string' && Array.isArray(v.layers) && Array.isArray(v.audio),
+  { message: 'not a template' }
 )
 
 const window = { inSec: num, outSec: num }
@@ -134,6 +142,14 @@ export const INVOKE_SCHEMAS = {
 
   captureStillToLibrary: args(stillRequest),
   captureStillToDisk: args(stillRequest, z.string()),
+
+  listTemplates: args(),
+  saveTemplate: args(template),
+  deleteTemplate: args(id),
+  chooseTemplateSound: args(id, z.number().int().min(0)),
+  exportTemplateDialog: args(id),
+  importTemplateDialog: args(),
+  instantiateTemplate: args(id),
 
   assistantStatus: args()
 } satisfies { [K in InvokeName]: z.ZodType<InvokeArgs<K>> }

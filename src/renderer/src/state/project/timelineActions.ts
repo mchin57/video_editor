@@ -3,9 +3,11 @@
  *  through `lib/links.ts` (docs/SHARED.md "LINK GROUPS"). */
 
 import type { TimelineItemRef } from '@shared/project'
+import type { ReelTemplate } from '@shared/templates'
 import { resolveCompAtPath } from '@shared/compositions'
 import { newId } from '@shared/ids'
 import * as links from '@/lib/links'
+import { applyTemplate } from '@/lib/templates'
 import { primaryRef, useUi } from '@/state/ui'
 import { activeComp, type Doc } from './core'
 
@@ -37,6 +39,12 @@ export interface TimelineActions {
   /** Split one layer (video / text / image) at an absolute timeline time. */
   splitLayerAt: (id: string, atSec: number) => void
   splitAudioAt: (audioId: string, atSec: number, sourceDurationSec: number) => void
+  /**
+   * Drop template `t` (its media already library ids) at `atSec` as one undo
+   * step and select what it added (`lib/templates.ts`). `effectSkipped` = it has
+   * a clip effect but no clip was under the playhead.
+   */
+  dropTemplate: (t: ReelTemplate, atSec: number, srcDur: links.SourceDuration) => { effectSkipped: boolean }
 }
 
 export const timelineActions = ({ get, commitComp }: Doc): TimelineActions => ({
@@ -80,5 +88,18 @@ export const timelineActions = ({ get, commitComp }: Doc): TimelineActions => ({
   splitLayerAt: (id, atSec) => get().splitItemsAt([{ kind: 'layer', id }], atSec, () => 0),
 
   splitAudioAt: (audioId, atSec, sourceDurationSec) =>
-    get().splitItemsAt([{ kind: 'audio', id: audioId }], atSec, () => sourceDurationSec)
+    get().splitItemsAt([{ kind: 'audio', id: audioId }], atSec, () => sourceDurationSec),
+
+  dropTemplate: (t, atSec, srcDur) => {
+    let added: TimelineItemRef[] = []
+    let effectSkipped = false
+    commitComp((p) => {
+      const res = applyTemplate(p, t, atSec, srcDur, newId)
+      added = res.added
+      effectSkipped = res.effectSkipped
+      return res.comp
+    })
+    if (added.length) useUi.getState().selectItems(added, added[0])
+    return { effectSkipped }
+  }
 })

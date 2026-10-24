@@ -533,8 +533,7 @@ describe('migrateProject — graphics layers (v27)', () => {
 })
 
 describe('migrateProject — pose overlay (v28)', () => {
-  it('stamps a v27 document as v28; a clip’s pose settings load as saved, and an old clip has none', () => {
-    expect(PROJECT_VERSION).toBe(28)
+  it('stamps a v27 document current; a clip’s pose settings load as saved, and an old clip has none', () => {
     const pose = { show: true, people: [{ tracks: [1, 3], color: '#FFD60A' }], angles: ['leftKnee'], widthPx: 6 }
     const withPose = {
       id: 'V',
@@ -548,8 +547,30 @@ describe('migrateProject — pose overlay (v28)', () => {
     }
     const old = { ...withPose, id: 'O', content: { ...withPose.content, pose: undefined } }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 27, layers: [withPose, old] })
-    expect(p.version).toBe(28)
+    expect(p.version).toBe(PROJECT_VERSION)
     expect(p.layers[0]).toEqual(withPose)
     expect((p.layers[1].content as { pose?: unknown }).pose).toBeUndefined()
+  })
+})
+
+describe('migrateProject — clip tint (v29)', () => {
+  it('stamps a v28 document as v29; a tint loads as saved, and an old clip has none', () => {
+    expect(PROJECT_VERSION).toBe(29)
+    const tint = { color: '#e8c290', amount: 0.6 }
+    const tinted = {
+      id: 'V',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'video', mediaId: 'm', inSec: 0, outSec: 2, mute: false, gainDb: 0, tint }
+    }
+    const old = { ...tinted, id: 'O', content: { ...tinted.content, tint: undefined } }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 28, layers: [tinted, old] })
+    expect(p.version).toBe(29)
+    expect(p.layers[0]).toEqual(tinted)
+    expect((p.layers[1].content as { tint?: unknown }).tint).toBeUndefined()
   })
 })
