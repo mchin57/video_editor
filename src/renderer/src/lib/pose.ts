@@ -13,6 +13,7 @@ import {
   POSE_ANGLES,
   POSE_LINKS,
   POSE_MIN_SCORE,
+  angleSure,
   clipPoseView,
   defaultPoseSettings,
   personAt,
@@ -110,7 +111,7 @@ export function poseToGraphics(
     }
     for (const id of settings.angles) {
       const d = POSE_ANGLES[id]
-      if (!seen(d.a) || !seen(d.vertex) || !seen(d.b)) continue
+      if (!angleSure(k, d)) continue
       marks.push({ ...angleMark(newId(), at(d.vertex), at(d.a), at(d.b), 0), color: person.color, widthPx: width })
     }
   }

@@ -16,12 +16,13 @@
  * Frames arrive as BGR24 HWC (ffmpeg `-pix_fmt bgr24`) — OpenCV's order, which
  * is what rtmlib feeds both models.
  *
- * NOT YET VERIFIED against the real model files (they aren't on the dev
- * machine yet — install steps in mchin57/video_editor#201): this follows
- * rtmlib's source line by line, and the unit tests pin the math on synthetic
- * tensors, but the files' input/output names and shapes, the channel order
- * and the keypoint order are rtmlib's word until a real detection is checked
- * (#191 stays `needs-verification` until then).
+ * Verified against the real model files (2026-10-24, install steps in
+ * mchin57/video_editor#201): the detector takes `input` [1,3,640,640] and
+ * returns NMS-baked `dets` [1,N,5] + `labels` int64 [1,N]; the pose model takes
+ * `input` [1,3,256,192] and returns `simcc_x` [1,26,384] + `simcc_y` [1,26,512].
+ * On a real side-on bike clip the skeleton landed on the rider's joints (BGR
+ * order and the Halpe26 keypoint order confirmed by eye). `e2e/poseDetect.spec.ts`
+ * runs the real job when the models are installed.
  */
 
 import type { Detection, Keypoints } from '@shared/pose'

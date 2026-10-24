@@ -5,6 +5,7 @@ import {
   POSE_ANGLES,
   POSE_LINKS,
   POSE_MIN_SCORE,
+  angleSure,
   clipPoseShapes,
   clipPoseView,
   joinTrack,
@@ -381,5 +382,45 @@ describe('rebasePoseData', () => {
     expect(r.tracks[0].frames[0]!.slice(0, 3)).toEqual([50, 100, 0.9])
     // The copy's second 0 is the source's second 3: the same pose.
     expect(trackAt(r, r.tracks[0], -2)![0]).toBe(50)
+  })
+})
+
+describe('angle confidence', () => {
+  it('labels an angle only when all three joints are sure, while the limb still draws', () => {
+    const view: PoseView = { crop: { x: 0, y: 0, w: 1000, h: 1000 }, size: { w: 1000, h: 1000 } }
+    const k = body(0, 0)
+    // A far knee the model half-sees (as on a side-on bike clip): drawn, not measured.
+    k[HALPE26.indexOf('leftKnee') * 3 + 2] = 0.4
+    const shapes = poseShapes(k, '#fff', { angles: ['leftKnee', 'rightKnee'], widthPx: 6 }, view)
+    expect(shapes.filter((s) => s.kind === 'label')).toHaveLength(1)
+    expect(angleSure(k, POSE_ANGLES.leftKnee)).toBe(false)
+    expect(angleSure(k, POSE_ANGLES.rightKnee)).toBe(true)
+    const [links] = shapes
+    const knee = toView(view, k[HALPE26.indexOf('leftKnee') * 3], k[HALPE26.indexOf('leftKnee') * 3 + 1])
+    expect(links.kind === 'path' && links.d.includes(`${knee.x} ${knee.y}`)).toBe(true)
+  })
+})
+
+describe('overlapping angle labels', () => {
+  it('keeps only the more confident of two angles whose labels would overlap (side-on hips)', () => {
+    const view: PoseView = { crop: { x: 0, y: 0, w: 1000, h: 1000 }, size: { w: 1000, h: 1000 } }
+    const k = body(0, 0)
+    const put = (name: (typeof HALPE26)[number], x: number, y: number, s = 0.9): void => {
+      k.splice(HALPE26.indexOf(name) * 3, 3, x, y, s)
+    }
+    // Both hips, shoulders and knees almost on top of each other (seen side-on).
+    put('leftShoulder', 300, 200, 0.95)
+    put('rightShoulder', 303, 202, 0.7)
+    put('leftHip', 500, 300, 0.95)
+    put('rightHip', 502, 301, 0.7)
+    put('leftKnee', 420, 500, 0.95)
+    put('rightKnee', 423, 503, 0.7)
+    const labels = poseShapes(k, '#fff', { angles: ['rightHip', 'leftHip'], widthPx: 6 }, view).filter(
+      (s) => s.kind === 'label'
+    )
+    expect(labels).toHaveLength(1)
+    // The left (more confident) one wins, whatever order they were chosen in.
+    const left = poseShapes(k, '#fff', { angles: ['leftHip'], widthPx: 6 }, view).find((s) => s.kind === 'label')
+    expect(labels[0]).toEqual(left)
   })
 })

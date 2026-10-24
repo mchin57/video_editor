@@ -138,6 +138,15 @@ export const PERSON_COLORS = ['#FFD60A', '#33D1FF', '#FF4FD8', '#7CFF4F', '#FF8A
 /** Below this model score a keypoint is hidden rather than drawn wrong (an arm
  *  under the water, a leg behind the bike). */
 export const POSE_MIN_SCORE = 0.3
+/** An angle is a NUMBER a coach reads, so its three joints must clear a
+ *  stricter bar than a line on the skeleton. Measured on a side-on bike clip:
+ *  the near leg scored ~0.75, the hidden far knee/ankle ~0.36–0.41 — enough
+ *  to sketch the far leg, not to print a misleading degree over the near one. */
+export const POSE_ANGLE_MIN_SCORE = 0.5
+
+/** Whether an angle is labelled for these keypoints: all three joints sure. */
+export const angleSure = (k: Keypoints, d: Pick<PoseAngleDef, 'a' | 'vertex' | 'b'>): boolean =>
+  [d.a, d.vertex, d.b].every((i) => k[i * 3 + 2] >= POSE_ANGLE_MIN_SCORE)
 /** Stroke width of a new overlay, logical px (at the clip's zoom 1). */
 export const POSE_DEFAULT_WIDTH = 6
 
@@ -607,12 +616,25 @@ export function poseShapes(
     return `M${f2(p.x)} ${f2(p.y)} L${f2(p.x)} ${f2(p.y)}`
   })
   if (dots.length) out.push({ kind: 'path', d: dots.join(' '), stroke: '#FFFFFF', strokeWidth: w * 1.8, fill: null })
-  for (const id of settings.angles) {
-    const def = POSE_ANGLES[id]
-    if (!seen(def.a) || !seen(def.vertex) || !seen(def.b)) continue
-    const m = { ...angleMark(id, at(def.vertex), at(def.a), at(def.b), 0), color, widthPx: w }
+  // Most confident first; an angle whose label would land on one already
+  // placed is left out — side-on, both hips (or knees) can sit on the same
+  // spot and print two numbers over each other.
+  const conf = (d: PoseAngleDef): number => k[d.a * 3 + 2] + k[d.vertex * 3 + 2] + k[d.b * 3 + 2]
+  const defs = settings.angles
+    .map((id) => POSE_ANGLES[id])
+    .filter((d) => angleSure(k, d))
+    .sort((x, y) => conf(y) - conf(x))
+  const placed: Pt[] = []
+  for (const def of defs) {
+    const m = { ...angleMark(def.id, at(def.vertex), at(def.a), at(def.b), 0), color, widthPx: w }
     // The arms are already the skeleton: keep the arc and the degree label.
-    out.push(...markShapes(m).slice(1))
+    const shapes = markShapes(m).slice(1)
+    const label = shapes.find((s) => s.kind === 'label')
+    if (label && label.kind === 'label') {
+      if (placed.some((p) => Math.hypot(p.x - label.x, p.y - label.y) < label.fontSizePx * 1.2)) continue
+      placed.push({ x: label.x, y: label.y })
+    }
+    out.push(...shapes)
   }
   return out
 }
