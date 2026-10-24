@@ -760,7 +760,7 @@ export function Timeline(): JSX.Element {
             {/* Empty-state hint */}
             {isEmpty && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-zinc-600">
-                Drag media here, or use ＋ PH / ＋ End on a library clip.
+                Drag media here, or use ＋ Playhead / ＋ End on a library clip.
               </div>
             )}
           </div>

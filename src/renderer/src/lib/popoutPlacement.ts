@@ -2,7 +2,7 @@
  * Where a clip card's hover pop-out goes (`HoverPopout` in `ClipCard.tsx`).
  *
  * The pop-out sits beside the whole CARD, not just its thumbnail: anchored at
- * the thumbnail it opened over the card's own ＋ PH / ＋ End / × buttons, and a
+ * the thumbnail it opened over the card's own ＋ Playhead / ＋ End / × buttons, and a
  * click meant for them landed on the preview video instead. It is also kept
  * below the app header, so it never covers the File / View / Format menus.
  */

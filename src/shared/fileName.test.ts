@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { FILE_NAME_MAX, pathBaseName, splitFileName, validateFileStem } from './fileName'
+import {
+  BIDI_CONTROL_CHARS,
+  BIDI_CONTROL_REASON,
+  FILE_NAME_MAX,
+  pathBaseName,
+  splitFileName,
+  validateFileStem
+} from './fileName'
 
 describe('splitFileName', () => {
   it('splits at the last dot, like path.extname', () => {
@@ -60,5 +67,13 @@ describe('validateFileStem', () => {
     expect(validateFileStem(fits, '.mp4')).toBeNull()
     expect(validateFileStem(`${fits}a`, '.mp4')).toMatch(String(FILE_NAME_MAX - 4))
     expect(validateFileStem('a'.repeat(FILE_NAME_MAX), '')).toBeNull()
+  })
+})
+
+describe('validateFileStem: bidi controls (#11)', () => {
+  it('rejects a right-to-left override that would disguise the extension', () => {
+    expect(validateFileStem(`clip${String.fromCharCode(0x202e)}4pm`, '.mp4')).toBe(BIDI_CONTROL_REASON)
+    expect(BIDI_CONTROL_CHARS.test(String.fromCharCode(0x2066))).toBe(true)
+    expect(validateFileStem('clip', '.mp4')).toBeNull()
   })
 })

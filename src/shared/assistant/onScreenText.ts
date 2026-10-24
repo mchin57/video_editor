@@ -8,6 +8,7 @@
 
 import type { Composition, GradientStyle, PillStyle, ShadowStyle, StrokeStyle, TimelineItemRef } from '../project'
 import { effectiveCaptionStyle } from '../project'
+import { FRAME } from '../frame'
 import type { TextAnimation } from '../textAnim'
 
 /** Reserved `set_text` / `get_text` id for the caption lane (on/off + lane-wide style). */
@@ -27,6 +28,35 @@ export function maxItemEndSec(durationSec: number): number {
 }
 /** Half of get_text's 1 ms rounding: a time this close to the current one is "unchanged". */
 export const TEXT_TIME_EPS = 0.0005
+
+/** Longest `text` set_text takes. Unbounded, a 200,000-character layer made
+ *  render_frame / export_video take ~25 s instead of under 1 s. */
+export const TEXT_MAX_CHARS = 2000
+/** Control characters `text` may not hold: every one but tab and newline (a NUL
+ *  once got through). The Inspector's text box takes both of those. */
+// eslint-disable-next-line no-control-regex
+export const TEXT_CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/
+/** set_text's bounds on a text centre (logical px): a whole FRAME past each
+ *  edge, which still holds the widest output window (21:9 reaches 720 px past
+ *  the sides). The Inspector leaves position unbounded, but 1e308 was stored and
+ *  then read back as null. */
+export const TEXT_X_MIN = -FRAME.width
+export const TEXT_X_MAX = 2 * FRAME.width
+export const TEXT_Y_MIN = -FRAME.height
+export const TEXT_Y_MAX = 2 * FRAME.height
+/** set_text's rotation bound (degrees, either way): any angle fits in a turn. */
+export const TEXT_ROTATION_MAX_DEG = 360
+/** set_text's gradient angle range (degrees): the Inspector's Angle slider's. */
+export const GRADIENT_ANGLE_MIN = 0
+export const GRADIENT_ANGLE_MAX = 360
+
+/** Why `text` can't be set (empty, too long, control characters), or null. */
+export function textProblem(text: unknown): string | null {
+  if (typeof text !== 'string' || !text.trim()) return 'text must not be empty (use remove_items to delete an item)'
+  if (text.length > TEXT_MAX_CHARS) return `text must be at most ${TEXT_MAX_CHARS} characters (it has ${text.length})`
+  if (TEXT_CONTROL_CHARS.test(text)) return 'text must not contain control characters (newline and tab are fine)'
+  return null
+}
 
 /** The style fields every on-screen text item has (text layer or caption). */
 export interface TextLook {

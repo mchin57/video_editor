@@ -461,7 +461,8 @@ export function ClipCard({
         {footer}
       </div>
 
-      {trailing && <div className="flex w-12 shrink-0 flex-col items-stretch gap-1">{trailing}</div>}
+      {/* At least w-12, wider when a label needs it (the Library's "＋ Playhead"). */}
+      {trailing && <div className="flex min-w-12 shrink-0 flex-col items-stretch gap-1">{trailing}</div>}
     </div>
   )
 }

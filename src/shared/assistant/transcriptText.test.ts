@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { PHRASE_MAX_WORDS, phrases, transcriptPhraseText, transcriptWordText, wordsInRange } from './transcriptText'
+import {
+  PHRASE_MAX_WORDS,
+  phrases,
+  transcriptPhraseText,
+  transcriptRange,
+  transcriptWordText,
+  wordsInRange
+} from './transcriptText'
 
 const w = (text: string, startSec: number, endSec: number) => ({ text, startSec, endSec })
 
@@ -37,5 +44,21 @@ describe('transcriptPhraseText', () => {
 describe('transcriptWordText', () => {
   it('prints one timed word per line', () => {
     expect(transcriptWordText([w('hi', 0, 0.3), w('there', 0.35, 0.7)])).toBe('0.00–0.30 hi\n0.35–0.70 there')
+  })
+})
+
+describe('transcriptRange', () => {
+  it('is undefined with no bounds and open-ended with one', () => {
+    expect(transcriptRange()).toBeUndefined()
+    expect(transcriptRange(5)).toEqual({ fromSec: 5, toSec: Infinity })
+    expect(transcriptRange(undefined, 5)).toEqual({ fromSec: 0, toSec: 5 })
+  })
+
+  it('allows fromSec = toSec (what is said at that moment)', () => {
+    expect(transcriptRange(3, 3)).toEqual({ fromSec: 3, toSec: 3 })
+  })
+
+  it('refuses fromSec after toSec instead of answering "(no speech)" (#11)', () => {
+    expect(() => transcriptRange(10, 2)).toThrow(/fromSec \(10s\) is after toSec \(2s\)/)
   })
 })

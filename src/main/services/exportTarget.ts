@@ -6,6 +6,7 @@
 import { join, parse } from 'node:path'
 import type { Job } from '@shared/jobs'
 import type { Project } from '@shared/project'
+import { BIDI_CONTROL_CHARS_ALL } from '@shared/fileName'
 
 const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i
 
@@ -16,6 +17,7 @@ export function sanitizeExportName(raw: string): string | null {
     .replace(/\.mp4$/i, '')
     // eslint-disable-next-line no-control-regex
     .replace(/[<>:"|?*\x00-\x1f]/g, '')
+    .replace(BIDI_CONTROL_CHARS_ALL, '') // invisible, and they disguise the name (shared/fileName.ts)
     .replace(/[. ]+$/, '')
     .trim()
   if (!stem || /^\.+$/.test(stem)) return null

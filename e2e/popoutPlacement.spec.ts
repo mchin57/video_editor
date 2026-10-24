@@ -1,6 +1,6 @@
 /**
  * Regression for #14: the library hover pop-out opened over its own card's
- * ＋ PH / ＋ End / × buttons and the header's File / View / Format menus, so a
+ * ＋ Playhead / ＋ End / × buttons and the header's File / View / Format menus, so a
  * click there after lingering on the thumbnail landed on the preview video.
  * The pop-out now sits beside the whole card and below the header.
  *
@@ -81,7 +81,7 @@ test('the library pop-out leaves its card buttons and the header menus clickable
   const header = (await page.locator('[data-app-header]').boundingBox())!
   expect(pop.y).toBeGreaterThanOrEqual(header.y + header.height)
 
-  // Glide from the thumbnail to ＋ PH: the pop-out may stay, but the click lands on the button.
+  // Glide from the thumbnail to ＋ Playhead: the pop-out may stay, but the click lands on the button.
   const ph = await centre(addPh)
   await page.mouse.move(ph.x, ph.y, { steps: 15 })
   await page.mouse.click(ph.x, ph.y)

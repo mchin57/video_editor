@@ -114,6 +114,7 @@ test('a clip is not ready — and cannot be added — until its proxy is fully w
   await expect(page.getByTitle('Add to audio track at the playhead')).toBeVisible() // refetch landed
   const addClip = page.getByTitle('Add clip at the playhead')
   await expect(addClip).toHaveCSS('pointer-events', 'none')
+  await expect(addClip).toBeDisabled() // a real button: the keyboard can't fire it either
 
   // All of the above must have run INSIDE the encode, or it proved nothing.
   expect(

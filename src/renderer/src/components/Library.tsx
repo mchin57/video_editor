@@ -162,18 +162,19 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
     )
     selectLayer(id)
   }
-  const addBtn = `rounded bg-sky-500/20 px-1 py-0.5 text-center text-[10px] font-semibold text-sky-300 transition hover:bg-sky-500/40 whitespace-nowrap ${
-    ready ? '' : 'pointer-events-none opacity-30'
-  }`
+  // Real buttons, so the keyboard reaches them (Tab, then Enter). Not ready =
+  // `disabled`; it also lets clicks through to the card, as before.
+  const notReadyCls = 'disabled:pointer-events-none disabled:opacity-30'
+  const addBtn = `rounded bg-sky-500/20 px-1 py-0.5 text-center text-[10px] font-semibold text-sky-300 transition hover:bg-sky-500/40 whitespace-nowrap ${notReadyCls}`
 
   // The add / remove action column — the Library's variant of the shared card.
   const actions = (
     <>
       {isImage ? (
         <>
-          <span
-            role="button"
-            tabIndex={-1}
+          <button
+            type="button"
+            disabled={!ready}
             onClick={(e) => {
               e.stopPropagation()
               addImageAt(playhead())
@@ -181,11 +182,11 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
             className={addBtn}
             title="Add image at the playhead"
           >
-            ＋ PH
-          </span>
-          <span
-            role="button"
-            tabIndex={-1}
+            ＋ Playhead
+          </button>
+          <button
+            type="button"
+            disabled={!ready}
             onClick={(e) => {
               e.stopPropagation()
               addImageAt(endOfTimeline())
@@ -194,12 +195,12 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
             title="Add image to the end of the timeline"
           >
             ＋ End
-          </span>
+          </button>
         </>
       ) : isAudio ? (
-        <span
-          role="button"
-          tabIndex={-1}
+        <button
+          type="button"
+          disabled={!ready}
           onClick={(e) => {
             e.stopPropagation()
             if (!ready) return
@@ -220,16 +221,16 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
           }}
           className={`rounded px-1 py-0.5 text-center text-[10px] font-semibold whitespace-nowrap transition ${
             onTrack ? 'bg-emerald-500/30 text-emerald-200' : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'
-          } ${ready ? '' : 'pointer-events-none opacity-30'}`}
+          } ${notReadyCls}`}
           title="Add to audio track at the playhead"
         >
-          ♪ PH
-        </span>
+          ♪ Playhead
+        </button>
       ) : (
         <>
-          <span
-            role="button"
-            tabIndex={-1}
+          <button
+            type="button"
+            disabled={!ready}
             onClick={(e) => {
               e.stopPropagation()
               addVideoAt(playhead())
@@ -237,11 +238,11 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
             className={addBtn}
             title="Add clip at the playhead"
           >
-            ＋ PH
-          </span>
-          <span
-            role="button"
-            tabIndex={-1}
+            ＋ Playhead
+          </button>
+          <button
+            type="button"
+            disabled={!ready}
             onClick={(e) => {
               e.stopPropagation()
               addVideoAt(endOfTimeline())
@@ -250,7 +251,7 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
             title="Add clip to the end of the timeline"
           >
             ＋ End
-          </span>
+          </button>
         </>
       )}
       <span

@@ -2,12 +2,12 @@
  * Regression (#12): an audio-only `.mp4` — AAC in an MP4, or an MP3 renamed
  * `.mp4` — imported as VIDEO because its kind came from the extension alone.
  * The video proxy's `-map 0:v:0` then failed ("Stream map '' matches no
- * streams"), the card said "proxy failed", and ♪ PH never became clickable.
+ * streams"), the card said "proxy failed", and ♪ Playhead never became clickable.
  * The same audio as `.m4a` worked.
  *
  * Fixed by checking the extension against the probed streams (`kindOfFile` /
  * `reconcileKind`, shared/media.ts): a video container with no picture is
- * audio. ARRANGE via real imports of lavfi-made files, ACT via the real ♪ PH
+ * audio. ARRANGE via real imports of lavfi-made files, ACT via the real ♪ Playhead
  * button, ASSERT on main's answer, the proxy jobs and the store.
  */
 import { execFileSync } from 'node:child_process'
@@ -39,7 +39,7 @@ const tone = (codec: string, out: string): void => {
 }
 
 for (const variant of ['AAC in an MP4', 'an MP3 renamed .mp4'] as const) {
-  test(`an audio-only .mp4 (${variant}) imports as audio and places with ♪ PH`, async ({ appPage: page }) => {
+  test(`an audio-only .mp4 (${variant}) imports as audio and places with ♪ Playhead`, async ({ appPage: page }) => {
     test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
     test.setTimeout(60_000)
 
@@ -64,7 +64,7 @@ for (const variant of ['AAC in an MP4', 'an MP3 renamed .mp4'] as const) {
     }, file)
     expect(asset.kind).toBe('audio')
 
-    // The audio proxy builds and the row's ♪ PH comes alive.
+    // The audio proxy builds and the row's ♪ Playhead comes alive.
     const addAudio = page.getByTitle('Add to audio track at the playhead')
     await expect(addAudio).toBeVisible()
     await expect(addAudio).toHaveCSS('pointer-events', 'auto', { timeout: 30_000 })

@@ -9,11 +9,11 @@
 
 import { existsSync, promises as fsp } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { alphaInputDecoder, assetAspect, assetKind, type MediaAsset } from '@shared/media'
+import { alphaInputDecoder, assetAspect, assetKind, isImageAsset, type MediaAsset } from '@shared/media'
 import type { SequenceItem } from '@shared/assistant/protocol'
 import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
-import { transcriptPhraseText, transcriptWordText } from '@shared/assistant/transcriptText'
+import { transcriptPhraseText, transcriptRange, transcriptWordText } from '@shared/assistant/transcriptText'
 import { frameTimes } from '@shared/assistant/frameTimes'
 import { resolveCompAtPath } from '@shared/compositions'
 import { splitPieces, trimPieces, type CutPiece } from '@shared/quickCut'
@@ -120,6 +120,7 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
   },
 
   get_transcript: async ({ mediaId, fromSec, toSec, words }) => {
+    const range = transcriptRange(fromSec, toSec) // before any (slow) transcription
     const asset = requireAsset(await projectAssets(), mediaId)
     if (!asset.probe.audio) throw new Error(`${asset.fileName} has no audio track to transcribe`)
     const session = requireSession() // a transcription finishes in the project it started in
@@ -128,8 +129,6 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
       if (!whisperAvailable()) throw new Error('whisper.cpp is not installed, so clips cannot be transcribed')
       transcript = await transcribeMedia(mediaId, session)
     }
-    const range =
-      fromSec !== undefined || toSec !== undefined ? { fromSec: fromSec ?? 0, toSec: toSec ?? Infinity } : undefined
     const body = words ? transcriptWordText(transcript.words, range) : transcriptPhraseText(transcript.words, range)
     return text(`${asset.fileName} (${mediaId}) — source seconds\n${body}`)
   },
@@ -141,7 +140,8 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     const dir = await fsp.mkdtemp(join(getSubdir('tmp'), 'frames-'))
     try {
       const content: ToolContent[] = []
-      for (const t of frameTimes(asset.probe.durationSec, times, count)) {
+      // A still has one picture: one frame, however many were asked for.
+      for (const t of frameTimes(isImageAsset(asset) ? 0 : asset.probe.durationSec, times, count)) {
         const out = join(dir, `${t.toFixed(3)}.jpg`)
         const chain = [...(v.isHdr ? [hdrToSdrChain(v)] : []), 'scale=360:-2']
         await generateStill(asset.originalPath, out, t, chain, alphaInputDecoder(v))

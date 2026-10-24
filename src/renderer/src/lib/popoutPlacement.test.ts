@@ -4,7 +4,7 @@ import { popoutPlacement, type Box } from './popoutPlacement'
 const overlaps = (a: Box, b: Box): boolean =>
   a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height
 
-// A library card on the left: thumbnail at its left, the ＋ PH / × buttons at its right.
+// A library card on the left: thumbnail at its left, the ＋ Playhead / × buttons at its right.
 const card: Box = { left: 10, top: 300, width: 260, height: 80 }
 const thumb: Box = { left: 18, top: 308, width: 36, height: 64 }
 const base = { card, thumb, width: 520, height: 560, viewportW: 1600, viewportH: 1000, minTop: 48 }
