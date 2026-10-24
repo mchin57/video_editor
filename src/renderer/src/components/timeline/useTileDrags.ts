@@ -2,7 +2,8 @@
  * Timeline ▸ pressing and dragging tiles: select (Ctrl/Cmd-click to build a
  * multi-selection), move the selection, and trim an edge — of a whole link
  * group / selection through `trimItemsBy`, or of a lone tile through its own
- * freeze- and speed-aware path. Every drag is one undo step (`commitLive`) and
+ * freeze- and speed-aware path — and set a freeze's hold from its overlay's
+ * edge. Every drag is one undo step (`commitLive`) and
  * works from its press-time snapshot. The tile rules live in `lib/links.ts`
  * and `lib/timeline.ts`; e2e: link, freezeTrim, timelineInteractions,
  * edgeScrollShrink, keybinds.
@@ -11,6 +12,7 @@
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import type { AudioClip, CaptionSegment, Composition, Layer, Project, TimelineItemRef } from '@shared/project'
 import { effectiveOut } from '@shared/project'
+import { freezeSpans } from '@shared/layers'
 import type { MediaAsset } from '@shared/media'
 import { sourceAfterPlayed } from '@shared/speed'
 import { clamp } from '@shared/math'
@@ -28,7 +30,7 @@ import {
   type SourceDuration
 } from '@/lib/links'
 import { startPointerDrag } from '@/lib/pointerDrag'
-import { trimVideoEnd, trimVideoStart } from '@/lib/timeline'
+import { setFreezeHold, trimVideoEndBy, trimVideoStart } from '@/lib/timeline'
 import { snap } from '@/lib/snap'
 import { shiftMarks } from '@shared/graphics'
 import { CLICK_SLOP, SNAP_PX } from './constants'
@@ -60,10 +62,11 @@ export function useTileDrags({
   selection,
   selKeys
 }: TileDragDeps): {
-  startTileDrag: (e: ReactPointerEvent, ref: TimelineItemRef) => void
+  startTileDrag: (e: ReactPointerEvent, ref: TimelineItemRef, onClick?: () => void) => void
   startLayerDrag: (e: ReactPointerEvent, layer: Layer, mode: 'start' | 'end') => void
   startCaptionDrag: (e: ReactPointerEvent, seg: CaptionSegment, mode: 'start' | 'end') => void
   startAudioDrag: (e: ReactPointerEvent, clip: AudioClip, mode: 'start' | 'end', maxOut: number) => void
+  startFreezeDrag: (e: ReactPointerEvent, layer: Layer, index: number) => void
 } {
   const selectItems = useUi((s) => s.selectItems)
   const setPlaying = usePlayback((s) => s.setPlaying)
@@ -97,8 +100,10 @@ export function useTileDrags({
    * for selecting and moving a tile, so linked tiles behave identically in every
    * lane. Ctrl/Cmd-click toggles the tile's group in the multi-selection without
    * dragging; a plain press selects (whole group) and starts a group move.
+   * `onClick` runs when the press is released without dragging (after the
+   * selection collapses onto the tile) — a freeze overlay picks itself there.
    */
-  const startTileDrag = (e: ReactPointerEvent, ref: TimelineItemRef): void => {
+  const startTileDrag = (e: ReactPointerEvent, ref: TimelineItemRef, onClick?: () => void): void => {
     e.stopPropagation()
     e.preventDefault()
     // Two snapshots: the ROOT document for commitLive (undo restores the whole
@@ -124,7 +129,7 @@ export function useTileDrags({
     // set; otherwise the press selects this tile's group (or just this tile).
     const refs = selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(comp0, ref)
     selectItems(refs, ref)
-    startGroupMove(e, before, comp0, refs, ref)
+    startGroupMove(e, before, comp0, refs, ref, onClick)
   }
 
   /** Ctrl/Cmd-click: add this tile's whole group to the selection, or drop it if
@@ -154,7 +159,8 @@ export function useTileDrags({
     before: Project,
     comp0: Composition,
     refs: TimelineItemRef[],
-    primary: TimelineItemRef
+    primary: TimelineItemRef,
+    onClick?: () => void
   ): void => {
     const startSec = tileOf(comp0, primary)?.startSec ?? 0
     const targets = collectSnapTargets(refKeys(refs))
@@ -177,6 +183,7 @@ export function useTileDrags({
           // has to keep the whole set alive so the set can be dragged.
           const p = getActiveComp()
           if (p) selectItems(expandGroup(p, primary), primary)
+          onClick?.()
           return
         }
         useProject.getState().commitLive(before)
@@ -276,14 +283,53 @@ export function useTileDrags({
             }
             // end
             if (layer.content.kind === 'video') {
-              const c = layer.content
-              return trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, d), c.inSec + 0.1, srcOut))
+              // Walks back through the footage AND freeze holds as played time
+              // (into a freeze: cut past it, then shorten the hold).
+              return trimVideoEndBy(layer, layer.content, d, srcOut)
             }
             return { ...l, endSec: Math.max(l.startSec + 0.2, snapSec(endSec + d)) }
           })
         }))
       },
       commitFrom(before)
+    )
+  }
+
+  /**
+   * Drag a freeze overlay's right edge: sets that hold's length (`setFreezeHold`,
+   * at least MIN_HOLD_SEC), moving only this clip's end. The edge snaps like any
+   * other, to targets outside this clip. Picks the freeze, so Delete removes it.
+   */
+  const startFreezeDrag = (e: ReactPointerEvent, layer: Layer, index: number): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    setPlaying(false)
+    const before = useProject.getState().project
+    const comp0 = getActiveComp()
+    if (!before || !comp0 || layer.content.kind !== 'video') return
+    const c = layer.content
+    const span = freezeSpans(c, layer).find((s) => s.index === index)
+    if (!span) return
+    const ref: TimelineItemRef = { kind: 'layer', id: layer.id }
+    selectItems(expandGroup(comp0, ref), ref)
+    useUi.getState().selectFreeze({ index, atSec: span.atSec })
+    const targets = collectSnapTargets(refKeys([ref]))
+    let dragged = false
+    trackHorizontalDrag(
+      e,
+      (dx) => {
+        // A press that barely moves is a pick, not a re-time (no snap, no undo step).
+        if (!dragged && Math.abs(dx) <= CLICK_SLOP) return
+        dragged = true
+        const edge = snap(span.endSec + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
+        useProject.getState().liveUpdate((p) => ({
+          ...p,
+          layers: p.layers.map((l) => (l.id === layer.id ? setFreezeHold(layer, c, index, edge - span.startSec) : l))
+        }))
+      },
+      () => {
+        if (dragged) useProject.getState().commitLive(before)
+      }
     )
   }
 
@@ -359,5 +405,5 @@ export function useTileDrags({
     )
   }
 
-  return { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag }
+  return { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag }
 }

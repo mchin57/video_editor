@@ -9,6 +9,7 @@ import {
   FRAME,
   frameToOutput,
   freezeExtraSec,
+  freezeSpans,
   FULL_FRAME,
   hookCovered,
   isBackgroundId,
@@ -283,6 +284,34 @@ describe('freezeExtraSec / isFrozenAt', () => {
     expect(isFrozenAt(c, l, 2.9)).toBe(false)
     expect(isFrozenAt(c, l, 3.5)).toBe(true)
     expect(isFrozenAt(c, l, 5)).toBe(false)
+  })
+})
+
+describe('freezeSpans', () => {
+  it('places each hold on the timeline in source order, after the holds before it', () => {
+    const l = makeVideoLayer('a', 'm', 2, 10) // starts at 2
+    // Stored out of order: indexes refer to the stored array.
+    const c = {
+      ...(l.content as VideoContent),
+      freezes: [
+        { atSec: 7, holdSec: 1 },
+        { atSec: 3, holdSec: 2 }
+      ]
+    }
+    expect(freezeSpans(c, l)).toEqual([
+      { index: 1, atSec: 3, holdSec: 2, startSec: 5, endSec: 7 },
+      { index: 0, atSec: 7, holdSec: 1, startSec: 11, endSec: 12 }
+    ])
+    // Each span is exactly where the clip shows the held frame.
+    for (const s of freezeSpans(c, l)) {
+      expect(isFrozenAt(c, l, s.startSec + 0.01)).toBe(true)
+      expect(isFrozenAt(c, l, s.endSec + 0.01)).toBe(false)
+    }
+  })
+  it('maps the footage before a hold through the clip speed', () => {
+    const l = makeVideoLayer('a', 'm', 0, 10)
+    const c = { ...(l.content as VideoContent), speed: 2, freezes: [{ atSec: 4, holdSec: 1 }] }
+    expect(freezeSpans(c, l)).toEqual([{ index: 0, atSec: 4, holdSec: 1, startSec: 2, endSec: 3 }])
   })
 })
 

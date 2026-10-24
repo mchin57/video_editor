@@ -255,6 +255,29 @@ export function isFrozenAt(content: VideoContent, layer: Layer, t: number): bool
   return false
 }
 
+/** One freeze hold placed on the timeline: the held frame shows over
+ *  `[startSec, endSec)`. `index` is its position in `content.freezes`. */
+export interface FreezeSpan {
+  index: number
+  atSec: number
+  holdSec: number
+  startSec: number
+  endSec: number
+}
+
+/** Where each of the layer's freeze holds sits on the timeline, in `atSec`
+ *  order — what the timeline draws as freeze overlays on the clip. */
+export function freezeSpans(content: VideoContent, layer: Pick<Layer, 'startSec'>): FreezeSpan[] {
+  const order = (content.freezes ?? []).map((f, index) => ({ ...f, index })).sort((a, b) => a.atSec - b.atSec)
+  let holdsBefore = 0
+  return order.map((f) => {
+    const holdSec = Math.max(0, f.holdSec)
+    const startSec = layer.startSec + playedBetween(content, content.inSec, f.atSec) + holdsBefore
+    holdsBefore += holdSec
+    return { index: f.index, atSec: f.atSec, holdSec, startSec, endSec: startSec + holdSec }
+  })
+}
+
 /**
  * Timeline time at which the layer shows SOURCE second `s` — the inverse of
  * `videoSourceTime` (for a source point inside a freeze hold, the hold's

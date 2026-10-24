@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   extractAudioPieces,
+  MIN_HOLD_SEC,
   reorder,
+  setFreezeHold,
   splitAudioClip,
   splitCaptionSegment,
   splitStaticLayer,
@@ -10,6 +12,7 @@ import {
   trimCaptionEdge,
   trimLayerEdge,
   trimVideoEnd,
+  trimVideoEndBy,
   trimVideoStart
 } from './timeline'
 import { layerTransformAt, makeGraphicsLayer, makeVideoLayer, playedVideoDuration } from '@shared/layers'
@@ -254,6 +257,115 @@ describe('splitVideoLayer', () => {
       expect(t.startSec).toBe(2)
       expect(video(t)).toMatchObject({ inSec: 2, freezes: [{ atSec: 3, holdSec: 2 }] })
       invariant(t)
+    })
+  })
+
+  describe('trimVideoEndBy (the right edge walks back into a freeze)', () => {
+    // A 10s clip frozen on its LAST frame for 2s → window 0..12.
+    const endFrozen = (): Layer => {
+      const l = makeVideoLayer('a', 'm', 0, 10)
+      return { ...l, endSec: 12, content: { ...(l.content as VideoContent), freezes: [{ atSec: 10, holdSec: 2 }] } }
+    }
+    it('trims footage after the hold first, keeping the hold', () => {
+      const l = frozen()
+      const t = trimVideoEndBy(l, video(l), -1, 10)
+      expect(t.endSec).toBeCloseTo(11, 9)
+      expect(video(t)).toMatchObject({ outSec: 9, freezes: [{ atSec: 3, holdSec: 2 }] })
+      invariant(t)
+    })
+    it('once past the footage, shortens the hold instead of dropping it', () => {
+      const l = frozen()
+      const t = trimVideoEndBy(l, video(l), -8, 10) // 7s of footage (3→10), then 1s of the hold
+      expect(t.endSec).toBeCloseTo(4, 9)
+      expect(video(t).outSec).toBeCloseTo(3, 9)
+      expect(video(t).freezes).toEqual([{ atSec: 3, holdSec: 1 }])
+      invariant(t)
+    })
+    it('a freeze on the last frame shortens straight away', () => {
+      const l = endFrozen()
+      const t = trimVideoEndBy(l, video(l), -0.5, 10)
+      expect(t.endSec).toBeCloseTo(11.5, 9)
+      expect(video(t)).toMatchObject({ outSec: 10, freezes: [{ atSec: 10, holdSec: 1.5 }] })
+      invariant(t)
+    })
+    it('a used-up hold is dropped and the trim carries on into the footage before it', () => {
+      const l = endFrozen()
+      const t = trimVideoEndBy(l, video(l), -3, 10) // the 2s hold, then 1s of footage
+      expect(t.endSec).toBeCloseTo(9, 9)
+      expect(video(t).outSec).toBeCloseTo(9, 9)
+      expect(video(t).freezes).toBeUndefined()
+      invariant(t)
+    })
+    it('is continuous in the delta across the footage/hold boundaries — AT them too', () => {
+      const l = frozen()
+      const at = (d: number): number => trimVideoEndBy(l, video(l), d, 10).endSec
+      for (const b of [-7, -9]) {
+        expect(at(b + 1e-6)).toBeCloseTo(at(b - 1e-6), 4)
+        expect(at(b)).toBeCloseTo(12 + b, 9) // regression: exactly -9 once collapsed the clip to 0.1s
+      }
+      // A freeze on the last frame, used up exactly by the delta.
+      const e = endFrozen()
+      expect(trimVideoEndBy(e, video(e), -2, 10).endSec).toBeCloseTo(10, 9)
+    })
+    it('drops a hold the edge cuts to under a millisecond, instead of leaving a sliver', () => {
+      const l = frozen()
+      const t = trimVideoEndBy(l, video(l), -8.9995, 10)
+      expect(video(t).freezes).toBeUndefined()
+      expect(t.endSec).toBeCloseTo(3, 9)
+      invariant(t)
+    })
+    it('shortens a hold on the last frame of a clip already at its minimum source span', () => {
+      const base = makeVideoLayer('a', 'm', 0, 10)
+      const c: VideoContent = { ...video(base), outSec: 0.1, freezes: [{ atSec: 0.1, holdSec: 2 }] }
+      const l: Layer = { ...base, endSec: 2.1, content: c }
+      const t = trimVideoEndBy(l, c, -1, 10)
+      expect(video(t).freezes).toEqual([{ atSec: 0.1, holdSec: 1 }])
+      expect(t.endSec).toBeCloseTo(1.1, 9)
+    })
+    it('lengthening extends the footage up to the source end', () => {
+      const l = trimVideoEndBy(frozen(), video(frozen()), -2, 20) // out 8, window 0..10
+      const t = trimVideoEndBy(l, video(l), 50, 20)
+      expect(video(t)).toMatchObject({ outSec: 20, freezes: [{ atSec: 3, holdSec: 2 }] })
+      expect(t.endSec).toBeCloseTo(22, 9)
+    })
+    it('keeps the minimum source span, and a hold at the very start stays whole', () => {
+      const base = makeVideoLayer('a', 'm', 0, 10)
+      const l: Layer = { ...base, endSec: 12, content: { ...video(base), freezes: [{ atSec: 0, holdSec: 2 }] } }
+      const t = trimVideoEndBy(l, video(l), -50, 10)
+      expect(video(t).outSec).toBeCloseTo(0.1, 9)
+      expect(video(t).freezes).toEqual([{ atSec: 0, holdSec: 2 }])
+      invariant(t)
+    })
+    it('walks the footage through the clip speed (2× = half the timeline time)', () => {
+      const base = makeVideoLayer('a', 'm', 0, 10)
+      const c: VideoContent = { ...video(base), speed: 2, freezes: [{ atSec: 6, holdSec: 2 }] }
+      const l: Layer = { ...base, endSec: 7, content: c } // 5s played + 2s hold
+      const t = trimVideoEndBy(l, c, -3, 10) // 2s of played footage (source 6→10), then 1s of hold
+      expect(video(t).outSec).toBeCloseTo(6, 9)
+      expect(video(t).freezes).toEqual([{ atSec: 6, holdSec: 1 }])
+      expect(t.endSec).toBeCloseTo(4, 9)
+    })
+    it('a group trim takes the same path (trimLayerEdge)', () => {
+      const l = frozen()
+      const { tile, achieved } = trimLayerEdge(l, 'end', -8, 10)
+      expect(achieved).toBeCloseTo(-8, 9)
+      expect(video(tile).freezes).toEqual([{ atSec: 3, holdSec: 1 }])
+    })
+  })
+
+  describe('setFreezeHold', () => {
+    it('changes one hold and moves only the clip end', () => {
+      const l = frozen()
+      const t = setFreezeHold(l, video(l), 0, 3.5)
+      expect(t.startSec).toBe(0)
+      expect(t.endSec).toBeCloseTo(13.5, 9)
+      expect(video(t).freezes).toEqual([{ atSec: 3, holdSec: 3.5 }])
+      invariant(t)
+    })
+    it(`never shortens a hold below ${MIN_HOLD_SEC}s, and ignores a missing freeze`, () => {
+      const l = frozen()
+      expect(video(setFreezeHold(l, video(l), 0, -4)).freezes).toEqual([{ atSec: 3, holdSec: MIN_HOLD_SEC }])
+      expect(setFreezeHold(l, video(l), 3, 1)).toBe(l)
     })
   })
 })

@@ -13,6 +13,7 @@ import {
   expandSelection,
   linkItems,
   moveItemsBy,
+  pickedFreezeIndex,
   pruneLinkGroups,
   refsForIds,
   removeItems,
@@ -108,6 +109,33 @@ const pair = (): Project =>
 
 const startOf = (p: Composition, ref: TimelineItemRef): number =>
   timelineTiles(p).find((t) => t.ref.kind === ref.kind && t.ref.id === ref.id)!.startSec
+
+describe('pickedFreezeIndex', () => {
+  const frozen = (gid?: string): Layer => {
+    const base = layer('L1', 0, 10, gid)
+    const c = {
+      ...(base.content as VideoContent),
+      freezes: [
+        { atSec: 3, holdSec: 2 },
+        { atSec: 3, holdSec: 1 }
+      ]
+    }
+    return { ...base, endSec: 13, content: c }
+  }
+  it('names the picked freeze by index AND atSec — two holds at one moment stay distinct', () => {
+    const p = project({ layers: [frozen()] })
+    expect(pickedFreezeIndex(p, 'L1', { index: 1, atSec: 3 })).toBe(1)
+    expect(pickedFreezeIndex(p, 'L1', { index: 0, atSec: 3 })).toBe(0)
+  })
+  it('is -1 for a stale pick: the freeze or layer is gone, or the clip is now linked', () => {
+    const p = project({ layers: [frozen()] })
+    expect(pickedFreezeIndex(p, 'L1', { index: 2, atSec: 3 })).toBe(-1)
+    expect(pickedFreezeIndex(p, 'L1', { index: 0, atSec: 4 })).toBe(-1)
+    expect(pickedFreezeIndex(p, 'nope', { index: 0, atSec: 3 })).toBe(-1)
+    const linked = project({ layers: [frozen('g1')], audioClips: [audio('A1', 0, 10, 'g1')] })
+    expect(pickedFreezeIndex(linked, 'L1', { index: 0, atSec: 3 })).toBe(-1)
+  })
+})
 
 describe('link / unlink', () => {
   it('links two tiles across lanes into one group', () => {
@@ -249,6 +277,27 @@ describe('trimItemsBy', () => {
     const next = trimItemsBy(pair(), [L('L1'), A('A1')], 'end', -7)
     expect(next.audioClips[0].outSec).toBeCloseTo(0.1, 5)
     expect(next.layers[0].endSec).toBeCloseTo(10 - 5.9, 5) // same delta, still in step
+  })
+
+  it('walks a frozen clip back through its hold and stays in step — even landing exactly on the hold start', () => {
+    // L1 0..12: 10s of source with a 2s hold at source 3s; A1 0..12 beside it.
+    const base = layer('L1', 0, 10, 'g1')
+    const frozen: Layer = {
+      ...base,
+      endSec: 12,
+      content: { ...(base.content as VideoContent), freezes: [{ atSec: 3, holdSec: 2 }] }
+    }
+    const p = project({ layers: [frozen], audioClips: [audio('A1', 0, 12, 'g1')] })
+    // 8s: the 7s of footage past the hold, then 1s of the hold.
+    const into = trimItemsBy(p, [L('L1'), A('A1')], 'end', -8)
+    expect((into.layers[0].content as VideoContent).freezes).toEqual([{ atSec: 3, holdSec: 1 }])
+    expect(into.layers[0].endSec).toBeCloseTo(4, 9)
+    expect(into.audioClips[0].outSec).toBeCloseTo(4, 9)
+    // 9s uses the hold up exactly: both ends land at 3s (not the clip's minimum).
+    const exact = trimItemsBy(p, [L('L1'), A('A1')], 'end', -9)
+    expect((exact.layers[0].content as VideoContent).freezes).toBeUndefined()
+    expect(exact.layers[0].endSec).toBeCloseTo(3, 9)
+    expect(exact.audioClips[0].outSec).toBeCloseTo(3, 9)
   })
 
   it('does not extend past a member’s source when the duration is known', () => {

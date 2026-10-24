@@ -18,7 +18,7 @@ import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, vid
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { assetAspect, assetKind } from '@shared/media'
-import { layerLabel, makeImageLayer, visualDuration } from '@shared/layers'
+import { freezeSpans, layerLabel, makeImageLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
@@ -66,7 +66,7 @@ import {
   LANE_GEOM
 } from './timeline/constants'
 import { spanOf, packAudioRows, snapTargetsFor } from './timeline/geometry'
-import { PoseBadge, TileThumb } from './timeline/parts'
+import { FreezeOverlay, PoseBadge, TileThumb } from './timeline/parts'
 import { TileDescription } from './timeline/TileDescription'
 import { TimelineToolbar } from './timeline/TimelineToolbar'
 import { LaneGutter } from './timeline/LaneGutter'
@@ -97,6 +97,10 @@ export function Timeline(): JSX.Element {
   const selectTile = useUi((s) => s.selectTile)
   const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
   const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
+  // The freeze picked on the selected clip (Delete removes it; see FreezeOverlay).
+  const selectedLayerId = useUi((s) => s.selectedLayerId)
+  const selectedFreeze = useUi((s) => s.selectedFreeze)
+  const selectFreeze = useUi((s) => s.selectFreeze)
   // The FULL selection (a link group, or a Ctrl-click multi-selection). Every
   // tile in it highlights and moves together; `selected*Id` is just the primary.
   const selection = useUi((s) => s.selection)
@@ -321,7 +325,7 @@ export function Timeline(): JSX.Element {
     e.dataTransfer.dropEffect = 'copy'
   }
 
-  const { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag } = useTileDrags({
+  const { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag } = useTileDrags({
     scrollRef,
     pxPerSec,
     collectSnapTargets,
@@ -426,6 +430,29 @@ export function Timeline(): JSX.Element {
             </span>
           )}
         </div>
+        {l.content.kind === 'video' &&
+          freezeSpans(l.content, l).map((s) => (
+            <FreezeOverlay
+              key={s.index}
+              layerId={l.id}
+              span={s}
+              left={(s.startSec - l.startSec) * pxPerSec}
+              width={s.holdSec * pxPerSec}
+              atClipEnd={s.endSec >= l.endSec - 1e-6}
+              picked={
+                !linked &&
+                selected &&
+                selectedLayerId === l.id &&
+                selectedFreeze?.index === s.index &&
+                selectedFreeze.atSec === s.atSec
+              }
+              linked={linked}
+              onBodyDown={(e) =>
+                startTileDrag(e, { kind: 'layer', id: l.id }, () => selectFreeze({ index: s.index, atSec: s.atSec }))
+              }
+              onEdgeDown={(e) => startFreezeDrag(e, l, s.index)}
+            />
+          ))}
         <div
           onPointerDown={(e) => startLayerDrag(e, l, 'start')}
           className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"

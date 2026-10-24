@@ -237,6 +237,61 @@ export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
 }
 
 /**
+ * Trim the RIGHT edge by a TIMELINE delta (negative = shorter), walking back
+ * through the clip as it plays: the footage after the last freeze, then that
+ * freeze's hold, then the footage before it, and so on. So dragging the edge
+ * into a freeze cuts everything past it and then shortens the hold (a hold used
+ * up, or cut under EPS, is dropped) — continuous in the delta to within EPS,
+ * which a group trim relies on. Lengthening extends the footage, up to source
+ * second `maxSrc`. At least MIN_SOURCE_SEC of source always stays.
+ */
+export function trimVideoEndBy(layer: Layer, c: VideoContent, deltaSec: number, maxSrc: number): Layer {
+  const minSrc = c.inSec + MIN_SOURCE_SEC
+  if (deltaSec >= 0) return trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, deltaSec), minSrc, maxSrc))
+  if (c.outSec < minSrc) return layer
+  const kept = (c.freezes ?? []).filter((f) => f.atSec <= c.outSec).sort((a, b) => a.atSec - b.atSec)
+  let out = c.outSec
+  let left = -deltaSec
+  // Stop as soon as the delta is used up: walking on with `left` at 0 would
+  // hand `sourceAfterPlayed` a -0, which it reads as FORWARD (clamped to the
+  // floor) and collapses the clip to its minimum.
+  while (left > 0) {
+    const last = kept[kept.length - 1]
+    // A hold before the minimum source span can't be reached: it stays.
+    const reachable = !!last && last.atSec >= minSrc
+    const floor = reachable ? last.atSec : minSrc
+    const footage = Math.max(0, playedBetween(c, floor, out))
+    if (left <= footage) {
+      out = Math.max(floor, sourceAfterPlayed(c, out, -left, floor))
+      break
+    }
+    left -= footage
+    out = floor
+    if (!reachable) break
+    if (left < last.holdSec - EPS) {
+      kept[kept.length - 1] = { ...last, holdSec: last.holdSec - left }
+      break
+    }
+    left -= Math.max(0, last.holdSec)
+    kept.pop()
+  }
+  return trimVideoEnd(layer, { ...c, freezes: kept }, out)
+}
+
+/** Shortest hold a freeze overlay drag leaves (removing one is Delete's job). */
+export const MIN_HOLD_SEC = 0.1
+
+/** Set the hold of the freeze at `index` (in `c.freezes`), clamped to
+ *  MIN_HOLD_SEC. Only this clip's end moves, by the change in hold. */
+export function setFreezeHold(layer: Layer, c: VideoContent, index: number, holdSec: number): Layer {
+  const f = c.freezes?.[index]
+  if (!f) return layer
+  const hold = Math.max(MIN_HOLD_SEC, holdSec)
+  const freezes = (c.freezes ?? []).map((g, i) => (i === index ? { ...g, holdSec: hold } : g))
+  return { ...layer, endSec: layer.endSec + hold - Math.max(0, f.holdSec), content: { ...c, freezes } }
+}
+
+/**
  * Trim one LAYER's `edge` by `deltaSec` timeline seconds, clamped to what the
  * layer can actually give: a video is bounded by its source (`srcDurSec`, or its
  * own out-point when the duration isn't known yet), text/image by a minimum
@@ -244,7 +299,7 @@ export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
  *
  * The delta is TIMELINE (played) time for every kind — a video converts it
  * through its own speed profile and freeze holds (`sourceAfterPlayed` +
- * `trimVideoStart`/`trimVideoEnd`), so a group trim can hand every member the
+ * `trimVideoStart`, and `trimVideoEndBy`), so a group trim can hand every member the
  * same number and each honors its own mapping. That's the whole reason this is
  * one function per kind with a shared signature.
  */
@@ -256,7 +311,7 @@ export function trimLayerEdge(layer: Layer, edge: TrimEdge, deltaSec: number, sr
     tile =
       edge === 'start'
         ? trimVideoStart(layer, c, clamp(sourceAfterPlayed(c, c.inSec, deltaSec), 0, c.outSec - MIN_SOURCE_SEC))
-        : trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, deltaSec), c.inSec + MIN_SOURCE_SEC, maxSrc))
+        : trimVideoEndBy(layer, c, deltaSec, maxSrc)
   } else if (edge === 'start') {
     tile = { ...layer, startSec: clamp(layer.startSec + deltaSec, 0, layer.endSec - MIN_LAYER_SEC) }
     // Graphics marks are timed from the start: re-base them so each keeps its
