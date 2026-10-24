@@ -9,7 +9,7 @@
  */
 
 import type { Layer, TextContent } from './project'
-import { DEFAULT_SHADOW } from './project'
+import { DEFAULT_SHADOW, PROJECT_VERSION } from './project'
 import { FRAME } from './frame'
 import { TEMPLATE_FORMAT_VERSION, type ReelTemplate } from './templates'
 
@@ -40,6 +40,7 @@ export const BUILT_IN_TEMPLATES: readonly ReelTemplate[] = [
     id: 'builtin-right-back',
     name: "We'll be right back",
     formatVersion: TEMPLATE_FORMAT_VERSION,
+    projectVersion: PROJECT_VERSION,
     clipEffect: {
       holdSec: 3,
       zoom: { scale: 1.3, dx: 0, dy: 0 },
@@ -68,6 +69,7 @@ export const BUILT_IN_TEMPLATES: readonly ReelTemplate[] = [
     id: 'builtin-follow',
     name: 'Follow for more',
     formatVersion: TEMPLATE_FORMAT_VERSION,
+    projectVersion: PROJECT_VERSION,
     clipEffect: null,
     layers: [
       text('t1', 0, 3, 820, {
@@ -93,6 +95,7 @@ export const BUILT_IN_TEMPLATES: readonly ReelTemplate[] = [
     id: 'builtin-link-in-bio',
     name: 'Link in bio',
     formatVersion: TEMPLATE_FORMAT_VERSION,
+    projectVersion: PROJECT_VERSION,
     clipEffect: null,
     layers: [
       text('t1', 0, 3, 760, {
@@ -136,6 +139,7 @@ export const BUILT_IN_TEMPLATES: readonly ReelTemplate[] = [
     id: 'builtin-lower-third',
     name: 'Lower-third name tag',
     formatVersion: TEMPLATE_FORMAT_VERSION,
+    projectVersion: PROJECT_VERSION,
     clipEffect: null,
     layers: [
       text('t1', 0, 4, 1180, {
@@ -161,6 +165,7 @@ export const BUILT_IN_TEMPLATES: readonly ReelTemplate[] = [
     id: 'builtin-before-after',
     name: 'Before / after labels',
     formatVersion: TEMPLATE_FORMAT_VERSION,
+    projectVersion: PROJECT_VERSION,
     clipEffect: null,
     layers: [
       text('t1', 0, 5, 300, {

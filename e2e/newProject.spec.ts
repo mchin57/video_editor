@@ -11,6 +11,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
+import { PROJECT_VERSION } from '../src/shared/project'
 import { test, expect } from './fixtures'
 
 const stubFolderPicker = (app: ElectronApplication, folder: string): Promise<void> =>
@@ -72,7 +73,7 @@ test('New creates the project folder and opens it; an existing folder and an inv
   )
   for (const dir of ['generated', 'transcripts', 'cache']) expect(statSync(join(root, dir)).isDirectory()).toBe(true)
   const doc = JSON.parse(readFileSync(reel, 'utf8'))
-  expect(doc).toMatchObject({ name: 'My Reel', version: 28, library: [] })
+  expect(doc).toMatchObject({ name: 'My Reel', version: PROJECT_VERSION, library: [] })
   const reelMtime = statSync(reel).mtimeMs
 
   // File ▸ New… again, the SAME name and location: refused inline, nothing switched.

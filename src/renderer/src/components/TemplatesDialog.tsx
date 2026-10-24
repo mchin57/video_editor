@@ -48,8 +48,9 @@ export function TemplatesDialog(): JSX.Element | null {
   return <Gallery mode={mode} />
 }
 
+const close = (): void => useUi.getState().setTemplatesOpen(null)
+
 function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
-  const close = (): void => useUi.getState().setTemplatesOpen(null)
   const qc = useQueryClient()
   const list = useQuery({ queryKey: TEMPLATES_KEY, queryFn: () => listTemplates() })
   const library = useLibrary()
@@ -74,7 +75,11 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
   }, [mode])
 
   const assets = library.data ?? []
-  const durationOf = (id: string): number => assets.find((a) => a.id === id)?.probe.durationSec ?? 0
+  const entries = list.data ?? []
+  const media = {
+    durationOf: (id: string): number => assets.find((a) => a.id === id)?.probe.durationSec ?? 0,
+    fpsOf: (id: string): number => assets.find((a) => a.id === id)?.probe.video?.avgFps ?? 0
+  }
 
   /** Run a gallery action: busy while it runs, the list replaced by what main
    *  returns (null = a dialog was canceled), any error shown inline. */
@@ -97,11 +102,13 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
     setBusy(true)
     setError(null)
     setNote(null)
-    insertTemplate(t.id, durationOf).then(
+    insertTemplate(t.id, media).then(
       ({ effectSkipped }) => {
         setBusy(false)
         if (effectSkipped) {
-          setNote(`Added “${t.name}”. There was no clip under the playhead, so only its text and sound were added.`)
+          setNote(
+            `Added “${t.name}”. There was no clip under the playhead, so only its overlays and sounds were added — no freeze.`
+          )
         } else close()
       },
       (err: unknown) => {
@@ -123,14 +130,19 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
       return
     }
     const skipped = got.skipped.length ? ` Not included: ${got.skipped.join(', ')}.` : ''
-    void run(async () => {
-      const next = await saveTemplate(got.template)
-      setName('')
-      return next
-    }, `Saved “${got.template.name}”.${skipped}`)
+    // Saving under a name you already use replaces that template — say so.
+    const lower = got.template.name.toLowerCase()
+    const replaces = entries.some((e) => !e.builtIn && e.template.name.toLowerCase() === lower)
+    void run(
+      async () => {
+        const next = await saveTemplate(got.template)
+        setName('')
+        return next
+      },
+      `Saved “${got.template.name}”${replaces ? ', replacing your template of that name' : ''}.${skipped}`
+    )
   }
 
-  const entries = list.data ?? []
   return createPortal(
     <div
       className="fixed inset-0 z-[600] flex items-center justify-center bg-black/70 p-8"
@@ -305,7 +317,12 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
 /** A still of the template's layers at its busiest moment, over a plain
  *  backdrop (tinted when the template tints the clip). Read-only. */
 function TemplatePreview({ template: t }: { template: ReelTemplate }): JSX.Element {
-  const comp = useMemo(() => ({ ...createEmptyComposition(), layers: t.layers }), [t.layers])
+  // Image layers point at files in the template's folder, not library media,
+  // so they can't be drawn here; text and graphics are.
+  const comp = useMemo(
+    () => ({ ...createEmptyComposition(), layers: t.layers.filter((l) => l.content.kind !== 'image') }),
+    [t.layers]
+  )
   const tint = t.clipEffect?.tint
   return (
     <div

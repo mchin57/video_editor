@@ -5,7 +5,7 @@
  * round-trips media, a damaged or traversing file is refused, and dropping
  * adopts copies into the project.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -117,6 +117,13 @@ describe('template storage', () => {
     t.audio[0].file = 'gone'
     await expect(saveTemplate(root, t, resolve)).rejects.toThrow('no longer in the library')
     expect(await mine()).toEqual([])
+  })
+
+  it('leaves no half-written folder behind when copying a file fails', async () => {
+    const vanish = async (id: string): Promise<Pick<MediaAsset, 'originalPath' | 'fileName'>> =>
+      id === 'm-logo' ? { originalPath: join(media, 'gone.png'), fileName: 'gone.png' } : resolve(id)
+    await expect(saveTemplate(root, selection(), vanish)).rejects.toThrow()
+    expect(existsSync(root) ? readdirSync(root) : []).toEqual([])
   })
 
   it("choosing a built-in's sound makes a user copy that stands in for it; deleting the copy brings it back", async () => {

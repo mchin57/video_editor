@@ -14,12 +14,15 @@ import { existsSync, promises as fsp } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import type { MediaAsset } from '@shared/media'
 import { newId } from '@shared/ids'
+import { PROJECT_VERSION } from '@shared/project'
 import { bestEffort, createLogger } from '@shared/log'
 import { BUILT_IN_TEMPLATES, isBuiltInTemplate } from '@shared/templateStarters'
 import {
   TEMPLATE_FORMAT_VERSION,
+  TEMPLATE_JSON,
   isTemplateFileName,
   mapTemplateFiles,
+  migrateTemplate,
   parseTemplateShare,
   sanitizeTemplate,
   templateFiles,
@@ -32,8 +35,6 @@ import { replaceFile } from './atomicWrite'
 import { safeFileName, uniqueFileName } from './projectLayout'
 
 const log = createLogger('templates')
-
-const TEMPLATE_JSON = 'template.json'
 
 /** The biggest share file Import reads (they hold their media, base64). */
 export const MAX_SHARE_BYTES = 256 * 1024 * 1024
@@ -68,7 +69,7 @@ async function readUserTemplate(root: string, id: string): Promise<ReelTemplate 
     log.warn(`template ${id} is damaged; skipped`)
     return null
   }
-  return mapTemplateFiles(t, (f) => (existsSync(join(dir, f)) ? f : null))
+  return mapTemplateFiles(migrateTemplate(t), (f) => (existsSync(join(dir, f)) ? f : null))
 }
 
 /** Every user template, by name. */
@@ -112,18 +113,27 @@ type FileSource = { from: string } | { data: Buffer }
 
 /**
  * Write `t` into its folder with `files` (file name → source), the JSON last
- * so a half-written template never lists. A folder already there is replaced.
+ * so a half-written template never lists. A folder already there keeps its
+ * other files. If anything fails, a folder this call created is removed again,
+ * so a failed save or import leaves nothing behind.
  */
 async function writeTemplate(root: string, t: ReelTemplate, files: Map<string, FileSource>): Promise<void> {
   const dir = dirOf(root, t.id)
   if (!dir) throw new Error(`Bad template id: ${t.id}`)
-  await fsp.mkdir(dir, { recursive: true })
-  for (const [name, src] of files) {
-    const to = join(dir, name)
-    if ('from' in src) await fsp.copyFile(src.from, to)
-    else await fsp.writeFile(to, src.data)
+  const fresh = !existsSync(dir)
+  try {
+    await fsp.mkdir(dir, { recursive: true })
+    for (const [name, src] of files) {
+      const to = join(dir, name)
+      if ('from' in src) await fsp.copyFile(src.from, to)
+      else await fsp.writeFile(to, src.data)
+    }
+    await replaceFile(join(dir, TEMPLATE_JSON), JSON.stringify(t, null, 2))
+  } catch (error) {
+    if (fresh)
+      await bestEffort(fsp.rm(dir, { recursive: true, force: true }), `removing half-written template ${t.id}`, log)
+    throw error
   }
-  await replaceFile(join(dir, TEMPLATE_JSON), JSON.stringify(t, null, 2))
 }
 
 /** Remove a user template's folder (no-op for a built-in or an unknown id). */
@@ -165,7 +175,8 @@ export async function saveTemplate(
   const t: ReelTemplate = {
     ...mapTemplateFiles(template, (m) => byMedia.get(m) ?? null),
     id,
-    formatVersion: TEMPLATE_FORMAT_VERSION
+    formatVersion: TEMPLATE_FORMAT_VERSION,
+    projectVersion: template.projectVersion ?? PROJECT_VERSION
   }
   delete t.basedOn
   const same = (await userTemplates(root)).filter((o) => o.name.toLowerCase() === t.name.toLowerCase())
@@ -242,10 +253,11 @@ export async function importTemplate(root: string, srcPath: string): Promise<Tem
   }
   const res = parseTemplateShare(parsed)
   if ('error' in res) throw new Error(res.error)
+  const migrated = migrateTemplate(res.template)
   const names = new Set((await listTemplates(root)).map((e) => e.template.name.toLowerCase()))
-  let name = res.template.name
-  for (let n = 2; names.has(name.toLowerCase()); n++) name = `${res.template.name} (${n})`
-  const t: ReelTemplate = { ...res.template, id: newId(), name }
+  let name = migrated.name
+  for (let n = 2; names.has(name.toLowerCase()); n++) name = `${migrated.name} (${n})`
+  const t: ReelTemplate = { ...migrated, id: newId(), name }
   delete t.basedOn
   const files = new Map<string, FileSource>(
     Object.entries(res.files).map(([f, b64]) => [f, { data: Buffer.from(b64, 'base64') }])

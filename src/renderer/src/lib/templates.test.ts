@@ -1,9 +1,12 @@
 /**
  * Dropping a template at the playhead (`applyTemplate`) and saving one from the
- * selection (`templateFromSelection`): the held frame is ONE source frame plus
- * a freeze at its end, only it is zoomed/graded and silent, the clip resumes
- * after the hold, everything after the drop point moves later by the hold, and
- * the dropped pieces land as one link group.
+ * selection (`templateFromSelection`): the held frame is a couple of SOURCE
+ * frames held at their head, only it is zoomed/graded and silent, the clip
+ * resumes after the hold, everything from the drop point on moves later by
+ * exactly the hold, and the dropped pieces land as one link group. Includes the
+ * audit's regressions: a drop at a clip start never deletes linked pieces before
+ * it, a drop inside a hold never makes a zero-length source, the held piece
+ * follows the clip's frame rate and speed.
  */
 import { describe, expect, it } from 'vitest'
 import { makeVideoLayer, playedVideoDuration, videoSourceTime } from '@shared/layers'
@@ -16,12 +19,15 @@ import {
 } from '@shared/project'
 import { BUILT_IN_TEMPLATES } from '@shared/templateStarters'
 import { TEMPLATE_FORMAT_VERSION, type ReelTemplate } from '@shared/templates'
-import { HOLD_FRAME_SEC, applyTemplate, clipUnder, templateFromSelection } from './templates'
+import { HELD_SOURCE_FRAMES, applyTemplate, clipUnder, templateFromSelection, type DropMedia } from './templates'
 import { expandGroup } from './links'
 
 let n = 0
 const makeId = (): string => `id${++n}`
-const srcDur = (): number => 0
+/** No durations known; every clip at 30 fps (the fallback too). */
+const media: DropMedia = { durationOf: () => 0, fpsOf: () => 30 }
+/** Two source frames at 30 fps. */
+const F = HELD_SOURCE_FRAMES / 30
 
 function sound(id: string, startSec: number, dur: number, extra: Partial<AudioClip> = {}): AudioClip {
   return {
@@ -109,84 +115,137 @@ function tpl(over: Partial<ReelTemplate> = {}): ReelTemplate {
   }
 }
 
-const vid = (c: Composition, id: string): Layer & { content: VideoContent } =>
-  c.layers.find((l) => l.id === id) as Layer & { content: VideoContent }
+type VideoLayer = Layer & { content: VideoContent }
+const vid = (c: Composition, id: string): VideoLayer => c.layers.find((l) => l.id === id) as VideoLayer
+const videos = (c: Composition): VideoLayer[] =>
+  (c.layers.filter((l) => l.content.kind === 'video') as VideoLayer[]).sort((a, b) => a.startSec - b.startSec)
 
 describe('applyTemplate — the clip effect', () => {
   it('holds the frame under the playhead and the clip resumes after the hold', () => {
-    const { comp, added, effectSkipped } = applyTemplate(edit(), tpl(), 4, srcDur, makeId)
+    const { comp, added, effectSkipped } = applyTemplate(edit(), tpl(), 4, media, makeId)
     expect(effectSkipped).toBe(false)
-    const heldId = added[0].id
-    const held = vid(comp, heldId)
-    // Left of the drop point: the original clip, cut at 4s.
-    const left = vid(comp, 'V')
-    expect([left.startSec, left.endSec, left.content.inSec, left.content.outSec]).toEqual([0, 4, 0, 4])
-    // The held piece: one source frame from 4s, then a freeze on its last frame.
+    const [left, held, rest] = videos(comp)
+    expect(held.id).toBe(added[0].id)
+    expect([left.id, left.startSec, left.endSec, left.content.inSec, left.content.outSec]).toEqual(['V', 0, 4, 0, 4])
+    // The held piece: two source frames from 4s, held at their head for 3s.
     expect(held.startSec).toBe(4)
-    expect(held.endSec).toBeCloseTo(7 + HOLD_FRAME_SEC, 6)
     expect(held.content.inSec).toBeCloseTo(4, 6)
-    expect(held.content.outSec).toBeCloseTo(4 + HOLD_FRAME_SEC, 6)
-    expect(held.content.freezes).toEqual([{ atSec: held.content.outSec, holdSec: 3 }])
-    expect(playedVideoDuration(held.content)).toBeCloseTo(3 + HOLD_FRAME_SEC, 6)
-    // It shows the frame at the drop point the whole time.
-    expect(videoSourceTime(held.content, held, 6.9)).toBeCloseTo(4 + HOLD_FRAME_SEC, 3)
+    expect(held.content.outSec).toBeCloseTo(4 + F, 6)
+    expect(held.content.freezes).toEqual([{ atSec: held.content.inSec, holdSec: 3 }])
+    expect(held.endSec).toBeCloseTo(7 + F, 6)
+    expect(playedVideoDuration(held.content)).toBeCloseTo(3 + F, 6)
+    // The frame at the drop point is what it shows across the hold.
+    for (const t of [4.01, 5.5, 6.99]) expect(videoSourceTime(held.content, held, t)).toBeCloseTo(4, 6)
     // Only it is graded, tinted, silent; the rest of the clip keeps its look.
     expect(held.content.mute).toBe(true)
     expect(held.content.color).toEqual(fx.color)
     expect(held.content.tint).toEqual(fx.tint)
     expect(left.content.tint).toBeUndefined()
-    // The rest of the clip resumes at the frame after the held one, after the hold.
-    const rest = comp.layers.find((l) => l.content.kind === 'video' && l.id !== 'V' && l.id !== heldId)!
-    expect(rest.startSec).toBeCloseTo(7 + HOLD_FRAME_SEC, 6)
-    expect((rest.content as VideoContent).inSec).toBeCloseTo(4 + HOLD_FRAME_SEC, 6)
-    expect(rest.content.kind === 'video' && rest.content.tint).toBeFalsy()
+    expect(rest.startSec).toBeCloseTo(7 + F, 6)
+    expect(rest.content.inSec).toBeCloseTo(4 + F, 6)
+    expect(rest.content.tint).toBeUndefined()
   })
 
   it('zooms the held frame from where it was to the template zoom across the hold', () => {
-    const { comp, added } = applyTemplate(edit(), tpl(), 4, srcDur, makeId)
-    const held = vid(comp, added[0].id)
-    expect(held.keyframes).toEqual([
+    const { comp, added } = applyTemplate(edit(), tpl(), 4, media, makeId)
+    expect(vid(comp, added[0].id).keyframes).toEqual([
       { tSec: 0, x: 540, y: 960, scale: 1 },
-      { tSec: expect.closeTo(3 + HOLD_FRAME_SEC, 6), x: 550, y: 940, scale: 1.5 }
+      { tSec: 3, x: 550, y: 940, scale: 1.5 }
     ])
   })
 
-  it("keeps the clip's own audio in sync: cut, a one-frame sliver dropped, the rest moved by the hold", () => {
-    const { comp, added } = applyTemplate(edit(), tpl(), 4, srcDur, makeId)
+  it('cuts the held piece by the CLIP’s frame rate', () => {
+    const { comp, added } = applyTemplate(edit(), tpl(), 4, { ...media, fpsOf: () => 24 }, makeId)
+    const held = vid(comp, added[0].id)
+    expect(held.content.outSec - held.content.inSec).toBeCloseTo(HELD_SOURCE_FRAMES / 24, 6)
+  })
+
+  it("keeps the clip's own audio in sync: cut, the sliver under the held frames dropped, the rest moved by the hold", () => {
+    const { comp, added } = applyTemplate(edit(), tpl(), 4, media, makeId)
     const clipAudio = comp.audioClips.filter((a) => a.mediaId === 'clip').sort((a, b) => a.startSec - b.startSec)
     expect(clipAudio).toHaveLength(2)
     expect([clipAudio[0].startSec, clipAudio[0].outSec]).toEqual([0, 4])
-    expect(clipAudio[1].startSec).toBeCloseTo(7 + HOLD_FRAME_SEC, 6)
-    expect(clipAudio[1].inSec).toBeCloseTo(4 + HOLD_FRAME_SEC, 6)
+    expect(clipAudio[1].startSec).toBeCloseTo(7 + F, 6)
+    expect(clipAudio[1].inSec).toBeCloseTo(4 + F, 6)
     // The resumed clip and its audio stay linked to each other, not to the template.
-    const rest = comp.layers.find((l) => l.content.kind === 'video' && l.id !== 'V' && l.id !== added[0].id)!
-    const restGroup = expandGroup(comp, { kind: 'layer', id: rest.id }).map((r) => r.id)
-    expect(restGroup).toEqual([rest.id, clipAudio[1].id])
+    const rest = videos(comp)[2]
+    expect(expandGroup(comp, { kind: 'layer', id: rest.id }).map((r) => r.id)).toEqual([rest.id, clipAudio[1].id])
+    expect(expandGroup(comp, added[0]).map((r) => r.id)).not.toContain(rest.id)
   })
 
-  it('moves everything after the drop point later by exactly the hold and leaves what crosses it alone', () => {
-    const { comp } = applyTemplate(edit(), tpl(), 4, srcDur, makeId)
-    const late = comp.layers.find((l) => l.id === 'late')!
-    expect(late.startSec).toBeCloseTo(11, 6)
-    expect(late.endSec).toBeCloseTo(12, 6)
+  it('moves everything from the drop point on later by exactly the hold, and leaves what crosses it alone', () => {
+    const c = edit()
+    c.layers.push(text('atCut', 4, 5)) // a title aligned to the drop point
+    const { comp } = applyTemplate(c, tpl(), 4, media, makeId)
+    expect(comp.layers.find((l) => l.id === 'late')).toMatchObject({ startSec: 11, endSec: 12 })
+    expect(comp.layers.find((l) => l.id === 'atCut')).toMatchObject({ startSec: 7, endSec: 8 })
     expect(comp.audioClips.find((a) => a.id === 'bed')!.startSec).toBe(0)
   })
 
   it('works at the very start of a clip (no first cut)', () => {
-    const { comp, added } = applyTemplate(edit(), tpl(), 0, srcDur, makeId)
+    const { comp, added } = applyTemplate(edit(), tpl(), 0, media, makeId)
     expect(added[0].id).toBe('V')
     const held = vid(comp, 'V')
     expect([held.startSec, held.content.inSec]).toEqual([0, 0])
-    expect(held.endSec).toBeCloseTo(3 + HOLD_FRAME_SEC, 6)
+    expect(held.endSec).toBeCloseTo(3 + F, 6)
+  })
+
+  it('at a clip start, never deletes a linked piece that reaches back before the drop point (J-cut)', () => {
+    // The clip starts at 5s; its linked audio starts 2s earlier (a J-cut) and a
+    // linked title runs 3s–6s.
+    const v = { ...makeVideoLayer('V', 'clip', 5, 5), linkGroupId: 'g' }
+    const c: Composition = {
+      ...createEmptyComposition(),
+      layers: [{ ...text('title', 3, 6), linkGroupId: 'g' }, v],
+      audioClips: [sound('A', 3, 7, { mediaId: 'clip', kind: 'extracted', linkGroupId: 'g' })]
+    }
+    const { comp } = applyTemplate(c, tpl({ layers: [], audio: [] }), 5, media, makeId)
+    // Everything before the drop point is still there.
+    const audio = comp.audioClips.filter((a) => a.mediaId === 'clip').sort((a, b) => a.startSec - b.startSec)
+    expect([audio[0].startSec, audio[0].outSec]).toEqual([3, 2])
+    const titles = comp.layers.filter((l) => l.content.kind === 'text').sort((a, b) => a.startSec - b.startSec)
+    expect(titles[0]).toMatchObject({ startSec: 3, endSec: 5 })
+    // Only the two-frame slivers between the cuts went; their tails moved past the hold.
+    expect(titles[1].startSec).toBeCloseTo(8 + F, 6)
+    expect(audio[1].startSec).toBeCloseTo(8 + F, 6)
+  })
+
+  it('inside an existing freeze hold: never a zero-length source, and the timeline still grows by exactly the hold', () => {
+    const v = makeVideoLayer('V', 'clip', 0, 10)
+    const frozen: VideoLayer = {
+      ...v,
+      endSec: 12,
+      content: { ...(v.content as VideoContent), freezes: [{ atSec: 3, holdSec: 2 }] }
+    } // holds source 3s over timeline 3–5s
+    const c = { ...createEmptyComposition(), layers: [frozen, text('late', 9, 10)] }
+    const { comp, added } = applyTemplate(c, tpl({ layers: [], audio: [] }), 4, media, makeId)
+    const held = vid(comp, added[0].id)
+    expect(held.content.outSec - held.content.inSec).toBeCloseTo(F, 6)
+    expect(held.content.inSec).toBe(3)
+    // The rest of the old hold (1s) plus the new 3s, as one head hold.
+    expect(held.content.freezes).toEqual([{ atSec: 3, holdSec: 4 }])
+    expect(comp.layers.find((l) => l.id === 'late')!.startSec).toBeCloseTo(12, 6)
+    expect(videos(comp).at(-1)!.endSec).toBeCloseTo(15, 6)
+  })
+
+  it('keeps a sped-up clip’s speed on the held piece, so the hold is all the timeline gains', () => {
+    const v = makeVideoLayer('V', 'clip', 0, 10)
+    const fast: VideoLayer = { ...v, endSec: 5, content: { ...(v.content as VideoContent), speed: 2 } }
+    const c = { ...createEmptyComposition(), layers: [fast, text('late', 6, 7)] }
+    const { comp, added } = applyTemplate(c, tpl({ layers: [], audio: [] }), 2, media, makeId)
+    const held = vid(comp, added[0].id)
+    expect(held.content.speed).toBe(2)
+    expect(held.content.inSec).toBeCloseTo(4, 6) // timeline 2s at 2× = source 4s
+    expect(held.content.outSec - held.content.inSec).toBeCloseTo(F, 6)
+    expect(comp.layers.find((l) => l.id === 'late')!.startSec).toBeCloseTo(9, 6)
+    expect(videos(comp).at(-1)!.endSec).toBeCloseTo(8, 6)
   })
 
   it('without a clip under the playhead drops only the overlays, and says so', () => {
     const before = edit()
-    const { comp, effectSkipped, added } = applyTemplate(before, tpl(), 15, srcDur, makeId)
+    const { comp, effectSkipped, added } = applyTemplate(before, tpl(), 15, media, makeId)
     expect(effectSkipped).toBe(true)
-    expect(comp.layers.filter((l) => l.content.kind === 'video')).toEqual(
-      before.layers.filter((l) => l.content.kind === 'video')
-    )
+    expect(videos(comp)).toEqual(videos(before))
     expect(added.map((r) => r.kind)).toEqual(['layer', 'audio'])
     expect(comp.layers.find((l) => l.id === 'late')!.startSec).toBe(8)
   })
@@ -202,13 +261,12 @@ describe('applyTemplate — the clip effect', () => {
 
 describe('applyTemplate — the overlays', () => {
   it('places layers and sounds from the drop point, skips an empty sound slot, and links them with the held frame', () => {
-    const { comp, added } = applyTemplate(edit(), tpl(), 4, srcDur, makeId)
+    const { comp, added } = applyTemplate(edit(), tpl(), 4, media, makeId)
     const title = comp.layers.at(-1)!
     expect(title.content.kind).toBe('text')
     expect([title.startSec, title.endSec]).toEqual([4.3, 7])
     const sting = comp.audioClips.find((a) => a.mediaId === 'sting-media')!
     expect([sting.startSec, sting.outSec, sting.gainDb]).toEqual([4, 2, -3])
-    expect(comp.audioClips.filter((a) => a.mediaId === '' || a.mediaId === null)).toHaveLength(0)
     expect(added).toHaveLength(3)
     const group = expandGroup(comp, added[0])
       .map((r) => r.id)
@@ -217,15 +275,26 @@ describe('applyTemplate — the overlays', () => {
   })
 
   it('gives every dropped piece a fresh id, so dropping twice never collides', () => {
-    const once = applyTemplate(createEmptyComposition(), tpl({ clipEffect: null }), 1, srcDur, makeId)
-    const twice = applyTemplate(once.comp, tpl({ clipEffect: null }), 5, srcDur, makeId)
+    const once = applyTemplate(createEmptyComposition(), tpl({ clipEffect: null }), 1, media, makeId)
+    const twice = applyTemplate(once.comp, tpl({ clipEffect: null }), 5, media, makeId)
     const ids = twice.comp.layers.map((l) => l.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('clips pieces timed before the drop point at the timeline start, trimming a sound’s head to stay in sync', () => {
+    const early = tpl({
+      clipEffect: null,
+      layers: [text('pre', -2, 1), text('gone', -3, -1)],
+      audio: [{ ...tpl().audio[0], clip: { ...tpl().audio[0].clip, startSec: -1.5, outSec: 3 } }]
+    })
+    const { comp } = applyTemplate(createEmptyComposition(), early, 1, media, makeId)
+    expect(comp.layers.map((l) => [l.startSec, l.endSec])).toEqual([[0, 2]])
+    expect(comp.audioClips.map((a) => [a.startSec, a.inSec, a.outSec])).toEqual([[0, 0.5, 3]])
+  })
+
   it('drops every built-in starter onto an empty edit', () => {
     for (const t of BUILT_IN_TEMPLATES) {
-      const { comp, effectSkipped } = applyTemplate(createEmptyComposition(), t, 2, srcDur, makeId)
+      const { comp, effectSkipped } = applyTemplate(createEmptyComposition(), t, 2, media, makeId)
       expect(comp.layers.length).toBe(t.layers.length)
       expect(effectSkipped).toBe(!!t.clipEffect)
       for (const l of comp.layers) expect(l.startSec).toBeGreaterThanOrEqual(2)
@@ -236,14 +305,13 @@ describe('applyTemplate — the overlays', () => {
 describe('templateFromSelection', () => {
   it('saves a dropped template back to the same pieces and clip effect', () => {
     const t = tpl()
-    const { comp, added } = applyTemplate(edit(), t, 4, srcDur, makeId)
+    const { comp, added } = applyTemplate(edit(), t, 4, media, makeId)
     const got = templateFromSelection(comp, added, '  My   bit ', 'new', () => 'Sting')
     if ('error' in got) throw new Error(got.error)
     expect(got.skipped).toEqual([])
     expect(got.template.name).toBe('My bit')
     expect(got.template.id).toBe('new')
-    const e = got.template.clipEffect!
-    expect(e).toEqual({
+    expect(got.template.clipEffect).toEqual({
       ...fx,
       zoom: { scale: expect.closeTo(1.5, 9), dx: expect.closeTo(10, 9), dy: expect.closeTo(-20, 9) }
     })

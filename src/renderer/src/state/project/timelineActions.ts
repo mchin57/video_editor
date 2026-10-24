@@ -7,7 +7,7 @@ import type { ReelTemplate } from '@shared/templates'
 import { resolveCompAtPath } from '@shared/compositions'
 import { newId } from '@shared/ids'
 import * as links from '@/lib/links'
-import { applyTemplate } from '@/lib/templates'
+import { applyTemplate, type DropMedia } from '@/lib/templates'
 import { primaryRef, useUi } from '@/state/ui'
 import { activeComp, type Doc } from './core'
 
@@ -44,7 +44,7 @@ export interface TimelineActions {
    * step and select what it added (`lib/templates.ts`). `effectSkipped` = it has
    * a clip effect but no clip was under the playhead.
    */
-  dropTemplate: (t: ReelTemplate, atSec: number, srcDur: links.SourceDuration) => { effectSkipped: boolean }
+  dropTemplate: (t: ReelTemplate, atSec: number, media: DropMedia) => { effectSkipped: boolean }
 }
 
 export const timelineActions = ({ get, commitComp }: Doc): TimelineActions => ({
@@ -90,11 +90,11 @@ export const timelineActions = ({ get, commitComp }: Doc): TimelineActions => ({
   splitAudioAt: (audioId, atSec, sourceDurationSec) =>
     get().splitItemsAt([{ kind: 'audio', id: audioId }], atSec, () => sourceDurationSec),
 
-  dropTemplate: (t, atSec, srcDur) => {
+  dropTemplate: (t, atSec, media) => {
     let added: TimelineItemRef[] = []
     let effectSkipped = false
     commitComp((p) => {
-      const res = applyTemplate(p, t, atSec, srcDur, newId)
+      const res = applyTemplate(p, t, atSec, media, newId)
       added = res.added
       effectSkipped = res.effectSkipped
       return res.comp

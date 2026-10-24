@@ -4,22 +4,25 @@
  * `lib/links.ts` — the store wraps each in one commit.
  *
  * A drop with a clip effect turns the frame under the playhead into its own
- * HELD piece, and the timeline after it moves later by the hold:
+ * HELD piece, and the timeline after it moves later by exactly the hold:
  *
- *   ─── clip ───|──────── clip ────────     before (playhead at |)
- *   ─── clip ───|[held frame]|──── clip ─  after: the rest resumes after the hold
+ *   ─── clip ───|──────── clip ────────       before (playhead at |)
+ *   ─── clip ───|[held frame··]|──── clip ─  after: the rest resumes after the hold
  *
- * The held piece is one source frame (`HOLD_FRAME_SEC`) with a freeze of
- * `holdSec` at its END — the hold shape verified against the export
- * (FFMPEG-NOTES "Freeze holds & overlay EOF"), never a zero-length source — so
- * the timeline grows by exactly the hold. Only that piece is zoomed and
- * graded, so the clip around it keeps its own look; it is silent (the template
- * brings its own sound). Every cut goes through `splitItemsAt` and every move
- * through `moveItemsBy`, so link groups, freezes and speed stay right.
+ * The held piece is `HELD_SOURCE_FRAMES` source frames (at the clip's own frame
+ * rate, so the export's `-t` window always holds a frame) with the hold at its
+ * HEAD: the export holds frame 0 (`freezeAt`'s nudge) and the preview clamps to
+ * `inSec`, so both show the same frame — the head-hold shape in FFMPEG-NOTES
+ * "Freeze holds & overlay EOF", checked for these short pieces against real
+ * renders by `e2e/templateExport.spec.ts`. It keeps the clip's speed, so the
+ * hold is all the timeline gains. Only that piece is zoomed and graded, so the
+ * clip around it keeps its own look; it is silent (the template brings its own
+ * sound). Every cut goes through `splitItemsAt`, every source↔timeline mapping
+ * through `videoTimelineTime`, every move through `moveItemsBy`.
  */
 
 import type { AudioClip, Composition, Layer, TimelineItemRef, VideoContent } from '@shared/project'
-import { isNeutralColor } from '@shared/project'
+import { PROJECT_VERSION, isNeutralColor } from '@shared/project'
 import { layerTransformAt, playedVideoDuration, videoTimelineTime } from '@shared/layers'
 import { isNeutralTint } from '@shared/tint'
 import {
@@ -40,10 +43,21 @@ import {
   type SourceDuration
 } from './links'
 
-/** The held piece's own source length: one frame at 30 fps. */
-export const HOLD_FRAME_SEC = 1 / 30
+/** How many source frames the held piece spans: two, so the export's input
+ *  window (`-t`) contains a frame whatever the frame phase at the cut. */
+export const HELD_SOURCE_FRAMES = 2
+
+/** The frame rate assumed for a clip whose probe has none. */
+const FALLBACK_FPS = 30
 
 const EPS = 1e-3
+
+/** What a drop needs to know about the library: a source's length (whole-
+ *  source audio clips need it to be cut) and a video's frame rate. */
+export interface DropMedia {
+  durationOf: SourceDuration
+  fpsOf: (mediaId: string) => number
+}
 
 export interface TemplateDrop {
   comp: Composition
@@ -75,16 +89,29 @@ function rightHalf(before: Composition, after: Composition, mediaId: string, at:
   )
 }
 
+/** `freezes` with `holdSec` more held at source time `at` (an existing hold
+ *  there grows; otherwise one is added). */
+function holdMore(freezes: VideoContent['freezes'], at: number, holdSec: number): NonNullable<VideoContent['freezes']> {
+  const list = [...(freezes ?? [])]
+  const i = list.findIndex((f) => Math.abs(f.atSec - at) < EPS)
+  if (i >= 0) list[i] = { atSec: list[i].atSec, holdSec: list[i].holdSec + holdSec }
+  else list.push({ atSec: at, holdSec })
+  return list.sort((a, b) => a.atSec - b.atSec)
+}
+
+const refKey = (r: TimelineItemRef): string => `${r.kind}:${r.id}`
+
 /**
  * Hold the frame under `atSec` for `fx.holdSec`, zoomed and graded, and push
- * everything that starts after it later by the hold. Returns the held layer's
- * id, or null (and `comp` unchanged) when no clip is under the playhead.
+ * everything that starts at or after the drop point later by the hold. Returns
+ * the held layer's id, or null (and `comp` unchanged) when no clip is under the
+ * playhead.
  */
 export function applyClipEffect(
   comp: Composition,
   fx: TemplateClipEffect,
   atSec: number,
-  srcDur: SourceDuration,
+  media: DropMedia,
   makeId: () => string
 ): { comp: Composition; heldId: string | null } {
   const clip = clipUnder(comp, atSec)
@@ -92,44 +119,51 @@ export function applyClipEffect(
   const mediaId = clip.content.mediaId
   // Where the frame is on screen at the drop point, before any cut re-bases it.
   const at = layerTransformAt(clip, atSec)
+  const groupOf = (c: Composition, id: string): TimelineItemRef[] => expandGroup(c, { kind: 'layer', id })
 
-  // 1. Cut the clip (with its link group) at the drop point, unless it starts there.
-  let c = comp
-  let heldId = clip.id
-  if (atSec > clip.startSec + EPS) {
-    const before = c
-    c = splitItemsAt(c, expandGroup(c, { kind: 'layer', id: clip.id }), atSec, srcDur, makeId)
-    const right = rightHalf(before, c, mediaId, atSec)
-    if (!right) return { comp, heldId: null }
-    heldId = right.id
-  }
+  // 1. Cut the clip's link group at the drop point. A clip that STARTS there
+  //    isn't cut, but its partners still are, so whatever lies before the drop
+  //    point (a J-cut's audio) ends up apart from the held piece.
+  let c = splitItemsAt(comp, groupOf(comp, clip.id), atSec, media.durationOf, makeId)
+  const heldId = atSec > clip.startSec + EPS ? rightHalf(comp, c, mediaId, atSec)?.id : clip.id
+  if (!heldId) return { comp, heldId: null }
 
-  // 2. Cut one frame off the front of what follows: that frame becomes the held
-  //    piece; its group's other one-frame slivers (the clip's own audio) go.
+  // 2. Cut what follows a couple of SOURCE frames in: those frames are the held
+  //    piece. Inside an existing hold the cut lands after it, so the piece is
+  //    never a zero-length source.
   const piece = c.layers.find((l) => l.id === heldId)!
-  const cutAt = atSec + HOLD_FRAME_SEC
-  if (piece.endSec > cutAt + EPS) {
-    c = splitItemsAt(c, expandGroup(c, { kind: 'layer', id: heldId }), cutAt, srcDur, makeId)
-  }
-  const slivers = expandGroup(c, { kind: 'layer', id: heldId }).filter((r) => r.id !== heldId)
-  c = removeItems(c, slivers)
+  const pc = piece.content as VideoContent
+  const fps = media.fpsOf(mediaId) > 0 ? media.fpsOf(mediaId) : FALLBACK_FPS
+  const cutAt = videoTimelineTime(pc, piece, Math.min(pc.outSec, pc.inSec + HELD_SOURCE_FRAMES / fps))
+  if (cutAt < piece.endSec - EPS) c = splitItemsAt(c, groupOf(c, heldId), cutAt, media.durationOf, makeId)
+  // The piece's group partners over those frames (the clip's own audio) go —
+  // only what lies between the two cuts; anything linked that reaches back
+  // before the drop point is left alone.
+  const inside = new Set(
+    timelineTiles(c, media.durationOf)
+      .filter((t) => t.startSec >= atSec - EPS && t.endSec <= cutAt + EPS)
+      .map((t) => refKey(t.ref))
+  )
+  c = removeItems(
+    c,
+    groupOf(c, heldId).filter((r) => r.id !== heldId && inside.has(refKey(r)))
+  )
 
-  // 3. The held piece: silent, ungrouped, one frame then a freeze on it, graded.
+  // 3. The held piece: silent, ungrouped, held at its first frame, graded.
   const cutLayer = c.layers.find((l) => l.id === heldId)!
   const cutEnd = cutLayer.endSec
   const vc = cutLayer.content as VideoContent
+  const freezes = holdMore(vc.freezes, vc.inSec, fx.holdSec)
   const content: VideoContent = {
     ...vc,
     mute: true,
-    speed: undefined,
-    speedRamp: undefined,
-    stabilize: null, // a one-frame window has nothing to stabilize
-    freezes: undefined
+    stabilize: null, // a two-frame window has nothing to stabilize
+    freezes
   }
-  content.freezes = [{ atSec: content.outSec, holdSec: fx.holdSec }]
   if (fx.color && !isNeutralColor(fx.color)) content.color = { ...fx.color }
   if (fx.tint && !isNeutralTint(fx.tint)) content.tint = { ...fx.tint }
-  const holdLen = playedVideoDuration(content)
+  // The zoom runs across the whole head hold (the rest of an earlier hold included).
+  const zoomSec = freezes.find((f) => Math.abs(f.atSec - vc.inSec) < EPS)!.holdSec
   const base = { x: at.x, y: at.y, scale: at.scale }
   const end = fx.zoom ? { x: at.x + fx.zoom.dx, y: at.y + fx.zoom.dy, scale: at.scale * fx.zoom.scale } : base
   const opacity = at.opacity < 1 ? { opacity: at.opacity } : {}
@@ -137,34 +171,54 @@ export function applyClipEffect(
     fx.zoom || at.opacity < 1
       ? [
           { tSec: 0, ...base, ...opacity },
-          { tSec: holdLen, ...end, ...opacity }
+          { tSec: zoomSec, ...end, ...opacity }
         ]
       : undefined
-  const held: Layer = { ...cutLayer, ...base, endSec: cutLayer.startSec + holdLen, keyframes, content }
+  const held: Layer = {
+    ...cutLayer,
+    ...base,
+    endSec: cutLayer.startSec + playedVideoDuration(content),
+    keyframes,
+    content
+  }
   delete held.linkGroupId
   c = { ...c, layers: c.layers.map((l) => (l.id === heldId ? held : l)) }
 
-  // 4. Ripple: everything starting at or after the cut moves later by what the
-  //    hold added, so the clip resumes after it and nothing gets covered.
+  // 4. Ripple: everything starting at or after the drop point moves later by
+  //    what the hold added (exactly `holdSec`), so the clip resumes after it
+  //    and nothing lands on top of the hold. Tiles that cross the drop point
+  //    (a music bed, a caption) play on under it.
   const delta = held.endSec - cutEnd
-  const later = timelineTiles(c)
-    .filter((t) => t.ref.id !== heldId && t.startSec >= cutEnd - EPS)
+  const later = timelineTiles(c, media.durationOf)
+    .filter((t) => t.ref.id !== heldId && t.startSec >= atSec - EPS)
     .map((t) => t.ref)
   if (delta > EPS && later.length) c = moveItemsBy(c, later, delta)
   return { comp: c, heldId }
 }
 
-/** The template's pieces as new tiles at `atSec` (ids from `makeId`); a sound
- *  slot with no sound is skipped. Media references must already be library ids. */
+/**
+ * The template's pieces as new tiles at `atSec` (ids from `makeId`); a sound
+ * slot with no sound is skipped. Media references must already be library ids.
+ * A piece timed before the drop point (saved from a selection that reached
+ * back past the hold) is clipped at the timeline start — a sound by trimming
+ * its head, so what plays stays in sync.
+ */
 function placedPieces(t: ReelTemplate, atSec: number, makeId: () => string): { layers: Layer[]; audio: AudioClip[] } {
-  const layers = t.layers.filter(isTemplateLayer).map((l): Layer => {
-    const copy: Layer = { ...l, id: makeId(), startSec: l.startSec + atSec, endSec: l.endSec + atSec }
+  const layers = t.layers.filter(isTemplateLayer).flatMap((l): Layer[] => {
+    const endSec = l.endSec + atSec
+    if (endSec <= EPS) return []
+    const copy: Layer = { ...l, id: makeId(), startSec: Math.max(0, l.startSec + atSec), endSec }
     delete copy.linkGroupId
-    return copy
+    return [copy]
   })
-  const audio = t.audio.flatMap((a: TemplateAudio): AudioClip[] =>
-    a.file ? [{ ...a.clip, id: makeId(), mediaId: a.file, startSec: a.clip.startSec + atSec }] : []
-  )
+  const audio = t.audio.flatMap((a: TemplateAudio): AudioClip[] => {
+    if (!a.file) return []
+    const start = a.clip.startSec + atSec
+    const lead = Math.max(0, -start)
+    const inSec = a.clip.inSec + lead
+    if (a.clip.outSec > 0 && inSec >= a.clip.outSec - EPS) return []
+    return [{ ...a.clip, id: makeId(), mediaId: a.file, startSec: start + lead, inSec }]
+  })
   return { layers, audio }
 }
 
@@ -178,14 +232,14 @@ export function applyTemplate(
   comp: Composition,
   t: ReelTemplate,
   atSec: number,
-  srcDur: SourceDuration,
+  media: DropMedia,
   makeId: () => string
 ): TemplateDrop {
   let c = comp
   const added: TimelineItemRef[] = []
   let effectSkipped = false
   if (t.clipEffect) {
-    const res = applyClipEffect(c, t.clipEffect, atSec, srcDur, makeId)
+    const res = applyClipEffect(c, t.clipEffect, atSec, media, makeId)
     c = res.comp
     if (res.heldId) added.push({ kind: 'layer', id: res.heldId })
     else effectSkipped = true
@@ -209,11 +263,6 @@ export interface TemplateCapture {
   skipped: string[]
 }
 
-/** Whether `l` is a held piece a template drop made: a frame or two of source
- *  with its freeze at the end. Its drop point is its start, not the hold's. */
-const isHeldPiece = (c: VideoContent, atSec: number): boolean =>
-  atSec >= c.outSec - EPS && c.outSec - c.inSec <= 2 * HOLD_FRAME_SEC + EPS
-
 /** The clip effect a frozen video layer carries, and the timeline time its
  *  (first) hold starts at — the template's drop point. */
 function captureEffect(l: Layer): { fx: TemplateClipEffect; originSec: number } | null {
@@ -221,10 +270,9 @@ function captureEffect(l: Layer): { fx: TemplateClipEffect; originSec: number } 
   const c = l.content
   const hold = [...(c.freezes ?? [])].sort((a, b) => a.atSec - b.atSec).find((f) => f.holdSec > 0)
   if (!hold) return null
-  const held = isHeldPiece(c, hold.atSec)
-  const originSec = held ? l.startSec : videoTimelineTime(c, l, hold.atSec)
+  const originSec = videoTimelineTime(c, l, hold.atSec)
   const a = layerTransformAt(l, originSec)
-  const b = layerTransformAt(l, held ? l.endSec : originSec + hold.holdSec)
+  const b = layerTransformAt(l, originSec + hold.holdSec)
   const zoomed = Math.abs(b.scale - a.scale) > 1e-6 || Math.abs(b.x - a.x) > 0.5 || Math.abs(b.y - a.y) > 0.5
   return {
     originSec,
@@ -307,6 +355,7 @@ export function templateFromSelection(
       id,
       name: clean,
       formatVersion: TEMPLATE_FORMAT_VERSION,
+      projectVersion: PROJECT_VERSION,
       layers,
       audio,
       clipEffect: effect?.fx ?? null

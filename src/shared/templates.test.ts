@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Layer } from './project'
+import { PROJECT_VERSION, type Layer } from './project'
 import { BUILT_IN_TEMPLATES, isBuiltInTemplate } from './templateStarters'
 import { FONTS } from './fonts'
 import {
@@ -7,6 +7,7 @@ import {
   cleanTemplateName,
   isTemplateFileName,
   mapTemplateFiles,
+  migrateTemplate,
   parseTemplateShare,
   sanitizeTemplate,
   templateDuration,
@@ -81,6 +82,18 @@ describe('template files', () => {
       expect(isTemplateFileName(bad), bad).toBe(false)
     }
   })
+
+  it('refuses names Windows rejects and the template’s own JSON', () => {
+    for (const bad of ['template.json', 'TEMPLATE.JSON', 'CON', 'nul.mp3', 'com1.wav', 'sting.', 'sting ']) {
+      expect(isTemplateFileName(bad), bad).toBe(false)
+    }
+    expect(isTemplateFileName('console.mp3')).toBe(true)
+  })
+
+  it('refuses a template whose files differ only in case (one file on Windows)', () => {
+    const clash = { ...withFiles, layers: [...withFiles.layers, image('i2', 'STING.MP3')] }
+    expect(sanitizeTemplate(clash)).toBeNull()
+  })
 })
 
 describe('sanitizeTemplate', () => {
@@ -95,6 +108,64 @@ describe('sanitizeTemplate', () => {
     expect(sanitizeTemplate({ ...withFiles, layers: [image('i', '../../evil.exe')] })).toBeNull()
     expect(sanitizeTemplate({ ...withFiles, clipEffect: { ...rightBack.clipEffect, holdSec: 0 } })).toBeNull()
     expect(sanitizeTemplate('nope')).toBeNull()
+  })
+
+  it('checks every field a shared file could break the preview or export with', () => {
+    const graphics = BUILT_IN_TEMPLATES.find((t) => t.id === 'builtin-link-in-bio')!
+    const g = graphics.layers.find((l) => l.content.kind === 'graphics')!
+    const badMark = (m: Record<string, unknown>): ReelTemplate => ({
+      ...graphics,
+      layers: [{ ...g, content: { kind: 'graphics', marks: [m] } } as unknown as Layer]
+    })
+    const mark = (g.content as unknown as { marks: Record<string, unknown>[] }).marks[0]
+    expect(sanitizeTemplate(badMark(mark))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...mark, tool: 'laser' }))).toBeNull()
+    expect(
+      sanitizeTemplate(
+        badMark({
+          ...mark,
+          points: [
+            { x: 1, y: 'a' },
+            { x: 2, y: 2 }
+          ]
+        })
+      )
+    ).toBeNull()
+    const t = rightBack.layers[0]
+    const withText = (patch: Record<string, unknown>): ReelTemplate => ({
+      ...rightBack,
+      layers: [{ ...t, content: { ...t.content, ...patch } } as Layer]
+    })
+    expect(sanitizeTemplate(withText({ pill: { enabled: 'yes', color: '#000', padPx: 1 } }))).toBeNull()
+    expect(sanitizeTemplate(withText({ shadow: { distancePx: 'far', color: '#000', blur: 0 } }))).toBeNull()
+    expect(sanitizeTemplate(withText({ animation: { in: 'fadeIn' } }))).toBeNull()
+    expect(sanitizeTemplate(withText({ fontSizePx: -4 }))).toBeNull()
+    expect(sanitizeTemplate({ ...rightBack, layers: [{ ...t, keyframes: [{ tSec: 0 }] }] })).toBeNull()
+  })
+})
+
+describe('migrateTemplate', () => {
+  it('leaves a current template alone and records the schema on an older one', () => {
+    expect(migrateTemplate(rightBack)).toBe(rightBack)
+    // Absent means 29, the schema templates shipped with — current today.
+    const unversioned = { ...rightBack, projectVersion: undefined }
+    expect(migrateTemplate(unversioned)).toBe(unversioned)
+    const old = { ...rightBack, projectVersion: 28 }
+    const m = migrateTemplate(old)
+    expect(m.projectVersion).toBe(PROJECT_VERSION)
+    expect(m.layers).toEqual(rightBack.layers)
+    expect(old.layers).toBe(rightBack.layers) // the input is not mutated
+  })
+
+  it("runs the project's own migrations over the layers (an unknown font falls back)", () => {
+    const t = rightBack.layers[0]
+    const old: ReelTemplate = {
+      ...rightBack,
+      projectVersion: 1,
+      layers: [{ ...t, content: { ...t.content, fontFamily: 'no-such-font' } } as Layer]
+    }
+    const m = migrateTemplate(old)
+    expect((m.layers[0].content as { fontFamily: string }).fontFamily).not.toBe('no-such-font')
   })
 })
 

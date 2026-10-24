@@ -21,7 +21,9 @@
 import type { AudioClip, ColorAdjust, Layer } from './project'
 import type { Tint } from './tint'
 import { isNeutralTint } from './tint'
-import { isNeutralColor } from './project'
+import { PROJECT_VERSION, createEmptyProject, isNeutralColor, migrateProject } from './project'
+import { GRAPHIC_TOOLS } from './graphics'
+import { FORBIDDEN_NAME_CHARS, RESERVED_DEVICE_NAME } from './fileName'
 
 /** Bump when the stored shape changes incompatibly (`sanitizeTemplate` refuses newer). */
 export const TEMPLATE_FORMAT_VERSION = 1
@@ -71,6 +73,10 @@ export interface ReelTemplate {
   layers: Layer[]
   audio: TemplateAudio[]
   clipEffect: TemplateClipEffect | null
+  /** The project schema (`PROJECT_VERSION`) its layers were saved in, so
+   *  `migrateTemplate` can bring them up to date (absent = 29, the version
+   *  templates shipped with). */
+  projectVersion?: number
   /** A user template made from a built-in one (by choosing its sound): it
    *  stands in for that built-in in the gallery, and deleting it brings the
    *  original back. */
@@ -184,22 +190,81 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isStr = (v: unknown): v is string => typeof v === 'string'
 
-/** A file name stored inside a template: a bare name, no folders, no `..`. */
+/** The template's own JSON file, which no media file may be named. */
+export const TEMPLATE_JSON = 'template.json'
+
+/**
+ * A file name stored inside a template: a bare name Windows accepts — no
+ * folders, no `..`, no reserved device name (CON, NUL, COM1…), no trailing dot
+ * or space — and never the template's own `template.json`.
+ */
 export function isTemplateFileName(v: unknown): v is string {
-  return isStr(v) && v.length > 0 && v.length <= 255 && !/[\\/:*?"<>|\0]/.test(v) && v !== '.' && v !== '..'
+  return (
+    isStr(v) &&
+    v.length > 0 &&
+    v.length <= 255 &&
+    !FORBIDDEN_NAME_CHARS.test(v) &&
+    !/[. ]$/.test(v) &&
+    !RESERVED_DEVICE_NAME.test(v) &&
+    v.toLowerCase() !== TEMPLATE_JSON
+  )
+}
+
+const isOptObj = (v: unknown, ok: (o: Record<string, unknown>) => boolean): boolean =>
+  v === undefined || v === null || (isObj(v) && ok(v))
+
+const validKeyframe = (k: unknown): boolean =>
+  isObj(k) && [k.tSec, k.x, k.y, k.scale].every(isNum) && (k.opacity === undefined || isNum(k.opacity))
+
+const validPoint = (p: unknown): boolean => isObj(p) && isNum(p.x) && isNum(p.y)
+
+const validMark = (m: unknown): boolean =>
+  isObj(m) &&
+  isStr(m.id) &&
+  (GRAPHIC_TOOLS as readonly unknown[]).includes(m.tool) &&
+  Array.isArray(m.points) &&
+  m.points.length >= 2 &&
+  m.points.every(validPoint) &&
+  isStr(m.color) &&
+  isNum(m.widthPx) &&
+  isNum(m.atSec) &&
+  isStr(m.reveal) &&
+  (m.fill === undefined || m.fill === null || isStr(m.fill)) &&
+  (m.radiusPx === undefined || isNum(m.radiusPx))
+
+/** Every field the preview and the export read off a text layer, typed. */
+function validText(c: Record<string, unknown>): boolean {
+  return (
+    isStr(c.text) &&
+    isStr(c.fontFamily) &&
+    isNum(c.fontSizePx) &&
+    c.fontSizePx > 0 &&
+    isStr(c.color) &&
+    isObj(c.pill) &&
+    typeof c.pill.enabled === 'boolean' &&
+    isStr(c.pill.color) &&
+    isNum(c.pill.padPx) &&
+    isOptObj(c.stroke, (s) => isNum(s.widthPx) && isStr(s.color)) &&
+    isOptObj(c.shadow, (s) => isNum(s.distancePx) && isStr(s.color) && isNum(s.blur)) &&
+    isOptObj(c.gradient, (g) => isStr(g.from) && isStr(g.to) && isNum(g.angle)) &&
+    isOptObj(c.animation, (a) => isStr(a.in) && isNum(a.inSec) && isStr(a.out) && isNum(a.outSec)) &&
+    isOptObj(c.effects, (e) => isOptObj(e.sparkle, (sp) => isNum(sp.density) && isStr(sp.color))) &&
+    (c.widthPx === undefined || isNum(c.widthPx))
+  )
 }
 
 function validLayer(v: unknown): v is Layer {
   if (!isObj(v) || !isStr(v.id) || !isObj(v.content)) return false
   if (![v.startSec, v.endSec, v.x, v.y, v.scale].every(isNum)) return false
   if ((v.endSec as number) <= (v.startSec as number)) return false
-  if (v.keyframes !== undefined && !Array.isArray(v.keyframes)) return false
+  if (v.keyframes !== undefined && !(Array.isArray(v.keyframes) && v.keyframes.every(validKeyframe))) return false
+  for (const k of ['rotationDeg', 'stretchX', 'stretchY'] as const) if (v[k] !== undefined && !isNum(v[k])) return false
   const c = v.content
   switch (c.kind) {
     case 'text':
-      return isStr(c.text) && isStr(c.fontFamily) && isNum(c.fontSizePx) && isStr(c.color) && isObj(c.pill as unknown)
+      return validText(c)
     case 'graphics':
-      return Array.isArray(c.marks)
+      return Array.isArray(c.marks) && c.marks.every(validMark)
     case 'image':
       return isTemplateFileName(c.mediaId) && isNum(c.opacity)
     default:
@@ -228,9 +293,10 @@ function validEffect(v: unknown): v is TemplateClipEffect {
 
 /**
  * A stored or imported template, or null when it isn't one we can use (wrong
- * shape, a newer format, a piece we can't place). Checked as a WHOLE — a
- * half-valid template would drop half its pieces — and returned as given: the
- * renderer's own migrations still run on the layers it places.
+ * shape, a newer format, a piece we can't place, two files whose names differ
+ * only in case — one file on Windows). Checked as a WHOLE — a half-valid
+ * template would drop half its pieces — and returned as given; main brings
+ * its layers up to date with `migrateTemplate` after.
  */
 export function sanitizeTemplate(v: unknown): ReelTemplate | null {
   if (!isObj(v) || !isStr(v.id) || !v.id || !isStr(v.name) || !cleanTemplateName(v.name)) return null
@@ -239,8 +305,24 @@ export function sanitizeTemplate(v: unknown): ReelTemplate | null {
   if (!Array.isArray(v.audio) || !v.audio.every(validAudio)) return null
   if (v.clipEffect !== null && !validEffect(v.clipEffect)) return null
   if (v.basedOn !== undefined && !isStr(v.basedOn)) return null
+  if (v.projectVersion !== undefined && !isNum(v.projectVersion)) return null
+  const files = templateFiles(v as unknown as ReelTemplate).map((f) => f.toLowerCase())
+  if (new Set(files).size !== files.length) return null
   if (!v.layers.length && !v.audio.length && !v.clipEffect) return null
   return v as unknown as ReelTemplate
+}
+
+/**
+ * `t` with its layers brought up to the current project schema: they run
+ * through the same `migrateProject` a saved project does (from the
+ * `projectVersion` they were saved in), so a template saved today still drops
+ * correctly after the document format moves on.
+ */
+export function migrateTemplate(t: ReelTemplate): ReelTemplate {
+  const from = t.projectVersion ?? 29
+  if (from >= PROJECT_VERSION) return t
+  const doc = { ...createEmptyProject('template', t.name), version: from, layers: structuredClone(t.layers) }
+  return { ...t, layers: migrateProject(doc).layers, projectVersion: PROJECT_VERSION }
 }
 
 // --- The share file ----------------------------------------------------------

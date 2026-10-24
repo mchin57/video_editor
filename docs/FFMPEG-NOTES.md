@@ -1124,6 +1124,37 @@ hash-compared (`framemd5`, yuv420p) against a lossless full render.
   Text layout (Chromium) and nested-comp pre-renders come on top, the same as
   for an export. The stabilization pre-pass is skipped for stills.
 
+## Template held frames — a two-frame piece with a head hold (verified ffmpeg 8.1.1, 2026-10-24)
+
+A template's clip effect (`applyClipEffect`, `lib/templates.ts`) turns the
+frame under the playhead into its own short video layer and holds it. The
+first design — ONE source frame at an assumed 30 fps with the hold at its END
+— was never rendered, and could not work: the export reads the layer with
+`-ss inSec -t len`, and a 1/30 s window over 24/25 fps footage, or a sub-frame
+window from a slow-motion clip, contains NO frame, so there is nothing for
+`eof_action=repeat` to hold.
+
+What ships, and what `e2e/templateExport.spec.ts` checks against real
+renders:
+
+- **The piece spans `HELD_SOURCE_FRAMES` (2) source frames at the CLIP's own
+  frame rate** (`probe.video.avgFps`), so the input window always holds a
+  frame whatever the frame phase at the cut.
+- **The hold sits at the piece's HEAD** (`atSec === inSec`), the shape already
+  verified above: `freezeAt` nudges the threshold off frame 0, so frame 0 is
+  the held frame — the same frame the preview's `videoSourceTime` clamps to.
+  (An end hold would show the frame *before* `outSec` in the export but the
+  one *at* it in the preview.)
+- **The piece keeps the clip's speed / ramp**, so the timeline grows by the
+  hold and nothing else.
+- Rendered from sources whose luma encodes time (frame N = 16 + 20·N/fps, read
+  back from the raw Y plane — `format=gray` would stretch limited range and
+  shift every reading by ~11), dropped off a frame boundary (2.02 s) with a 1 s
+  hold: at 24, 25, 30 and 60 fps at 1×, at 30 fps 0.5× and at 24 fps 2× the
+  output shows the drop-point frame across the hold (never black) and resumes
+  at source `speed·(t − hold)`, each within 4 source frames (the export's cfr
+  resampling plus the one-frame hairline in "Speed" above).
+
 ## Clip tint — colorchannelmixer after eq (verified ffmpeg 8.1.1, 2026-10-24)
 
 A clip's tint (`VideoContent.tint`, `shared/tint.ts`) is one 3×3 RGB matrix,

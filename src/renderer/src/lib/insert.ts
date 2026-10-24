@@ -13,7 +13,7 @@ import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { makeCaption } from '@/lib/captions'
 import { idle } from '@/lib/interaction'
-import type { SourceDuration } from '@/lib/links'
+import type { DropMedia } from '@/lib/templates'
 import { instantiateTemplate } from '@/ipc/client'
 
 /** A text layer at the playhead (3s), a third of the way down the frame. */
@@ -44,17 +44,28 @@ export function insertGraphics(): void {
 
 /**
  * Drop template `id` at the playhead (where it was when this was called): main
- * copies its media into the project's library first, then one store edit
- * places it (`dropTemplate`, one undo step). `durationOf` gives the library's
- * source lengths (a whole-source audio clip needs one to be cut). Resolves
- * whether its clip effect found no clip under the playhead.
+ * copies its media into the project's library first, then the store adds them
+ * and places the template (`dropTemplate`) — ONE undo step for both. `library`
+ * gives the library's source lengths and frame rates (a whole-source audio
+ * clip needs a length to be cut; the held frame is cut by frame rate).
+ * Resolves whether its clip effect found no clip under the playhead.
  */
-export async function insertTemplate(id: string, durationOf: SourceDuration): Promise<{ effectSkipped: boolean }> {
+export async function insertTemplate(id: string, library: DropMedia): Promise<{ effectSkipped: boolean }> {
   const at = usePlayback.getState().time
   const { template, assets } = await instantiateTemplate(id)
   await idle() // the copy can finish mid-drag
   const store = useProject.getState()
-  if (assets.length) store.addMedia(assets.map((a) => a.id))
-  const fresh = new Map(assets.map((a) => [a.id, a.probe.durationSec]))
-  return store.dropTemplate(template, at, (m) => fresh.get(m) ?? durationOf(m))
+  const fresh = new Map(assets.map((a) => [a.id, a]))
+  const media: DropMedia = {
+    durationOf: (m) => fresh.get(m)?.probe.durationSec ?? library.durationOf(m),
+    fpsOf: (m) => fresh.get(m)?.probe.video?.avgFps ?? library.fpsOf(m)
+  }
+  // A gesture, so adding the media and placing the template undo together.
+  store.beginGesture()
+  try {
+    if (assets.length) store.addMedia(assets.map((a) => a.id))
+    return store.dropTemplate(template, at, media)
+  } finally {
+    store.endGesture()
+  }
 }
