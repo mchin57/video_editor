@@ -5,12 +5,11 @@ import { join, parse } from 'node:path'
 import type { StillRequest } from '@shared/ipc'
 import type { MediaAsset } from '@shared/media'
 import { alphaInputDecoder } from '@shared/media'
-import { isNeutralColor } from '@shared/project'
 import { exportProject, suggestedExportName } from '../services/exporter'
 import { getSettings } from '../services/settings'
 import { generateStill } from '../services/still'
 import { hdrToSdrChain } from '../services/proxy'
-import { cropFilter, eqFilter } from '../services/ffmpegFilters'
+import { cropFilter, gradeFilter } from '../services/ffmpegFilters'
 import { importGenerated, requireUsable, tmpOutput } from '../services/mediaStore'
 import { requireSession } from '../services/projectSession'
 import { dialogsFor, handle } from './handle'
@@ -23,7 +22,8 @@ function stillVfChain(asset: MediaAsset, req: StillRequest): string[] {
   if (req.crop) chain.push(cropFilter(req.crop))
   if (req.flipH) chain.push('hflip')
   if (req.flipV) chain.push('vflip')
-  if (req.color && !isNeutralColor(req.color)) chain.push(eqFilter(req.color))
+  const grade = gradeFilter(req.color, req.tint)
+  if (grade) chain.push(grade)
   return chain
 }
 

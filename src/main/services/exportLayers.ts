@@ -8,7 +8,7 @@
  */
 
 import type { CellRect, CompoundContent, ImageContent, Layer, LayoutContent, VideoContent } from '@shared/project'
-import { effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
+import { effectiveStabilize, videoSpeed } from '@shared/project'
 import { assertNever } from '@shared/layerKinds'
 import { hasSpeedRamp, speedSegments } from '@shared/speed'
 import { cellSpan, coverCrop, FULL_CELL, layoutCellRect } from '@shared/layouts'
@@ -17,7 +17,7 @@ import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
 import { existsSync } from 'node:fs'
 import { ensureImagePath, getAsset } from './mediaStore'
 import { hdrToSdrChain } from './proxy'
-import { eqFilter, r } from './ffmpegFilters'
+import { gradeFilter, r } from './ffmpegFilters'
 import type { ExportVideo } from './exporterArgs'
 import type { CompositionRender, Prerendered } from './exportRender'
 import { exportTextLayer } from './exportText'
@@ -91,7 +91,7 @@ async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoConte
     flipH: c.flipH,
     flipV: c.flipV,
     rotationDeg: l.rotationDeg,
-    colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
+    colorEq: gradeFilter(c.color, c.tint),
     boxW,
     boxH,
     x: r(m.x(l.x) - boxW / 2),

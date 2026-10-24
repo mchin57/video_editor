@@ -79,6 +79,8 @@ export interface StillRequest {
   crop: { x: number; y: number; w: number; h: number } | null
   /** Color correction to apply (null = none). */
   color: { brightness: number; contrast: number; saturation: number } | null
+  /** Tint to apply after the color correction (absent/null = none). */
+  tint?: import('./tint').Tint | null
   /** Mirror the (cropped) picture, like the clip does on screen. Layer rotation
    *  is a transform like position, so a still does not bake it in. */
   flipH?: boolean

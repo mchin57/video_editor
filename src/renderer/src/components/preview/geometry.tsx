@@ -1,11 +1,12 @@
 /** Preview ▸ layer geometry: a layer's box and fill in canonical CSS, its keyframed transform at a time, and measuring the selected box for the handles. */
 
-import { type CSSProperties } from 'react'
+import { type CSSProperties, type JSX } from 'react'
 import type { Layer, VideoContent } from '@shared/project'
 import { type MediaAsset } from '@shared/media'
 import { layerTransformAt, stretchedBox, type ResizeBox } from '@shared/layers'
 import { kindInfo } from '@shared/layerKinds'
 import { normalizeDeg } from '@shared/rotation'
+import { isNeutralTint, tintFeColorMatrix, tintMatrix, type Tint } from '@shared/tint'
 import { LOGICAL } from '@/lib/coords'
 import { pct } from './frame'
 
@@ -47,9 +48,11 @@ export function videoFillStyle(content: VideoContent, asset: MediaAsset | undefi
   const crop = content.crop
   const v = asset?.probe.video
   const col = content.color
-  const filter = col
-    ? `brightness(${1 + col.brightness}) contrast(${col.contrast}) saturate(${col.saturation})`
-    : undefined
+  const parts: string[] = []
+  if (col) parts.push(`brightness(${1 + col.brightness}) contrast(${col.contrast}) saturate(${col.saturation})`)
+  // The tint runs after the grade, as the export's colorchannelmixer runs after eq.
+  if (content.tint && !isNeutralTint(content.tint)) parts.push(`url(#${tintFilterId(content.tint)})`)
+  const filter = parts.length ? parts.join(' ') : undefined
   if (crop && v) {
     return {
       position: 'absolute',
@@ -102,4 +105,27 @@ export function measureSelectedBox(stage: HTMLElement): MeasuredBox | null {
     rotationDeg: normalizeDeg((Math.atan2(m.b, m.a) * 180) / Math.PI),
     pxPerLogical: 1 / s
   }
+}
+
+/** The DOM id of the SVG filter `TintFilter` renders for `t` — derived from the
+ *  matrix, so two clips with the same tint share one id harmlessly. */
+export const tintFilterId = (t: Tint): string =>
+  `reel-tint-${tintMatrix(t)
+    .map((v) => Math.round(v * 1e6))
+    .join('-')}`
+
+/**
+ * The SVG filter a tinted clip's `filter: url(#…)` points at: `tintFeColorMatrix`
+ * in sRGB (`color-interpolation-filters`), the same matrix the export's
+ * `colorchannelmixer` applies. Renders nothing for an untinted clip.
+ */
+export function TintFilter({ tint }: { tint: Tint | null | undefined }): JSX.Element | null {
+  if (!tint || isNeutralTint(tint)) return null
+  return (
+    <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+      <filter id={tintFilterId(tint)} colorInterpolationFilters="sRGB">
+        <feColorMatrix type="matrix" values={tintFeColorMatrix(tint)} />
+      </filter>
+    </svg>
+  )
 }

@@ -1124,6 +1124,31 @@ hash-compared (`framemd5`, yuv420p) against a lossless full render.
   Text layout (Chromium) and nested-comp pre-renders come on top, the same as
   for an export. The stabilization pre-pass is skipped for stills.
 
+## Clip tint — colorchannelmixer after eq (verified ffmpeg 8.1.1, 2026-10-24)
+
+A clip's tint (`VideoContent.tint`, `shared/tint.ts`) is one 3×3 RGB matrix,
+`(1 − a)·I + a·T·Lᵀ` (T the tint colour, L the Rec. 709 luma weights). The
+export writes it as `colorchannelmixer` straight after the clip's `eq`
+(`gradeFilter`, `ffmpegFilters.ts`); the preview applies the SAME numbers as
+an SVG `feColorMatrix` with `color-interpolation-filters="sRGB"`, after the
+CSS brightness/contrast/saturate chain — both on non-linear sRGB values.
+
+Verified by pushing lavfi `color` sources through the export's own shape
+(`format=yuv420p` input → `eq=…,colorchannelmixer=…,setsar=1,format=yuv420p`)
+and reading the pixel back as rgb24:
+
+- **ffmpeg converts YUV → RGB around `colorchannelmixer` by itself** — no
+  explicit `format=` is needed in front of it, and the trailing
+  `format=yuv420p` takes it back.
+- **The output matches the matrix to within 2–3 levels**, and that error is
+  the YUV round trip, not the filter: `#4080C0` alone comes back as
+  (63,127,192) → (62,126,191) through one more conversion. At full strength
+  toward `#ffd999` it read (117,99,69) against 118.1/100.5/70.9 computed from
+  the round-tripped input; white read (254,215,154) against (255,217,153); at
+  half strength (88,112,130) and (254,234,202); black stays (0,0,0).
+- **Alpha survives**: a 50%-alpha `yuva420p` source keeps alpha 129 through
+  it (the `aa` term defaults to 1), so background-removed clips can be tinted.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

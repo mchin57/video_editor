@@ -43,7 +43,15 @@ import { imageUrl, thumbUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
 import { useProject } from '@/state/projectStore'
 import { pct, FrameCtx, frameCanvasStyle } from './frame'
-import { mediaBox, withKeyframedTransform, layerRotation, flipTransform, videoFillStyle, mediaAspect } from './geometry'
+import {
+  mediaBox,
+  withKeyframedTransform,
+  layerRotation,
+  flipTransform,
+  videoFillStyle,
+  mediaAspect,
+  TintFilter
+} from './geometry'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
@@ -126,6 +134,7 @@ function VideoLayerView({
           wrapper — flipping the (larger, offset) <video> itself would mirror
           the whole source and show the wrong region. */}
       <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', transform: flipTransform(content) }}>
+        <TintFilter tint={content.tint} />
         <video
           ref={ref}
           // Before `src` — see the AudioFollower note; a layer clip can be

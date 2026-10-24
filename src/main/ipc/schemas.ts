@@ -60,6 +60,7 @@ const stillRequest = z.object({
   sourceSec: num,
   crop: z.object({ x: num, y: num, w: num, h: num }).nullable(),
   color: z.object({ brightness: num, contrast: num, saturation: num }).nullable(),
+  tint: z.object({ color: z.string(), amount: num }).nullable().optional(),
   flipH: z.boolean().optional(),
   flipV: z.boolean().optional()
 })

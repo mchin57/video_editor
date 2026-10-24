@@ -5,9 +5,11 @@ import {
   eqFilter,
   f3,
   f6,
+  gradeFilter,
   piecewiseLinearExpr,
   r,
-  speedRampPlayedExpr
+  speedRampPlayedExpr,
+  tintFilter
 } from './ffmpegFilters'
 
 describe('ffmpegFilters', () => {
@@ -19,6 +21,24 @@ describe('ffmpegFilters', () => {
     expect(eqFilter({ brightness: 0.1, contrast: 1.2, saturation: 0.8 })).toBe(
       'eq=brightness=0.1:contrast=1.2:saturation=0.8'
     )
+  })
+
+  it('builds the tint as colorchannelmixer rows from the shared matrix (the values verified against ffmpeg)', () => {
+    // Full-strength tint toward #ffd999: each row is the luma weights
+    // scaled by that channel — FFMPEG-NOTES "Clip tint".
+    expect(tintFilter({ color: '#ffd999', amount: 1 })).toBe(
+      'colorchannelmixer=rr=0.2126:rg=0.7152:rb=0.0722:gr=0.180918:gg=0.608621:gb=0.061441:br=0.12756:bg=0.42912:bb=0.04332'
+    )
+  })
+
+  it('grades with eq then the tint, skipping whichever is neutral', () => {
+    const color = { brightness: 0.1, contrast: 1, saturation: 1 }
+    const tint = { color: '#ffffff', amount: 0.5 }
+    expect(gradeFilter(null, null)).toBe('')
+    expect(gradeFilter({ brightness: 0, contrast: 1, saturation: 1 }, { color: '#ff0000', amount: 0 })).toBe('')
+    expect(gradeFilter(color, null)).toBe('eq=brightness=0.1:contrast=1:saturation=1')
+    expect(gradeFilter(color, tint)).toBe(`eq=brightness=0.1:contrast=1:saturation=1,${tintFilter(tint)}`)
+    expect(gradeFilter(undefined, tint)).toBe(tintFilter(tint))
   })
 
   it('f3 formats to 3 decimals; r rounds to the nearest int', () => {
