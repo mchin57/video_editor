@@ -66,7 +66,7 @@ import {
   LANE_GEOM
 } from './timeline/constants'
 import { spanOf, packAudioRows, snapTargetsFor } from './timeline/geometry'
-import { TileThumb } from './timeline/parts'
+import { PoseBadge, TileThumb } from './timeline/parts'
 import { TileDescription } from './timeline/TileDescription'
 import { TimelineToolbar } from './timeline/TimelineToolbar'
 import { LaneGutter } from './timeline/LaneGutter'
@@ -414,6 +414,7 @@ export function Timeline(): JSX.Element {
               {videoSpeed(l.content)}×
             </span>
           ) : null}
+          {l.content.kind === 'video' && <PoseBadge layerId={l.id} content={l.content} />}
           {l.content.kind === 'video' && stabilizeOverridden(l.content) && (
             <span
               className={`ml-auto shrink-0 rounded px-1 text-[8px] font-bold leading-tight ${

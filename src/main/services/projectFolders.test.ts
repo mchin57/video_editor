@@ -167,15 +167,18 @@ describe('project folders (pointer model)', () => {
     expect(existsSync(join(root, 'transcripts', `${clip.id}.json`))).toBe(true)
   })
 
-  it('Save As copies generated/ + transcripts/, re-measures relative paths, and leaves the old folder at its last save', async () => {
+  it('Save As copies generated/ + transcripts/ + pose/, re-measures relative paths, and leaves the old folder at its last save', async () => {
     writeFileSync(join(root, 'generated', 'x (still).png'), 'png')
     writeFileSync(join(root, 'transcripts', `${clip.id}.json`), '{}')
+    mkdirSync(join(root, 'pose'))
+    writeFileSync(join(root, 'pose', `${clip.id}.json`), '{}')
     await saveProject(project) // unsaved edits in the old folder…
     const res = await saveProjectAs(project, join(scratch, 'Copies', 'Race day v2.reel'))
     const to = join(scratch, 'Copies', 'Race day v2')
     expect(res.path).toBe(join(to, 'Race day v2.reel'))
     expect(existsSync(join(to, 'generated', 'x (still).png'))).toBe(true)
     expect(existsSync(join(to, 'transcripts', `${clip.id}.json`))).toBe(true)
+    expect(existsSync(join(to, 'pose', `${clip.id}.json`))).toBe(true)
     expect(existsSync(join(root, 'autosave.json'))).toBe(false) // …now belong to the new folder
     const saved = reelOf(to).library[0]
     expect(saved.absolutePath).toBe(

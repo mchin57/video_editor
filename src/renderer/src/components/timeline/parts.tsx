@@ -1,8 +1,10 @@
-/** Timeline ▸ small presentational parts: a tile's thumbnail and a toolbar button. */
+/** Timeline ▸ small presentational parts: a tile's thumbnail, its pose badge and a toolbar button. */
 
 import { useState, type JSX } from 'react'
 import { type MediaAsset } from '@shared/media'
+import type { VideoContent } from '@shared/project'
 import { thumbUrl } from '@/ipc/client'
+import { usePoseData } from '@/hooks/usePose'
 
 /**
  * A layer tile's thumbnail. Hidden while it can't load — but only for the asset
@@ -41,5 +43,27 @@ export function ToolbarButton({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * A clip tile's pose badge: shown while the clip draws a skeleton — overlay on,
+ * someone picked, AND the detection there to draw from (a Save As or relink
+ * can leave settings with no data; the badge mustn't claim an overlay then).
+ */
+export function PoseBadge({ layerId, content }: { layerId: string; content: VideoContent }): JSX.Element | null {
+  const pose = content.pose
+  const active = !!pose?.show && pose.people.length > 0
+  const data = usePoseData(content.mediaId, active)
+  if (!active || !data) return null
+  const n = pose!.people.length
+  return (
+    <span
+      data-testid={`tile-pose-${layerId}`}
+      className="shrink-0 rounded bg-yellow-400/80 px-1 text-[8px] font-bold leading-tight text-yellow-950"
+      title={`Pose overlay: ${n === 1 ? '1 person' : `${n} people`}`}
+    >
+      🦴
+    </span>
   )
 }

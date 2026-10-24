@@ -260,7 +260,7 @@ test('trimming the tile start and splitting it keep every mark at its moment', a
   expect(start).toBeGreaterThan(1.5)
   expect(await absolute()).toBeCloseTo(3, 1)
 
-  // S at 4s splits it; the right half's copy of the arrow is already on screen.
+  // S at 4s splits it; the right half keeps the arrow's moment (3s, before its start).
   await page.evaluate(() => {
     window.__reelStores.useUi.getState().selectLayer('G')
     window.__reelStores.usePlayback.getState().setTime(4)
@@ -273,6 +273,6 @@ test('trimming the tile start and splitting it keep every mark at its moment', a
   )
   expect(halves).toHaveLength(2)
   expect(halves[1].start).toBeCloseTo(4)
-  expect(halves[1].marks[0]).toMatchObject({ atSec: 0, reveal: 'pop' })
+  expect(halves[1].marks[0].atSec).toBeCloseTo(-1)
   expect(halves[1].marks[0].id).not.toBe(halves[0].marks[0].id)
 })

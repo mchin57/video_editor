@@ -15,6 +15,7 @@ import { CollapsibleSection } from '../CollapsibleSection'
 import { Field, NumberInput, Row, disabledCls, inputCls } from '../ui'
 import { LiveRange, OverrideToggle, StabilizeSliders, setLayer, type TriMode } from './controls'
 import { RemoveBackground } from './RemoveBackground'
+import { PoseSection } from './PoseSection'
 import { FreezeFrames, SpeedControl } from './VideoTiming'
 import { SoundEffectsSection } from './SoundEffects'
 
@@ -137,6 +138,7 @@ export function VideoClipSections({
       {/* Background removal → this clip's segment, matted and swapped in
           place. An already-transparent clip just says so. */}
       <RemoveBackground key={`matte-${id}`} layerId={id} content={c} asset={asset} />
+      <PoseSection key={`pose-${id}`} layer={layer} content={c} asset={asset} />
     </>
   )
 }

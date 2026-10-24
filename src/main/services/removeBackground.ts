@@ -18,11 +18,24 @@
  */
 
 import { once } from 'node:events'
-import { existsSync, promises as fsp, readdirSync } from 'node:fs'
+import { promises as fsp } from 'node:fs'
 import { basename, join, parse } from 'node:path'
 import type { MediaAsset } from '@shared/media'
 import type { RemoveBackgroundRequest } from '@shared/ipc'
-import { getSubdir, getBundledModelsDir } from '../config'
+import { getSubdir } from '../config'
+import {
+  bestSession,
+  fallBackToCpu,
+  loadOrt,
+  onnxFiles,
+  ortLoads,
+  type InferenceDevice,
+  type OrtOutputs,
+  type OrtSession,
+  type OrtTensor
+} from './onnx'
+import { POSE_MODEL_PREFIXES } from './poseModel'
+import { carryPoseToCopy } from './poseDetect'
 import { getBinaries } from './ffmpeg'
 import { startFfmpeg } from './ffmpegRun'
 import { importGenerated, ensureProxy, requireUsable } from './mediaStore'
@@ -44,99 +57,24 @@ import { createLogger, bestEffort } from '@shared/log'
 
 const log = createLogger('matte')
 
-type OrtModule = typeof import('onnxruntime-node')
-type OrtTensor = import('onnxruntime-node').Tensor
-type OrtSession = import('onnxruntime-node').InferenceSession
-type OrtOutputs = Awaited<ReturnType<OrtSession['run']>>
+/** Where the matte ran (the job label says so). */
+export type MatteDevice = InferenceDevice
 
-/** Where inference runs. GPU = DirectML (any D3D12 GPU on Windows — it ships
- *  inside onnxruntime-node's win32 binaries, so it costs no installer size). */
-export type MatteDevice = 'gpu' | 'cpu'
-
-/** Model search roots, bundled (installer) first, then the user data dir. */
-function modelDirs(): string[] {
-  const dirs: string[] = []
-  const bundled = getBundledModelsDir()
-  if (bundled) dirs.push(bundled)
-  dirs.push(join(getSubdir('bin'), 'models'))
-  return dirs
-}
-
-/** Locate the RVM matting model (`rvm_*.onnx`, else the first `.onnx` found). */
+/** Locate the RVM matting model: `rvm_*.onnx`, else the first `.onnx` that
+ *  isn't one of the pose models sharing the folder (a renamed RVM file). */
 export function discoverMatteModel(): string | null {
-  for (const dir of modelDirs()) {
-    if (!existsSync(dir)) continue
-    let files: string[]
-    try {
-      files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.onnx'))
-    } catch {
-      continue
-    }
-    const pick = files.find((f) => f.toLowerCase().startsWith('rvm')) ?? files[0]
-    if (pick) return join(dir, pick)
-  }
-  return null
+  const files = onnxFiles()
+  const rvm = files.find(([, f]) => f.toLowerCase().startsWith('rvm'))
+  const other = files.find(([, f]) => !POSE_MODEL_PREFIXES.some((p) => f.toLowerCase().startsWith(p)))
+  const pick = rvm ?? other
+  return pick ? join(pick[0], pick[1]) : null
 }
 
 /** Feature gate: the model must exist on disk AND onnxruntime-node must load
  *  (it's a native module — an Electron ABI mismatch fails at import time, and
  *  the UI should hide the button rather than fail at click time). */
 export async function segmentAvailable(): Promise<boolean> {
-  if (discoverMatteModel() === null) return false
-  try {
-    await loadOrt()
-    return true
-  } catch (error) {
-    // Hidden, not failed at click time — but say why (an ABI mismatch, a missing DLL).
-    log.warn('onnxruntime-node did not load; background removal is unavailable', error)
-    return false
-  }
-}
-
-// onnxruntime-node is loaded lazily (native module) so a load failure can't crash
-// the whole main process at import; sessions are cached per model path + device.
-let ortMod: OrtModule | null = null
-const sessions = new Map<string, Promise<OrtSession>>()
-/** Set once the GPU session was created but could not actually run the model;
- *  later jobs this app run go straight to the CPU instead of failing over again. */
-let gpuUnusable = false
-
-async function loadOrt(): Promise<OrtModule> {
-  if (!ortMod) ortMod = await import('onnxruntime-node')
-  return ortMod
-}
-
-function getSession(ort: OrtModule, modelPath: string, device: MatteDevice): Promise<OrtSession> {
-  const key = `${device}:${modelPath}`
-  let s = sessions.get(key)
-  if (!s) {
-    s =
-      device === 'gpu'
-        ? // DirectML supports neither memory patterns nor parallel execution;
-          // onnxruntime's docs require both off for the DML provider.
-          ort.InferenceSession.create(modelPath, {
-            executionProviders: ['dml'],
-            enableMemPattern: false,
-            executionMode: 'sequential'
-          })
-        : ort.InferenceSession.create(modelPath)
-    // Don't cache a failure — the next job should get to try again.
-    s.catch(() => sessions.delete(key))
-    sessions.set(key, s)
-  }
-  return s
-}
-
-/** The GPU session when this machine can create one, else the CPU session. */
-async function bestSession(ort: OrtModule, modelPath: string): Promise<{ session: OrtSession; device: MatteDevice }> {
-  if (process.platform === 'win32' && !gpuUnusable) {
-    try {
-      return { session: await getSession(ort, modelPath, 'gpu'), device: 'gpu' }
-    } catch (err) {
-      log.warn('DirectML unavailable, using the CPU', err)
-    }
-  }
-  return { session: await getSession(ort, modelPath, 'cpu'), device: 'cpu' }
+  return discoverMatteModel() !== null && (await ortLoads('background removal'))
 }
 
 /** Fail early and clearly if a non-RVM ONNX was dropped in (inputs: src,
@@ -227,9 +165,7 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
         return await tryShapes(session)
       } catch (err) {
         if (device !== 'gpu') throw err
-        log.warn('GPU inference failed, retrying on the CPU', err)
-        gpuUnusable = true
-        session = await getSession(ort, modelPath, 'cpu')
+        session = await fallBackToCpu(ort, modelPath, err)
         device = 'cpu'
         ratioT = makeRatio([1])
         setLabel(job.id, onDevice(device))
@@ -292,6 +228,10 @@ export async function removeBackgroundToLibrary(req: RemoveBackgroundRequest): P
     // Content-address the result, then register it as a normal library asset.
     const span = `${clock(window.startSec)}–${clock(window.startSec + window.durationSec)}`
     const result = await importGenerated(tmpOut, `${parse(asset.fileName).name} (no bg ${span}).webm`, project)
+    // A detected pose follows the clip onto its transparent copy.
+    const rv = result.probe.video
+    if (rv)
+      await carryPoseToCopy(asset.id, result.id, window.startSec, { w: rv.displayWidth, h: rv.displayHeight }, project)
     // Build the alpha (WebM) preview proxy before reporting done, so the caller
     // can swap the clip in and it plays at once. Its own job shows its progress.
     setLabel(job.id, `${onDevice(device)} · preparing preview`)

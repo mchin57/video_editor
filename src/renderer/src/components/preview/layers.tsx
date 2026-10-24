@@ -47,6 +47,7 @@ import { mediaBox, withKeyframedTransform, layerRotation, flipTransform, videoFi
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
+import { PoseOverlay } from './pose'
 
 /** One composited video layer: a <video> that follows the master clock. */
 function VideoLayerView({
@@ -58,7 +59,8 @@ function VideoLayerView({
   selected,
   boxStyle,
   onMoveDown,
-  muted = false
+  muted = false,
+  editable = false
 }: {
   layer: Layer
   content: VideoContent
@@ -70,6 +72,8 @@ function VideoLayerView({
   onMoveDown: (e: ReactPointerEvent) => void
   /** Silenced by an ancestor (a muted layout cell the comp fills). */
   muted?: boolean
+  /** A layer of the comp being edited (its pose people can be picked). */
+  editable?: boolean
 }): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const target = videoSourceTime(content, layer, time)
@@ -140,6 +144,9 @@ function VideoLayerView({
           }}
         />
       </div>
+      {/* Outside the flip wrapper: the overlay mirrors its points itself, so
+          angle labels never read backwards. */}
+      <PoseOverlay layer={layer} content={content} asset={asset} time={time} editable={editable} />
     </div>
   )
 }
@@ -383,7 +390,8 @@ function StackVideo({
   playing,
   selected,
   onMoveDown,
-  muted
+  muted,
+  editable
 }: KindViewProps<VideoContent>): JSX.Element {
   const asset = assetById.get(content.mediaId)
   const box = {
@@ -414,6 +422,7 @@ function StackVideo({
       boxStyle={box}
       onMoveDown={onMoveDown}
       muted={muted}
+      editable={!!editable}
     />
   )
 }

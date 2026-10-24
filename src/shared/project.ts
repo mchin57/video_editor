@@ -20,6 +20,7 @@ import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
 import type { AudioFx } from './audioFx'
 import type { GraphicMark } from './graphics'
+import type { PoseSettings } from './pose'
 import type { TextEffects } from './sparkle'
 import type { TextAnimation } from './textAnim'
 
@@ -236,6 +237,14 @@ export interface VideoContent {
    * agree by both muting).
    */
   speedRamp?: SpeedKeyframe[]
+  /**
+   * The body-pose overlay drawn on this clip (absent/null = none): which
+   * detected people show, their colours and the joint angles labelled. The
+   * keypoints themselves are per MEDIA file, saved in the project folder and
+   * looked up in source time, so a trim, split, freeze or speed change keeps
+   * the skeleton on the athlete. @see shared/pose.ts
+   */
+  pose?: PoseSettings | null
 }
 
 /** Allowed constant-speed range (matches the Inspector control). */
@@ -788,7 +797,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 27
+export const PROJECT_VERSION = 28
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1119,6 +1128,8 @@ export function migrateProject(raw: unknown): Project {
   p.volumeLevels = normalizeVolumeLevels(p.volumeLevels)
   // v27 adds the `graphics` layer content kind (shapes + telestrator marks,
   // shared/graphics.ts) — purely additive, old projects simply have none.
+  // v28 adds the absence-tolerant `VideoContent.pose` overlay settings
+  // (shared/pose.ts) — absent means no overlay, so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

@@ -13,7 +13,7 @@
  * duration IS `compositionDuration`.
  */
 
-import type { AudioClip, Composition, Layer, LayoutCell } from './project'
+import type { AudioClip, Composition, Layer, LayoutCell, VideoContent } from './project'
 import { audioClipEnd, createEmptyComposition } from './project'
 import { FRAME, layerLabel, playedVideoDuration, visualDuration } from './layers'
 
@@ -235,6 +235,38 @@ export function mapAudioClipsDeep<T extends Composition>(comp: T, fn: (a: AudioC
     return next
   })
   return changed ? { ...comp, layers, audioClips } : comp
+}
+
+/**
+ * Rewrite every VIDEO layer in `comp` AND every nested composition (compound
+ * layers, layout-cell comps) through `fn` — the layer-side twin of
+ * `mapAudioClipsDeep`, with the same identity guarantees (a no-op returns
+ * `comp` itself).
+ */
+export function mapVideoLayersDeep<T extends Composition>(comp: T, fn: (l: Layer, c: VideoContent) => Layer): T {
+  let changed = false
+  const layers = comp.layers.map((l): Layer => {
+    const c = l.content
+    let next = l
+    if (c.kind === 'video') next = fn(l, c)
+    else if (c.kind === 'compound') {
+      const inner = mapVideoLayersDeep(c.comp, fn)
+      if (inner !== c.comp) next = { ...l, content: { ...c, comp: inner } }
+    } else if (c.kind === 'layout') {
+      let cellsChanged = false
+      const cells = c.cells.map((cell): LayoutCell => {
+        if (!cell.comp) return cell
+        const inner = mapVideoLayersDeep(cell.comp, fn)
+        if (inner === cell.comp) return cell
+        cellsChanged = true
+        return { ...cell, comp: inner }
+      })
+      if (cellsChanged) next = { ...l, content: { ...c, cells } }
+    }
+    if (next !== l) changed = true
+    return next
+  })
+  return changed ? { ...comp, layers } : comp
 }
 
 /** Every audio clip in `comp` and its nested compositions (read-only walk). */

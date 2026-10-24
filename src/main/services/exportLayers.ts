@@ -22,6 +22,7 @@ import type { ExportVideo } from './exporterArgs'
 import type { CompositionRender, Prerendered } from './exportRender'
 import { exportTextLayer } from './exportText'
 import { exportGraphicsLayer } from './exportGraphics'
+import { exportPoseOverlay } from './exportPose'
 
 /** Add a visible layer's compositor steps to the pass. */
 export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
@@ -79,35 +80,35 @@ async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoConte
     hasAlpha = false
     inputDecoder = null
   }
-  pass.visuals.push({
-    kind: 'video',
-    video: {
-      path: srcPath,
-      inSec: srcInSec,
-      len: trimLen,
-      hdrChain,
-      hasAlpha,
-      inputDecoder,
-      crop: c.crop ?? null,
-      flipH: c.flipH,
-      flipV: c.flipV,
-      rotationDeg: l.rotationDeg,
-      colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
-      boxW,
-      boxH,
-      x: r(m.x(l.x) - boxW / 2),
-      y: r(m.y(l.y) - boxH / 2),
-      startSec: l.startSec,
-      endSec: l.endSec,
-      freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
-      speed: videoSpeed(c),
-      // Speed-ramp profile → boundary points in trimmed-input time. The
-      // shared `speedSegments` resolves the same profile the preview plays.
-      ramp: hasSpeedRamp(c) ? rampPoints(c) : undefined,
-      keyframes: pass.keyframes(l, aspect),
-      opacity: await pass.opacityAnim(l)
-    }
-  })
+  const clip: ExportVideo = {
+    path: srcPath,
+    inSec: srcInSec,
+    len: trimLen,
+    hdrChain,
+    hasAlpha,
+    inputDecoder,
+    crop: c.crop ?? null,
+    flipH: c.flipH,
+    flipV: c.flipV,
+    rotationDeg: l.rotationDeg,
+    colorEq: isNeutralColor(c.color) ? '' : eqFilter(c.color!),
+    boxW,
+    boxH,
+    x: r(m.x(l.x) - boxW / 2),
+    y: r(m.y(l.y) - boxH / 2),
+    startSec: l.startSec,
+    endSec: l.endSec,
+    freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
+    speed: videoSpeed(c),
+    // Speed-ramp profile → boundary points in trimmed-input time. The
+    // shared `speedSegments` resolves the same profile the preview plays.
+    ramp: hasSpeedRamp(c) ? rampPoints(c) : undefined,
+    keyframes: pass.keyframes(l, aspect),
+    opacity: await pass.opacityAnim(l)
+  }
+  pass.visuals.push({ kind: 'video', video: clip })
+  // Its body-pose overlay (if shown) composites right above it, sharing its box.
+  if (v) await exportPoseOverlay(pass, l, c, clip, { w: v.displayWidth, h: v.displayHeight })
   // An unmuted video layer's own audio joins the mix (placed at its start),
   // tempo-matched to the clip's speed (pitch-preserving atempo chain). A
   // RAMPED clip's audio is dropped — there is no variable-tempo audio path,

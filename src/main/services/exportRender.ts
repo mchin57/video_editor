@@ -16,6 +16,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
 import { promises as fsp } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Composition, Layer, Stabilize, VolumeLevel } from '@shared/project'
@@ -31,15 +32,18 @@ import { audioProxyIfReady, getAsset } from './mediaStore'
 import { ensureLoudness } from './loudness'
 import type { ProjectSession } from './projectSession'
 import { setProgress } from './jobs'
-import { runFfmpeg } from './ffmpegRun'
+import { runFfmpeg, startFfmpeg } from './ffmpegRun'
 import { buildOpacityCmdLines } from './ffmpegFilters'
 import {
   buildExportArgs,
+  buildOverlayEncodeArgs,
   buildFrameArgs,
   buildVidstabDetectArgs,
   buildVidstabTransformArgs,
   exportAudioClips,
   frameIndexAt,
+  FILTER_GRAPH_FILE,
+  withFilterGraphFile,
   type AudioClipSource,
   type ExportAudio,
   type ExportImage,
@@ -238,7 +242,11 @@ export class CompositionRender {
     // rewind it (weighting them across N+1 passes is a Stage 5 item). Stills have no job.
     const progress = o.depth === 1 && !o.frames ? (pr: number): void => setProgress(ctx.jobId, pr) : undefined
     ctx.signal?.throwIfAborted()
-    await runFfmpeg(ctx.ffmpeg, args, totalDur, progress, this.tmpDir, ctx.signal)
+    // The graph goes in a file next to the ASS / command files (cwd = tmpDir):
+    // a long one would overflow the Windows command line.
+    const scripted = withFilterGraphFile(args)
+    if (scripted.graph !== null) await fsp.writeFile(join(this.tmpDir, FILTER_GRAPH_FILE), scripted.graph, 'utf8')
+    await runFfmpeg(ctx.ffmpeg, scripted.args, totalDur, progress, this.tmpDir, ctx.signal)
     return output
   }
 
@@ -287,6 +295,39 @@ export class CompositionRender {
     const paths = svgs.map((_, i) => join(this.tmpDir, name(i)))
     await this.textRenderer().renderSvgs(svgs, width, height, paths)
     return { paths, pattern: join(this.tmpDir, `graphics_${n}_%03d.png`) }
+  }
+
+  /**
+   * Render an overlay ANIMATION — `count` frames at 30 fps, frame i drawn from
+   * `svgAt(i)` at `width`×`height` px by the export's Chromium — into a
+   * lossless alpha .mov in this pass's temp dir, streamed straight into the
+   * encoder. Returns its path. The encoder dies with the export's cancel
+   * signal and on every error here.
+   */
+  async renderOverlayVideo(
+    count: number,
+    svgAt: (i: number) => string,
+    width: number,
+    height: number
+  ): Promise<string> {
+    const file = join(this.tmpDir, `overlay_${this.seq.image++}.mov`)
+    const enc = startFfmpeg(this.ctx.ffmpeg, buildOverlayEncodeArgs(file), { signal: this.ctx.signal })
+    const stdin = enc.child.stdin
+    stdin.on('error', () => {}) // an encoder that dies early surfaces through `exited`
+    try {
+      await this.textRenderer().streamSvgs(count, svgAt, width, height, async (png) => {
+        this.ctx.signal?.throwIfAborted()
+        // Wait out back-pressure — or the encoder failing while we wait.
+        if (!stdin.write(png)) await Promise.race([once(stdin, 'drain'), enc.exited])
+      })
+      stdin.end()
+      await enc.exited
+    } catch (error) {
+      enc.child.kill()
+      await Promise.allSettled([enc.exited])
+      throw error
+    }
+    return file
   }
 
   /**

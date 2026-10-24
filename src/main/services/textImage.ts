@@ -183,6 +183,17 @@ export interface TextRenderer {
   /** Rasterise each SVG (`width`×`height` px, which must fit the window) to
    *  its PNG in `outPaths`, on one page load. Throws on failure. */
   renderSvgs: (svgs: string[], width: number, height: number, outPaths: string[]) => Promise<void>
+  /** Rasterise `count` SVGs made on demand (`svgAt(i)`, `width`×`height` px)
+   *  on one page load, handing each PNG to `onPng` in order — an animation's
+   *  frames, streamed straight into an encoder. A frame whose SVG repeats the
+   *  previous one reuses its PNG. Throws on failure. */
+  streamSvgs: (
+    count: number,
+    svgAt: (i: number) => string,
+    width: number,
+    height: number,
+    onPng: (png: Buffer, i: number) => Promise<void>
+  ) => Promise<void>
   /** Lay every block out with the preview's CSS and report its lines (one
    *  page, one pass). Throws on failure. */
   layout: (specs: TextImageSpec[]) => Promise<LaidOutLine[][]>
@@ -238,19 +249,35 @@ export function createTextRenderer(
       await fsp.writeFile(outPath, normaliseCapture(img, width, height).toPNG())
     },
     async renderSvgs(svgs, w, h, outPaths) {
-      if (w > width || h > height) throw new Error(`mark raster ${w}x${h} exceeds the ${width}x${height} window`)
+      await this.streamSvgs(
+        svgs.length,
+        (i) => svgs[i],
+        w,
+        h,
+        (png, i) => fsp.writeFile(outPaths[i], png)
+      )
+    },
+    async streamSvgs(count, svgAt, w, h, onPng) {
+      if (w > width || h > height) throw new Error(`raster ${w}x${h} exceeds the ${width}x${height} window`)
       const win = ensureWin()
       const htmlPath = join(tmpDir, `svg_page_${n++}.html`)
       await fsp.writeFile(htmlPath, buildSvgPageHtml(width, height, fontsDir), 'utf8')
       await win.loadFile(htmlPath)
       win.showInactive()
       await delay(70) // let a frame paint after show
-      for (let i = 0; i < svgs.length; i++) {
-        await win.webContents.executeJavaScript(showSvgScript(svgs[i]))
-        // A sub-rect capture comes back at the device scale like a full one —
-        // the same cropped-vs-scaled guard applies.
-        const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h })
-        await fsp.writeFile(outPaths[i], normaliseCapture(img, w, h).toPNG())
+      let prevSvg: string | null = null
+      let prevPng: Buffer | null = null
+      for (let i = 0; i < count; i++) {
+        const svg = svgAt(i)
+        if (svg !== prevSvg || !prevPng) {
+          await win.webContents.executeJavaScript(showSvgScript(svg))
+          // A sub-rect capture comes back at the device scale like a full one —
+          // the same cropped-vs-scaled guard applies.
+          const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h })
+          prevPng = normaliseCapture(img, w, h).toPNG()
+          prevSvg = svg
+        }
+        await onPng(prevPng, i)
       }
     },
     async layout(specs) {

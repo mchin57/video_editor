@@ -88,7 +88,9 @@ export function buildMatteDecodeArgs(
   h: number,
   fps: number,
   preFilter = '',
-  window?: MatteWindow
+  window?: MatteWindow,
+  /** `bgr24` for the pose models, which take OpenCV's channel order. */
+  pixFmt: 'rgb24' | 'bgr24' = 'rgb24'
 ): string[] {
   const vf = [`fps=${fps}`, preFilter, `scale=${w}:${h}:flags=bicubic`].filter(Boolean).join(',')
   return [
@@ -102,7 +104,7 @@ export function buildMatteDecodeArgs(
     '-f',
     'rawvideo',
     '-pix_fmt',
-    'rgb24',
+    pixFmt,
     'pipe:1'
   ]
 }

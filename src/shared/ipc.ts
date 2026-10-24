@@ -56,6 +56,10 @@ export const IPC = {
   // Background removal (subject-aware crop)
   segmentAvailable: 'segment:available',
   removeBackground: 'segment:removeBackground',
+  // Body pose (detect once per media item, drawn on clips)
+  poseAvailable: 'pose:available',
+  detectPose: 'pose:detect',
+  getPose: 'pose:get',
   // Background jobs
   cancelJob: 'job:cancel',
   // Stills (capture a frame from a clip)
@@ -113,6 +117,28 @@ export interface RemoveBackgroundRequest {
   minSpeed: number
   /** Opaque tag echoed as the job's `subjectId` (the renderer passes the layer
    *  id, so the UI can find "the matte job for this layer"). */
+  subjectId?: string
+}
+
+/** Whether pose detection can run: both models found and onnxruntime loads.
+ *  `missing` names the model files still to install (the Inspector says so). */
+export interface PoseAvailability {
+  ready: boolean
+  missing: string[]
+  /** The folder to put user-installed models in (`<data>/bin/models`). */
+  modelsDir: string
+}
+
+export interface DetectPoseRequest {
+  mediaId: string
+  /** Source window to cover, in the source's own time. Grown to include any
+   *  window already detected for the same media, so other clips keep theirs. */
+  startSec: number
+  durationSec: number
+  /** Slowest speed the clip plays the window at (1 = none): slow-mo is
+   *  sampled more densely so the skeleton keeps up with fast limbs. */
+  minSpeed: number
+  /** Opaque tag echoed as the job's `subjectId` (the renderer passes the layer id). */
   subjectId?: string
 }
 
@@ -244,6 +270,14 @@ export interface IpcInvoke {
   // model being present. Resolves null when the job was canceled.
   segmentAvailable: Fn<[], boolean>
   removeBackground: Fn<[req: RemoveBackgroundRequest], MediaAsset | null>
+
+  // Body pose — detect people's keypoints over a clip's source window (once
+  // per media item, saved in the project folder) and read them back. Gated
+  // on both pose models being installed. detectPose resolves null when the
+  // job was canceled.
+  poseAvailable: Fn<[], PoseAvailability>
+  detectPose: Fn<[req: DetectPoseRequest], import('./pose').PoseData | null>
+  getPose: Fn<[mediaId: string], import('./pose').PoseData | null>
   /** Ask a cancelable background job to stop (false = nothing to cancel). */
   cancelJob: Fn<[jobId: string], boolean>
 
