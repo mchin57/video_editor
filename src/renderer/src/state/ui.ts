@@ -8,6 +8,12 @@ import { expandGroup } from '@/lib/links'
 export type LevelDialog =
   { mode: 'create'; assign?: string[] } | { mode: 'rename'; levelId: string } | { mode: 'loudness'; levelId: string }
 
+/** A freeze picked on a clip tile: its index in `content.freezes` and its `atSec`. */
+export interface PickedFreeze {
+  index: number
+  atSec: number
+}
+
 /** Transient editor UI selection that doesn't belong in the project document. */
 interface UiState {
   /**
@@ -85,13 +91,19 @@ interface UiState {
    *  stage to pick from (null = not picking). Cleared with the selection. */
   posePickLayerId: string | null
   setPosePickLayerId: (id: string | null) => void
+  /** The freeze picked on the selected video layer's timeline tile (null =
+   *  none): Delete removes it instead of the clip. Identified by its index in
+   *  `content.freezes` AND its `atSec`, so a pick that no longer matches (an
+   *  undo, a trim) is simply stale. Cleared with the selection. */
+  selectedFreeze: PickedFreeze | null
+  selectFreeze: (f: PickedFreeze | null) => void
   /** Clear every selection (clip/caption/audio). */
   clearSelection: () => void
 }
 
 /** What every selection change resets: the stage's edit modes (the armed
- *  graphics tool, the selected mark, pose picking). */
-const NO_STAGE_EDIT = { graphicsTool: null, selectedMarkId: null, posePickLayerId: null }
+ *  graphics tool, the selected mark, pose picking) and the picked freeze. */
+const NO_STAGE_EDIT = { graphicsTool: null, selectedMarkId: null, posePickLayerId: null, selectedFreeze: null }
 
 /** The primary (last clicked) tile as a ref, or null when nothing is selected.
  *  The three `selected*Id` fields are mutually exclusive, so this is total. */
@@ -116,6 +128,7 @@ const single = (
   | 'graphicsTool'
   | 'selectedMarkId'
   | 'posePickLayerId'
+  | 'selectedFreeze'
 > & {
   captionsGlobalSelected: boolean
 } => ({
@@ -189,6 +202,8 @@ export const useUi = create<UiState>((set) => ({
   selectMark: (id) => set({ selectedMarkId: id }),
   posePickLayerId: null,
   setPosePickLayerId: (id) => set({ posePickLayerId: id }),
+  selectedFreeze: null,
+  selectFreeze: (f) => set({ selectedFreeze: f }),
   clearSelection: () =>
     set({
       selection: [],

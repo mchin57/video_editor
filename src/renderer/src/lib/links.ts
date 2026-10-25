@@ -439,6 +439,18 @@ export function trimItemsBy(
   }
 }
 
+/**
+ * The index of the freeze `pick` names on video layer `layerId`, or -1 when the
+ * pick is stale: the layer or that freeze (index AND `atSec`) is gone, or the
+ * clip is now linked — a freeze on a linked tile is locked, like the Inspector's
+ * freeze controls, since re-timing one member would desync the group.
+ */
+export function pickedFreezeIndex(p: Composition, layerId: string, pick: { index: number; atSec: number }): number {
+  const c = p.layers.find((l) => l.id === layerId)?.content
+  if (c?.kind !== 'video' || c.freezes?.[pick.index]?.atSec !== pick.atSec) return -1
+  return isLinked(p, { kind: 'layer', id: layerId }) ? -1 : pick.index
+}
+
 /** Whether a cut at `atSec` falls strictly inside this tile and the tile
  *  supports splitting at all. */
 export function splittableAt(p: Composition, ref: TimelineItemRef, atSec: number, srcDur?: SourceDuration): boolean {

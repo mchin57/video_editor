@@ -1,8 +1,9 @@
-/** Timeline ▸ small presentational parts: a tile's thumbnail, its pose badge and a toolbar button. */
+/** Timeline ▸ small presentational parts: a tile's thumbnail, its freeze overlays, its pose badge and a toolbar button. */
 
-import { useState, type JSX } from 'react'
+import { useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import { type MediaAsset } from '@shared/media'
 import type { VideoContent } from '@shared/project'
+import type { FreezeSpan } from '@shared/layers'
 import { thumbUrl } from '@/ipc/client'
 import { usePoseData } from '@/hooks/usePose'
 
@@ -43,6 +44,68 @@ export function ToolbarButton({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * A freeze hold drawn on its clip tile: a translucent blue box over the span the
+ * frame is held. Pressing the box selects and moves the clip like the rest of the
+ * tile, and a click (no drag) picks the freeze so Delete removes it; dragging its
+ * right edge sets the hold. When the hold ends the clip, that handle sits just
+ * inside the clip's own end handle so both stay reachable. On a linked tile the
+ * box is display-only: re-timing one member would desync the group (the
+ * Inspector's freeze controls lock the same way).
+ */
+export function FreezeOverlay({
+  layerId,
+  span,
+  left,
+  width,
+  atClipEnd,
+  picked,
+  linked,
+  onBodyDown,
+  onEdgeDown
+}: {
+  layerId: string
+  span: FreezeSpan
+  left: number
+  width: number
+  atClipEnd: boolean
+  picked: boolean
+  linked: boolean
+  onBodyDown: (e: ReactPointerEvent) => void
+  onEdgeDown: (e: ReactPointerEvent) => void
+}): JSX.Element {
+  const hold = `${span.holdSec.toFixed(1)}s`
+  return (
+    <div
+      data-testid={`freeze-${layerId}-${span.index}`}
+      data-picked={picked ? 'true' : undefined}
+      onPointerDown={linked ? undefined : onBodyDown}
+      // A linked box takes no pointer events, so it never shows a tooltip.
+      title={
+        linked
+          ? undefined
+          : `Freeze ${hold}: click to select (Delete removes it), drag the right edge to change the hold`
+      }
+      className={`absolute top-0 h-full border-x ${
+        picked ? 'border-sky-100 bg-sky-400/55 ring-2 ring-inset ring-sky-100' : 'border-sky-300/70 bg-sky-500/35'
+      } ${linked ? 'pointer-events-none' : ''}`}
+      style={{ left, width: Math.max(3, width) }}
+    >
+      <span className="pointer-events-none absolute bottom-0 left-0.5 max-w-full truncate text-[8px] font-bold leading-tight text-sky-50">
+        ❄ {hold}
+      </span>
+      {!linked && (
+        <div
+          data-testid={`freeze-edge-${layerId}-${span.index}`}
+          onPointerDown={onEdgeDown}
+          className="absolute top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
+          style={{ right: atClipEnd ? 8 : 0 }}
+        />
+      )}
+    </div>
   )
 }
 

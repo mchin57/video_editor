@@ -25,6 +25,7 @@ import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
 import { refetchFresh } from '@/lib/refetchFresh'
+import { pickedFreezeIndex } from '@/lib/links'
 import {
   chooseProjectLocation,
   defaultProjectLocation,
@@ -34,7 +35,7 @@ import {
   pathForFile
 } from '@/ipc/client'
 import { useEditor } from '@/state/store'
-import { useProject } from '@/state/projectStore'
+import { getActiveComp, useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { useAppSettings } from '@/state/appSettings'
@@ -241,12 +242,20 @@ export default function App(): JSX.Element {
         project.redo()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Delete the whole selection (one tile, or every tile of a link group) —
-        // or, with a graphics mark selected, just that mark.
-        const { selection, selectedLayerId, selectedMarkId } = useUi.getState()
+        // or, with a graphics mark or a freeze picked, just that one. A stale
+        // pick (undone, trimmed away, clip since linked) falls through to the clip.
+        const { selection, selectedLayerId, selectedMarkId, selectedFreeze } = useUi.getState()
+        const comp = getActiveComp()
+        const freezeIndex =
+          comp && selectedLayerId && selectedFreeze ? pickedFreezeIndex(comp, selectedLayerId, selectedFreeze) : -1
         if (selectedLayerId && selectedMarkId) {
           e.preventDefault()
           project.updateGraphicsMarks(selectedLayerId, (ms) => ms.filter((m) => m.id !== selectedMarkId))
           useUi.getState().selectMark(null)
+        } else if (selectedLayerId && freezeIndex >= 0) {
+          e.preventDefault()
+          project.removeFreeze(selectedLayerId, freezeIndex)
+          useUi.getState().selectFreeze(null)
         } else if (selection.length) {
           e.preventDefault()
           project.removeItems(selection)
