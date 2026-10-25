@@ -1,10 +1,10 @@
 /** Timeline ▸ small presentational parts: a tile's thumbnail, its freeze overlays, its pose badge and a toolbar button. */
 
 import { useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import { type MediaAsset } from '@shared/media'
+import { isWorkoutAsset, type MediaAsset } from '@shared/media'
 import type { VideoContent } from '@shared/project'
 import type { FreezeSpan } from '@shared/layers'
-import { thumbUrl } from '@/ipc/client'
+import { thumbUrl, workoutThumbUrl } from '@/ipc/client'
 import { usePoseData } from '@/hooks/usePose'
 
 /**
@@ -17,7 +17,7 @@ export function TileThumb({ asset }: { asset: MediaAsset }): JSX.Element | null 
   if (failedFor === asset) return null
   return (
     <img
-      src={thumbUrl(asset)}
+      src={isWorkoutAsset(asset) ? workoutThumbUrl(asset) : thumbUrl(asset)}
       alt=""
       onError={() => setFailedFor(asset)}
       className="pointer-events-none h-full w-6 shrink-0 rounded-sm object-cover opacity-80"

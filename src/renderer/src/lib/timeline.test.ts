@@ -8,6 +8,7 @@ import {
   splitCaptionSegment,
   splitStaticLayer,
   splitVideoLayer,
+  splitWorkoutLayer,
   trimAudioEdge,
   trimCaptionEdge,
   trimLayerEdge,
@@ -15,7 +16,13 @@ import {
   trimVideoEndBy,
   trimVideoStart
 } from './timeline'
-import { layerTransformAt, makeGraphicsLayer, makeVideoLayer, playedVideoDuration } from '@shared/layers'
+import {
+  layerTransformAt,
+  makeGraphicsLayer,
+  makeVideoLayer,
+  makeWorkoutLayer,
+  playedVideoDuration
+} from '@shared/layers'
 import { newMark, type GraphicMark } from '@shared/graphics'
 import type { AudioClip, CaptionSegment, GraphicsContent, Layer, TextContent, VideoContent } from '@shared/project'
 
@@ -416,6 +423,32 @@ describe('splitAudioClip', () => {
     expect(splitAudioClip(audio({ outSec: 0 }), 0, 0, makeId)).toBeNull()
     const res = splitAudioClip(audio({ outSec: 0 }), 4, 0, makeId)
     expect(res?.[0].outSec).toBe(4)
+  })
+})
+
+describe('workout overlays on the timeline', () => {
+  // Ride 100–300 s at 10×: timeline 5–25 s.
+  const tile = (): Layer => makeWorkoutLayer('w', 'm', 5, { inSec: 100, outSec: 300, speed: 10 }, [])
+  const win = (l: Layer): number[] => {
+    const c = l.content
+    return c.kind === 'workout' ? [l.startSec, l.endSec, c.inSec, c.outSec] : []
+  }
+
+  it('an edge trim moves the ride window at the tile’s speed, and reports what it achieved', () => {
+    const start = trimLayerEdge(tile(), 'start', 2, 600)
+    expect(win(start.tile)).toEqual([7, 25, 120, 300])
+    expect(start.achieved).toBeCloseTo(2, 9)
+    const end = trimLayerEdge(tile(), 'end', 3, 600)
+    expect(win(end.tile)).toEqual([5, 28, 100, 330])
+    // The recording ends at 600 s: 30 timeline seconds of room, no more.
+    expect(trimLayerEdge(tile(), 'end', 100, 600).achieved).toBeCloseTo(30, 9)
+  })
+
+  it('splits into consecutive ride windows', () => {
+    const [a, b] = splitWorkoutLayer(tile(), 15, () => 'n')!
+    expect(win(a)).toEqual([5, 15, 100, 200])
+    expect(win(b)).toEqual([15, 25, 200, 300])
+    expect(splitWorkoutLayer(makeVideoLayer('v', 'm', 0, 4), 2, () => 'n')).toBeNull()
   })
 })
 

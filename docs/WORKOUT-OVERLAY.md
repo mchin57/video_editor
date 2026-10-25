@@ -2,11 +2,11 @@
 
 Issues #186 (workout data overlays) and #187 (route map). Built in three steps:
 
-1. **Import and library** (this document's built part): a `.fit` file imports like any clip and
-   sits in the library with its route as the thumbnail.
-2. **The overlay layer**: a timeline tile that draws chosen metrics (power, speed, heart rate,
-   distance so far, total distance, average power, static map, live map) over the video, in the
-   preview and the export. Not built yet.
+1. **Import and library** (built): a `.fit` file imports like any clip and sits in the library
+   with its route as the thumbnail.
+2. **The overlay layer** (built): a timeline tile that draws chosen metrics (power, speed, heart
+   rate, distance so far, total distance, average power, static map, live map) over the video,
+   in the preview and the export.
 3. **The graph window**: power / elevation / speed / heart-rate graphs against time or distance,
    with trim, split, delete and wheel zoom down to 1 s. Not built yet.
 
@@ -26,10 +26,73 @@ Issues #186 (workout data overlays) and #187 (route map). Built in three steps:
   short (a flat battery mid-ride) imports with the samples before the damage.
 - **Relink** never swaps a workout for footage or the other way round, even with "Update path
   anyway": the timeline holds the clip as one or the other.
-- **Nothing to place yet.** A workout card has no ＋ Playhead / ＋ End buttons and can't be
-  dragged, and selecting it doesn't give an empty timeline its length.
+- Selecting a workout in the library doesn't give an empty timeline its length.
 - Durations of an hour or more now read `h:mm:ss` everywhere `formatDuration` is used (they
   read `118:17` before).
+
+## The overlay (built)
+
+- **Placing it.** A workout card's **＋ End** adds an overlay at the end of the timeline showing
+  the WHOLE recording in 8 s (`WHOLE_WORKOUT_SEC`): a 2-hour ride plays at about 900×.
+  **＋ Playhead**, or dropping the card on the timeline, does the same unless there is footage
+  there that was filmed during the workout: then it SYNCS (below).
+- **The tile** sits in its own Workout lane (shown once one exists), with its speed as a badge
+  (`75×`). It shows one stretch of the recording (its ride window) at one speed: dragging its
+  right edge trims the window's end at that speed, the left edge its start; **S** splits it into
+  two tiles over consecutive stretches at the same speed.
+- **Widgets.** A new overlay shows power, speed, heart rate and the live map, those the file
+  has data for: readouts along the lower third, the map top right. Each is dragged into place
+  on the preview (one undo step). The Inspector's **Shows** list turns each metric on or off,
+  with its size and colour; a metric the file has no data for is greyed out with why ("This
+  file has no power."). The live map can **draw the route as it's ridden** (the ridden part bold
+  over the whole route faint).
+- **The metrics:** power (W), speed (mph, or pace: min/mi for a run or walk, per 100 yd for a
+  swim, following the leg of a multisport file), heart rate (bpm), distance so far, total
+  distance and average power (both for the whole workout, not the stretch shown), the static
+  map (the route) and the live map (the route with a dot where the athlete is). The maps are
+  the route's shape only, no streets.
+- **Readable at speed.** At (near) real time power, speed and heart rate show the recorded
+  sample; played faster than 1.5×, the mean of the samples over half a second of screen time,
+  so they don't flicker. Distance so far is the distance at that very moment (between samples
+  too).
+- **The Inspector** (Workout section) also sets the speed, or the length (the speed follows);
+  **Starts at** slides the stretch shown without changing the tile; Units (miles / kilometres).
+  On a linked tile (a synced overlay) speed and length are locked, like Start/End on
+  any linked tile.
+- **The export** draws exactly what the preview does: the overlay is rendered frame by frame by
+  the export's Chromium from the same shapes (`workoutOverlayShapes`), over the box the widgets
+  occupy, and composited above the layers below it (`e2e/workoutExport.spec.ts` checks the live
+  map's dot in the exported pixels at two moments). Also compared once by eye (2026-10-25) on the
+  owner's race-finish clip with that race's Forerunner file: the exported frame matched the
+  preview (484 W, 6:39/mi, 193 bpm at the same moment).
+- **The assistant:** `get_timeline` lists a workout tile's stretch (`inSec`/`outSec`, seconds into
+  the workout), speed and metrics.
+
+## Syncing to footage
+
+Placed at the playhead over a video clip (an original: a clip the editor made, such as a Quick
+cut piece, carries its source's recording time and is never synced to), the overlay looks up
+when that clip was filmed (its
+container's recording-time tag, read with ffprobe when needed: FFMPEG-NOTES "Recording time").
+When the recording covers it, the overlay takes the clip's window on the timeline, plays at 1×,
+shows the stretch of the workout that was happening while the clip was filmed, and is LINKED to
+the clip (moves, trims, splits and deletes with it). Only the part of the clip the recording
+covers gets an overlay. A clip that is sped up, ramped or frozen isn't synced to (its frames no
+longer map one-to-one onto clock time), and nor is one filmed at another time: those get the
+whole-recording overlay.
+
+Linked, the overlay is held to what the recording can give: a synced overlay that already
+starts at the recording's first sample (or ends at its last) can't grow that way, so a group
+trim that would extend the clip that way stops there, as any link group stops at its most
+constrained member.
+
+The recording time is taken as the moment the clip STARTED recording. The tags don't say which
+end they mark; the reasons for reading it as the start are in FFMPEG-NOTES. If a clip turns out
+a few seconds off, the Inspector's **Starts at** slides the stretch by hand.
+
+Checked once by hand on the owner's own files (2026-10-25, not a repeatable test): the
+2026-08-02 race-finish clip (IMG_1594, filmed 13:57:01 UTC) with that race's Forerunner file
+synced to 8736 s into the workout (2:25:36, the last 17 s of the run), linked to the clip.
 
 ## FIT files: what the real files showed (2026-10-25)
 
@@ -67,14 +130,20 @@ Each decoded in under 60 ms (the largest, 1 MB, 9,579 samples), with no errors. 
   arrays for each channel present (`lat`/`lon`, `distanceM`, `speedMps`, `powerW`, `heartRate`,
   `cadence`, `altitudeM`), and `legs`, `laps`, `pauses`. Cached as `cache/<id>/workout.json`,
   the workout's "proxy" (`proxyReady` = that file exists). Disposable like the rest of the
-  cache: a missing one is rebuilt by the proxy step, and `workoutSeries(id)` decodes the original
-  again when the cached `version` is not `WORKOUT_SERIES_VERSION`. Neither rebuild is covered
-  by a test yet; the overlay step, the first reader of `workoutSeries`, will add one.
+  cache: a missing one is rebuilt by the proxy step (not covered by a test), and
+  `workoutSeries(id)` (what the overlay reads, over IPC `getWorkout`) decodes the original again
+  when the cached `version` is not `WORKOUT_SERIES_VERSION` (`e2e/workoutOverlay.spec.ts`
+  replaces a stale cache that way).
 - **`WorkoutSummary`** rides in the library record's probe (`ProbeInfo.workout`, saved in the
   `.reel`): sport, `startUtc`, channels, total distance, average power. Such a probe has no
   streams; `durationSec` is first sample to last. The record's `kind` is `workout`.
 - **Thumbnail:** `cache/<id>/thumb.svg`, from `workoutThumbSvg`, served by `reelmedia://` as
   `image/svg+xml`.
+- **The tile** (`WorkoutContent`, layer kind `workout`, project v30): `mediaId`, the ride window
+  `inSec`/`outSec` (seconds of the recording), `speed` (ride seconds per timeline second),
+  `widgets` (each: metric, centre and size in canonical px, colour, `trace` for the live map) and
+  `units`. The layer's own x/y/scale are unused. `endSec − startSec = (outSec − inSec) / speed`
+  always: every edit goes through `shared/workoutOverlay.ts`.
 
 ## Code
 
@@ -85,14 +154,23 @@ Each decoded in under 60 ms (the largest, 1 MB, 9,579 samples), with no errors. 
 | Kind, extension | `shared/media.ts` (`WORKOUT_EXTS`, `isWorkoutAsset`) |
 | Import, cache, thumbnail, relink | `main/services/mediaStore.ts` (`probeSource`, `workoutSeries`) |
 | Card | `renderer/components/ClipCard.tsx` (`WorkoutThumb`), `Library.tsx` |
+| Overlay: timing, edits, sync, metric registry, shapes | `shared/workoutOverlay.ts` + test |
+| Placing (sync or whole ride) | `renderer/lib/workout.ts` (`placeWorkout`) |
+| Preview + widget drag | `renderer/components/preview/workout.tsx` |
+| Inspector | `renderer/components/inspector/WorkoutSection.tsx` |
+| Timeline split / trim | `renderer/lib/timeline.ts` (`splitWorkoutLayer`, `trimLayerEdge`), `useTileDrags.ts` |
+| Export | `main/services/exportWorkout.ts` |
+| Recording time | `main/services/ffprobe.ts` (`probeRecordedUtc`), `ffprobeParse.ts` (`recordedUtcFromTags`) |
 | Test FIT files (written by the SDK's encoder) | `main/services/__fixtures__/fitFile.ts` |
-| Spec | `e2e/workoutImport.spec.ts` |
+| Specs | `e2e/workoutImport.spec.ts`, `e2e/workoutOverlay.spec.ts`, `e2e/workoutExport.spec.ts` |
 
 ## Not in this version
 
-- Placing a workout on the timeline, and everything the overlay draws (steps 2 and 3 above).
-- Units: distances read in miles (`DEFAULT_DISTANCE_UNITS`) until the overlay's unit setting
-  exists.
+- The graph window (step 3): graphs of the recording to cut it by, zoomable to 1 s.
+- Lap / split timer (#188).
+- A widget's font, or a background panel behind readouts. Readouts use the bundled Montserrat
+  ExtraBold with a thin outline.
+- The library card's distance always reads in miles; an overlay's units are per tile.
 - GPX / TCX files. The parser's output (`WorkoutSeries`) doesn't depend on FIT, so another
   reader can produce it.
-- The assistant: `list_media` reports `kind: "workout"`, nothing more.
+- The assistant can read overlays (`get_timeline`) but not place or edit them.

@@ -141,33 +141,36 @@ export interface RoutePoint {
   y: number
 }
 
+/** Maps a position (degrees) to a point in the box `routeProjection` fitted. */
+export type RouteProject = (lat: number, lon: number) => RoutePoint
+
 /**
- * The GPS track fitted into a `w`×`h` box (inset by `pad`), north up, centred,
+ * How the GPS track sits in a `w`×`h` box (inset by `pad`): north up, centred,
  * aspect kept — the route's SHAPE only, no map. Longitude is scaled by the
  * cosine of the track's mean latitude (equirectangular), which is exact enough
- * at the size of one workout. At most `maxPoints` points (an even stride over
- * the track, keeping its last point). Empty when the file has no track or
- * fewer than two positions.
+ * at the size of one workout. Null when the file has no track or fewer than two
+ * positions. The live map's dot goes through the same projection as the route
+ * it rides on.
  */
-export function routeShape(s: WorkoutSeries, w: number, h: number, pad = 0, maxPoints = 2000): RoutePoint[] {
-  if (!s.lat || !s.lon) return []
-  const pts: { lat: number; lon: number }[] = []
+export function routeProjection(s: WorkoutSeries, w: number, h: number, pad = 0): RouteProject | null {
+  if (!s.lat || !s.lon) return null
+  const lats: number[] = []
+  const lons: number[] = []
   for (let i = 0; i < s.t.length; i++) {
     const lat = s.lat[i]
     const lon = s.lon[i]
-    if (lat !== null && lon !== null) pts.push({ lat, lon })
+    if (lat !== null && lon !== null) {
+      lats.push(lat)
+      lons.push(lon)
+    }
   }
-  if (pts.length < 2) return []
-  const meanLat = pts.reduce((a, p) => a + p.lat, 0) / pts.length
+  if (lats.length < 2) return null
+  const meanLat = lats.reduce((a, v) => a + v, 0) / lats.length
   const k = Math.cos((meanLat * Math.PI) / 180)
-  const xs = pts.map((p) => p.lon * k)
-  const ys = pts.map((p) => -p.lat)
-  const ex = extent(xs)
-  const ey = extent(ys)
-  const minX = ex.lo
-  const minY = ey.lo
-  const spanX = ex.hi - minX
-  const spanY = ey.hi - minY
+  const ex = extent(lons.map((v) => v * k))
+  const ey = extent(lats.map((v) => -v))
+  const spanX = ex.hi - ex.lo
+  const spanY = ey.hi - ey.lo
   const innerW = Math.max(0, w - 2 * pad)
   const innerH = Math.max(0, h - 2 * pad)
   // A straight north-south (or east-west) track fits on its one real span; a
@@ -176,13 +179,88 @@ export function routeShape(s: WorkoutSeries, w: number, h: number, pad = 0, maxP
   const scale = Number.isFinite(fit) ? fit : 0
   const offX = pad + (innerW - spanX * scale) / 2
   const offY = pad + (innerH - spanY * scale) / 2
-  const stride = Math.max(1, Math.ceil(pts.length / maxPoints))
+  return (lat, lon) => ({ x: offX + (lon * k - ex.lo) * scale, y: offY + (-lat - ey.lo) * scale })
+}
+
+/**
+ * The GPS track drawn into a `w`×`h` box (`routeProjection`). At most
+ * `maxPoints` points (an even stride over the track, keeping its last point).
+ * Empty when the file has no track.
+ */
+export function routeShape(s: WorkoutSeries, w: number, h: number, pad = 0, maxPoints = 2000): RoutePoint[] {
+  const project = routeProjection(s, w, h, pad)
+  if (!project || !s.lat || !s.lon) return []
+  const idx: number[] = []
+  for (let i = 0; i < s.t.length; i++) if (s.lat[i] !== null && s.lon[i] !== null) idx.push(i)
+  const stride = Math.max(1, Math.ceil(idx.length / maxPoints))
   const out: RoutePoint[] = []
-  for (let i = 0; i < pts.length; i += stride)
-    out.push({ x: offX + (xs[i] - minX) * scale, y: offY + (ys[i] - minY) * scale })
-  const last = pts.length - 1
-  if (last % stride !== 0) out.push({ x: offX + (xs[last] - minX) * scale, y: offY + (ys[last] - minY) * scale })
+  for (let j = 0; j < idx.length; j += stride) out.push(project(s.lat[idx[j]]!, s.lon[idx[j]]!))
+  const last = idx.length - 1
+  if (last > 0 && last % stride !== 0) out.push(project(s.lat[idx[last]]!, s.lon[idx[last]]!))
   return out
+}
+
+// --- Sampling -----------------------------------------------------------------
+
+/** Index of the last sample at or before `sec` (−1 before the first). */
+export function sampleIndexAt(s: Pick<WorkoutSeries, 't'>, sec: number): number {
+  let lo = 0
+  let hi = s.t.length - 1
+  if (hi < 0 || sec < s.t[0]) return -1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (s.t[mid] <= sec) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+/** A channel's value at `sec`, linear between the two samples around it. A
+ *  gap is not bridged: next to a sample with no value it holds the one before
+ *  (null when that has none). Clamped to the first / last sample outside the
+ *  recording. */
+export function valueAt(s: WorkoutSeries, values: (number | null)[] | undefined, sec: number): number | null {
+  if (!values || !s.t.length) return null
+  const i = Math.max(0, sampleIndexAt(s, sec))
+  const j = Math.min(s.t.length - 1, i + 1)
+  const a = values[i]
+  const b = values[j]
+  if (a === null || b === null || j === i || sec <= s.t[i]) return a
+  const f = Math.min(1, (sec - s.t[i]) / (s.t[j] - s.t[i]))
+  return a + (b - a) * f
+}
+
+/** The mean of a channel's samples inside `[sec − halfSec, sec + halfSec]`, or
+ *  the value at `sec` when no sample falls inside. */
+export function meanAround(
+  s: WorkoutSeries,
+  values: (number | null)[] | undefined,
+  sec: number,
+  halfSec: number
+): number | null {
+  if (!values) return null
+  let sum = 0
+  let n = 0
+  for (let i = Math.max(0, sampleIndexAt(s, sec - halfSec)); i < s.t.length && s.t[i] <= sec + halfSec; i++) {
+    const v = values[i]
+    if (s.t[i] >= sec - halfSec && v !== null) {
+      sum += v
+      n++
+    }
+  }
+  return n ? sum / n : valueAt(s, values, sec)
+}
+
+/** Where the athlete was at `sec` (degrees, interpolated), or null off the track. */
+export function positionAt(s: WorkoutSeries, sec: number): { lat: number; lon: number } | null {
+  const lat = valueAt(s, s.lat, sec)
+  const lon = valueAt(s, s.lon, sec)
+  return lat === null || lon === null ? null : { lat, lon }
+}
+
+/** The leg (`cycling`, `running`, …) under `sec`, else the file's sport. */
+export function sportAt(s: WorkoutSeries, sec: number): string {
+  return s.legs.find((l) => sec >= l.startSec && sec < l.endSec)?.sport ?? workoutSport(s.legs)
 }
 
 const f1 = (n: number): string => (Math.round(n * 10) / 10).toString()

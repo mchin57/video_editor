@@ -46,6 +46,7 @@ interface RawFrame {
 interface RawFormat {
   duration?: string
   format_name?: string
+  tags?: Record<string, string>
 }
 
 export interface FfprobeJson {
@@ -151,6 +152,25 @@ function parseAudio(s: RawStream): AudioStreamInfo {
     sampleRate: Number(s.sample_rate ?? 0) || 0,
     channels: s.channels ?? 0
   }
+}
+
+/**
+ * When the footage started recording (ISO, UTC), from the container's tags, or
+ * null. iPhone writes `com.apple.quicktime.creationdate` (local time with its
+ * offset, e.g. `2026-08-02T09:00:01-0400`) and `creation_time` (UTC); on the
+ * owner's clips the two name the same second whatever the clip's length, so
+ * both mark the START (docs/WORKOUT-OVERLAY.md "Syncing to footage"). Other
+ * cameras write `creation_time` only.
+ */
+export function recordedUtcFromTags(tags: Record<string, string> | undefined): string | null {
+  for (const key of ['com.apple.quicktime.creationdate', 'creation_time']) {
+    const raw = tags?.[key]
+    if (!raw) continue
+    // `-0400` → `-04:00`, so the offset reads the same in every engine.
+    const ms = Date.parse(raw.trim().replace(/([+-]\d{2})(\d{2})$/, '$1:$2'))
+    if (Number.isFinite(ms)) return new Date(ms).toISOString()
+  }
+  return null
 }
 
 export function parseFfprobeJson(json: FfprobeJson): ProbeInfo {

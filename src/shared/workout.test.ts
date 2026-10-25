@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  meanAround,
+  positionAt,
+  routeProjection,
+  sampleIndexAt,
+  sportAt,
+  valueAt,
   formatDistance,
   routeShape,
   seriesChannels,
@@ -41,6 +47,58 @@ describe('summary', () => {
     expect(s.avgPowerW).toBe(150)
     expect(summarizeWorkout(series()).distanceM).toBeNull()
     expect(summarizeWorkout(series()).avgPowerW).toBeNull()
+  })
+})
+
+describe('sampling a recording', () => {
+  // Uneven samples (smart recording) with a gap in power at 4 s.
+  const s = series({ t: [0, 1, 4, 10], powerW: [100, 200, null, 400], lat: [0, 1, 2, 3], lon: [0, 0, 0, 0] })
+
+  it('finds the sample at or before a moment', () => {
+    expect(sampleIndexAt(s, -1)).toBe(-1)
+    expect(sampleIndexAt(s, 0)).toBe(0)
+    expect(sampleIndexAt(s, 3.9)).toBe(1)
+    expect(sampleIndexAt(s, 4)).toBe(2)
+    expect(sampleIndexAt(s, 99)).toBe(3)
+  })
+
+  it('interpolates between samples, but never across a gap; holds outside the recording', () => {
+    expect(valueAt(s, s.powerW, 0.5)).toBe(150)
+    expect(valueAt(s, s.powerW, 2)).toBe(200) // 1 s → 4 s: the 4 s sample has no power, so 1 s holds
+    expect(valueAt(s, s.powerW, 5)).toBeNull() // after the sample with none
+    expect(valueAt(s, s.powerW, -5)).toBe(100)
+    expect(valueAt(s, s.powerW, 50)).toBe(400)
+    expect(valueAt(s, undefined, 1)).toBeNull()
+  })
+
+  it('averages the samples inside a window, and falls back to the value when none fall inside', () => {
+    expect(meanAround(s, s.powerW, 0.5, 0.6)).toBe(150) // 0 s and 1 s
+    expect(meanAround(s, s.powerW, 7, 1)).toBeNull() // no sample in 6–8 s; the value there bridges the gap
+    expect(meanAround(s, s.powerW, 7, 3.5)).toBe(400) // 4 s has none, 10 s has 400
+  })
+
+  it('knows where the athlete was and which leg they were on', () => {
+    expect(positionAt(s, 2.5)).toEqual({ lat: 1.5, lon: 0 })
+    expect(positionAt(series(), 1)).toBeNull()
+    const tri = series({
+      legs: [
+        { startSec: 0, endSec: 5, sport: 'swimming' },
+        { startSec: 5, endSec: 10, sport: 'transition' },
+        { startSec: 10, endSec: 20, sport: 'cycling' }
+      ]
+    })
+    expect(sportAt(tri, 2)).toBe('swimming')
+    expect(sportAt(tri, 12)).toBe('cycling')
+    expect(sportAt(tri, 99)).toBe('multisport')
+  })
+
+  it('projects a position onto the same box its route is fitted to', () => {
+    const p = routeProjection(series({ lat: [0, 0.01, 0.01], lon: [0, 0, 0.01] }), 100, 100)!
+    expect(p(0, 0).x).toBeCloseTo(0, 6)
+    expect(p(0, 0).y).toBeCloseTo(100, 6)
+    expect(p(0.01, 0.01).x).toBeCloseTo(100, 6)
+    expect(p(0.01, 0.01).y).toBeCloseTo(0, 6)
+    expect(routeProjection(series(), 10, 10)).toBeNull()
   })
 })
 

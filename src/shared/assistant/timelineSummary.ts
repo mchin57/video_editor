@@ -6,6 +6,7 @@
 import type { Composition, Layer } from '../project'
 import { audioClipEnd } from '../project'
 import { compositionDuration, type SourceDuration } from '../compositions'
+import { workoutSpeed } from '../workoutOverlay'
 
 export interface LayerSummary {
   id: string
@@ -14,10 +15,14 @@ export interface LayerSummary {
   endSec: number
   hidden: boolean
   mediaId?: string
-  /** Source window (video only). */
+  /** Source window (video), or the stretch of the recording shown (workout). */
   inSec?: number
   outSec?: number
   text?: string
+  /** Workout overlay: seconds of the recording per second of video, and the
+   *  metrics its widgets show (`power`, `liveMap`, …). */
+  speed?: number
+  shows?: string[]
   linkGroupId?: string
 }
 
@@ -53,6 +58,15 @@ function layerSummary(l: Layer): LayerSummary {
   if (c.kind === 'video') Object.assign(s, { mediaId: c.mediaId, inSec: r3(c.inSec), outSec: r3(c.outSec) })
   else if (c.kind === 'image') s.mediaId = c.mediaId
   else if (c.kind === 'text') s.text = c.text
+  else if (c.kind === 'workout') {
+    Object.assign(s, {
+      mediaId: c.mediaId,
+      inSec: r3(c.inSec),
+      outSec: r3(c.outSec),
+      speed: r3(workoutSpeed(c)),
+      shows: c.widgets.map((w) => w.metric)
+    })
+  }
   if (l.linkGroupId) s.linkGroupId = l.linkGroupId
   return s
 }

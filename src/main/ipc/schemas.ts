@@ -138,6 +138,8 @@ export const INVOKE_SCHEMAS = {
     z.object({ mediaId: id, startSec: num, durationSec: num, minSpeed: num, subjectId: z.string().optional() })
   ),
   getPose: args(id),
+  getWorkout: args(id),
+  mediaRecordedAt: args(id),
   cancelJob: args(id),
 
   captureStillToLibrary: args(stillRequest),

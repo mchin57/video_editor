@@ -2,8 +2,7 @@
  * A `.fit` workout imports like any clip (docs/WORKOUT-OVERLAY.md): it lands in
  * the library with its route as the thumbnail and its sport, distance and
  * length on the card. A planned-workout FIT (no recording) is refused in words.
- * Until the overlay exists a workout cannot be placed: no add buttons, not
- * draggable.
+ * Placing it as an overlay is e2e/workoutOverlay.spec.ts.
  *
  * ARRANGE real FIT files written by Garmin's encoder and stub the Open picker,
  * ACT with a real click on Import, ASSERT on the card's DOM (the thumbnail
@@ -52,9 +51,9 @@ test('a FIT ride imports with its route thumbnail; a planned workout is refused'
     .poll(() => thumb.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
     .toBeGreaterThan(0)
 
-  // Nothing to place yet: no add buttons, and the card can't be dragged.
-  await expect(card.getByRole('button', { name: /Playhead|End/ })).toHaveCount(0)
-  await expect(card).toHaveAttribute('draggable', 'false')
+  // It places like any clip: add buttons, and the card drags.
+  await expect(card.getByRole('button', { name: /Playhead|End/ })).toHaveCount(2)
+  await expect(card).toHaveAttribute('draggable', 'true')
 
   // Regression: selecting a workout used to give the EMPTY timeline the
   // workout's length (a 2-hour ride read "0:00.0 / 118:17.0").

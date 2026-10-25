@@ -5,7 +5,8 @@
  * 1080x1920 px; the project's output frame is a window on them (`frame.ts`).
  */
 
-import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent } from './project'
+import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent, WorkoutContent } from './project'
+import { workoutPlayedSec, type WorkoutWidget } from './workoutOverlay'
 import { playedBetween, sourceAfterPlayed } from './speed'
 import { DEFAULT_FONT_ID } from './fonts'
 import { FRAME, FULL_FRAME, type FrameRect } from './frame'
@@ -572,6 +573,29 @@ export function makeTextLayer(id: string, startSec: number, endSec: number, fram
       color: '#ffffff',
       pill: { ...DEFAULT_PILL }
     }
+  }
+}
+
+/** A workout overlay showing ride window `[inSec, outSec)` of `mediaId` at
+ *  `speed`, from timeline `startSec`; its end follows (`workoutPlayedSec`). */
+export function makeWorkoutLayer(
+  id: string,
+  mediaId: string,
+  startSec: number,
+  window: { inSec: number; outSec: number; speed: number },
+  widgets: WorkoutWidget[]
+): Layer {
+  const content: WorkoutContent = { kind: 'workout', mediaId, ...window, widgets }
+  const start = Math.max(0, startSec)
+  return {
+    id,
+    hidden: false,
+    startSec: start,
+    endSec: start + workoutPlayedSec(content),
+    x: FRAME.width / 2,
+    y: FRAME.height / 2,
+    scale: 1,
+    content
   }
 }
 

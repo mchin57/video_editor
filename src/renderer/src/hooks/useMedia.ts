@@ -26,6 +26,7 @@ import { useLoudness } from '@/state/loudness'
 import { idle } from '@/lib/interaction'
 import { newId } from '@shared/ids'
 import { createLogger } from '@shared/log'
+import { invalidateWorkout } from './useWorkout'
 
 const log = createLogger('media')
 
@@ -270,6 +271,8 @@ export function useRepairMedia(): {
     if (!result) return
     const { asset } = result
     if (result.cutsReset) useProject.getState().resetMediaCuts(asset.id, asset.probe.durationSec)
+    // A workout relinked to another file is another recording.
+    void invalidateWorkout(qc, asset.id)
     if (!asset.proxyReady) {
       void ensureProxy(asset.id)
         .catch((err) => log.error('proxy rebuild failed', err))

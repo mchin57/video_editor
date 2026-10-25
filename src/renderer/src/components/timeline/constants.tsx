@@ -59,6 +59,12 @@ export const LANE_STYLE = {
     block: 'border-yellow-400/40 bg-yellow-500/20',
     sel: 'border-yellow-300 ring-1 ring-yellow-300/50'
   },
+  workout: {
+    dot: 'bg-rose-400',
+    tint: 'border-rose-400/30 bg-rose-500/10',
+    block: 'border-rose-400/40 bg-rose-500/20',
+    sel: 'border-rose-300 ring-1 ring-rose-300/50'
+  },
   caption: {
     dot: 'bg-emerald-400',
     tint: 'border-emerald-400/30 bg-emerald-500/10',

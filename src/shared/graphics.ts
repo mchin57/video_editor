@@ -256,10 +256,22 @@ function angleParts(m: GraphicMark): { radius: number; fontSizePx: number } {
  *  caps and joins. */
 export type MarkShape =
   | { kind: 'path'; d: string; stroke: string | null; strokeWidth: number; fill: string | null }
-  | { kind: 'label'; x: number; y: number; text: string; fontSizePx: number; color: string; outlinePx: number }
+  | {
+      kind: 'label'
+      x: number
+      y: number
+      text: string
+      fontSizePx: number
+      color: string
+      outlinePx: number
+      /** Equal-width digits, so a changing number doesn't wobble (a workout
+       *  readout). Absent = the font's own. */
+      tabular?: boolean
+    }
 
 const f2 = (n: number): string => (Math.round(n * 100) / 100).toString()
-const pathD = (pts: Pt[], close = false): string =>
+/** An SVG path through `pts` (closed with `close`). */
+export const pathD = (pts: Pt[], close = false): string =>
   pts.map((p, i) => `${i ? 'L' : 'M'}${f2(p.x)} ${f2(p.y)}`).join(' ') + (close ? ' Z' : '')
 
 /**
@@ -386,6 +398,7 @@ export function shapeSvg(s: MarkShape, fontFamily: string): string {
   return (
     `<text x="${f2(s.x)}" y="${f2(s.y)}" fill="${escAttr(s.color)}" font-size="${f2(s.fontSizePx)}" ` +
     `font-family="${escAttr(fontFamily)}" text-anchor="middle" dominant-baseline="central" ` +
+    (s.tabular ? `style="font-variant-numeric:tabular-nums" ` : '') +
     `stroke="#000000" stroke-width="${f2(s.outlinePx)}" stroke-linejoin="round" paint-order="stroke">` +
     `${escAttr(s.text)}</text>`
   )

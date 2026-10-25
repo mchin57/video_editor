@@ -5,6 +5,7 @@
 
 import type { CropRect, ImageContent, Layer, LayoutCell, TextContent, VideoContent } from '@shared/project'
 import type { GraphicMark } from '@shared/graphics'
+import type { WorkoutWidget } from '@shared/workoutOverlay'
 import type { PoseSettings } from '@shared/pose'
 import { videoSpeed } from '@shared/project'
 import {
@@ -40,7 +41,15 @@ import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
 import { applyTextEdits } from '@/lib/textEdits'
 import { useUi } from '@/state/ui'
 import { useAppSettings } from '@/state/appSettings'
-import { activeComp, mapGraphicsMarks, mapLayer, mapVideoLayer, projectFormat, type Doc } from './core'
+import {
+  activeComp,
+  mapGraphicsMarks,
+  mapLayer,
+  mapVideoLayer,
+  mapWorkoutWidgets,
+  projectFormat,
+  type Doc
+} from './core'
 
 /** A partial patch over a layer's content (the caller guards the content kind).
  *  A union of partials rather than Record<string, unknown> so a typo'd field
@@ -50,6 +59,11 @@ type ContentPatch = Partial<VideoContent> | Partial<ImageContent> | Partial<Text
 export interface LayerActions {
   /** Append a layer to the FRONT of the stack (top). */
   addLayer: (layer: Layer) => void
+  /** Add a workout overlay; with `linkTo`, link it to that layer (and its
+   *  group) — the clip it was synced to — in the same undo step. */
+  addWorkoutLayer: (layer: Layer, linkTo?: string) => void
+  /** Replace workout layer `id`'s widgets with `fn(widgets)`. */
+  updateWorkoutWidgets: (id: string, fn: (widgets: WorkoutWidget[]) => WorkoutWidget[]) => void
   /** Add a video layer (front) at `startSec`; optionally extract its audio.
    *  `aspect` (the clip's w/h) fits it to the project's frame; absent = scale 1. */
   addVideoLayer: (
@@ -144,6 +158,19 @@ const sortedKeyframes = (l: Layer): NonNullable<Layer['keyframes']> =>
 
 export const layerActions = ({ get, commit, commitComp }: Doc): LayerActions => ({
   addLayer: (layer) => commitComp((p) => ({ ...p, layers: [...p.layers, layer] })),
+
+  addWorkoutLayer: (layer, linkTo) =>
+    commitComp((p) => {
+      const added = { ...p, layers: [...p.layers, layer] }
+      if (!linkTo || !p.layers.some((l) => l.id === linkTo)) return added
+      const refs = [
+        { kind: 'layer' as const, id: layer.id },
+        { kind: 'layer' as const, id: linkTo }
+      ]
+      return links.linkItems(added, refs, newId)
+    }),
+
+  updateWorkoutWidgets: (id, fn) => commitComp((p) => mapWorkoutWidgets(p, id, fn)),
 
   addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false, aspect) =>
     commitComp((p) => {
