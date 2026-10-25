@@ -65,6 +65,14 @@ export const IPC = {
   // Stills (capture a frame from a clip)
   captureStillToLibrary: 'still:toLibrary',
   captureStillToDisk: 'still:toDisk',
+  // Templates (editor-wide; shared/templates.ts)
+  listTemplates: 'templates:list',
+  saveTemplate: 'templates:save',
+  deleteTemplate: 'templates:delete',
+  chooseTemplateSound: 'templates:chooseSound',
+  exportTemplateDialog: 'templates:export',
+  importTemplateDialog: 'templates:import',
+  instantiateTemplate: 'templates:instantiate',
   // AI assistant: main ⇄ renderer bridge + status for Settings
   assistantResponse: 'assistant:response',
   assistantStatus: 'assistant:status'
@@ -79,6 +87,8 @@ export interface StillRequest {
   crop: { x: number; y: number; w: number; h: number } | null
   /** Color correction to apply (null = none). */
   color: { brightness: number; contrast: number; saturation: number } | null
+  /** Tint to apply after the color correction (absent/null = none). */
+  tint?: import('./tint').Tint | null
   /** Mirror the (cropped) picture, like the clip does on screen. Layer rotation
    *  is a transform like position, so a still does not bake it in. */
   flipH?: boolean
@@ -200,6 +210,8 @@ type MediaAsset = import('./media').MediaAsset
 type Project = import('./project').Project
 type Settings = import('./settings').Settings
 type Transcript = import('./transcript').Transcript
+type ReelTemplate = import('./templates').ReelTemplate
+type TemplateEntry = import('./templates').TemplateEntry
 
 export interface IpcInvoke {
   getCapabilities: Fn<[], import('./ffmpeg').FfmpegCapabilities>
@@ -284,6 +296,22 @@ export interface IpcInvoke {
   // Stills — capture a frame from a clip into the library, or save it to disk.
   captureStillToLibrary: Fn<[req: StillRequest], MediaAsset>
   captureStillToDisk: Fn<[req: StillRequest, suggestedName: string], string | null>
+
+  // Templates — editor-wide, under <data>/templates (shared/templates.ts).
+  // Every change returns the updated gallery; a dialog canceled returns null.
+  listTemplates: Fn<[], TemplateEntry[]>
+  /** Save as template: media references are library ids, copied in. A user
+   *  template of the same name is replaced. */
+  saveTemplate: Fn<[template: ReelTemplate], TemplateEntry[]>
+  deleteTemplate: Fn<[id: string], TemplateEntry[]>
+  /** Pick a sound file for sound slot `slot` (a built-in gets a user copy). */
+  chooseTemplateSound: Fn<[id: string, slot: number], TemplateEntry[] | null>
+  /** Save the template as a share file; the path written, or null. */
+  exportTemplateDialog: Fn<[id: string], string | null>
+  importTemplateDialog: Fn<[], TemplateEntry[] | null>
+  /** The template ready to drop: its media adopted into the open project's
+   *  library (copies), references swapped for their media ids. */
+  instantiateTemplate: Fn<[id: string], { template: ReelTemplate; assets: MediaAsset[] }>
 
   /** The AI assistant's pipe server status, for Settings. */
   assistantStatus: Fn<[], import('./assistant/protocol').AssistantStatus>

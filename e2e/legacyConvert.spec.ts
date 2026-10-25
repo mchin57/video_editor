@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { MediaAsset, MediaRecord } from '../src/shared/media'
+import { PROJECT_VERSION } from '../src/shared/project'
 import { test, expect } from './fixtures'
 import { FFMPEG } from './bin'
 
@@ -145,7 +146,7 @@ test('opening an old project converts it in place, keeping its clip id and point
     mediaIds: string[]
     library: MediaRecord[]
   }
-  expect(saved.version).toBe(28)
+  expect(saved.version).toBe(PROJECT_VERSION)
   expect(saved.mediaIds).toEqual([oldId])
   expect(saved.library).toHaveLength(1)
   expect(saved.library[0]).toMatchObject({

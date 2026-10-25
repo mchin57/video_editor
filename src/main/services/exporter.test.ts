@@ -286,6 +286,7 @@ function everything(): Project {
     crop: { x: 0, y: 200, w: 1080, h: 1500 },
     flipH: true,
     color: { brightness: 0.1, contrast: 1.2, saturation: 0.9 },
+    tint: { color: '#ffd999', amount: 0.5 },
     freezes: [{ atSec: 2, holdSec: 0.5 }],
     speed: 1.5,
     gainDb: -3

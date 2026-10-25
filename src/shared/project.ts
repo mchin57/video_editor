@@ -23,6 +23,7 @@ import type { GraphicMark } from './graphics'
 import type { PoseSettings } from './pose'
 import type { TextEffects } from './sparkle'
 import type { TextAnimation } from './textAnim'
+import type { Tint } from './tint'
 
 export interface CropRect {
   /** Source-pixel crop rectangle, aspect-locked to the output preset. */
@@ -211,6 +212,9 @@ export interface VideoContent {
   flipV?: boolean
   /** Optional color correction (absent = none). */
   color?: ColorAdjust
+  /** Optional tint toward one colour, applied after `color` (absent/null = none;
+   *  shared/tint.ts). */
+  tint?: Tint | null
   /**
    * Per-clip override of the project-wide stabilization default
    * (`Project.stabilizeDefault`). `undefined` = inherit the default; `null` =
@@ -797,7 +801,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 28
+export const PROJECT_VERSION = 29
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1130,6 +1134,8 @@ export function migrateProject(raw: unknown): Project {
   // shared/graphics.ts) — purely additive, old projects simply have none.
   // v28 adds the absence-tolerant `VideoContent.pose` overlay settings
   // (shared/pose.ts) — absent means no overlay, so nothing is rewritten.
+  // v29 adds the absence-tolerant `VideoContent.tint` (shared/tint.ts) —
+  // absent means untinted, so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

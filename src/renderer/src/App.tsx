@@ -20,6 +20,7 @@ import { StatusFooter } from '@/components/StatusFooter'
 import { NewProjectDialog } from '@/components/NewProjectDialog'
 import { StartScreen } from '@/components/StartScreen'
 import { VolumeLevelDialog } from '@/components/VolumeLevelDialog'
+import { TemplatesDialog } from '@/components/TemplatesDialog'
 import { ImportFailures } from '@/components/ImportFailures'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
@@ -412,6 +413,7 @@ export default function App(): JSX.Element {
         <ScriptModal />
         <NewProjectWindow />
         <VolumeLevelDialog />
+        <TemplatesDialog />
         <ImportFailures />
       </Section>
 

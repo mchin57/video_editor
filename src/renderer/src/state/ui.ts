@@ -68,6 +68,11 @@ interface UiState {
    *  or set its loudness. Null = closed. */
   levelDialog: LevelDialog | null
   setLevelDialog: (v: LevelDialog | null) => void
+  /** The template gallery (components/TemplatesDialog.tsx): open on the
+   *  gallery, or with the "Save selection as template" name field focused.
+   *  Null = closed. */
+  templatesOpen: 'gallery' | 'save' | null
+  setTemplatesOpen: (v: 'gallery' | 'save' | null) => void
   /** Whether the checklist modal is open. */
   checklistOpen: boolean
   setChecklistOpen: (v: boolean) => void
@@ -190,6 +195,8 @@ export const useUi = create<UiState>((set) => ({
   setNewProjectOpen: (v) => set({ newProjectOpen: v }),
   levelDialog: null,
   setLevelDialog: (v) => set({ levelDialog: v }),
+  templatesOpen: null,
+  setTemplatesOpen: (v) => set({ templatesOpen: v }),
   checklistOpen: false,
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,

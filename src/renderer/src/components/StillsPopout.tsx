@@ -40,6 +40,7 @@ export function StillsPopout(): JSX.Element | null {
       sourceSec,
       crop: content.crop ?? null,
       color: content.color ?? null,
+      tint: content.tint ?? null,
       flipH: content.flipH,
       flipV: content.flipV
     }

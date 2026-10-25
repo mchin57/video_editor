@@ -8,6 +8,9 @@
  * `Math.round` for an ffmpeg arg, import from here instead. @see docs/SHARED.md
  */
 
+import { isNeutralColor, type ColorAdjust } from '@shared/project'
+import { isNeutralTint, tintMatrix, type Tint } from '@shared/tint'
+
 /** Round to an integer — ffmpeg pixel geometry (overlay x/y, scale w/h, crop). */
 export const r = (n: number): number => Math.round(n)
 
@@ -38,6 +41,27 @@ export function rotateFilter(deg: number): string {
 /** `eq=brightness=…:contrast=…:saturation=…` color-correction filter. */
 export function eqFilter(c: { brightness: number; contrast: number; saturation: number }): string {
   return `eq=brightness=${c.brightness}:contrast=${c.contrast}:saturation=${c.saturation}`
+}
+
+/**
+ * A clip tint as `colorchannelmixer` (RGB rows from `tintMatrix`, alpha left
+ * alone) — the export twin of the preview's `feColorMatrix`. ffmpeg converts a
+ * YUV stream to RGB around it by itself. Verified against ffmpeg 8.1.1 — see
+ * FFMPEG-NOTES "Clip tint".
+ */
+export function tintFilter(t: Tint): string {
+  const m = tintMatrix(t)
+  const names = ['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb']
+  return `colorchannelmixer=${names.map((n, i) => `${n}=${m[i]}`).join(':')}`
+}
+
+/** The colour-grade fragment for a clip: `eq` then the tint, either optional
+ *  ('' when the clip is ungraded). */
+export function gradeFilter(color: ColorAdjust | null | undefined, tint: Tint | null | undefined): string {
+  const parts: string[] = []
+  if (color && !isNeutralColor(color)) parts.push(eqFilter(color))
+  if (tint && !isNeutralTint(tint)) parts.push(tintFilter(tint))
+  return parts.join(',')
 }
 
 /**

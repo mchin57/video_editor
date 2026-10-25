@@ -1124,6 +1124,62 @@ hash-compared (`framemd5`, yuv420p) against a lossless full render.
   Text layout (Chromium) and nested-comp pre-renders come on top, the same as
   for an export. The stabilization pre-pass is skipped for stills.
 
+## Template held frames — a two-frame piece with a head hold (verified ffmpeg 8.1.1, 2026-10-24)
+
+A template's clip effect (`applyClipEffect`, `lib/templates.ts`) turns the
+frame under the playhead into its own short video layer and holds it. The
+first design — ONE source frame at an assumed 30 fps with the hold at its END
+— was never rendered, and could not work: the export reads the layer with
+`-ss inSec -t len`, and a 1/30 s window over 24/25 fps footage, or a sub-frame
+window from a slow-motion clip, contains NO frame, so there is nothing for
+`eof_action=repeat` to hold.
+
+What ships, and what `e2e/templateExport.spec.ts` checks against real
+renders:
+
+- **The piece spans `HELD_SOURCE_FRAMES` (2) source frames at the CLIP's own
+  frame rate** (`probe.video.avgFps`), so the input window always holds a
+  frame whatever the frame phase at the cut.
+- **The hold sits at the piece's HEAD** (`atSec === inSec`), the shape already
+  verified above: `freezeAt` nudges the threshold off frame 0, so frame 0 is
+  the held frame — the same frame the preview's `videoSourceTime` clamps to.
+  (An end hold would show the frame *before* `outSec` in the export but the
+  one *at* it in the preview.)
+- **The piece keeps the clip's speed / ramp**, so the timeline grows by the
+  hold and nothing else.
+- Rendered from sources whose luma encodes time (frame N = 16 + 20·N/fps, read
+  back from the raw Y plane — `format=gray` would stretch limited range and
+  shift every reading by ~11), dropped off a frame boundary (2.02 s) with a 1 s
+  hold: at 24, 25, 30 and 60 fps at 1×, at 30 fps 0.5× and at 24 fps 2× the
+  output shows the drop-point frame across the hold (never black) and resumes
+  at source `speed·(t − hold)`, each within 4 source frames (the export's cfr
+  resampling plus the one-frame hairline in "Speed" above).
+
+## Clip tint — colorchannelmixer after eq (verified ffmpeg 8.1.1, 2026-10-24)
+
+A clip's tint (`VideoContent.tint`, `shared/tint.ts`) is one 3×3 RGB matrix,
+`(1 − a)·I + a·T·Lᵀ` (T the tint colour, L the Rec. 709 luma weights). The
+export writes it as `colorchannelmixer` straight after the clip's `eq`
+(`gradeFilter`, `ffmpegFilters.ts`); the preview applies the SAME numbers as
+an SVG `feColorMatrix` with `color-interpolation-filters="sRGB"`, after the
+CSS brightness/contrast/saturate chain — both on non-linear sRGB values.
+
+Verified by pushing lavfi `color` sources through the export's own shape
+(`format=yuv420p` input → `eq=…,colorchannelmixer=…,setsar=1,format=yuv420p`)
+and reading the pixel back as rgb24:
+
+- **ffmpeg converts YUV → RGB around `colorchannelmixer` by itself** — no
+  explicit `format=` is needed in front of it, and the trailing
+  `format=yuv420p` takes it back.
+- **The output matches the matrix to within 2–3 levels**, and that error is
+  the YUV round trip, not the filter: `#4080C0` alone comes back as
+  (63,127,192) → (62,126,191) through one more conversion. At full strength
+  toward `#ffd999` it read (117,99,69) against 118.1/100.5/70.9 computed from
+  the round-tripped input; white read (254,215,154) against (255,217,153); at
+  half strength (88,112,130) and (254,234,202); black stays (0,0,0).
+- **Alpha survives**: a 50%-alpha `yuva420p` source keeps alpha 129 through
+  it (the `aa` term defaults to 1), so background-removed clips can be tinted.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

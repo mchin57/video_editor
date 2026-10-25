@@ -98,6 +98,15 @@ const api = {
   captureStillToLibrary: invoke('captureStillToLibrary'),
   captureStillToDisk: invoke('captureStillToDisk'),
 
+  // Templates
+  listTemplates: invoke('listTemplates'),
+  saveTemplate: invoke('saveTemplate'),
+  deleteTemplate: invoke('deleteTemplate'),
+  chooseTemplateSound: invoke('chooseTemplateSound'),
+  exportTemplateDialog: invoke('exportTemplateDialog'),
+  importTemplateDialog: invoke('importTemplateDialog'),
+  instantiateTemplate: invoke('instantiateTemplate'),
+
   // AI assistant: main asks the renderer to run store ops; the renderer answers.
   onAssistantRequest: subscribe('assistantRequest'),
   assistantRespond: send('assistantResponse'),
