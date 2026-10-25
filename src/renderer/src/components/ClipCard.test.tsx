@@ -2,9 +2,10 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { MediaAsset } from '@shared/media'
-import type { ClipThumb as Thumb } from './ClipCard'
+import type { ClipCard as Card, ClipThumb as Thumb } from './ClipCard'
 
 let ClipThumb: typeof Thumb
+let ClipCard: typeof Card
 let root: Root | null = null
 let host: HTMLDivElement | null = null
 
@@ -12,7 +13,7 @@ beforeAll(async () => {
   ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   // ClipCard imports ipc/client, which destructures window.api at load.
   ;(window as unknown as { api: unknown }).api = new Proxy({}, { get: () => () => undefined })
-  ;({ ClipThumb } = await import('./ClipCard'))
+  ;({ ClipThumb, ClipCard } = await import('./ClipCard'))
 })
 
 afterEach(() => {
@@ -59,5 +60,39 @@ describe('ClipThumb', () => {
     // The refresh that follows the thumb being built: same clip, new object.
     act(() => root!.render(<ClipThumb asset={jpeg()} />))
     expect(host.querySelector('img')?.getAttribute('src')).toBe('reelmedia://aaaaaaaaaaaa/thumb.jpg?v=r1')
+  })
+})
+
+const ride = (): MediaAsset => ({
+  ...jpeg(),
+  id: 'bbbbbbbbbbbb',
+  fileName: 'Morning_Ride.fit',
+  probe: {
+    durationSec: 7214,
+    container: 'fit',
+    video: null,
+    audio: null,
+    workout: {
+      sport: 'cycling',
+      startUtc: '2026-05-24T13:02:02.000Z',
+      channels: ['position', 'distance', 'power'],
+      distanceM: 53405.82,
+      avgPowerW: 188
+    }
+  },
+  kind: 'workout'
+})
+
+describe('a workout card', () => {
+  it('shows its route thumbnail and what it is: sport, distance, length', () => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    act(() => root!.render(<ClipCard asset={ride()} />))
+    expect(host.querySelector('[data-testid="workout-thumb"] img')?.getAttribute('src')).toBe(
+      'reelmedia://bbbbbbbbbbbb/thumb.svg?v=r1'
+    )
+    expect(host.textContent).toContain('Ride · 33.2 mi · 2:00:14')
+    expect(host.textContent).not.toContain('no video')
   })
 })

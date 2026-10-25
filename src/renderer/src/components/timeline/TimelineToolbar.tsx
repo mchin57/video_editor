@@ -60,7 +60,7 @@ export function TimelineToolbar({
       >
         {playing ? '❚❚' : '▶'}
       </button>
-      <span className="ml-1 w-24 font-mono text-[11px] text-zinc-400">
+      <span data-testid="timeline-clock" className="ml-1 w-24 font-mono text-[11px] text-zinc-400">
         {tc(time)} / {tc(durationSec)}
       </span>
       <div className="mx-1 h-4 w-px bg-white/10" />

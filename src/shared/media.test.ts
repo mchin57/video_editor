@@ -7,6 +7,7 @@ import {
   normalizeDescription,
   pixFmtHasAlpha,
   reconcileKind,
+  relinkKindProblem,
   type MediaAsset,
   type ProbeInfo,
   type VideoStreamInfo
@@ -118,5 +119,34 @@ describe('media kind: extension checked against the probe', () => {
     const saved = { kind: 'video', probe: probe({ audio: sound }) } as MediaAsset
     expect(assetKind(saved)).toBe('audio')
     expect(assetKind({ ...saved, probe: probe({ video: picture, audio: sound }) })).toBe('video')
+  })
+
+  it('a .fit file is a workout, and its probe (no streams) keeps it one', () => {
+    const workout: ProbeInfo = {
+      ...probe({}),
+      container: 'fit',
+      workout: { sport: 'cycling', startUtc: '', channels: [], distanceM: null, avgPowerW: null }
+    }
+    expect(kindOfFile('C:/rides/Morning Ride.FIT', workout)).toBe('workout')
+    expect(reconcileKind(null, workout)).toBe('workout')
+    expect(assetKind({ kind: 'workout', probe: workout } as MediaAsset)).toBe('workout')
+    // The probe decides both ways: a workout probe under another claim, and a
+    // workout claim over an ffprobe probe.
+    expect(reconcileKind('video', workout)).toBe('workout')
+    expect(reconcileKind('workout', probe({ video: picture, audio: sound }))).toBe('video')
+  })
+
+  it('a workout and footage are never relinked to each other', () => {
+    const workout: ProbeInfo = {
+      ...probe({}),
+      workout: { sport: 'cycling', startUtc: '', channels: [], distanceM: null, avgPowerW: null }
+    }
+    const footage = probe({ video: picture, audio: sound })
+    expect(relinkKindProblem({ kind: 'video', fileName: 'IMG_1.MOV' }, workout)).toMatch(/is a workout file/)
+    expect(relinkKindProblem({ kind: 'workout', fileName: 'ride.fit' }, footage)).toMatch(
+      /only be relinked to a workout/
+    )
+    expect(relinkKindProblem({ kind: 'video', fileName: 'IMG_1.MOV' }, footage)).toBeNull()
+    expect(relinkKindProblem({ kind: 'workout', fileName: 'ride.fit' }, workout)).toBeNull()
   })
 })

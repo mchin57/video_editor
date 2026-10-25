@@ -17,7 +17,7 @@ import type { AudioClip, Layer, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
-import { assetAspect, assetKind } from '@shared/media'
+import { assetAspect, assetKind, isWorkoutAsset } from '@shared/media'
 import { freezeSpans, layerLabel, makeImageLayer, visualDuration } from '@shared/layers'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
@@ -128,7 +128,9 @@ export function Timeline(): JSX.Element {
 
   const selectedLibId = useEditor((s) => s.selectedId)
   const previewAsset = layers.length === 0 && selectedLibId ? assetById.get(selectedLibId) : undefined
-  const previewDur = previewAsset?.proxyReady ? previewAsset.probe.durationSec : 0
+  // A workout has no picture or sound to preview: selecting one must not give
+  // an empty timeline its hours-long length.
+  const previewDur = previewAsset?.proxyReady && !isWorkoutAsset(previewAsset) ? previewAsset.probe.durationSec : 0
   const canPlay = layers.length > 0 || previewDur > 0
 
   const {
@@ -291,9 +293,10 @@ export function Timeline(): JSX.Element {
     assetDrag.reset()
     const asset = assetById.get(id)
     if (!asset || !asset.proxyReady) return
+    const kind = assetKind(asset)
+    if (kind === 'workout') return // no workout tile yet (docs/WORKOUT-OVERLAY.md)
     const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
     const nid = newId()
-    const kind = assetKind(asset)
     if (kind === 'image') {
       addLayer(
         makeImageLayer(nid, id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) })

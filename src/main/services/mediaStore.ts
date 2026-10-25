@@ -16,14 +16,26 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, promises as fsp } from 'node:fs'
 import { basename, dirname, join, parse } from 'node:path'
-import type { FingerprintField, MediaAsset, MediaKind, MediaRecord } from '@shared/media'
+import type { FingerprintField, MediaAsset, MediaKind, MediaRecord, ProbeInfo } from '@shared/media'
 import type { RelinkResult } from '@shared/ipc'
-import { isAudioAsset, isImageAsset, isUnknownClip, kindOfFile, normalizeDescription } from '@shared/media'
+import {
+  isAudioAsset,
+  isImageAsset,
+  isUnknownClip,
+  isWorkoutAsset,
+  kindFromExt,
+  kindOfFile,
+  normalizeDescription,
+  relinkKindProblem
+} from '@shared/media'
+import { WORKOUT_SERIES_VERSION, workoutThumbSvg, type WorkoutSeries } from '@shared/workout'
 import { getSubdir } from '../config'
 import { probeFile } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
+import { readWorkout, workoutProbe } from './workoutParse'
+import { replaceFile } from './atomicWrite'
 import { detectMonoFoldChannel, extractAudio, generateAudioProxy, generateWaveform } from './audio'
 import { activeJobUsing, createJob, failJob, finishJob } from './jobs'
 import { splitFileName, validateFileStem } from '@shared/fileName'
@@ -46,7 +58,7 @@ import type { AudioFxSettings } from '@shared/audioFx'
 import { fxLabel } from '@shared/audioFx'
 import { renderAudioFx } from './audioFx'
 import { forgetLoudnessFailure, kickLoudness, loudnessPassReading, type LoudnessSource } from './loudness'
-import { createLogger } from '@shared/log'
+import { bestEffort, createLogger } from '@shared/log'
 
 const log = createLogger('media')
 
@@ -69,20 +81,33 @@ const audioProxyPath = (r: string, id: string): string => cachePath(r, id, 'audi
 const imagePath = (r: string, id: string): string => cachePath(r, id, 'image.png')
 const waveformPath = (r: string, id: string): string => cachePath(r, id, 'waveform.png')
 const thumbPath = (r: string, id: string): string => cachePath(r, id, 'thumb.jpg')
+const workoutPath = (r: string, id: string): string => cachePath(r, id, 'workout.json')
+const workoutThumbPath = (r: string, id: string): string => cachePath(r, id, 'thumb.svg')
 
 /** Whether a video asset carries an alpha channel (background-removed clip). */
 const isAlphaVideo = (a: MediaAsset): boolean => !!a.probe.video?.hasAlpha
 
-/** The "ready to use" artifact for an asset: image PNG, audio bed, or video proxy
- *  (a VP9 WebM for alpha clips so preview keeps transparency, else an H.264 mp4). */
+/** The "ready to use" artifact for an asset: image PNG, audio bed, a workout's
+ *  decoded series, or video proxy (a VP9 WebM for alpha clips so preview keeps
+ *  transparency, else an H.264 mp4). */
 const playableProxyPath = (r: string, a: MediaAsset): string =>
   isImageAsset(a)
     ? imagePath(r, a.id)
     : isAudioAsset(a)
       ? audioProxyPath(r, a.id)
-      : isAlphaVideo(a)
-        ? alphaProxyPath(r, a.id)
-        : proxyPath(r, a.id)
+      : isWorkoutAsset(a)
+        ? workoutPath(r, a.id)
+        : isAlphaVideo(a)
+          ? alphaProxyPath(r, a.id)
+          : proxyPath(r, a.id)
+
+/** The probe for a file about to join the library: a workout is decoded (its
+ *  series comes back too, to cache), anything else goes to ffprobe. */
+async function probeSource(path: string): Promise<{ probe: ProbeInfo; series?: WorkoutSeries }> {
+  if (kindFromExt(path) !== 'workout') return { probe: await probeFile(path) }
+  const series = await readWorkout(path)
+  return { probe: workoutProbe(series), series }
+}
 
 /*
  * Every generated file here is gated on EXISTENCE (a present proxy.mp4 means
@@ -126,8 +151,15 @@ async function makeArtifact(
   })
 }
 
-/** Best-effort first-frame thumbnail; never fails the import if it errors. */
+/** Best-effort first-frame thumbnail (a workout's: its route); never fails the
+ *  import if it errors. */
 async function makeThumb(s: ProjectSession, asset: MediaAsset): Promise<void> {
+  if (isWorkoutAsset(asset)) {
+    await makeArtifact(s, workoutThumbPath(s.root, asset.id), 'workout thumbnail', asset.id, async (out) =>
+      replaceFile(out, workoutThumbSvg(await workoutSeries(asset.id, s)))
+    )
+    return
+  }
   if (!asset.probe.video) return
   await makeArtifact(s, thumbPath(s.root, asset.id), 'thumbnail', asset.id, (out) =>
     generateThumbnail(asset.originalPath, out, asset.probe, isImageAsset(asset))
@@ -304,7 +336,9 @@ export async function relinkMedia(
     s.library.putEntry(pointAt(r, entry.record, srcPath), srcPath, r)
   } else {
     if (!force) throw new Error(`That file isn't the same footage as "${entry.record.fileName}".`)
-    const probe = await probeFile(srcPath)
+    const { probe } = await probeSource(srcPath)
+    const kindProblem = relinkKindProblem(entry.record, probe)
+    if (kindProblem) throw new Error(kindProblem)
     if (probe.audio?.channels === 2) probe.audio.monoFoldChannel = await detectMonoFoldChannel(srcPath)
     // Cuts reset only when the old length was KNOWN and differs: a clip never
     // fingerprinted has no real length to compare, so its cuts stay.
@@ -450,7 +484,7 @@ async function register(
   fingerprint: MediaRecord['fingerprint'],
   generated: boolean
 ): Promise<MediaAsset> {
-  const probe = await probeFile(path)
+  const { probe, series } = await probeSource(path)
   // Level-probe stereo sources for a dead channel so the proxy + export can
   // mono-fold "mono mic on one side" footage (best-effort; null on any failure).
   if (probe.audio?.channels === 2) {
@@ -469,6 +503,8 @@ async function register(
     kind
   }
   const asset = toAsset(s, s.library.putEntry(record, path, r))
+  // A workout's "proxy" is its decoded series: it was just decoded, so keep it.
+  if (series) await bestEffort(writeWorkoutCache(s, id, series), `caching the workout ${id}`, log)
   await makeThumb(s, asset)
   await makeImage(s, asset) // images: build the display PNG now (it is their "proxy")
   kickLoudness(s, loudnessSource(asset))
@@ -539,6 +575,29 @@ export async function importGenerated(
   })
 }
 
+async function writeWorkoutCache(s: ProjectSession, id: string, series: WorkoutSeries): Promise<void> {
+  await fsp.mkdir(cacheDir(s.root, id), { recursive: true })
+  await replaceFile(workoutPath(s.root, id), JSON.stringify(series))
+}
+
+/**
+ * A workout's decoded series: its cache when that is current, else decoded
+ * from the original (and cached). Throws when the clip isn't a workout, or
+ * its file is missing with nothing cached.
+ */
+export async function workoutSeries(id: string, s: ProjectSession = requireSession()): Promise<WorkoutSeries> {
+  const cached = await fsp
+    .readFile(workoutPath(s.root, id), 'utf8')
+    .then((text) => JSON.parse(text) as WorkoutSeries)
+    .catch(() => null)
+  if (cached?.version === WORKOUT_SERIES_VERSION) return cached
+  const asset = await requireUsable(id, s)
+  if (!isWorkoutAsset(asset)) throw new Error(`${asset.fileName} is not a workout file.`)
+  const series = await readWorkout(asset.originalPath)
+  await writeWorkoutCache(s, id, series)
+  return series
+}
+
 /**
  * Generate the proxy if missing, reporting progress via the jobs channel.
  * Concurrent calls for one asset share a single build (import, re-import and
@@ -581,6 +640,15 @@ async function buildProxy(s: ProjectSession, id: string): Promise<void> {
   // Images need no transcode — just the display PNG (built best-effort at import).
   if (isImageAsset(asset)) {
     await makeImage(s, asset)
+    return
+  }
+
+  // A workout whose cache is missing (cleared, or the import couldn't write
+  // it): decode the file again, and its thumbnail with it. A cache from an
+  // older parser is rebuilt when it is next read (`workoutSeries`).
+  if (isWorkoutAsset(asset)) {
+    await writeWorkoutCache(s, id, await readWorkout(asset.originalPath))
+    await makeThumb(s, asset)
     return
   }
 
