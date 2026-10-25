@@ -12,11 +12,32 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { ToolContent } from '@shared/assistant/pipeProtocol'
 import type { ToolArgs, ToolName } from '@shared/assistant/toolArgs'
 import { FONTS } from '@shared/fonts'
-import { TEXT_FONT_SIZE_MAX, TEXT_FONT_SIZE_MIN, TEXT_PILL_PAD_MAX } from '@shared/assistant/onScreenText'
+import {
+  GRADIENT_ANGLE_MAX,
+  GRADIENT_ANGLE_MIN,
+  TEXT_CONTROL_CHARS,
+  TEXT_FONT_SIZE_MAX,
+  TEXT_FONT_SIZE_MIN,
+  TEXT_MAX_CHARS,
+  TEXT_PILL_PAD_MAX,
+  TEXT_ROTATION_MAX_DEG,
+  TEXT_X_MAX,
+  TEXT_X_MIN,
+  TEXT_Y_MAX,
+  TEXT_Y_MIN
+} from '@shared/assistant/onScreenText'
 
 export type CallEditor = <K extends ToolName>(tool: K, args: ToolArgs[K]) => Promise<ToolContent[]>
 
 const result = (content: ToolContent[]): CallToolResult => ({ content })
+
+/** The latest second any time argument may name (~11.6 days, past any real clip
+ *  or edit). zod refuses Infinity itself, but a finite-but-huge time like 1e308
+ *  overflowed the editor's rounding, and its messages printed "Infinitys". */
+export const MAX_TIME_SEC = 1_000_000
+/** A time in seconds: 0 or more / more than 0, up to MAX_TIME_SEC. */
+const sec = (): z.ZodNumber => z.number().min(0).max(MAX_TIME_SEC)
+const posSec = (): z.ZodNumber => z.number().positive().max(MAX_TIME_SEC)
 
 export function registerTools(server: McpServer, call: CallEditor): void {
   server.registerTool(
@@ -42,11 +63,11 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'get_transcript',
     {
       description:
-        'Timed transcript of a clip in SOURCE seconds. Transcribes the clip first if needed (can take a minute; progress shows in the editor). Default: one line per phrase "[start–end] text". Set words=true for one line per word (best with a fromSec/toSec range) when you need to cut on an exact word.',
+        'Timed transcript of a clip in SOURCE seconds. Transcribes the clip first if needed (can take a minute; progress shows in the editor). Default: one line per phrase "[start–end] text". Set words=true for one line per word (best with a fromSec/toSec range) when you need to cut on an exact word. fromSec may not be after toSec.',
       inputSchema: {
         mediaId: z.string(),
-        fromSec: z.number().min(0).optional(),
-        toSec: z.number().min(0).optional(),
+        fromSec: sec().optional(),
+        toSec: sec().optional(),
         words: z.boolean().optional()
       }
     },
@@ -57,10 +78,10 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'get_frames',
     {
       description:
-        'Small still frames (≈360px wide JPEG) from a clip at SOURCE times, to judge the picture. Give explicit times, or a count for evenly spaced frames. At most 8.',
+        'Small still frames (≈360px wide JPEG) from a clip at SOURCE times, to judge the picture. Give explicit times, or a count for evenly spaced frames. At most 8; a still image gives one frame.',
       inputSchema: {
         mediaId: z.string(),
-        times: z.array(z.number().min(0)).min(1).max(8).optional(),
+        times: z.array(sec()).min(1).max(8).optional(),
         count: z.number().int().min(1).max(8).optional()
       }
     },
@@ -74,8 +95,8 @@ export function registerTools(server: McpServer, call: CallEditor): void {
         'Make a NEW library clip from SOURCE seconds [startSec, endSec) of a video, saved in the project folder (frame-accurate re-encode; takes a few seconds). The original clip and the timeline are left alone. Returns {created: [the new library entry]} — place it with place_sequence. An end past the clip is clamped to its end. Use when the user wants a trimmed clip in the library; to just use part of a clip in the edit, place_sequence with inSec/outSec is enough.',
       inputSchema: {
         mediaId: z.string(),
-        startSec: z.number().min(0),
-        endSec: z.number().positive()
+        startSec: sec(),
+        endSec: posSec()
       }
     },
     async (args) => result(await call('trim_clip', args))
@@ -88,7 +109,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
         'Cut a video at one or more SOURCE seconds into back-to-back NEW library clips (N times → N+1 clips, in order), saved in the project folder (frame-accurate re-encode). The original and the timeline are left alone. Returns {created: [the new library entries, in order]}. Each piece must be at least 0.1s.',
       inputSchema: {
         mediaId: z.string(),
-        times: z.array(z.number().positive()).min(1).max(50).describe('SOURCE seconds to cut at, inside the clip')
+        times: z.array(posSec()).min(1).max(50).describe('SOURCE seconds to cut at, inside the clip')
       }
     },
     async (args) => result(await call('split_clip', args))
@@ -104,8 +125,8 @@ export function registerTools(server: McpServer, call: CallEditor): void {
           .array(
             z.object({
               mediaId: z.string(),
-              inSec: z.number().min(0).optional().describe('SOURCE second to start at (default 0)'),
-              outSec: z.number().positive().optional().describe("SOURCE second to end at (default: the clip's end)")
+              inSec: sec().optional().describe('SOURCE second to start at (default 0)'),
+              outSec: posSec().optional().describe("SOURCE second to end at (default: the clip's end)")
             })
           )
           .min(2)
@@ -144,11 +165,11 @@ export function registerTools(server: McpServer, call: CallEditor): void {
         'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0. Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut. Refused: an outSec more than 0.5s past its clip\'s end, or an atSec more than 60s past the end of the edit (times are seconds, not milliseconds).',
       inputSchema: {
         items: z
-          .array(z.object({ mediaId: z.string(), inSec: z.number().min(0), outSec: z.number().positive() }))
+          .array(z.object({ mediaId: z.string(), inSec: sec(), outSec: posSec() }))
           .min(1)
           .max(200),
         mode: z.enum(['append', 'replace']).optional(),
-        atSec: z.number().min(0).optional().describe('TIMELINE second to start at')
+        atSec: sec().optional().describe('TIMELINE second to start at')
       }
     },
     async (args) => result(await call('place_sequence', args))
@@ -217,8 +238,8 @@ export function registerTools(server: McpServer, call: CallEditor): void {
         'All text the viewer reads: text layers and caption segments in TIMELINE order, each with id, kind ("text" | "caption"), startSec/endSec, the text, whether it is visible (and why not), whether it is linked, and the style it actually renders with (font, size, colour, pill, stroke, shadow, gradient, centre x/y in the 1080x1920 frame, rotation). Captions say whether they follow the lane style or have their own. Also the caption lane itself (id "captions": on/off + lane-wide style) and durationSec, the length of the edit: captions do not extend it, so one starting at or after it says hiddenBecause "after the end of the edit", and one running past it has cutOffAtSec. Optional: ids, or fromSec/toSec to get what is on screen in that range (fromSec = toSec asks what shows at that moment).',
       inputSchema: {
         ids: z.array(z.string()).min(1).optional(),
-        fromSec: z.number().min(0).optional().describe('TIMELINE second'),
-        toSec: z.number().min(0).optional().describe('TIMELINE second')
+        fromSec: sec().optional().describe('TIMELINE second'),
+        toSec: sec().optional().describe('TIMELINE second')
       }
     },
     async (args) => result(await call('get_text', args))
@@ -234,13 +255,23 @@ export function registerTools(server: McpServer, call: CallEditor): void {
       .optional()
       .describe('Item to patch (from get_text). Leave out to CREATE a new item. "captions" = the caption lane.'),
     kind: z.enum(['text', 'caption']).optional().describe('Only when creating; default "text" (a text layer on top)'),
-    text: z.string().min(1).optional(),
-    startSec: z.number().min(0).optional().describe('TIMELINE second'),
-    endSec: z.number().positive().optional().describe('TIMELINE second'),
+    text: z
+      .string()
+      .min(1)
+      .max(TEXT_MAX_CHARS)
+      .refine((s) => !TEXT_CONTROL_CHARS.test(s), 'text must not contain control characters (newline and tab are fine)')
+      .optional(),
+    startSec: sec().optional().describe('TIMELINE second'),
+    endSec: posSec().optional().describe('TIMELINE second'),
     visible: z.boolean().optional(),
-    x: z.number().optional().describe('Centre x in the 1080x1920 frame'),
-    y: z.number().optional().describe('Centre y in the 1080x1920 frame'),
-    rotationDeg: z.number().optional().describe('Clockwise degrees'),
+    x: z.number().min(TEXT_X_MIN).max(TEXT_X_MAX).optional().describe('Centre x in the 1080x1920 frame'),
+    y: z.number().min(TEXT_Y_MIN).max(TEXT_Y_MAX).optional().describe('Centre y in the 1080x1920 frame'),
+    rotationDeg: z
+      .number()
+      .min(-TEXT_ROTATION_MAX_DEG)
+      .max(TEXT_ROTATION_MAX_DEG)
+      .optional()
+      .describe('Clockwise degrees'),
     fontFamily: z.enum(FONTS.map((f) => f.id) as [string, ...string[]]).optional(),
     fontSizePx: z.number().min(TEXT_FONT_SIZE_MIN).max(TEXT_FONT_SIZE_MAX).optional(),
     color: color.optional(),
@@ -263,7 +294,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
       .optional()
       .describe('null removes'),
     gradient: z
-      .strictObject({ from: color, to: color, angle: z.number() })
+      .strictObject({ from: color, to: color, angle: z.number().min(GRADIENT_ANGLE_MIN).max(GRADIENT_ANGLE_MAX) })
       .nullable()
       .optional()
       .describe('Fill gradient, overrides color; null removes'),
@@ -295,7 +326,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     {
       description:
         "Move the editor's playhead to a TIMELINE second (pausing playback there) so the user sees that exact moment — e.g. the first point you want them to look at. Changes nothing in the edit.",
-      inputSchema: { timeSec: z.number().min(0) }
+      inputSchema: { timeSec: sec() }
     },
     async (args) => result(await call('set_playhead', args))
   )
@@ -305,7 +336,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     {
       description:
         'The FINISHED picture at TIMELINE seconds — every layer, text and caption burned in exactly as the export renders it (unlike get_frames, which shows raw source footage). Use it to check how text actually looks on screen: cut off, off-frame, unreadable over the picture, overlapping. 1–4 times per call (all rendered in one pass); takes a few seconds. Times past the end show the last frame.',
-      inputSchema: { times: z.array(z.number().min(0)).min(1).max(4) }
+      inputSchema: { times: z.array(sec()).min(1).max(4) }
     },
     async (args) => result(await call('render_frame', args))
   )

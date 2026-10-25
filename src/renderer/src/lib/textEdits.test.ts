@@ -5,6 +5,19 @@ import { makeTextLayer, makeVideoLayer } from '@shared/layers'
 import { applyTextEdits, type TextEditCtx } from './textEdits'
 import { captionInWindow, captionWithText } from './captions'
 import { splitCaptionSegment } from './timeline'
+import {
+  GRADIENT_ANGLE_MAX,
+  GRADIENT_ANGLE_MIN,
+  TEXT_CONTROL_CHARS,
+  TEXT_MAX_CHARS,
+  TEXT_ROTATION_MAX_DEG,
+  TEXT_X_MAX,
+  TEXT_X_MIN,
+  TEXT_Y_MAX,
+  TEXT_Y_MIN,
+  textProblem,
+  type TextEdit
+} from '@shared/assistant/onScreenText'
 
 const w = (text: string, startSec: number, endSec: number): { text: string; startSec: number; endSec: number } => ({
   text,
@@ -78,6 +91,70 @@ describe('applyTextEdits', () => {
     const c = comp()
     expect(() => applyTextEdits(c, [{ id: 't1' }], ctx())).toThrow(/nothing to change/)
     expect(() => applyTextEdits(c, [{ id: 'c1' }], ctx())).toThrow(/nothing to change/)
+    expect(() => applyTextEdits(c, [{ id: 'captions' }], ctx())).toThrow(/nothing to change/)
+  })
+
+  it('an id-only edit fails the whole batch, so its good edits change nothing either (#19)', () => {
+    expect(() => applyTextEdits(comp(), [{ id: 't1', text: 'Fixed' }, { id: 'c1' }], ctx())).toThrow(
+      /^Nothing was changed:\nedit 2 \(id "c1"\): nothing to change/
+    )
+  })
+
+  it('bounds x, y, rotation and gradient angle to the shared limits; refuses 1e308 (#10)', () => {
+    const ok = applyTextEdits(
+      comp(),
+      [
+        {
+          id: 't1',
+          x: TEXT_X_MIN,
+          y: TEXT_Y_MAX,
+          rotationDeg: -TEXT_ROTATION_MAX_DEG,
+          gradient: { from: '#ffffff', to: '#000000', angle: GRADIENT_ANGLE_MAX }
+        }
+      ],
+      ctx()
+    )
+    expect(ok.comp.layers.find((l) => l.id === 't1')).toMatchObject({ x: TEXT_X_MIN, y: TEXT_Y_MAX })
+    const bad: [string, TextEdit][] = [
+      ['x', { id: 't1', x: 1e308 }],
+      ['x', { id: 't1', x: TEXT_X_MAX + 1 }],
+      ['y', { id: 't1', y: -1e308 }],
+      ['y', { id: 't1', y: TEXT_Y_MIN - 1 }],
+      ['rotationDeg', { id: 't1', rotationDeg: 1e308 }],
+      ['rotationDeg', { id: 'c1', rotationDeg: TEXT_ROTATION_MAX_DEG + 1 }],
+      ['x', { id: 'captions', x: Number.NaN }],
+      ['gradient.angle', { id: 't1', gradient: { from: '#ffffff', to: '#000000', angle: 1e308 } }],
+      ['gradient.angle', { id: 't1', gradient: { from: '#ffffff', to: '#000000', angle: GRADIENT_ANGLE_MIN - 1 } }]
+    ]
+    for (const [field, e] of bad) {
+      expect(() => applyTextEdits(comp(), [e], ctx()), JSON.stringify(e)).toThrow(
+        new RegExp(`${field.replace('.', '\\.')} must be a number from`)
+      )
+    }
+  })
+
+  it('caps text at TEXT_MAX_CHARS and refuses control characters but newline and tab (#10)', () => {
+    const long = 'a'.repeat(TEXT_MAX_CHARS)
+    expect(textOf(applyTextEdits(comp(), [{ id: 't1', text: long }], ctx()).comp, 't1').text).toBe(long)
+    expect(() => applyTextEdits(comp(), [{ id: 't1', text: `${long}a` }], ctx())).toThrow(/at most 2000 characters/)
+    expect(() => applyTextEdits(comp(), [{ text: 'b'.repeat(200_000), startSec: 0, endSec: 2 }], ctx())).toThrow(
+      /at most/
+    )
+    const tabbed = `Day${String.fromCharCode(9)}one${String.fromCharCode(10)}swim`
+    expect(textOf(applyTextEdits(comp(), [{ id: 't1', text: tabbed }], ctx()).comp, 't1').text).toBe(tabbed)
+    for (const code of [0, 7, 8, 11, 13, 27, 127, 0x9b]) {
+      const text = `a${String.fromCharCode(code)}b`
+      expect(() => applyTextEdits(comp(), [{ id: 'c1', text }], ctx()), `U+${code.toString(16)}`).toThrow(
+        /control characters/
+      )
+    }
+  })
+
+  it('textProblem: the shared text rule', () => {
+    expect(textProblem('ok')).toBeNull()
+    expect(textProblem('  ')).toMatch(/empty/)
+    expect(textProblem(42)).toMatch(/empty/)
+    expect(TEXT_CONTROL_CHARS.test(String.fromCharCode(0))).toBe(true)
   })
 
   it('creates a text layer on top when there is no id, with defaults for unset style', () => {

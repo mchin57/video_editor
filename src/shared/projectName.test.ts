@@ -65,3 +65,21 @@ describe('validateProjectName', () => {
     }
   })
 })
+
+describe('validateProjectName: bidi controls (#11)', () => {
+  // Built from code points so no invisible character sits in this source file.
+  const BIDI = [0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]
+
+  it('rejects each bidi control, with a reason the user can read', () => {
+    for (const code of BIDI) {
+      expect(validateProjectName(`race${String.fromCharCode(code)}4pm.exe`), code.toString(16)).toMatch(
+        /text-direction/
+      )
+    }
+  })
+
+  it('still accepts right-to-left text itself (Arabic, Hebrew)', () => {
+    expect(validateProjectName('سباق')).toBeNull()
+    expect(validateProjectName('מירוץ')).toBeNull()
+  })
+})

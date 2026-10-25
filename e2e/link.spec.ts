@@ -102,7 +102,7 @@ async function dragEdge(page: Page, testId: string, which: 'left' | 'right', sec
 }
 
 test('a clip with audio is added LINKED, and trimming either trims both', async ({ appPage: page }) => {
-  // The store action behind a timeline drop and the Library's ＋ PH / ＋ End.
+  // The store action behind a timeline drop and the Library's ＋ Playhead / ＋ End.
   await page.evaluate(() => window.__reelStores.useProject.getState().addVideoLayer('L1', 'no-such-media', 0, 10, true))
   const added = await tiles(page)
   expect(added.layers[0].gid).toBeTruthy()

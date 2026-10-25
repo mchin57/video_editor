@@ -24,3 +24,16 @@ describe('frameTimes', () => {
     ).toHaveLength(MAX_FRAMES)
   })
 })
+
+describe('frameTimes on a still (#11)', () => {
+  it('gives one frame for a still, whatever count or times are asked', () => {
+    expect(frameTimes(0, undefined, 8)).toEqual([0])
+    expect(frameTimes(0)).toEqual([0])
+    expect(frameTimes(0, [0, 1, 2])).toEqual([0])
+  })
+
+  it('never repeats a time when a very short clip clamps every slice to one moment', () => {
+    // A JPEG probes as a nominal 0.04 s (ffprobe): shorter than the end guard.
+    expect(frameTimes(0.04, undefined, 8)).toEqual([0])
+  })
+})

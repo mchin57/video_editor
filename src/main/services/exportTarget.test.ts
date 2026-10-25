@@ -24,6 +24,11 @@ describe('sanitizeExportName', () => {
     expect(sanitizeExportName('   ')).toBeNull()
     expect(sanitizeExportName('CON')).toBe('_CON.mp4')
   })
+
+  it('strips bidi controls, so a model-chosen name cannot display disguised (#11)', () => {
+    expect(sanitizeExportName(`cut${String.fromCharCode(0x202e)}4pm.exe`)).toBe('cut4pm.exe.mp4')
+    expect(sanitizeExportName(String.fromCharCode(0x200f, 0x2066))).toBeNull()
+  })
 })
 
 describe('uniqueExportPath', () => {

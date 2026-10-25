@@ -14,6 +14,8 @@ import { FONTS, isKnownFont } from '@shared/fonts'
 import { makeTextLayer } from '@shared/layers'
 import {
   CAPTION_LANE_ID,
+  GRADIENT_ANGLE_MAX,
+  GRADIENT_ANGLE_MIN,
   MAX_TEXT_PAST_END_SEC,
   maxItemEndSec,
   MIN_TEXT_SEC,
@@ -21,6 +23,12 @@ import {
   TEXT_PILL_PAD_MAX,
   TEXT_TIME_EPS,
   TEXT_FONT_SIZE_MIN,
+  TEXT_ROTATION_MAX_DEG,
+  TEXT_X_MAX,
+  TEXT_X_MIN,
+  TEXT_Y_MAX,
+  TEXT_Y_MIN,
+  textProblem,
   type TextEdit,
   type TextEditResult
 } from '@shared/assistant/onScreenText'
@@ -86,7 +94,9 @@ function styleProblems(e: TextEdit): string[] {
   }
   inRange('fontSizePx', e.fontSizePx, TEXT_FONT_SIZE_MIN, TEXT_FONT_SIZE_MAX)
   color('color', e.color)
-  for (const k of POSITION_KEYS) if (e[k] !== undefined && !finite(e[k])) p.push(`${k} must be a number`)
+  inRange('x', e.x, TEXT_X_MIN, TEXT_X_MAX)
+  inRange('y', e.y, TEXT_Y_MIN, TEXT_Y_MAX)
+  inRange('rotationDeg', e.rotationDeg, -TEXT_ROTATION_MAX_DEG, TEXT_ROTATION_MAX_DEG)
   if (e.pill !== undefined) {
     if (e.pill === null || typeof e.pill !== 'object') p.push('pill must be an object')
     else {
@@ -108,7 +118,7 @@ function styleProblems(e: TextEdit): string[] {
   if (e.gradient) {
     color('gradient.from', e.gradient.from)
     color('gradient.to', e.gradient.to)
-    if (!finite(e.gradient.angle)) p.push('gradient.angle must be a number')
+    inRange('gradient.angle', e.gradient.angle, GRADIENT_ANGLE_MIN, GRADIENT_ANGLE_MAX)
   }
   if (e.widthPx !== undefined && e.widthPx !== null) inRange('widthPx', e.widthPx, 40, 4000)
   return p
@@ -182,9 +192,8 @@ export function applyTextEdits(comp: Composition, edits: TextEdit[], ctx: TextEd
     }
     const style = styleProblems(e)
     if (style.length) return fail(style.join('; '))
-    if (e.text !== undefined && (typeof e.text !== 'string' || !e.text.trim())) {
-      return fail('text must not be empty (use remove_items to delete an item)')
-    }
+    const badText = e.text !== undefined ? textProblem(e.text) : null
+    if (badText) return fail(badText)
     if (e.visible !== undefined && typeof e.visible !== 'boolean') return fail('visible must be true or false')
 
     // --- the caption lane ---------------------------------------------------

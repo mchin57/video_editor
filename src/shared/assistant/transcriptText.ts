@@ -18,6 +18,19 @@ export interface TranscriptRange {
 
 const fmt = (s: number): string => s.toFixed(2)
 
+/**
+ * `get_transcript`'s optional fromSec/toSec as a range (undefined when neither
+ * is given; a missing end is open). Throws when fromSec is after toSec, which
+ * otherwise came back as "(no speech)" without comment.
+ */
+export function transcriptRange(fromSec?: number, toSec?: number): TranscriptRange | undefined {
+  if (fromSec === undefined && toSec === undefined) return undefined
+  if (fromSec !== undefined && toSec !== undefined && fromSec > toSec) {
+    throw new Error(`fromSec (${fromSec}s) is after toSec (${toSec}s); give the earlier time as fromSec.`)
+  }
+  return { fromSec: fromSec ?? 0, toSec: toSec ?? Infinity }
+}
+
 /** Words whose span overlaps `range` (all of them when absent). */
 export function wordsInRange(words: CaptionWord[], range?: TranscriptRange): CaptionWord[] {
   if (!range) return words
