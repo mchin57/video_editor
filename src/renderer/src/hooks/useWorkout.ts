@@ -14,8 +14,8 @@ export const WORKOUT_KEY = 'workout'
 
 const log = createLogger('workout')
 
-/** The recording (undefined while loading, or when it can't be read). */
-export function useWorkoutSeries(mediaId: string | undefined): WorkoutSeries | undefined {
+/** The recording: undefined while loading, null when it can't be read. */
+export function useWorkoutSeries(mediaId: string | undefined): WorkoutSeries | null | undefined {
   // The folder is part of the key: another project's cache is another file.
   const filePath = useProject((s) => s.filePath)
   const q = useQuery({
@@ -30,7 +30,7 @@ export function useWorkoutSeries(mediaId: string | undefined): WorkoutSeries | u
     staleTime: Infinity,
     retry: false
   })
-  return q.data
+  return q.isError ? null : q.data
 }
 
 /** Drop the cached recording for a media item (after a Relink points it at

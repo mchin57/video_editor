@@ -23,6 +23,7 @@ import {
   workoutOverlayShapes,
   workoutPlayedSec,
   workoutRideSec,
+  workoutTimelineSec,
   canSyncTo,
   type WorkoutWidget
 } from './workoutOverlay'
@@ -65,6 +66,8 @@ describe('timing', () => {
     // Held at the window's ends.
     expect(workoutRideSec(c, l, 0)).toBe(100)
     expect(workoutRideSec(c, l, 99)).toBe(300)
+    // And back: ride 200 s is shown at timeline 15 s.
+    expect(workoutTimelineSec(c, l, 200)).toBe(15)
   })
 
   it('a left-edge trim moves the ride window with it, never before the recording or timeline 0', () => {

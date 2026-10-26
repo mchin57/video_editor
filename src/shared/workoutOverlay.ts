@@ -98,6 +98,12 @@ export function workoutRideSec(c: WorkoutContentFields, layer: Pick<Layer, 'star
   return clamp(c.inSec + (t - layer.startSec) * workoutSpeed(c), c.inSec, c.outSec)
 }
 
+/** The timeline time showing moment `rideSec` of the recording (the graph's
+ *  cut point on the tile). */
+export function workoutTimelineSec(c: WorkoutContentFields, layer: Pick<Layer, 'startSec'>, rideSec: number): number {
+  return layer.startSec + (rideSec - c.inSec) / workoutSpeed(c)
+}
+
 /** Every edit below takes the tile and its content (narrowed by the caller,
  *  as `trimVideoStart` does) and returns the tile with its end following the
  *  window: `endSec − startSec = workoutPlayedSec(content)` always holds. */

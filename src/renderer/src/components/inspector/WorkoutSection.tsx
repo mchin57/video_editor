@@ -6,7 +6,7 @@
  * over its speed.
  */
 
-import { type JSX } from 'react'
+import { useState, type JSX } from 'react'
 import type { Layer, WorkoutContent } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { DEFAULT_DISTANCE_UNITS, sportLabel, type DistanceUnits } from '@shared/workout'
@@ -29,9 +29,12 @@ import {
 import { newId } from '@shared/ids'
 import { formatDuration } from '@/lib/format'
 import { updateById } from '@/lib/arrays'
-import { useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
+import { useUi } from '@/state/ui'
+import { rangesStillMatch, workoutTilesOf, type WorkoutTile } from '@/lib/workoutGraph'
+import { WorkoutGraphDialog } from '../WorkoutGraphDialog'
 import { CollapsibleSection } from '../CollapsibleSection'
-import { Field, NumberInput, Slider, colorCls, disabledCls, inputCls } from '../ui'
+import { Field, NumberInput, Slider, btnCls, colorCls, disabledCls, inputCls } from '../ui'
 
 /** Size ranges per widget kind (canonical px: a readout's number height, a map's width). */
 const SIZE_RANGE = { number: { min: 40, max: 320 }, map: { min: 120, max: 1080 } } as const
@@ -49,6 +52,22 @@ export function WorkoutSection({
   linked: boolean
 }): JSX.Element {
   const updateWidgets = useProject((s) => s.updateWorkoutWidgets)
+  const [graph, setGraph] = useState<WorkoutTile[] | null>(null)
+  const openGraph = (): void => {
+    const comp = activeComp(useProject.getState())
+    if (comp) setGraph(workoutTilesOf(comp, c.mediaId))
+  }
+  const saveGraph = (before: WorkoutTile[], after: WorkoutTile[]): string | null => {
+    const comp = activeComp(useProject.getState())
+    if (!comp || !rangesStillMatch(comp, before)) {
+      return 'The timeline changed while this was open, so nothing was saved. Close and open the graph again.'
+    }
+    useProject.getState().applyWorkoutRanges(before, after)
+    // Keep this tile selected if it survived; else the first range.
+    const keep = after.find((t) => t.id === layer.id) ?? after[0]
+    if (keep) useUi.getState().selectLayer(keep.id)
+    return null
+  }
   const update = useProject((s) => s.updateLayer)
   /** Take an edited tile from a shared helper: its window and content together. */
   const apply = (l: Layer): void => update(layer.id, { startSec: l.startSec, endSec: l.endSec, content: l.content })
@@ -72,6 +91,16 @@ export function WorkoutSection({
           shows {formatDuration(c.inSec)}–{formatDuration(c.outSec)} of {formatDuration(rideDur)}
           {summary?.startUtc ? ` · recorded ${new Date(summary.startUtc).toLocaleString()}` : ''}
         </p>
+        <button
+          type="button"
+          data-testid="workout-open-graph"
+          onClick={openGraph}
+          disabled={!asset || asset.status === 'missing'}
+          className={`${btnCls} ${disabledCls} mb-2 w-full`}
+          title="Graphs of the recording: zoom in, then trim, split or delete what the overlay shows"
+        >
+          📈 Graph…
+        </button>
         <div className="flex gap-2">
           <Field label="Speed (×)">
             <NumberInput
@@ -191,6 +220,15 @@ export function WorkoutSection({
           })}
         </ul>
       </CollapsibleSection>
+      {graph && asset && (
+        <WorkoutGraphDialog
+          asset={asset}
+          tiles={graph}
+          selectedId={layer.id}
+          onClose={() => setGraph(null)}
+          onSave={saveGraph}
+        />
+      )}
     </>
   )
 }

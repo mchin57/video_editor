@@ -7,8 +7,8 @@ Issues #186 (workout data overlays) and #187 (route map). Built in three steps:
 2. **The overlay layer** (built): a timeline tile that draws chosen metrics (power, speed, heart
    rate, distance so far, total distance, average power, static map, live map) over the video,
    in the preview and the export.
-3. **The graph window**: power / elevation / speed / heart-rate graphs against time or distance,
-   with trim, split, delete and wheel zoom down to 1 s. Not built yet.
+3. **The graph window** (built): power / elevation / speed / heart-rate graphs against time or
+   distance, with trim, split, delete and wheel zoom down to 1 s.
 
 ## What it does (built)
 
@@ -67,6 +67,41 @@ Issues #186 (workout data overlays) and #187 (route map). Built in three steps:
   preview (484 W, 6:39/mi, 193 bpm at the same moment).
 - **The assistant:** `get_timeline` lists a workout tile's stretch (`inSec`/`outSec`, seconds into
   the workout), speed and metrics.
+
+## The graph window (built)
+
+**Inspector ▸ Workout ▸ 📈 Graph…** opens the recording in a window over the editor, like Quick
+cut's, with every overlay tile of that recording (on the timeline being edited) as a RANGE:
+
+- **Lines:** power, elevation, speed and heart rate, each with its own vertical scale fitted to
+  what is in view (and the samples just beside it), each toggled on or off (one the file has no data for is greyed out). Laps
+  are dashed lines, timer pauses shaded.
+- **Axis:** Time or Distance (Distance is greyed out for a file with no distance). On the
+  distance axis a stop collapses to the moment it began, so a cut there lands at the stop's
+  start.
+- **Zoom:** the wheel zooms about the pointer, from the whole recording down to 1 s across the
+  whole width (10 m on the distance axis); Shift+wheel or the bar under the graph pans; **Fit**
+  shows it all again.
+- **The cursor:** a press puts it there (and selects the range under it); ←/→ move it 1 s
+  (Shift: 10 s). It is the graph's own: the editor's playhead doesn't move.
+- **Cutting**, as in Quick cut: drag a range's handles to trim its ends; **S** or ✂ Split cuts
+  the range under the cursor (both halves at least the shortest tile); **Del** or Delete range
+  removes the selected one (never the last; deleting the overlay itself is the timeline's
+  job); a selected range's **Speed** can be set here (typing it is one undo step). Undo / redo
+  inside the window: Ctrl+Z / Ctrl+Y.
+- **Ranges are tiles.** The edits are the timeline's own (`splitWorkout`, `trimWorkoutStart` /
+  `trimWorkoutEnd`, `withWorkoutSpeed`), driven in ride time: a split here makes the two tiles
+  S makes on the timeline (the right half right after the left); a deleted range leaves a gap
+  on the timeline; a left-end trim moves the tile's start, as on the timeline.
+- **Save** puts the result on the timeline as ONE undo step, every tile keeping its place in
+  the layer stack (a split's right half right after its left); **Cancel** (or Escape) changes
+  nothing. Keys pressed while the window is open never reach the editor's shortcuts, and a
+  recording that can't be read still shows Close. If the timeline's tiles of that recording
+  changed while the window was open (the assistant can edit meanwhile), Save refuses, saying
+  so, rather than overwrite them.
+- **A range linked to a clip** (a synced overlay) is drawn dashed with 🔗 and can't be trimmed,
+  split or deleted here ("Linked to a clip: edit it on the timeline (or unlink it first)."):
+  cutting it would leave it out of step with its footage.
 
 ## Syncing to footage
 
@@ -162,11 +197,15 @@ Each decoded in under 60 ms (the largest, 1 MB, 9,579 samples), with no errors. 
 | Export | `main/services/exportWorkout.ts` |
 | Recording time | `main/services/ffprobe.ts` (`probeRecordedUtc`), `ffprobeParse.ts` (`recordedUtcFromTags`) |
 | Test FIT files (written by the SDK's encoder) | `main/services/__fixtures__/fitFile.ts` |
-| Specs | `e2e/workoutImport.spec.ts`, `e2e/workoutOverlay.spec.ts`, `e2e/workoutExport.spec.ts` |
+| Graph: axes, zoom, line sampling, ticks | `shared/workoutGraph.ts` + test |
+| Graph: the working copy's edits, Save | `renderer/lib/workoutGraph.ts` + test |
+| Graph window | `renderer/components/WorkoutGraphDialog.tsx` (opened from `WorkoutSection.tsx`) |
+| Specs | `e2e/workoutImport.spec.ts`, `e2e/workoutOverlay.spec.ts`, `e2e/workoutExport.spec.ts`, `e2e/workoutGraph.spec.ts` |
 
 ## Not in this version
 
-- The graph window (step 3): graphs of the recording to cut it by, zoomable to 1 s.
+- Playing the overlay inside the graph window, or the window following the editor's playhead.
+- Closing the gap a deleted range leaves (ripple delete, #115).
 - Lap / split timer (#188).
 - A widget's font, or a background panel behind readouts. Readouts use the bundled Montserrat
   ExtraBold with a thin outline.
