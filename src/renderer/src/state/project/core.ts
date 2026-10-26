@@ -11,6 +11,7 @@
 import type { StoreApi } from 'zustand'
 import type { Composition, Layer, Project, VideoContent } from '@shared/project'
 import type { GraphicMark } from '@shared/graphics'
+import type { WorkoutWidget } from '@shared/workoutOverlay'
 import { migrateProject } from '@shared/project'
 import {
   MAX_COMP_DEPTH,
@@ -180,6 +181,17 @@ export const mapVideoLayer = (
   id: string,
   fn: (l: Layer, content: VideoContent) => Layer
 ): Composition => mapLayer(c, id, (l) => (l.content.kind === 'video' ? fn(l, l.content) : l))
+
+/** `c` with WORKOUT layer `id`'s widgets replaced by `fn(widgets)`; any other
+ *  kind is left as it is. */
+export const mapWorkoutWidgets = (
+  c: Composition,
+  id: string,
+  fn: (widgets: WorkoutWidget[]) => WorkoutWidget[]
+): Composition =>
+  mapLayer(c, id, (l) =>
+    l.content.kind === 'workout' ? { ...l, content: { ...l.content, widgets: fn(l.content.widgets) } } : l
+  )
 
 /** `c` with GRAPHICS layer `id`'s marks replaced by `fn(marks)`; any other
  *  kind is left as it is. */

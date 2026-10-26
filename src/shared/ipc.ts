@@ -60,6 +60,9 @@ export const IPC = {
   poseAvailable: 'pose:available',
   detectPose: 'pose:detect',
   getPose: 'pose:get',
+  // A workout's decoded recording (the overlay draws from it)
+  getWorkout: 'media:workout',
+  mediaRecordedAt: 'media:recordedAt',
   // Background jobs
   cancelJob: 'job:cancel',
   // Stills (capture a frame from a clip)
@@ -290,6 +293,12 @@ export interface IpcInvoke {
   poseAvailable: Fn<[], PoseAvailability>
   detectPose: Fn<[req: DetectPoseRequest], import('./pose').PoseData | null>
   getPose: Fn<[mediaId: string], import('./pose').PoseData | null>
+  /** A workout library item's decoded recording (rebuilt from the file when
+   *  its cache is gone or stale). */
+  getWorkout: Fn<[mediaId: string], import('./workout').WorkoutSeries>
+  /** When a video clip started recording (ISO, UTC), or null — a workout
+   *  overlay syncs to it. */
+  mediaRecordedAt: Fn<[mediaId: string], string | null>
   /** Ask a cancelable background job to stop (false = nothing to cancel). */
   cancelJob: Fn<[jobId: string], boolean>
 

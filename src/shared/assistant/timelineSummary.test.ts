@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyComposition, type AudioClip } from '../project'
-import { makeImageLayer, makeVideoLayer } from '../layers'
+import { makeImageLayer, makeVideoLayer, makeWorkoutLayer } from '../layers'
+import { newWidget } from '../workoutOverlay'
 import { summarizeTimeline } from './timelineSummary'
 import type { SourceDuration } from '../compositions'
 
@@ -19,6 +20,24 @@ const audio = (over: Partial<AudioClip>): AudioClip => ({
 })
 
 describe('summarizeTimeline', () => {
+  it('describes a workout overlay: the stretch of the recording, its speed and what it shows', () => {
+    const w = makeWorkoutLayer('w', 'fit1', 0, { inSec: 30, outSec: 830, speed: 100 }, [
+      newWidget('power', [], 'a'),
+      newWidget('liveMap', [], 'b')
+    ])
+    const [s] = summarizeTimeline({ ...createEmptyComposition(), layers: [w] }).layers
+    expect(s).toMatchObject({
+      kind: 'workout',
+      mediaId: 'fit1',
+      startSec: 0,
+      endSec: 8,
+      inSec: 30,
+      outSec: 830,
+      speed: 100,
+      shows: ['power', 'liveMap']
+    })
+  })
+
   it('lists layers by start time with their source window', () => {
     const comp = {
       ...createEmptyComposition(),

@@ -31,6 +31,7 @@ import {
 } from '@/lib/links'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { setFreezeHold, trimVideoEndBy, trimVideoStart } from '@/lib/timeline'
+import { trimWorkoutEnd, trimWorkoutStart } from '@shared/workoutOverlay'
 import { snap } from '@/lib/snap'
 import { shiftMarks } from '@shared/graphics'
 import { CLICK_SLOP, SNAP_PX } from './constants'
@@ -249,7 +250,7 @@ export function useTileDrags({
     }
     const { startSec, endSec } = layer
     const srcOut =
-      layer.content.kind === 'video'
+      layer.content.kind === 'video' || layer.content.kind === 'workout'
         ? (assetById.get(layer.content.mediaId)?.probe.durationSec ?? layer.content.outSec)
         : 0
     trackHorizontalDrag(
@@ -260,6 +261,12 @@ export function useTileDrags({
           ...p,
           layers: p.layers.map((l) => {
             if (l.id !== layer.id) return l
+            // A workout's ride window follows its edge at the tile's speed.
+            if (layer.content.kind === 'workout') {
+              return mode === 'start'
+                ? trimWorkoutStart(layer, layer.content, d)
+                : trimWorkoutEnd(layer, layer.content, d, srcOut)
+            }
             if (mode === 'start') {
               if (layer.content.kind === 'video') {
                 // Freeze-aware: drops holds trimmed past and keeps the window

@@ -1180,6 +1180,33 @@ and reading the pixel back as rgb24:
 - **Alpha survives**: a 50%-alpha `yuva420p` source keeps alpha 129 through
   it (the `aa` term defaults to 1), so background-removed clips can be tinted.
 
+## Recording time — when a clip was filmed (verified ffprobe 8.1.1, 2026-10-25)
+
+A workout overlay syncs to footage by its recording time (docs/WORKOUT-OVERLAY.md
+"Syncing to footage"), read on demand with `-show_entries format_tags`
+(`probeRecordedUtc`, `recordedUtcFromTags` in ffprobeParse.ts). Read off the
+owner's own iPhone clips:
+
+- **iPhone writes two format tags:** `creation_time` (UTC,
+  `2026-08-02T13:57:01.000000Z`) and `com.apple.quicktime.creationdate` (local
+  time with its offset, `2026-08-02T09:57:01-0400`). Every stream repeats
+  `creation_time`.
+- **They name the same instant, whatever the clip's length** (3.6 s, 12 s,
+  61 s clips alike), so they mark the same end of the recording. That it is
+  the START, as Photos treats the capture date, is consistent with the race
+  finish clip IMG_1594 against the same race's Forerunner file: the finish
+  arch is in frame about 8 s in, and the watch was stopped 9 s after that. It
+  is the reading the overlay uses; the Inspector's "Starts at" slides it.
+- **ffmpeg's `-metadata creation_time=…` writes the same `creation_time` tag**
+  (`2026-05-24T13:00:30.000000Z` back from ffprobe), which is how the e2e
+  sync spec makes a clip "filmed during" a test ride.
+- V8 (main and the renderer) parses all three forms, `-0400` offset included;
+  the parser still rewrites `-0400` → `-04:00` before parsing.
+- **A clip the editor makes keeps its source's tag.** Quick cut and Merge copy
+  the input's metadata (`-map_metadata 0`): a piece cut from 3 s into a file
+  tagged `13:00:30Z` still reads `13:00:30Z`. So an editor-made clip
+  (`generated`) is never synced to (`canSyncTo`); only originals are.
+
 ## Known constraints (product decisions, not bugs)
 
 - The export composites at a hardcoded **30fps CFR** (`r=30` base canvas +

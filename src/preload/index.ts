@@ -90,6 +90,8 @@ const api = {
   poseAvailable: invoke('poseAvailable'),
   detectPose: invoke('detectPose'),
   getPose: invoke('getPose'),
+  getWorkout: invoke('getWorkout'),
+  mediaRecordedAt: invoke('mediaRecordedAt'),
   cancelJob: invoke('cancelJob'),
   /** Subscribe to background job progress. Returns an unsubscribe function. */
   onJobProgress: subscribe('jobProgress'),

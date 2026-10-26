@@ -21,6 +21,7 @@ import { makeImageLayer, visualDuration } from '@shared/layers'
 import { ClipCard } from '@/components/ClipCard'
 import { btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 import { newId } from '@shared/ids'
+import { placeWorkout } from '@/lib/workout'
 
 /**
  * A library row: the shared `ClipCard` shell (thumbnail + hover preview + meta),
@@ -141,10 +142,9 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
 
   const isImage = isImageAsset(asset)
   const isAudio = !asset.probe.video && !!asset.probe.audio
-  // A workout has nothing to place yet: the overlay it will become is the
-  // next step (docs/WORKOUT-OVERLAY.md). It sits in the library, undraggable.
+  // A workout lands as an overlay (docs/WORKOUT-OVERLAY.md): at the playhead it
+  // syncs to the footage there when that was filmed during the workout.
   const isWorkout = isWorkoutAsset(asset)
-  const placeable = ready && !isWorkout
   const selected = selectedId === asset.id
   const pct = Math.round((job?.progress ?? 0) * 100)
 
@@ -174,7 +174,34 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   // The add / remove action column — the Library's variant of the shared card.
   const actions = (
     <>
-      {isWorkout ? null : isImage ? (
+      {isWorkout ? (
+        <>
+          <button
+            type="button"
+            disabled={!ready}
+            onClick={(e) => {
+              e.stopPropagation()
+              void placeWorkout(asset, playhead(), true)
+            }}
+            className={addBtn}
+            title="Add the workout overlay at the playhead (synced to the clip there when it was filmed during the workout)"
+          >
+            ＋ Playhead
+          </button>
+          <button
+            type="button"
+            disabled={!ready}
+            onClick={(e) => {
+              e.stopPropagation()
+              void placeWorkout(asset, endOfTimeline(), false)
+            }}
+            className={addBtn}
+            title="Add the workout overlay to the end of the timeline (the whole workout, sped up)"
+          >
+            ＋ End
+          </button>
+        </>
+      ) : isImage ? (
         <>
           <button
             type="button"
@@ -279,9 +306,9 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
       asset={asset}
       selected={selected}
       onClick={() => select(asset.id)}
-      draggable={placeable}
+      draggable={ready}
       onDragStart={(e) => {
-        if (!placeable) {
+        if (!ready) {
           e.preventDefault()
           return
         }

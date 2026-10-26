@@ -9,7 +9,7 @@
  * follows the clip's frame rate and speed.
  */
 import { describe, expect, it } from 'vitest'
-import { makeVideoLayer, playedVideoDuration, videoSourceTime } from '@shared/layers'
+import { makeVideoLayer, makeWorkoutLayer, playedVideoDuration, videoSourceTime } from '@shared/layers'
 import {
   createEmptyComposition,
   type AudioClip,
@@ -366,6 +366,23 @@ describe('templateFromSelection', () => {
     )
     if ('error' in got) throw new Error(got.error)
     expect(got.skipped).toEqual(['video footage (add a freeze frame to save its effect)', "a clip's own audio"])
+    // A workout overlay (selected with the clip it is synced to) is named as one.
+    const withWorkout = {
+      ...c,
+      layers: [...c.layers, makeWorkoutLayer('W', 'fit', 0, { inSec: 0, outSec: 10, speed: 1 }, [])]
+    }
+    const got2 = templateFromSelection(
+      withWorkout,
+      [
+        { kind: 'layer', id: 'W' },
+        { kind: 'layer', id: 'late' }
+      ],
+      'x',
+      'i',
+      () => ''
+    )
+    if ('error' in got2) throw new Error(got2.error)
+    expect(got2.skipped).toEqual(['a workout overlay'])
     expect(templateFromSelection(c, [{ kind: 'layer', id: 'V' }], 'x', 'i', () => '')).toEqual({
       error: 'Select text, graphics, images, sounds or a frozen clip to save as a template.'
     })

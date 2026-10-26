@@ -23,6 +23,7 @@ import type { CompositionRender, Prerendered } from './exportRender'
 import { exportTextLayer } from './exportText'
 import { exportGraphicsLayer } from './exportGraphics'
 import { exportPoseOverlay } from './exportPose'
+import { exportWorkoutLayer } from './exportWorkout'
 
 /** Add a visible layer's compositor steps to the pass. */
 export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
@@ -40,6 +41,8 @@ export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
       return exportTextLayer(pass, l, c)
     case 'graphics':
       return exportGraphicsLayer(pass, l, c)
+    case 'workout':
+      return exportWorkoutLayer(pass, l, c)
     default:
       return assertNever(c, 'layer kind')
   }

@@ -20,6 +20,7 @@ import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
 import type { AudioFx } from './audioFx'
 import type { GraphicMark } from './graphics'
+import type { WorkoutContentFields } from './workoutOverlay'
 import type { PoseSettings } from './pose'
 import type { TextEffects } from './sparkle'
 import type { TextAnimation } from './textAnim'
@@ -370,7 +371,19 @@ export interface GraphicsContent {
   marks: GraphicMark[]
 }
 
-export type LayerContent = VideoContent | ImageContent | TextContent | LayoutContent | CompoundContent | GraphicsContent
+/**
+ * A WORKOUT OVERLAY: a stretch of a recorded workout (a `.fit` library item)
+ * shown as widgets — readouts and route maps — placed on the frame. The ride
+ * window plays at its own speed; widgets are in canonical px (the layer's own
+ * x/y/scale are unused). What it shows at each moment is
+ * `shared/workoutOverlay.ts` — the preview and the export both draw from it.
+ */
+export interface WorkoutContent extends WorkoutContentFields {
+  kind: 'workout'
+}
+
+export type LayerContent =
+  VideoContent | ImageContent | TextContent | LayoutContent | CompoundContent | GraphicsContent | WorkoutContent
 export type LayerKind = LayerContent['kind']
 
 /**
@@ -690,7 +703,7 @@ export interface Project extends Composition {
  *  second it plays (0 = unknown, e.g. an audio clip running "to the end"). */
 export interface MediaUse {
   mediaId: string
-  as: 'video' | 'image' | 'audio'
+  as: 'video' | 'image' | 'audio' | 'workout'
   outSec: number
 }
 
@@ -704,6 +717,7 @@ export function mediaUses(p: Pick<Project, 'layers' | 'audioClips'>): MediaUse[]
     const c = l.content
     if (c.kind === 'video') uses.push({ mediaId: c.mediaId, as: 'video', outSec: Math.max(0, c.outSec) })
     if (c.kind === 'image') uses.push({ mediaId: c.mediaId, as: 'image', outSec: 0 })
+    if (c.kind === 'workout') uses.push({ mediaId: c.mediaId, as: 'workout', outSec: Math.max(0, c.outSec) })
     if (c.kind === 'layout') {
       for (const cell of c.cells) {
         if (cell.comp) uses.push(...mediaUses(cell.comp))
@@ -801,7 +815,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 29
+export const PROJECT_VERSION = 30
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1136,6 +1150,8 @@ export function migrateProject(raw: unknown): Project {
   // (shared/pose.ts) — absent means no overlay, so nothing is rewritten.
   // v29 adds the absence-tolerant `VideoContent.tint` (shared/tint.ts) —
   // absent means untinted, so nothing is rewritten.
+  // v30 adds the `workout` layer content kind (shared/workoutOverlay.ts) —
+  // purely additive, old projects simply have none.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

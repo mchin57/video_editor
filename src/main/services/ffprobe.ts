@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import type { ProbeInfo } from '@shared/media'
 import { kindFromExt } from '@shared/media'
 import { getBinaries } from './ffmpeg'
-import { parseFfprobeJson, type FfprobeJson } from './ffprobeParse'
+import { parseFfprobeJson, recordedUtcFromTags, type FfprobeJson } from './ffprobeParse'
 
 const execFileAsync = promisify(execFile)
 
@@ -26,4 +26,18 @@ export async function probeFile(path: string): Promise<ProbeInfo> {
     { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }
   )
   return parseFfprobeJson(JSON.parse(stdout) as FfprobeJson)
+}
+
+/** When a clip started recording (ISO, UTC) per its container's tags, or null
+ *  (`recordedUtcFromTags`). Read on demand — a workout overlay asks once, when
+ *  it syncs to that clip. */
+export async function probeRecordedUtc(path: string): Promise<string | null> {
+  const { ffprobe } = await getBinaries()
+  if (!ffprobe) throw new Error('ffprobe not found')
+  const { stdout } = await execFileAsync(
+    ffprobe,
+    ['-v', 'error', '-print_format', 'json', '-show_entries', 'format_tags', path],
+    { windowsHide: true, maxBuffer: 1024 * 1024 }
+  )
+  return recordedUtcFromTags((JSON.parse(stdout) as FfprobeJson).format?.tags)
 }

@@ -12,6 +12,7 @@ import { extractedAudioClip } from '@shared/volumeLevels'
 import { playedBetween, sourceAfterPlayed } from '@shared/speed'
 import { clamp } from '@shared/math'
 import { shiftMarks } from '@shared/graphics'
+import { splitWorkout, trimWorkoutEnd, trimWorkoutStart } from '@shared/workoutOverlay'
 
 /** Cut tolerance shared by every split below (and mirrored by
  *  `splittableAt` in `lib/links.ts`, which decides whether to offer the cut). */
@@ -135,6 +136,15 @@ export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => strin
     content: { ...c, inSec: cutSource, freezes: rightFreezes.length ? rightFreezes : undefined }
   }
   return [left, right]
+}
+
+/**
+ * Split a WORKOUT overlay at absolute timeline time `atSec` into two tiles over
+ * consecutive ride windows at the same speed (`splitWorkout`, shared/
+ * workoutOverlay.ts). Null when the cut misses it or it isn't a workout.
+ */
+export function splitWorkoutLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
+  return layer.content.kind === 'workout' ? splitWorkout(layer, layer.content, atSec, makeId) : null
 }
 
 /**
@@ -306,7 +316,10 @@ export function setFreezeHold(layer: Layer, c: VideoContent, index: number, hold
 export function trimLayerEdge(layer: Layer, edge: TrimEdge, deltaSec: number, srcDurSec = 0): Trimmed<Layer> {
   const c = layer.content
   let tile = layer
-  if (c.kind === 'video') {
+  if (c.kind === 'workout') {
+    // The ride window follows the edge at the tile's speed (shared mapping).
+    tile = edge === 'start' ? trimWorkoutStart(layer, c, deltaSec) : trimWorkoutEnd(layer, c, deltaSec, srcDurSec)
+  } else if (c.kind === 'video') {
     const maxSrc = srcDurSec > 0 ? srcDurSec : c.outSec
     tile =
       edge === 'start'

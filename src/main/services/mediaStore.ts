@@ -29,8 +29,9 @@ import {
   relinkKindProblem
 } from '@shared/media'
 import { WORKOUT_SERIES_VERSION, workoutThumbSvg, type WorkoutSeries } from '@shared/workout'
+import { canSyncTo } from '@shared/workoutOverlay'
 import { getSubdir } from '../config'
-import { probeFile } from './ffprobe'
+import { probeFile, probeRecordedUtc } from './ffprobe'
 import { generateProxy, generateAlphaProxy } from './proxy'
 import { generateThumbnail } from './thumbnail'
 import { generateDisplayImage } from './image'
@@ -596,6 +597,28 @@ export async function workoutSeries(id: string, s: ProjectSession = requireSessi
   const series = await readWorkout(asset.originalPath)
   await writeWorkoutCache(s, id, series)
   return series
+}
+
+/** Recording times already read, by original path + content revision. */
+const recordedCache = new Map<string, string | null>()
+
+/** When a video clip started recording (ISO, UTC), or null when its file
+ *  doesn't say, is missing, or was made by the editor (`canSyncTo`) — what a
+ *  workout overlay syncs to. */
+export async function mediaRecordedAt(id: string, s: ProjectSession = requireSession()): Promise<string | null> {
+  const asset = await readAsset(s, id)
+  if (!asset || asset.status !== 'ok' || !canSyncTo(asset)) return null
+  const key = `${asset.originalPath}|${asset.rev ?? ''}`
+  if (!recordedCache.has(key)) {
+    recordedCache.set(
+      key,
+      await probeRecordedUtc(asset.originalPath).catch((error: unknown) => {
+        log.warn(`reading the recording time of ${id} failed`, error)
+        return null
+      })
+    )
+  }
+  return recordedCache.get(key) ?? null
 }
 
 /**

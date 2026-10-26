@@ -95,6 +95,17 @@ export const LAYER_KINDS = {
     motion: true,
     keyframes: 'transform',
     handles: 'none'
+  },
+  workout: {
+    title: 'Workout overlay',
+    name: 'Workout',
+    icon: '📈',
+    // Its widgets are placed one by one on the canvas; the layer itself has no
+    // box, motion or keyframes.
+    rotatable: false,
+    motion: false,
+    keyframes: 'none',
+    handles: 'none'
   }
 } as const satisfies Record<LayerKind, LayerKindInfo>
 
@@ -105,7 +116,7 @@ export const kindInfo = (l: { content: Pick<LayerContent, 'kind'> }): LayerKindI
  *  Layout cells and compound clips hold clips too, nested — walk those with
  *  `mediaUses`. */
 export const layerMediaId = (c: LayerContent): string | null =>
-  c.kind === 'video' || c.kind === 'image' ? c.mediaId : null
+  c.kind === 'video' || c.kind === 'image' || c.kind === 'workout' ? c.mediaId : null
 
 /** Exhaustiveness guard for a `switch` over a union: a case left unhandled makes
  *  the call a compile error. Throws if reached at runtime (bad data). */

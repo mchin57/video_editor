@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { createEmptyProject, mediaUses, referencedMediaIds } from '@shared/project'
 import { isUnknownClip } from '@shared/media'
-import { makeImageLayer, makeVideoLayer } from '@shared/layers'
+import { makeImageLayer, makeVideoLayer, makeWorkoutLayer } from '@shared/layers'
+import { reconcileKind } from '@shared/media'
 import { unknownRecords } from './unknownMedia'
 import { isUnknownFingerprint } from './fingerprint'
 
@@ -53,6 +54,15 @@ describe('unknownRecords', () => {
       expect(r.relativePath).toBeNull()
       expect(r.fileName).toBe('Unknown clip')
     }
+  })
+
+  it('a recording only a workout overlay uses becomes a workout placeholder', () => {
+    const p = createEmptyProject('p', 't')
+    p.layers = [makeWorkoutLayer('w', 'cccccccccccc', 0, { inSec: 0, outSec: 600, speed: 75 }, [])]
+    const [r] = unknownRecords(p, () => false)
+    expect([r.kind, r.probe.durationSec, r.probe.video, r.probe.audio]).toEqual(['workout', 600, null, null])
+    // Its kind reads back as a workout, so Relink asks for a workout file.
+    expect(reconcileKind(r.kind, r.probe)).toBe('workout')
   })
 
   it('returns nothing when every used clip has a record', () => {

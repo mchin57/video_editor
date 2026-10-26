@@ -6,8 +6,26 @@ import {
   parseRate,
   normalizeRotation,
   PROBE_VERSION,
+  recordedUtcFromTags,
   type FfprobeJson
 } from './ffprobeParse'
+
+describe('recordedUtcFromTags', () => {
+  it("reads an iPhone clip's capture date (its local time and offset) as UTC", () => {
+    // The tags of the owner's IMG_1594.MOV (2026-08-02 race finish).
+    const tags = {
+      creation_time: '2026-08-02T13:57:01.000000Z',
+      'com.apple.quicktime.creationdate': '2026-08-02T09:57:01-0400'
+    }
+    expect(recordedUtcFromTags(tags)).toBe('2026-08-02T13:57:01.000Z')
+  })
+
+  it('falls back to creation_time, and says null when nothing usable is there', () => {
+    expect(recordedUtcFromTags({ creation_time: '2026-05-24T13:00:30.000000Z' })).toBe('2026-05-24T13:00:30.000Z')
+    expect(recordedUtcFromTags({ 'com.apple.quicktime.creationdate': 'garbage', encoder: 'x' })).toBeNull()
+    expect(recordedUtcFromTags(undefined)).toBeNull()
+  })
+})
 
 describe('parseRate', () => {
   it('parses rationals', () => {

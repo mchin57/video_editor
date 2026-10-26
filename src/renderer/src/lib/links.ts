@@ -38,6 +38,7 @@ import {
   splitCaptionSegment,
   splitStaticLayer,
   splitVideoLayer,
+  splitWorkoutLayer,
   trimAudioEdge,
   trimCaptionEdge,
   trimLayerEdge,
@@ -64,7 +65,7 @@ export const refKeys = (refs: TimelineItemRef[]): Set<string> => new Set(refs.ma
 export type SourceDuration = (mediaId: string) => number
 
 /** The timeline's visual bands, in render order. */
-export type TileLane = 'clips' | 'layout' | 'text' | 'image' | 'graphics' | 'caption' | 'audio' | 'fx'
+export type TileLane = 'clips' | 'layout' | 'text' | 'image' | 'graphics' | 'workout' | 'caption' | 'audio' | 'fx'
 
 /**
  * Which band a layer is drawn in. The ONE definition — `timelineTiles` fills
@@ -83,6 +84,8 @@ export function layerLane(l: Layer): TileLane {
       return 'image'
     case 'graphics':
       return 'graphics'
+    case 'workout':
+      return 'workout'
     default:
       return 'clips'
   }
@@ -409,7 +412,8 @@ export function trimItemsBy(
   const keys = refKeys(refs)
   if (keys.size === 0 || delta === 0) return p
   const has = (kind: TimelineItemKind, id: string): boolean => keys.has(refKey({ kind, id }))
-  const layerSrc = (l: Layer): number => (l.content.kind === 'video' ? srcDur(l.content.mediaId) : 0)
+  const layerSrc = (l: Layer): number =>
+    l.content.kind === 'video' || l.content.kind === 'workout' ? srcDur(l.content.mediaId) : 0
   const trimLayer = (l: Layer, d: number): Trimmed<Layer> => trimLayerEdge(l, edge, d, layerSrc(l))
   const trimAudio = (a: AudioClip, d: number): Trimmed<AudioClip> => trimAudioEdge(a, edge, d, srcDur(a.mediaId))
 
@@ -523,7 +527,13 @@ export function splitItemsAt(
     }
     // Video carries a source trim through the cut; text/image are the same
     // content over two windows (with window-anchored motion/animation split).
-    const res = l.content.kind === 'video' ? splitVideoLayer(l, atSec, makeId) : splitStaticLayer(l, atSec, makeId)
+    const k = l.content.kind
+    const res =
+      k === 'video'
+        ? splitVideoLayer(l, atSec, makeId)
+        : k === 'workout'
+          ? splitWorkoutLayer(l, atSec, makeId)
+          : splitStaticLayer(l, atSec, makeId)
     if (!res) {
       layers.push(uncut(l))
       continue

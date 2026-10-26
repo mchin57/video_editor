@@ -6,7 +6,7 @@ import { detectSilence } from '../services/silence'
 import { ensureLoudness } from '../services/loudness'
 import { removeBackgroundToLibrary, segmentAvailable } from '../services/removeBackground'
 import { detectPose, getPose, poseAvailable } from '../services/poseDetect'
-import { renderAudioFxToLibrary, requireUsable } from '../services/mediaStore'
+import { mediaRecordedAt, renderAudioFxToLibrary, requireUsable, workoutSeries } from '../services/mediaStore'
 import { cancelJob } from '../services/jobs'
 import { handle } from './handle'
 
@@ -37,6 +37,9 @@ export function registerAnalysisHandlers(): void {
   handle('poseAvailable', () => poseAvailable())
   handle('detectPose', (_event, req) => detectPose(req))
   handle('getPose', (_event, mediaId) => getPose(mediaId))
+  // A workout's recording, for its overlay.
+  handle('getWorkout', (_event, mediaId) => workoutSeries(mediaId))
+  handle('mediaRecordedAt', (_event, mediaId) => mediaRecordedAt(mediaId))
   // Ask a cancelable background job to stop (false = nothing to cancel).
   handle('cancelJob', (_event, jobId) => cancelJob(jobId))
 }

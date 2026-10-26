@@ -1,4 +1,4 @@
-/** Inspector ▸ the selected LAYER (video, image, text, layout, compound clip, graphics). */
+/** Inspector ▸ the selected LAYER (video, image, text, layout, compound clip, graphics, workout). */
 
 import { type JSX } from 'react'
 import { layerFitScale } from '@shared/layers'
@@ -17,6 +17,7 @@ import { MotionFields, KeyframesSection } from './Motion'
 import { TextAnimationFields, LayerTextInput, TextEffectsFields } from './TextFields'
 import { VideoClipSections } from './VideoSections'
 import { GraphicsSection } from './GraphicsSection'
+import { WorkoutSection } from './WorkoutSection'
 
 export function LayerEditor(): JSX.Element | null {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
@@ -65,138 +66,144 @@ export function LayerEditor(): JSX.Element | null {
       {/* A graphics tile is all about its marks: the drawing tools come first. */}
       {c.kind === 'graphics' && <GraphicsSection layer={layer} content={c} />}
 
-      <CollapsibleSection id="transform" title="Transform">
-        {/* Start/End each move ONE edge (a trim, not a move), so they'd change this
+      {/* A workout overlay has no box: its timing and widgets are its own
+          section (Start/End would break its length = window ÷ speed). */}
+      {c.kind === 'workout' && <WorkoutSection layer={layer} content={c} asset={asset} linked={linked} />}
+
+      {c.kind !== 'workout' && (
+        <CollapsibleSection id="transform" title="Transform">
+          {/* Start/End each move ONE edge (a trim, not a move), so they'd change this
           tile's length out from under the rest of its group. */}
-        <div className="flex gap-2">
-          <Field label="Start (s)">
-            <NumberInput
-              step="0.1"
-              min={0}
-              max={layer.endSec - 0.2}
-              value={layer.startSec}
-              format={(v) => v.toFixed(1)}
-              disabled={linked}
-              onCommit={(v) =>
-                // A graphics tile's marks are timed from its start: keep each at
-                // its moment, like a left-edge trim on the timeline does.
-                update(
-                  id,
-                  c.kind === 'graphics'
-                    ? { startSec: v, content: { ...c, marks: shiftMarks(c.marks, v - layer.startSec) } }
-                    : { startSec: v }
-                )
-              }
-              className={`${inputCls} ${disabledCls}`}
-            />
-          </Field>
-          <Field label="End (s)">
-            <NumberInput
-              step="0.1"
-              min={layer.startSec + 0.2}
-              max={Math.max(layer.startSec + 0.2, maxEnd)}
-              value={layer.endSec}
-              format={(v) => v.toFixed(1)}
-              disabled={linked}
-              onCommit={(v) => update(id, { endSec: v })}
-              className={`${inputCls} ${disabledCls}`}
-            />
-          </Field>
-        </div>
-
-        {posKeyframed && (
-          <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
-            {keyframed
-              ? 'Position & zoom are animated by keyframes (below) — these base values are ignored.'
-              : 'Position follows the motion (below) — drag the text to move its whole path.'}
-          </p>
-        )}
-        <div className="flex gap-2">
-          <Field label="Position X">
-            <NumberInput
-              step="5"
-              value={Math.round(layer.x - frame.x)}
-              disabled={posKeyframed}
-              onCommit={(v) => update(id, { x: v + frame.x })}
-            />
-          </Field>
-          <Field label="Position Y">
-            <NumberInput
-              step="5"
-              value={Math.round(layer.y - frame.y)}
-              disabled={posKeyframed}
-              onCommit={(v) => update(id, { y: v + frame.y })}
-            />
-          </Field>
-        </div>
-
-        <Field label={`Zoom · ${Math.round((layer.scale / zoomBase) * 100)}%`}>
-          <div className={keyframed ? 'pointer-events-none opacity-40' : ''}>
-            <LiveRange
-              min={0.05}
-              max={4}
-              step={0.01}
-              value={layer.scale / zoomBase}
-              transform={(p, v) => mut(p, (l) => ({ ...l, scale: v * zoomBase }))}
-            />
+          <div className="flex gap-2">
+            <Field label="Start (s)">
+              <NumberInput
+                step="0.1"
+                min={0}
+                max={layer.endSec - 0.2}
+                value={layer.startSec}
+                format={(v) => v.toFixed(1)}
+                disabled={linked}
+                onCommit={(v) =>
+                  // A graphics tile's marks are timed from its start: keep each at
+                  // its moment, like a left-edge trim on the timeline does.
+                  update(
+                    id,
+                    c.kind === 'graphics'
+                      ? { startSec: v, content: { ...c, marks: shiftMarks(c.marks, v - layer.startSec) } }
+                      : { startSec: v }
+                  )
+                }
+                className={`${inputCls} ${disabledCls}`}
+              />
+            </Field>
+            <Field label="End (s)">
+              <NumberInput
+                step="0.1"
+                min={layer.startSec + 0.2}
+                max={Math.max(layer.startSec + 0.2, maxEnd)}
+                value={layer.endSec}
+                format={(v) => v.toFixed(1)}
+                disabled={linked}
+                onCommit={(v) => update(id, { endSec: v })}
+                className={`${inputCls} ${disabledCls}`}
+              />
+            </Field>
           </div>
-        </Field>
 
-        {/* Rotation: the same control captions use, paired with the canvas
+          {posKeyframed && (
+            <p className="mb-1 text-[10px] leading-snug text-amber-300/80">
+              {keyframed
+                ? 'Position & zoom are animated by keyframes (below) — these base values are ignored.'
+                : 'Position follows the motion (below) — drag the text to move its whole path.'}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Field label="Position X">
+              <NumberInput
+                step="5"
+                value={Math.round(layer.x - frame.x)}
+                disabled={posKeyframed}
+                onCommit={(v) => update(id, { x: v + frame.x })}
+              />
+            </Field>
+            <Field label="Position Y">
+              <NumberInput
+                step="5"
+                value={Math.round(layer.y - frame.y)}
+                disabled={posKeyframed}
+                onCommit={(v) => update(id, { y: v + frame.y })}
+              />
+            </Field>
+          </div>
+
+          <Field label={`Zoom · ${Math.round((layer.scale / zoomBase) * 100)}%`}>
+            <div className={keyframed ? 'pointer-events-none opacity-40' : ''}>
+              <LiveRange
+                min={0.05}
+                max={4}
+                step={0.01}
+                value={layer.scale / zoomBase}
+                transform={(p, v) => mut(p, (l) => ({ ...l, scale: v * zoomBase }))}
+              />
+            </div>
+          </Field>
+
+          {/* Rotation: the same control captions use, paired with the canvas
           handle. Layouts and compound clips don't rotate (yet). */}
-        {kind.rotatable && (
-          <AngleField
-            value={layer.rotationDeg ?? 0}
-            onChange={(deg) => update(id, { rotationDeg: deg || undefined })}
-          />
-        )}
-        {c.kind === 'video' && (
-          <div className="mb-2 flex gap-1">
-            <button
-              type="button"
-              className={toggleCls(!!c.flipH)}
-              onClick={() => updateContent(id, { flipH: !c.flipH })}
-              title="Mirror left–right"
-            >
-              ⇋ Flip H
-            </button>
-            <button
-              type="button"
-              className={toggleCls(!!c.flipV)}
-              onClick={() => updateContent(id, { flipV: !c.flipV })}
-              title="Mirror top–bottom"
-            >
-              ⇵ Flip V
-            </button>
-          </div>
-        )}
+          {kind.rotatable && (
+            <AngleField
+              value={layer.rotationDeg ?? 0}
+              onChange={(deg) => update(id, { rotationDeg: deg || undefined })}
+            />
+          )}
+          {c.kind === 'video' && (
+            <div className="mb-2 flex gap-1">
+              <button
+                type="button"
+                className={toggleCls(!!c.flipH)}
+                onClick={() => updateContent(id, { flipH: !c.flipH })}
+                title="Mirror left–right"
+              >
+                ⇋ Flip H
+              </button>
+              <button
+                type="button"
+                className={toggleCls(!!c.flipV)}
+                onClick={() => updateContent(id, { flipV: !c.flipV })}
+                title="Mirror top–bottom"
+              >
+                ⇵ Flip V
+              </button>
+            </div>
+          )}
 
-        <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
-          <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
-          Visible
-        </label>
+          <label className="mb-3 flex items-center gap-2 text-xs text-zinc-300">
+            <input type="checkbox" checked={!layer.hidden} onChange={() => update(id, { hidden: !layer.hidden })} />
+            Visible
+          </label>
 
-        {/* Any ordinary tile can become a compound clip: it moves into a nested
+          {/* Any ordinary tile can become a compound clip: it moves into a nested
           timeline you then edit on its own. Linked tiles are excluded — their
           partners would be left behind in the parent. */}
-        {c.kind !== 'compound' && (
-          <button
-            onClick={() => {
-              useProject.getState().convertLayerToComp(id)
-              useProject.getState().enterComposition({ layerId: id })
-            }}
-            disabled={linked}
-            className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
-            title={
-              linked
-                ? 'Not available on a linked tile — its partners would stay behind (unlink first)'
-                : 'Move this into its own nested timeline and open it'
-            }
-          >
-            🧩 Edit as compound clip
-          </button>
-        )}
-      </CollapsibleSection>
+          {c.kind !== 'compound' && (
+            <button
+              onClick={() => {
+                useProject.getState().convertLayerToComp(id)
+                useProject.getState().enterComposition({ layerId: id })
+              }}
+              disabled={linked}
+              className={`mb-1 w-full rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
+              title={
+                linked
+                  ? 'Not available on a linked tile — its partners would stay behind (unlink first)'
+                  : 'Move this into its own nested timeline and open it'
+              }
+            >
+              🧩 Edit as compound clip
+            </button>
+          )}
+        </CollapsibleSection>
+      )}
 
       {/* Straight-line motion: start point → end point over a duration. Two
           keyframes under the hood (shared/motion.ts), so for media the

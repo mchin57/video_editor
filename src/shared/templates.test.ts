@@ -147,9 +147,10 @@ describe('sanitizeTemplate', () => {
 describe('migrateTemplate', () => {
   it('leaves a current template alone and records the schema on an older one', () => {
     expect(migrateTemplate(rightBack)).toBe(rightBack)
-    // Absent means 29, the schema templates shipped with — current today.
+    // Absent means 29, the schema templates shipped with: brought up to date.
     const unversioned = { ...rightBack, projectVersion: undefined }
-    expect(migrateTemplate(unversioned)).toBe(unversioned)
+    expect(migrateTemplate(unversioned).projectVersion).toBe(PROJECT_VERSION)
+    expect(migrateTemplate(unversioned).layers).toEqual(rightBack.layers)
     const old = { ...rightBack, projectVersion: 28 }
     const m = migrateTemplate(old)
     expect(m.projectVersion).toBe(PROJECT_VERSION)

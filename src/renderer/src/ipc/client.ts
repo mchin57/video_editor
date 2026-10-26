@@ -49,6 +49,8 @@ export const {
   poseAvailable,
   detectPose,
   getPose,
+  getWorkout,
+  mediaRecordedAt,
   cancelJob,
   renderAudioFx,
   captureStillToLibrary,

@@ -17,7 +17,7 @@ const LONG_AGO = new Date(0).toISOString()
 /**
  * One placeholder per media id `doc` uses that `known` has no record of. Its
  * kind and length come from how the timeline uses it: any video use makes it a
- * video, else an image, else audio; the length is the furthest source second
+ * video, else an image, else a workout, else audio; the length is the furthest source second
  * played (0 when no use says). The empty `absolutePath` marks it as unknown
  * (see `isUnknownClip`); `UNKNOWN_FINGERPRINT` keeps it Missing until Relink.
  */
@@ -25,16 +25,28 @@ export function unknownRecords(
   doc: Pick<Project, 'layers' | 'audioClips'>,
   known: (id: string) => boolean
 ): MediaRecord[] {
-  const byId = new Map<string, { video: boolean; image: boolean; audio: boolean; outSec: number }>()
+  const byId = new Map<string, { video: boolean; image: boolean; audio: boolean; workout: boolean; outSec: number }>()
   for (const use of mediaUses(doc)) {
     if (known(use.mediaId)) continue
-    const u = byId.get(use.mediaId) ?? { video: false, image: false, audio: false, outSec: 0 }
+    const u = byId.get(use.mediaId) ?? { video: false, image: false, audio: false, workout: false, outSec: 0 }
     u[use.as] = true
     u.outSec = Math.max(u.outSec, use.outSec)
     byId.set(use.mediaId, u)
   }
   return [...byId].map(([id, u]) => {
-    const kind = u.video ? 'video' : u.image ? 'image' : 'audio'
+    const kind = u.video ? 'video' : u.image ? 'image' : u.workout ? 'workout' : 'audio'
+    if (kind === 'workout') {
+      // A recording nobody can name yet: no channels, so its overlay draws
+      // nothing until Relink finds the file.
+      const probe: ProbeInfo = {
+        durationSec: u.outSec,
+        container: 'unknown',
+        video: null,
+        audio: null,
+        workout: { sport: 'workout', startUtc: '', channels: [], distanceM: null, avgPowerW: null }
+      }
+      return placeholder(id, probe, kind)
+    }
     const probe: ProbeInfo = {
       durationSec: u.outSec,
       container: 'unknown',
@@ -59,15 +71,17 @@ export function unknownRecords(
             },
       audio: u.audio || kind === 'audio' ? { codec: 'unknown', sampleRate: 48000, channels: 2 } : null
     }
-    return {
-      id,
-      fileName: UNKNOWN_CLIP_NAME,
-      relativePath: null,
-      absolutePath: '',
-      fingerprint: UNKNOWN_FINGERPRINT,
-      importedAt: LONG_AGO,
-      probe,
-      kind
-    }
+    return placeholder(id, probe, kind)
   })
 }
+
+const placeholder = (id: string, probe: ProbeInfo, kind: MediaRecord['kind']): MediaRecord => ({
+  id,
+  fileName: UNKNOWN_CLIP_NAME,
+  relativePath: null,
+  absolutePath: '',
+  fingerprint: UNKNOWN_FINGERPRINT,
+  importedAt: LONG_AGO,
+  probe,
+  kind
+})

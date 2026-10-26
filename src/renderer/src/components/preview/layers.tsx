@@ -55,6 +55,7 @@ import {
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
+import { StackWorkout } from './workout'
 import { PoseOverlay } from './pose'
 
 /** One composited video layer: a <video> that follows the master clock. */
@@ -331,6 +332,17 @@ export function StackLayer(props: StackLayerProps): JSX.Element | null {
       return <StackCompound {...view} content={c} />
     case 'text':
       return <StackText {...view} content={c} />
+    case 'workout':
+      return (
+        <StackWorkout
+          layer={layer}
+          content={c}
+          z={props.z}
+          time={props.time}
+          selected={props.selected}
+          editable={!!props.editable}
+        />
+      )
     case 'graphics':
       return (
         <StackGraphics

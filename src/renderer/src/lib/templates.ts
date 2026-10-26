@@ -315,7 +315,14 @@ export function templateFromSelection(
       const got: ReturnType<typeof captureEffect> = effect ? null : captureEffect(l)
       if (got) effect = got
       else skipped.push(effect ? 'a second video clip' : 'video footage (add a freeze frame to save its effect)')
-    } else skipped.push(l.content.kind === 'layout' ? 'a layout' : 'a compound clip')
+    } else
+      skipped.push(
+        l.content.kind === 'layout'
+          ? 'a layout'
+          : l.content.kind === 'workout'
+            ? 'a workout overlay'
+            : 'a compound clip'
+      )
   }
   const sounds: AudioClip[] = []
   for (const a of comp.audioClips) {

@@ -27,7 +27,7 @@ import {
   unlinkItems
 } from './links'
 import { makeLayoutLayer } from '@shared/layouts'
-import { makeVideoLayer } from '@shared/layers'
+import { makeVideoLayer, makeWorkoutLayer } from '@shared/layers'
 import { createEmptyProject } from '@shared/project'
 import type {
   AudioClip,
@@ -342,6 +342,20 @@ describe('trimItemsBy', () => {
 
 describe('splitItemsAt', () => {
   const srcDur = (): number => 0 // explicit out-points everywhere in these fixtures
+
+  it('splits a workout overlay synced to its clip along with it', () => {
+    // Synced: same window as the clip, real time, ride 30–40 s.
+    const w = { ...makeWorkoutLayer('W', 'fit', 0, { inSec: 30, outSec: 40, speed: 1 }, []), linkGroupId: 'g1' }
+    const p = project({ layers: [layer('L1', 0, 10, 'g1'), w] })
+    const next = splitItemsAt(p, [L('L1'), L('W')], 4, srcDur, ids())
+    const ride = next.layers.flatMap((l) =>
+      l.content.kind === 'workout' ? [[l.startSec, l.content.inSec, l.content.outSec]] : []
+    )
+    expect(ride).toEqual([
+      [0, 30, 34],
+      [4, 34, 40]
+    ])
+  })
 
   it('splits every member the playhead crosses, at the playhead', () => {
     const next = splitItemsAt(pair(), [L('L1'), A('A1')], 5, srcDur, ids())

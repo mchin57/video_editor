@@ -6,12 +6,14 @@ import {
   createEmptyProject,
   effectiveCaptionStyle,
   effectiveStabilize,
+  mediaUses,
   migrateProject,
   pillRadiusPx,
   stabilizeOverridden
 } from './project'
 import type { CaptionSegment, CaptionsConfig, AudioClip } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
+import { makeWorkoutLayer } from './layers'
 
 describe('pillRadiusPx', () => {
   it('scales the corner radius with padding (0.6×, rounded)', () => {
@@ -554,8 +556,7 @@ describe('migrateProject — pose overlay (v28)', () => {
 })
 
 describe('migrateProject — clip tint (v29)', () => {
-  it('stamps a v28 document as v29; a tint loads as saved, and an old clip has none', () => {
-    expect(PROJECT_VERSION).toBe(29)
+  it('stamps a v28 document as current; a tint loads as saved, and an old clip has none', () => {
     const tint = { color: '#e8c290', amount: 0.6 }
     const tinted = {
       id: 'V',
@@ -569,8 +570,21 @@ describe('migrateProject — clip tint (v29)', () => {
     }
     const old = { ...tinted, id: 'O', content: { ...tinted.content, tint: undefined } }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 28, layers: [tinted, old] })
-    expect(p.version).toBe(29)
+    expect(p.version).toBe(PROJECT_VERSION)
     expect(p.layers[0]).toEqual(tinted)
     expect((p.layers[1].content as { tint?: unknown }).tint).toBeUndefined()
+  })
+})
+
+describe('migrateProject — workout overlays (v30)', () => {
+  it('stamps a v29 document as v30; a workout layer loads as saved', () => {
+    expect(PROJECT_VERSION).toBe(30)
+    const w = makeWorkoutLayer('W', 'fit', 2, { inSec: 30, outSec: 830, speed: 100 }, [
+      { id: 'p', metric: 'power', x: 190, y: 1440, sizePx: 96, color: '#FFFFFF' }
+    ])
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 29, layers: [w] })
+    expect(p.version).toBe(30)
+    expect(p.layers[0]).toEqual(w)
+    expect(mediaUses(p)).toEqual([{ mediaId: 'fit', as: 'workout', outSec: 830 }])
   })
 })

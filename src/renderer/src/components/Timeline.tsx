@@ -19,6 +19,8 @@ import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { assetAspect, assetKind, isWorkoutAsset } from '@shared/media'
 import { freezeSpans, layerLabel, makeImageLayer, visualDuration } from '@shared/layers'
+import { formatSpeed, workoutSpeed } from '@shared/workoutOverlay'
+import { placeWorkout } from '@/lib/workout'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
@@ -177,17 +179,20 @@ export function Timeline(): JSX.Element {
     const text = layers.filter((l) => layerLane(l) === 'text')
     const image = layers.filter((l) => layerLane(l) === 'image')
     const graphics = layers.filter((l) => layerLane(l) === 'graphics')
+    const workout = layers.filter((l) => layerLane(l) === 'workout')
     return {
       video,
       layout,
       text,
       image,
       graphics,
+      workout,
       vRows: packRows(video.map(spanOf)),
       lRows: packRows(layout.map(spanOf)),
       tRows: packRows(text.map(spanOf)),
       iRows: packRows(image.map(spanOf)),
-      gRows: packRows(graphics.map(spanOf))
+      gRows: packRows(graphics.map(spanOf)),
+      wRows: packRows(workout.map(spanOf))
     }
   }, [layers])
   const capRows = useMemo(() => packRows(captionSegs.map(spanOf)), [captionSegs])
@@ -210,6 +215,11 @@ export function Timeline(): JSX.Element {
     // drops onto it — tiles come from Insert ▸ Graphics.
     ...(grouped.graphics.length > 0
       ? [{ key: 'graphics' as const, label: 'Graphics', rows: rowCount(grouped.gRows) }]
+      : []),
+    // Workout overlays only once one exists (they come from a workout file in
+    // the library).
+    ...(grouped.workout.length > 0
+      ? [{ key: 'workout' as const, label: 'Workout', rows: rowCount(grouped.wRows) }]
       : []),
     ...(captionSegs.length > 0 ? [{ key: 'caption' as const, label: 'Captions', rows: rowCount(capRows) }] : []),
     { key: 'audio' as const, label: 'Audio', rows: rowCount(audRows) },
@@ -294,8 +304,11 @@ export function Timeline(): JSX.Element {
     const asset = assetById.get(id)
     if (!asset || !asset.proxyReady) return
     const kind = assetKind(asset)
-    if (kind === 'workout') return // no workout tile yet (docs/WORKOUT-OVERLAY.md)
     const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
+    if (kind === 'workout') {
+      void placeWorkout(asset, startSec, true)
+      return
+    }
     const nid = newId()
     if (kind === 'image') {
       addLayer(
@@ -373,7 +386,7 @@ export function Timeline(): JSX.Element {
   // Render one layer block within its lane.
   const layerBlock = (
     l: Layer,
-    laneKey: 'clips' | 'layout' | 'text' | 'image' | 'graphics',
+    laneKey: 'clips' | 'layout' | 'text' | 'image' | 'graphics' | 'workout',
     rows: Map<string, number>
   ): JSX.Element => {
     const left = l.startSec * pxPerSec
@@ -412,6 +425,13 @@ export function Timeline(): JSX.Element {
                 .join(' → ')})`}
             >
               ×~
+            </span>
+          ) : l.content.kind === 'workout' && workoutSpeed(l.content) !== 1 ? (
+            <span
+              className="shrink-0 rounded bg-rose-500/70 px-1 text-[8px] font-bold leading-tight text-rose-50"
+              title={`Plays the workout at ${formatSpeed(workoutSpeed(l.content))}× real time`}
+            >
+              {formatSpeed(workoutSpeed(l.content))}×
             </span>
           ) : l.content.kind === 'video' && videoSpeed(l.content) !== 1 ? (
             <span
@@ -713,6 +733,7 @@ export function Timeline(): JSX.Element {
             {!laneCollapsed('text') && grouped.text.map((l) => layerBlock(l, 'text', grouped.tRows))}
             {!laneCollapsed('image') && grouped.image.map((l) => layerBlock(l, 'image', grouped.iRows))}
             {!laneCollapsed('graphics') && grouped.graphics.map((l) => layerBlock(l, 'graphics', grouped.gRows))}
+            {!laneCollapsed('workout') && grouped.workout.map((l) => layerBlock(l, 'workout', grouped.wRows))}
 
             {/* Caption lane */}
             {!laneCollapsed('caption') &&
