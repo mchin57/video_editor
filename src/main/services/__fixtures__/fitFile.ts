@@ -25,6 +25,8 @@ export interface FitFileSpec {
   sport?: string
   /** Timer stops, `[stopSec, startSec]` after `start`. */
   pauses?: [number, number][]
+  /** Where each lap starts (seconds after `start`); absent = one lap. */
+  laps?: number[]
   /** `workout` writes a PLANNED workout: a file id and no recording. */
   type?: 'activity' | 'workout'
 }
@@ -71,7 +73,11 @@ export function buildFitFile(spec: FitFileSpec): Uint8Array {
     })
   }
   timer(last, 'stopAll')
-  write(Profile.MesgNum.LAP, { timestamp: at(last), startTime: start, totalElapsedTime: last })
+  const lapStarts = spec.laps ?? [0]
+  lapStarts.forEach((from, i) => {
+    const to = lapStarts[i + 1] ?? last
+    write(Profile.MesgNum.LAP, { timestamp: at(to), startTime: at(from), totalElapsedTime: to - from })
+  })
   write(Profile.MesgNum.SESSION, {
     timestamp: at(last),
     startTime: start,

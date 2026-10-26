@@ -37,6 +37,7 @@ import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import type { TextEdit, TextEditResult } from '@shared/assistant/onScreenText'
 import { extractAudioPieces } from '@/lib/timeline'
 import * as links from '@/lib/links'
+import { applyRanges, type WorkoutTile } from '@/lib/workoutGraph'
 import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
 import { applyTextEdits } from '@/lib/textEdits'
 import { useUi } from '@/state/ui'
@@ -62,6 +63,8 @@ export interface LayerActions {
   /** Add a workout overlay; with `linkTo`, link it to that layer (and its
    *  group) — the clip it was synced to — in the same undo step. */
   addWorkoutLayer: (layer: Layer, linkTo?: string) => void
+  /** The workout graph's Save: tiles `before` replaced by `after` (one undo step). */
+  applyWorkoutRanges: (before: Layer[], after: Layer[]) => void
   /** Replace workout layer `id`'s widgets with `fn(widgets)`. */
   updateWorkoutWidgets: (id: string, fn: (widgets: WorkoutWidget[]) => WorkoutWidget[]) => void
   /** Add a video layer (front) at `startSec`; optionally extract its audio.
@@ -171,6 +174,9 @@ export const layerActions = ({ get, commit, commitComp }: Doc): LayerActions => 
     }),
 
   updateWorkoutWidgets: (id, fn) => commitComp((p) => mapWorkoutWidgets(p, id, fn)),
+
+  applyWorkoutRanges: (before, after) =>
+    commitComp((p) => applyRanges(p, before as WorkoutTile[], after as WorkoutTile[])),
 
   addVideoLayer: (id, mediaId, startSec, durationSec, hasAudio = false, aspect) =>
     commitComp((p) => {
