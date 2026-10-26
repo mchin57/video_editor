@@ -41,6 +41,7 @@ describe('isMediaPath', () => {
     expect(isMediaPath('a.MOV')).toBe(true)
     expect(isMediaPath('a.mp3')).toBe(true)
     expect(isMediaPath('a.PNG')).toBe(true)
+    expect(isMediaPath('Morning_Ride.fit')).toBe(true)
   })
   it('rejects everything else', () => {
     expect(isMediaPath('a.txt')).toBe(false)

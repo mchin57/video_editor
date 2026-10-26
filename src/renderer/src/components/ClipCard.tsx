@@ -13,10 +13,11 @@
 import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { MediaAsset } from '@shared/media'
-import { isImageAsset } from '@shared/media'
+import { isImageAsset, isWorkoutAsset } from '@shared/media'
+import { formatDistance, sportLabel } from '@shared/workout'
 import { formatDuration } from '@/lib/format'
 import { startPointerDrag } from '@/lib/pointerDrag'
-import { audioUrl, imageUrl, proxyUrl, thumbUrl } from '@/ipc/client'
+import { audioUrl, imageUrl, proxyUrl, thumbUrl, workoutThumbUrl } from '@/ipc/client'
 import { useHoverGuard, useHoverIntent } from '@/hooks/useHoverIntent'
 import { headerBottom, popoutPlacement } from '@/lib/popoutPlacement'
 import { DescriptionBox } from './DescriptionBox'
@@ -362,6 +363,58 @@ export function AudioThumb({ asset }: { asset: MediaAsset }): JSX.Element {
   )
 }
 
+/** A workout's card thumbnail: its route (or a sparkline, for a file with no
+ *  GPS), drawn by main into the cache. Hovering pops out its description. */
+export function WorkoutThumb({ asset }: { asset: MediaAsset }): JSX.Element {
+  const [failedFor, setFailedFor] = useState<MediaAsset | null>(null)
+  const [wrapEl, setWrapEl] = useState<HTMLDivElement | null>(null)
+  const { target: popout, intent } = useHoverIntent<true>()
+  return (
+    <div
+      ref={setWrapEl}
+      data-testid="workout-thumb"
+      className="relative h-full w-full"
+      onMouseEnter={() => intent.enter(true)}
+      onMouseLeave={() => intent.leave()}
+    >
+      {failedFor === asset ? (
+        <span className="flex h-full w-full items-center justify-center text-base text-sky-300">〰</span>
+      ) : (
+        <img
+          src={workoutThumbUrl(asset)}
+          alt=""
+          onError={() => setFailedFor(asset)}
+          className="h-full w-full object-contain"
+        />
+      )}
+      {popout && wrapEl && (
+        <HoverPopout
+          asset={asset}
+          anchor={wrapEl}
+          media="none"
+          onEnter={() => intent.enter()}
+          onLeave={() => intent.leave()}
+          onPin={(on, hovered) => intent.pin(on, hovered)}
+        />
+      )}
+    </div>
+  )
+}
+
+/** A card's second line: picture size and length, or what a workout is. */
+function metaLine(asset: MediaAsset): string {
+  const w = asset.probe.workout
+  if (w) {
+    const parts = [sportLabel(w.sport)]
+    if (w.distanceM) parts.push(formatDistance(w.distanceM))
+    return [...parts, formatDuration(asset.probe.durationSec)].join(' · ')
+  }
+  const v = asset.probe.video
+  return `${v ? `${v.displayWidth}×${v.displayHeight}` : 'no video'} · ${
+    isImageAsset(asset) ? 'image' : formatDuration(asset.probe.durationSec)
+  }`
+}
+
 export function ClipBadges({ asset }: { asset: MediaAsset }): JSX.Element | null {
   const v = asset.probe.video
   if (!v) return null
@@ -382,7 +435,13 @@ function ThumbCell({ asset, proxyPct }: { asset: MediaAsset; proxyPct?: number }
   const isAudio = !asset.probe.video && !!asset.probe.audio
   return (
     <div className="relative flex h-16 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-black/60 text-zinc-600">
-      {isAudio ? <AudioThumb asset={asset} /> : <ClipThumb asset={asset} />}
+      {isWorkoutAsset(asset) ? (
+        <WorkoutThumb asset={asset} />
+      ) : isAudio ? (
+        <AudioThumb asset={asset} />
+      ) : (
+        <ClipThumb asset={asset} />
+      )}
       {!asset.proxyReady && (
         <div className="absolute inset-x-0 bottom-0 h-0.5 bg-zinc-700">
           <div className="h-full bg-sky-400 transition-all" style={{ width: `${proxyPct ?? 0}%` }} />
@@ -423,8 +482,6 @@ export function ClipCard({
   proxyPct?: number
   proxyError?: boolean
 }): JSX.Element {
-  const v = asset.probe.video
-  const isImage = isImageAsset(asset)
   const clickable = !!onClick
   return (
     <div
@@ -445,15 +502,14 @@ export function ClipCard({
         <div className="truncate text-xs font-medium text-zinc-200" title={asset.fileName}>
           {asset.fileName}
         </div>
-        <div className="mt-0.5 text-[10px] text-zinc-500">
-          {v ? `${v.displayWidth}×${v.displayHeight}` : 'no video'} ·{' '}
-          {isImage ? 'image' : formatDuration(asset.probe.durationSec)}
-        </div>
+        <div className="mt-0.5 text-[10px] text-zinc-500">{metaLine(asset)}</div>
         <div className="mt-1">
           {asset.proxyReady ? (
             <ClipBadges asset={asset} />
           ) : proxyError ? (
             <span className="text-[10px] text-rose-400">proxy failed</span>
+          ) : isWorkoutAsset(asset) ? (
+            <span className="text-[10px] text-sky-400/80">reading workout…</span>
           ) : (
             <span className="text-[10px] text-sky-400/80">generating preview… {proxyPct ?? 0}%</span>
           )}

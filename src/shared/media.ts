@@ -1,5 +1,7 @@
 /** Probed facts about a source media file, and the imported asset record. */
 
+import type { WorkoutSummary } from './workout'
+
 export interface VideoStreamInfo {
   codec: string
   /** Stored (pre-rotation) pixel dimensions. */
@@ -56,9 +58,15 @@ export interface ProbeInfo {
    *  absent = before versions. Records whose probe is stale are re-probed on
    *  open. */
   version?: number
+  /** A workout file's summary (`kind: 'workout'`), from decoding it rather
+   *  than ffprobe: such a probe has no streams, and `durationSec` is the time
+   *  from the recording's first sample to its last. */
+  workout?: WorkoutSummary
 }
 
-export type MediaKind = 'video' | 'audio' | 'image'
+/** `workout` = a recorded activity (a `.fit` file), placed as a data overlay
+ *  rather than a picture or sound (docs/WORKOUT-OVERLAY.md). */
+export type MediaKind = 'video' | 'audio' | 'image' | 'workout'
 
 /**
  * What identifies an original without reading all of it (docs/MEDIA-POINTERS.md):
@@ -176,6 +184,8 @@ export const VIDEO_EXTS = [
 ]
 export const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'wma']
 export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif']
+/** Read by the FIT decoder, never by ffmpeg. */
+export const WORKOUT_EXTS = ['fit']
 
 /** Classify a path by extension (null when unrecognised). */
 export function kindFromExt(path: string): MediaKind | null {
@@ -183,11 +193,13 @@ export function kindFromExt(path: string): MediaKind | null {
   if (IMAGE_EXTS.includes(ext)) return 'image'
   if (AUDIO_EXTS.includes(ext)) return 'audio'
   if (VIDEO_EXTS.includes(ext)) return 'video'
+  if (WORKOUT_EXTS.includes(ext)) return 'workout'
   return null
 }
 
 /** Best-effort class from the probe alone (for assets without a stored kind). */
 export function deriveKind(probe: ProbeInfo): MediaKind {
+  if (probe.workout) return 'workout'
   if (!probe.video && probe.audio) return 'audio'
   if (probe.video && probe.durationSec === 0) return 'image'
   return 'video'
@@ -201,13 +213,30 @@ export function deriveKind(probe: ProbeInfo): MediaKind {
  * containers"). A "video" that is one picture with no duration and no sound is
  * a still: a JPEG or PNG renamed `.mp4` probes as `jpeg_pipe`/`png_pipe` with
  * no duration at all (FFMPEG-NOTES "Stills with a video extension"), and as a
- * video it placed as a 0:00 clip. Anything else keeps its claim, and no claim
- * falls back to the probe alone.
+ * video it placed as a 0:00 clip. A workout is decided by its probe both
+ * ways: only the FIT decoder writes `probe.workout`, and a record claiming to be
+ * a workout without one is read from its probe instead. Anything else keeps its
+ * claim, and no claim falls back to the probe alone.
  */
 export function reconcileKind(claimed: MediaKind | null | undefined, probe: ProbeInfo): MediaKind {
+  if (probe.workout) return 'workout'
+  if (claimed === 'workout') return deriveKind(probe)
   if (claimed === 'video' && !probe.video && probe.audio) return 'audio'
   if (claimed === 'video' && probe.video && !probe.audio && probe.durationSec === 0) return 'image'
   return claimed ?? deriveKind(probe)
+}
+
+/**
+ * Why a clip can't be force-relinked to a file with this probe, or null. A
+ * workout and footage are never stand-ins for each other: the timeline holds
+ * the clip as one or the other, and "Update path anyway" keeps its tiles.
+ */
+export function relinkKindProblem(record: Pick<MediaRecord, 'kind' | 'fileName'>, probe: ProbeInfo): string | null {
+  const wasWorkout = record.kind === 'workout'
+  if (wasWorkout === !!probe.workout) return null
+  return wasWorkout
+    ? `“${record.fileName}” is a workout file; it can only be relinked to a workout file.`
+    : `That is a workout file, and “${record.fileName}” isn't: relink it to a video, audio or image file.`
 }
 
 /** The class of a newly probed file: its extension, checked against the probe. */
@@ -253,6 +282,7 @@ export function alphaInputDecoder(v: Pick<VideoStreamInfo, 'codec' | 'hasAlpha'>
 export const isImageAsset = (a: MediaAsset): boolean => assetKind(a) === 'image'
 export const isAudioAsset = (a: MediaAsset): boolean => assetKind(a) === 'audio'
 export const isVideoAsset = (a: MediaAsset): boolean => assetKind(a) === 'video'
+export const isWorkoutAsset = (a: MediaAsset): boolean => assetKind(a) === 'workout'
 
 /** A visual asset's display aspect (w/h), or undefined when its probe has no
  *  usable picture size (audio, or a failed probe). Fits new layers to the frame. */

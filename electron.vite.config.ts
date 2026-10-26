@@ -37,7 +37,9 @@ const contentSecurityPolicy = (): Plugin => ({
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // Garmin's FIT SDK ships as ES modules only; bundling it keeps the CommonJS
+    // main from having to `require` an ES module at run time.
+    plugins: [externalizeDepsPlugin({ exclude: ['@garmin/fitsdk'] })],
     resolve: { alias: { '@shared': shared } },
     build: {
       rollupOptions: {

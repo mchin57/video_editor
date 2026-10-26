@@ -1,6 +1,6 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
-import { assetAspect, assetKind, isImageAsset, isUnknownClip } from '@shared/media'
+import { assetAspect, assetKind, isImageAsset, isUnknownClip, isWorkoutAsset } from '@shared/media'
 import {
   useLibrary,
   useImportMedia,
@@ -141,6 +141,10 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
 
   const isImage = isImageAsset(asset)
   const isAudio = !asset.probe.video && !!asset.probe.audio
+  // A workout has nothing to place yet: the overlay it will become is the
+  // next step (docs/WORKOUT-OVERLAY.md). It sits in the library, undraggable.
+  const isWorkout = isWorkoutAsset(asset)
+  const placeable = ready && !isWorkout
   const selected = selectedId === asset.id
   const pct = Math.round((job?.progress ?? 0) * 100)
 
@@ -170,7 +174,7 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   // The add / remove action column — the Library's variant of the shared card.
   const actions = (
     <>
-      {isImage ? (
+      {isWorkout ? null : isImage ? (
         <>
           <button
             type="button"
@@ -275,9 +279,9 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
       asset={asset}
       selected={selected}
       onClick={() => select(asset.id)}
-      draggable={ready}
+      draggable={placeable}
       onDragStart={(e) => {
-        if (!ready) {
+        if (!placeable) {
           e.preventDefault()
           return
         }

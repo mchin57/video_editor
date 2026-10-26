@@ -10,13 +10,13 @@
 
 import { readdir, stat } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
+import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS, WORKOUT_EXTS } from '@shared/media'
 import { createLogger } from '@shared/log'
 
 const log = createLogger('import')
 
 /** Every extension the library can import, without the leading dot. */
-export const MEDIA_EXTS: readonly string[] = [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS]
+export const MEDIA_EXTS: readonly string[] = [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS, ...WORKOUT_EXTS]
 
 /** Does this filename look like media we can import? (extension only — the
  *  probe is the real authority, this just avoids probing every stray file.) */

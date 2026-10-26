@@ -2,7 +2,7 @@
 
 import type { WebContents } from 'electron'
 import type { MediaAsset } from '@shared/media'
-import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from '@shared/media'
+import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS, WORKOUT_EXTS } from '@shared/media'
 import { importManyReport } from '../services/importMany'
 import {
   ensureProxy,
@@ -20,7 +20,7 @@ import { mergeToLibrary } from '../services/merge'
 import { broadcast, sendTo } from './events'
 import { dialogsFor, handle, pickedPath } from './handle'
 
-const ALL_MEDIA = { name: 'Media', extensions: [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS] }
+const ALL_MEDIA = { name: 'Media', extensions: [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS, ...WORKOUT_EXTS] }
 const ALL_FILES = { name: 'All files', extensions: ['*'] }
 
 const mb = (bytes: number): string => `${(bytes / 1024 ** 2).toFixed(1)} MB`
@@ -74,6 +74,7 @@ export function registerMediaHandlers(): void {
         { name: 'Video', extensions: VIDEO_EXTS },
         { name: 'Audio', extensions: AUDIO_EXTS },
         { name: 'Images', extensions: IMAGE_EXTS },
+        { name: 'Workouts (.fit)', extensions: WORKOUT_EXTS },
         ALL_FILES
       ]
     })

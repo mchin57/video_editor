@@ -34,6 +34,7 @@ const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
   '.woff': 'font/woff',

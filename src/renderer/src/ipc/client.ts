@@ -94,6 +94,9 @@ export const videoProxyUrl = (asset: MediaAsset): string =>
 /** URL for a media asset's first-frame thumbnail. */
 export const thumbUrl = (m: MediaRef): string => mediaUrl(m, 'thumb.jpg')
 
+/** URL for a workout's library thumbnail: its route (an SVG). */
+export const workoutThumbUrl = (m: MediaRef): string => mediaUrl(m, 'thumb.svg')
+
 /** URL for an image asset's full display PNG (alpha preserved) — for overlays. */
 export const imageUrl = (m: MediaRef): string => mediaUrl(m, 'image.png')
 
