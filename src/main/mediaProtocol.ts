@@ -15,12 +15,18 @@ import { Readable } from 'node:stream'
 import { getBundledFontsDir } from './config'
 import { requireSession } from './services/projectSession'
 import { cacheDir } from './services/projectLayout'
+import { sharedRoot } from './services/sharedLibrary'
 
 export const MEDIA_SCHEME = 'reelmedia'
 
 /** Reserved hostname that serves bundled font files (resources/fonts) for the
  *  renderer's `@font-face` rules. Media ids are hex hashes, so it never collides. */
 export const FONTS_HOST = 'fonts'
+
+/** Reserved hostname that serves the shared library's folders
+ *  (`reelmedia://shared/<itemId>/<file>`: gallery previews and sounds). Works
+ *  with no project open; it never collides with a media id for the same reason. */
+export const SHARED_HOST = 'shared'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -31,9 +37,16 @@ const MIME: Record<string, string> = {
   '.aac': 'audio/aac',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
   '.svg': 'image/svg+xml',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
@@ -89,12 +102,17 @@ export function registerMediaProtocol(): void {
     const url = new URL(request.url)
     const id = url.hostname
     const file = decodeURIComponent(url.pathname).replace(/^\/+/, '')
-    // Bundled fonts live outside the project; serve them from their dir. Media
-    // is served from the OPEN project's cache/<id> (its derived files only —
-    // the protocol never hands out originals).
+    // Bundled fonts and the shared library live outside the project; serve them
+    // from their dirs. Media is served from the OPEN project's cache/<id> (its
+    // derived files only — the protocol never hands out a project's originals).
     let base: string | null
     try {
-      base = id === FONTS_HOST ? getBundledFontsDir() : cacheDir(requireSession().root, id)
+      base =
+        id === FONTS_HOST
+          ? getBundledFontsDir()
+          : id === SHARED_HOST
+            ? sharedRoot()
+            : cacheDir(requireSession().root, id)
     } catch {
       base = null // no project open yet
     }

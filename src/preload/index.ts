@@ -109,6 +109,15 @@ const api = {
   importTemplateDialog: invoke('importTemplateDialog'),
   instantiateTemplate: invoke('instantiateTemplate'),
 
+  // Shared library
+  listShared: invoke('listShared'),
+  addSharedFilesDialog: invoke('addSharedFilesDialog'),
+  addSharedFromLibrary: invoke('addSharedFromLibrary'),
+  saveSharedText: invoke('saveSharedText'),
+  renameShared: invoke('renameShared'),
+  deleteShared: invoke('deleteShared'),
+  instantiateShared: invoke('instantiateShared'),
+
   // AI assistant: main asks the renderer to run store ops; the renderer answers.
   onAssistantRequest: subscribe('assistantRequest'),
   assistantRespond: send('assistantResponse'),

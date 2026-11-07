@@ -15,7 +15,7 @@
 
 import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, promises as fsp } from 'node:fs'
-import { basename, dirname, join, parse } from 'node:path'
+import { basename, dirname, extname, join, parse } from 'node:path'
 import type { FingerprintField, MediaAsset, MediaKind, MediaRecord, ProbeInfo } from '@shared/media'
 import type { RelinkResult } from '@shared/ipc'
 import {
@@ -739,6 +739,28 @@ export async function getProjectMedia(ids: string[], s: ProjectSession = require
  *  if a job dies before adopting it). */
 export const tmpOutput = (prefix: string, ext: string): string =>
   join(getSubdir('tmp'), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`)
+
+/**
+ * Adopt a COPY of a file the editor keeps outside any project (a template's
+ * media, a shared-library item) as a library item in `generated/`, so the
+ * project never points into those folders. Identical content reuses the
+ * project's existing copy (`importGenerated`). The temp copy is removed if
+ * adopting fails.
+ */
+export async function copyIntoProject(
+  srcPath: string,
+  displayName: string,
+  s: ProjectSession = requireSession()
+): Promise<MediaAsset> {
+  const tmp = tmpOutput('adopt', extname(srcPath).slice(1) || 'bin')
+  try {
+    await fsp.copyFile(srcPath, tmp)
+    return await importGenerated(tmp, displayName, s)
+  } catch (error) {
+    await bestEffort(fsp.rm(tmp, { force: true }), 'removing a temp copy', log)
+    throw error
+  }
+}
 
 /**
  * Pull a source file's audio into the library as a standalone audio asset (no

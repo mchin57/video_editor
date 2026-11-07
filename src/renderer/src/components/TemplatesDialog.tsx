@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { MediaAsset } from '@shared/media'
-import { createEmptyComposition } from '@shared/project'
 import { newId } from '@shared/ids'
 import {
   TEMPLATE_NAME_MAX,
   templateDuration,
-  templatePreviewTime,
   templateSummary,
   type ReelTemplate,
   type TemplateEntry
@@ -26,14 +23,13 @@ import { insertTemplate } from '@/lib/insert'
 import { templateFromSelection } from '@/lib/templates'
 import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
-import { CompFill } from './preview/layers'
+import { TemplatePreview } from './TemplatePreview'
 import { btnCls, dangerBtnCls, disabledCls, inputCls, subtleBtnCls } from './ui'
 
 const TEMPLATES_KEY = ['templates']
-const NO_ASSETS = new Map<string, MediaAsset>()
 
 /**
- * Insert ▸ Template… — the template gallery (shared/templates.ts): the built-in
+ * Insert ▸ Shared ▸ Templates… — the template gallery (shared/templates.ts): the built-in
  * starters and your own, each with a still preview, what it does, and Insert
  * (drops it at the playhead). Your own can be exported as a share file or
  * deleted; any template with a sound slot can be given a sound (a built-in's
@@ -311,29 +307,5 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
       </div>
     </div>,
     document.body
-  )
-}
-
-/** A still of the template's layers at its busiest moment, over a plain
- *  backdrop (tinted when the template tints the clip). Read-only. */
-function TemplatePreview({ template: t }: { template: ReelTemplate }): JSX.Element {
-  // Image layers point at files in the template's folder, not library media,
-  // so they can't be drawn here; text and graphics are.
-  const comp = useMemo(
-    () => ({ ...createEmptyComposition(), layers: t.layers.filter((l) => l.content.kind !== 'image') }),
-    [t.layers]
-  )
-  const tint = t.clipEffect?.tint
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none relative w-[72px] shrink-0 overflow-hidden rounded bg-gradient-to-b from-zinc-600 to-zinc-800"
-      style={{ aspectRatio: '9 / 16', containerType: 'size' }}
-    >
-      {tint && tint.amount > 0 && (
-        <div className="absolute inset-0" style={{ background: tint.color, opacity: tint.amount * 0.6 }} />
-      )}
-      <CompFill comp={comp} time={templatePreviewTime(t)} playing={false} assetById={NO_ASSETS} depth={1} muted />
-    </div>
   )
 }

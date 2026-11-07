@@ -23,7 +23,18 @@ export function getDataDir(): string {
 }
 
 export function getSubdir(
-  name: 'media' | 'projects' | 'exports' | 'tmp' | 'bin' | 'extracted' | 'stills' | 'nobg' | 'audiofx' | 'templates'
+  name:
+    | 'media'
+    | 'projects'
+    | 'exports'
+    | 'tmp'
+    | 'bin'
+    | 'extracted'
+    | 'stills'
+    | 'nobg'
+    | 'audiofx'
+    | 'templates'
+    | 'shared'
 ): string {
   const p = join(getDataDir(), name)
   mkdirSync(p, { recursive: true })

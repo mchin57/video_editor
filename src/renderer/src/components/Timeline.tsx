@@ -17,12 +17,13 @@ import type { AudioClip, Layer, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
-import { assetAspect, assetKind, isWorkoutAsset } from '@shared/media'
-import { freezeSpans, layerLabel, makeImageLayer, visualDuration } from '@shared/layers'
+import { isWorkoutAsset } from '@shared/media'
+import { freezeSpans, layerLabel, visualDuration } from '@shared/layers'
 import { formatSpeed, workoutSpeed } from '@shared/workoutOverlay'
 import { placeWorkout } from '@/lib/workout'
+import { placeAsset } from '@/lib/placeAsset'
 import { useLibrary } from '@/hooks/useMedia'
-import { activeComp, getActiveComp, getFormat, useProject } from '@/state/projectStore'
+import { activeComp, getActiveComp, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
@@ -48,7 +49,6 @@ import { MENU_SEPARATOR, useContextMenu, type ContextMenuEntry } from '@/compone
 import { levelOf } from '@shared/volumeLevels'
 import { clamp } from '@shared/math'
 import { kindInfo, layerMediaId } from '@shared/layerKinds'
-import { newId } from '@shared/ids'
 import {
   HOOK_SEC,
   SNAP_PX,
@@ -94,9 +94,6 @@ export function Timeline(): JSX.Element {
   const script = project?.script ?? EMPTY_SCRIPT
   const volumeLevels = project?.volumeLevels ?? EMPTY_LEVELS
 
-  const selectLayer = useUi((s) => s.selectLayer)
-  const selectAudio = useUi((s) => s.selectAudio)
-  const selectTile = useUi((s) => s.selectTile)
   const captionsGlobalSelected = useUi((s) => s.captionsGlobalSelected)
   const selectCaptionsGlobal = useUi((s) => s.selectCaptionsGlobal)
   // The freeze picked on the selected clip (Delete removes it; see FreezeOverlay).
@@ -109,9 +106,6 @@ export function Timeline(): JSX.Element {
   const selKeys = useMemo(() => refKeys(selection), [selection])
   const isSelected = (kind: TimelineItemRef['kind'], id: string): boolean => selKeys.has(refKey({ kind, id }))
 
-  const addLayer = useProject((s) => s.addLayer)
-  const addVideoLayer = useProject((s) => s.addVideoLayer)
-  const addAudioClip = useProject((s) => s.addAudioClip)
   const removeItems = useProject((s) => s.removeItems)
   const splitItemsAt = useProject((s) => s.splitItemsAt)
   const snapItemsToPrevious = useProject((s) => s.snapItemsToPrevious)
@@ -303,37 +297,9 @@ export function Timeline(): JSX.Element {
     assetDrag.reset()
     const asset = assetById.get(id)
     if (!asset || !asset.proxyReady) return
-    const kind = assetKind(asset)
     const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
-    if (kind === 'workout') {
-      void placeWorkout(asset, startSec, true)
-      return
-    }
-    const nid = newId()
-    if (kind === 'image') {
-      addLayer(
-        makeImageLayer(nid, id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) })
-      )
-      selectLayer(nid)
-    } else if (kind === 'audio') {
-      addAudioClip({
-        id: nid,
-        mediaId: id,
-        startSec,
-        inSec: 0,
-        outSec: asset.probe.durationSec,
-        gainDb: 0,
-        fadeInSec: 0,
-        fadeOutSec: 0,
-        duck: false,
-        kind: 'audio'
-      })
-      selectAudio(nid)
-    } else {
-      addVideoLayer(nid, id, startSec, asset.probe.durationSec, !!asset.probe.audio, assetAspect(asset))
-      // A clip with audio lands as a LINKED pair — select the whole group.
-      selectTile(getActiveComp(), { kind: 'layer', id: nid })
-    }
+    if (isWorkoutAsset(asset)) void placeWorkout(asset, startSec, true)
+    else placeAsset(asset, startSec)
   }
   const onDragOver = (e: ReactDragEvent): void => {
     if (!e.dataTransfer.types.includes(DND_MIME)) return

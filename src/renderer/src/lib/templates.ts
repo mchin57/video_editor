@@ -285,6 +285,16 @@ function captureEffect(l: Layer): { fx: TemplateClipEffect; originSec: number } 
   }
 }
 
+/** Copies of `layers` timed from `origin` (the capture's t = 0) and
+ *  unlinked — how a template or a shared text piece keeps selected layers. */
+function capturedLayers(layers: Layer[], origin: number): Layer[] {
+  return layers.map((l): Layer => {
+    const copy: Layer = { ...l, startSec: l.startSec - origin, endSec: l.endSec - origin }
+    delete copy.linkGroupId
+    return copy
+  })
+}
+
 /**
  * A template from the tiles in `refs`, or a reason it can't be made. Text,
  * graphics and image layers and sound clips are kept as they are; a FROZEN
@@ -337,11 +347,7 @@ export function templateFromSelection(
   }
   const origin = effect?.originSec ?? Math.min(...overlays.map((l) => l.startSec), ...sounds.map((a) => a.startSec))
 
-  const layers = overlays.map((l): Layer => {
-    const copy: Layer = { ...l, startSec: l.startSec - origin, endSec: l.endSec - origin }
-    delete copy.linkGroupId
-    return copy
-  })
+  const layers = capturedLayers(overlays, origin)
   const audio = sounds.map((a): TemplateAudio => ({
     label: audioLabel(a.mediaId),
     file: a.mediaId,
@@ -369,4 +375,22 @@ export function templateFromSelection(
     },
     skipped
   }
+}
+
+/**
+ * The selected TEXT layers as a shared text piece (shared/sharedLibrary.ts):
+ * copies timed from the earliest one's start, keeping everything else exactly
+ * as it is on screen (position, size, rotation, style, animation, keyframes),
+ * unlinked. `skipped` counts the other selected pieces, which are left out.
+ */
+export function textPieceFromSelection(
+  comp: Composition,
+  refs: TimelineItemRef[]
+): { layers: Layer[]; skipped: number } | { error: string } {
+  const keys = new Set(refs.map((r) => `${r.kind}:${r.id}`))
+  const texts = comp.layers.filter((l) => keys.has(`layer:${l.id}`) && l.content.kind === 'text')
+  if (!texts.length) return { error: 'Select one or more text layers on the timeline first.' }
+  const origin = Math.min(...texts.map((l) => l.startSec))
+  const layers = capturedLayers(texts, origin)
+  return { layers, skipped: refs.length - texts.length }
 }

@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react'
 import type { MediaAsset } from '@shared/media'
-import { assetAspect, assetKind, isImageAsset, isUnknownClip, isWorkoutAsset } from '@shared/media'
+import { assetKind, isAudioAsset, isImageAsset, isUnknownClip, isWorkoutAsset } from '@shared/media'
+import { sharedKindOf } from '@shared/sharedLibrary'
 import {
   useLibrary,
   useImportMedia,
@@ -14,14 +15,14 @@ import { revealFile } from '@/ipc/client'
 import { RenameMediaDialog } from '@/components/RenameMediaDialog'
 import { QuickCutDialog } from '@/components/QuickCutDialog'
 import { latestJob, useEditor } from '@/state/store'
-import { activeComp, getFormat, useProject } from '@/state/projectStore'
+import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { usePlayback } from '@/state/playback'
-import { makeImageLayer, visualDuration } from '@shared/layers'
+import { visualDuration } from '@shared/layers'
 import { ClipCard } from '@/components/ClipCard'
-import { btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/components/ui'
-import { newId } from '@shared/ids'
+import { MENU_SEPARATOR, btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 import { placeWorkout } from '@/lib/workout'
+import { placeAsset } from '@/lib/placeAsset'
 
 /**
  * A library row: the shared `ClipCard` shell (thumbnail + hover preview + meta),
@@ -33,12 +34,6 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   const selectedId = useEditor((s) => s.selectedId)
   const select = useEditor((s) => s.select)
   const job = useEditor((s) => latestJob(s.jobs, 'proxy', asset.id))
-  const addVideoLayer = useProject((s) => s.addVideoLayer)
-  const addAudioClip = useProject((s) => s.addAudioClip)
-  const addLayer = useProject((s) => s.addLayer)
-  const selectAudio = useUi((s) => s.selectAudio)
-  const selectLayer = useUi((s) => s.selectLayer)
-  const selectTile = useUi((s) => s.selectTile)
   const onTrack = useProject((s) => activeComp(s)?.audioClips.some((a) => a.mediaId === asset.id) ?? false)
   const removeMedia = useProject((s) => s.removeMedia)
 
@@ -80,6 +75,9 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
       : mergeable.length < 2
         ? 'The library needs another video clip to merge with.'
         : undefined)
+  // The shared library takes sounds, pictures and video (a copy of the file).
+  const shareTab = sharedKindOf(assetKind(asset))
+  const noShare = noFile ?? (shareTab ? undefined : 'Only sounds, pictures and video can be shared.')
   const menuItems = (): ContextMenuEntry[] => [
     { label: 'Quick cut…', testId: 'ctx-quickcut', disabled: !!noCut, reason: noCut, onSelect: () => setCutting(true) },
     {
@@ -96,6 +94,18 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
       disabled: !!noFile,
       reason: noFile,
       onSelect: () => void revealFile(asset.originalPath)
+    },
+    MENU_SEPARATOR,
+    {
+      // Opens the shared library on the clip's tab, which copies it in and
+      // says how that went (docs/SHARED-LIBRARY.md).
+      label: 'Add to shared library',
+      testId: 'ctx-add-shared',
+      disabled: !!noShare,
+      reason: noShare,
+      onSelect: () => {
+        if (shareTab) useUi.getState().setSharedOpen({ tab: shareTab, addMediaId: asset.id })
+      }
     }
   ]
   const onContextMenu = (e: React.MouseEvent): void => ctx.open(e, menuItems())
@@ -141,7 +151,8 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   )
 
   const isImage = isImageAsset(asset)
-  const isAudio = !asset.probe.video && !!asset.probe.audio
+  // The same class `placeAsset` and a timeline drop use (an MP3 with cover art is a sound).
+  const isAudio = isAudioAsset(asset)
   // A workout lands as an overlay (docs/WORKOUT-OVERLAY.md): at the playhead it
   // syncs to the footage there when that was filmed during the workout.
   const isWorkout = isWorkoutAsset(asset)
@@ -152,20 +163,9 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   const playhead = (): number => usePlayback.getState().time
   const endOfTimeline = (): number => visualDuration(useProject.getState().project?.layers ?? [])
   const addVideoAt = (startSec: number): void => {
-    if (!ready) return
-    const id = newId()
-    addVideoLayer(id, asset.id, startSec, asset.probe.durationSec, !!asset.probe.audio, assetAspect(asset))
-    // A clip with audio lands as a LINKED pair — select the whole group.
-    selectTile(useProject.getState().project, { kind: 'layer', id })
+    if (ready) placeAsset(asset, startSec)
   }
-  const addImageAt = (startSec: number): void => {
-    if (!ready) return
-    const id = newId()
-    addLayer(
-      makeImageLayer(id, asset.id, startSec, startSec + 3, { frame: getFormat().frame, aspect: assetAspect(asset) })
-    )
-    selectLayer(id)
-  }
+  const addImageAt = addVideoAt
   // Real buttons, so the keyboard reaches them (Tab, then Enter). Not ready =
   // `disabled`; it also lets clicks through to the card, as before.
   const notReadyCls = 'disabled:pointer-events-none disabled:opacity-30'
@@ -234,21 +234,7 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
           disabled={!ready}
           onClick={(e) => {
             e.stopPropagation()
-            if (!ready) return
-            const id = newId()
-            addAudioClip({
-              id,
-              mediaId: asset.id,
-              startSec: usePlayback.getState().time,
-              inSec: 0,
-              outSec: asset.probe.durationSec,
-              gainDb: 0,
-              fadeInSec: 0,
-              fadeOutSec: 0,
-              duck: false,
-              kind: 'audio'
-            })
-            selectAudio(id)
+            if (ready) placeAsset(asset, playhead())
           }}
           className={`rounded px-1 py-0.5 text-center text-[10px] font-semibold whitespace-nowrap transition ${
             onTrack ? 'bg-emerald-500/30 text-emerald-200' : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'

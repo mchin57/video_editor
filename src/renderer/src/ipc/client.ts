@@ -62,6 +62,13 @@ export const {
   exportTemplateDialog,
   importTemplateDialog,
   instantiateTemplate,
+  listShared,
+  addSharedFilesDialog,
+  addSharedFromLibrary,
+  saveSharedText,
+  renameShared,
+  deleteShared,
+  instantiateShared,
   pathForFile,
   onJobProgress,
   onLibraryChanged,
@@ -110,6 +117,10 @@ export const waveformUrl = (m: MediaRef): string => mediaUrl(m, 'waveform.png')
 
 /** URL for a bundled font file (resources/fonts/<file>) for `@font-face`. */
 export const fontUrl = (file: string): string => `reelmedia://fonts/${file}`
+
+/** URL for a file in a shared-library item's folder (its preview, its sound). */
+export const sharedUrl = (itemId: string, file: string): string =>
+  `reelmedia://shared/${encodeURIComponent(itemId)}/${encodeURIComponent(file)}`
 
 /** A rejected IPC call's own message, without Electron's wrapper
  *  ("Error invoking remote method 'media:rename': Error: …"), for showing to

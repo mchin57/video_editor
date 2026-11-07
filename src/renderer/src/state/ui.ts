@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Composition, TimelineItemRef } from '@shared/project'
 import type { ImportSkip } from '@shared/media'
 import type { GraphicTool } from '@shared/graphics'
+import type { SharedKind } from '@shared/sharedLibrary'
 import { expandGroup } from '@/lib/links'
 
 /** What the volume-level dialog is doing. */
@@ -73,6 +74,11 @@ interface UiState {
    *  Null = closed. */
   templatesOpen: 'gallery' | 'save' | null
   setTemplatesOpen: (v: 'gallery' | 'save' | null) => void
+  /** The shared library (components/SharedDialog.tsx), open on `tab`;
+   *  `addMediaId` = a library clip to copy in as it opens (the Library's
+   *  "Add to shared library"). Null = closed. */
+  sharedOpen: { tab: SharedKind; addMediaId?: string } | null
+  setSharedOpen: (v: { tab: SharedKind; addMediaId?: string } | null) => void
   /** Whether the checklist modal is open. */
   checklistOpen: boolean
   setChecklistOpen: (v: boolean) => void
@@ -197,6 +203,8 @@ export const useUi = create<UiState>((set) => ({
   setLevelDialog: (v) => set({ levelDialog: v }),
   templatesOpen: null,
   setTemplatesOpen: (v) => set({ templatesOpen: v }),
+  sharedOpen: null,
+  setSharedOpen: (v) => set({ sharedOpen: v }),
   checklistOpen: false,
   setChecklistOpen: (v) => set({ checklistOpen: v }),
   scriptOpen: false,
