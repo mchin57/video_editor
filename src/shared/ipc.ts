@@ -76,6 +76,14 @@ export const IPC = {
   exportTemplateDialog: 'templates:export',
   importTemplateDialog: 'templates:import',
   instantiateTemplate: 'templates:instantiate',
+  // Shared library (editor-wide; shared/sharedLibrary.ts)
+  listShared: 'shared:list',
+  addSharedFilesDialog: 'shared:addFiles',
+  addSharedFromLibrary: 'shared:addFromLibrary',
+  saveSharedText: 'shared:saveText',
+  renameShared: 'shared:rename',
+  deleteShared: 'shared:delete',
+  instantiateShared: 'shared:instantiate',
   // AI assistant: main ⇄ renderer bridge + status for Settings
   assistantResponse: 'assistant:response',
   assistantStatus: 'assistant:status'
@@ -215,6 +223,9 @@ type Settings = import('./settings').Settings
 type Transcript = import('./transcript').Transcript
 type ReelTemplate = import('./templates').ReelTemplate
 type TemplateEntry = import('./templates').TemplateEntry
+type SharedItem = import('./sharedLibrary').SharedItem
+type SharedAddResult = import('./sharedLibrary').SharedAddResult
+type SharedFileKind = Exclude<import('./sharedLibrary').SharedKind, 'text'>
 
 export interface IpcInvoke {
   getCapabilities: Fn<[], import('./ffmpeg').FfmpegCapabilities>
@@ -321,6 +332,20 @@ export interface IpcInvoke {
   /** The template ready to drop: its media adopted into the open project's
    *  library (copies), references swapped for their media ids. */
   instantiateTemplate: Fn<[id: string], { template: ReelTemplate; assets: MediaAsset[] }>
+
+  // Shared library — editor-wide, under <data>/shared (shared/sharedLibrary.ts).
+  // Every change returns the updated list; a dialog canceled returns null.
+  listShared: Fn<[], SharedItem[]>
+  /** Pick files for tab `kind` and copy them in. */
+  addSharedFilesDialog: Fn<[kind: SharedFileKind], SharedAddResult | null>
+  /** Copy a library clip's original in. */
+  addSharedFromLibrary: Fn<[mediaId: string], SharedAddResult>
+  /** Save text layers (timed from 0) as a text piece; the same name replaces. */
+  saveSharedText: Fn<[name: string, layers: unknown[]], SharedItem[]>
+  renameShared: Fn<[id: string, name: string], SharedItem[]>
+  deleteShared: Fn<[id: string], SharedItem[]>
+  /** Item `id`'s file copied into the open project's library. */
+  instantiateShared: Fn<[id: string], MediaAsset>
 
   /** The AI assistant's pipe server status, for Settings. */
   assistantStatus: Fn<[], import('./assistant/protocol').AssistantStatus>

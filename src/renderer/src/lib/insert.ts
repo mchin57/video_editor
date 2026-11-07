@@ -14,7 +14,9 @@ import { useUi } from '@/state/ui'
 import { makeCaption } from '@/lib/captions'
 import { idle } from '@/lib/interaction'
 import type { DropMedia } from '@/lib/templates'
-import { instantiateTemplate } from '@/ipc/client'
+import { instantiateShared, instantiateTemplate } from '@/ipc/client'
+import { placeAsset } from '@/lib/placeAsset'
+import { sharedTextTemplate, type SharedItem } from '@shared/sharedLibrary'
 
 /** A text layer at the playhead (3s), a third of the way down the frame. */
 export function insertText(): void {
@@ -65,6 +67,31 @@ export async function insertTemplate(id: string, library: DropMedia): Promise<{ 
   try {
     if (assets.length) store.addMedia(assets.map((a) => a.id))
     return store.dropTemplate(template, at, media)
+  } finally {
+    store.endGesture()
+  }
+}
+
+/**
+ * Insert shared-library item `item` at the playhead (where it was when this
+ * was called). A text piece drops like a template's text (one link group when
+ * it has several layers, selected); a sound, graphic or video is first copied
+ * into the project's library by main, then placed like a library clip — ONE
+ * undo step for both.
+ */
+export async function insertShared(item: SharedItem, library: DropMedia): Promise<void> {
+  const at = usePlayback.getState().time
+  if (item.kind === 'text') {
+    useProject.getState().dropTemplate(sharedTextTemplate(item), at, library)
+    return
+  }
+  const asset = await instantiateShared(item.id)
+  await idle() // the copy can finish mid-drag
+  const store = useProject.getState()
+  store.beginGesture()
+  try {
+    store.addMedia([asset.id])
+    placeAsset(asset, at)
   } finally {
     store.endGesture()
   }

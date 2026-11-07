@@ -10,6 +10,7 @@ import { registerExportHandlers } from './export'
 import { registerMediaHandlers } from './media'
 import { registerProjectHandlers } from './project'
 import { registerSettingsHandlers } from './settings'
+import { registerSharedLibraryHandlers } from './sharedLibrary'
 import { registerTemplateHandlers } from './templates'
 
 export function registerIpcHandlers(): void {
@@ -20,4 +21,5 @@ export function registerIpcHandlers(): void {
   registerExportHandlers()
   registerAnalysisHandlers()
   registerTemplateHandlers()
+  registerSharedLibraryHandlers()
 }

@@ -9,7 +9,7 @@
  * follows the clip's frame rate and speed.
  */
 import { describe, expect, it } from 'vitest'
-import { makeVideoLayer, makeWorkoutLayer, playedVideoDuration, videoSourceTime } from '@shared/layers'
+import { makeTextLayer, makeVideoLayer, makeWorkoutLayer, playedVideoDuration, videoSourceTime } from '@shared/layers'
 import {
   createEmptyComposition,
   type AudioClip,
@@ -19,7 +19,14 @@ import {
 } from '@shared/project'
 import { BUILT_IN_TEMPLATES } from '@shared/templateStarters'
 import { TEMPLATE_FORMAT_VERSION, type ReelTemplate } from '@shared/templates'
-import { HELD_SOURCE_FRAMES, applyTemplate, clipUnder, templateFromSelection, type DropMedia } from './templates'
+import {
+  HELD_SOURCE_FRAMES,
+  applyTemplate,
+  clipUnder,
+  templateFromSelection,
+  textPieceFromSelection,
+  type DropMedia
+} from './templates'
 import { expandGroup } from './links'
 
 let n = 0
@@ -389,5 +396,38 @@ describe('templateFromSelection', () => {
     expect(templateFromSelection(c, [{ kind: 'layer', id: 'late' }], '   ', 'i', () => '')).toEqual({
       error: 'Give the template a name.'
     })
+  })
+})
+
+describe('textPieceFromSelection', () => {
+  const text = (id: string, start: number, end: number, extra: Partial<Layer> = {}): Layer => ({
+    ...makeTextLayer(id, start, end),
+    ...extra
+  })
+
+  it('keeps the selected text layers exactly as they are on screen, timed from the first', () => {
+    const a = text('a', 4, 6, { x: 200, y: 1600, scale: 1.3, rotationDeg: 12, linkGroupId: 'g' })
+    const b = text('b', 4.5, 8)
+    const comp: Composition = { ...createEmptyComposition(), layers: [a, b, makeVideoLayer('v', 'm', 0, 10)] }
+    const got = textPieceFromSelection(comp, [
+      { kind: 'layer', id: 'a' },
+      { kind: 'layer', id: 'b' },
+      { kind: 'layer', id: 'v' }
+    ])
+    if ('error' in got) throw new Error(got.error)
+    expect(got.skipped).toBe(1)
+    const { linkGroupId: _drop, ...rest } = a
+    expect(got.layers).toEqual([
+      { ...rest, startSec: 0, endSec: 2 },
+      { ...b, startSec: 0.5, endSec: 4 }
+    ])
+  })
+
+  it('needs at least one text layer', () => {
+    const comp: Composition = { ...createEmptyComposition(), layers: [makeVideoLayer('v', 'm', 0, 10)] }
+    expect(textPieceFromSelection(comp, [{ kind: 'layer', id: 'v' }])).toEqual({
+      error: 'Select one or more text layers on the timeline first.'
+    })
+    expect(textPieceFromSelection(comp, [])).toHaveProperty('error')
   })
 })

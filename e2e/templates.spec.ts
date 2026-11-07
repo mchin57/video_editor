@@ -1,5 +1,5 @@
 /**
- * Templates (Insert ▸ Template… / Save selection as template…): the gallery
+ * Templates (Insert ▸ Shared ▸ Templates… / Save selection as template…): the gallery
  * lists the built-in starters; Insert drops one at the playhead as ONE linked,
  * selected, undoable edit; "We'll be right back" holds the frame under the
  * playhead (zoomed, tinted, silent) and moves the rest of the edit later by the
@@ -30,6 +30,7 @@ const project = (page: Page) =>
 
 async function openGallery(page: Page): Promise<void> {
   await page.getByTestId('insert-menu').click()
+  await page.getByTestId('insert-shared').click()
   await page.getByTestId('insert-template').click()
   await expect(page.getByTestId('templates-dialog')).toBeVisible()
 }

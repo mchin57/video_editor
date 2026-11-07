@@ -21,6 +21,7 @@ import { NewProjectDialog } from '@/components/NewProjectDialog'
 import { StartScreen } from '@/components/StartScreen'
 import { VolumeLevelDialog } from '@/components/VolumeLevelDialog'
 import { TemplatesDialog } from '@/components/TemplatesDialog'
+import { SharedDialog } from '@/components/SharedDialog'
 import { ImportFailures } from '@/components/ImportFailures'
 import { useImportMedia, useLibrary } from '@/hooks/useMedia'
 import { useDragDepth } from '@/lib/dragDepth'
@@ -414,6 +415,7 @@ export default function App(): JSX.Element {
         <NewProjectWindow />
         <VolumeLevelDialog />
         <TemplatesDialog />
+        <SharedDialog />
         <ImportFailures />
       </Section>
 

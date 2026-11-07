@@ -2,12 +2,10 @@
  *  share file, and getting one ready to drop (services/templates.ts). */
 
 import { app } from 'electron'
-import { copyFile, rm } from 'node:fs/promises'
-import { extname, join } from 'node:path'
-import { bestEffort, createLogger } from '@shared/log'
+import { join } from 'node:path'
 import { AUDIO_EXTS } from '@shared/media'
 import { TEMPLATE_FILE_EXT, sanitizeTemplate } from '@shared/templates'
-import { importGenerated, requireUsable, tmpOutput } from '../services/mediaStore'
+import { copyIntoProject, requireUsable } from '../services/mediaStore'
 import { requireSession } from '../services/projectSession'
 import { safeFileName } from '../services/projectLayout'
 import {
@@ -21,8 +19,6 @@ import {
   templatesRoot
 } from '../services/templates'
 import { dialogsFor, handle, pickedPath } from './handle'
-
-const log = createLogger('templates')
 
 const shareFilter = { name: 'Reel Editor template', extensions: [TEMPLATE_FILE_EXT] }
 
@@ -76,15 +72,6 @@ export function registerTemplateHandlers(): void {
     // The project gets its OWN copy of each file (in generated/), so it never
     // points into the templates folder; identical files dedupe by fingerprint.
     const s = requireSession()
-    return instantiateTemplate(templatesRoot(), id, async (path, name) => {
-      const tmp = tmpOutput('template', extname(path).slice(1) || 'bin')
-      try {
-        await copyFile(path, tmp)
-        return await importGenerated(tmp, name, s)
-      } catch (error) {
-        await bestEffort(rm(tmp, { force: true }), 'removing a template temp copy', log)
-        throw error
-      }
-    })
+    return instantiateTemplate(templatesRoot(), id, (path, name) => copyIntoProject(path, name, s))
   })
 }
