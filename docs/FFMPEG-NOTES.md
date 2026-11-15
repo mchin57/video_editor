@@ -1207,17 +1207,100 @@ renders:
   at source `speed·(t − hold)`, each within 4 source frames (the export's cfr
   resampling plus the one-frame hairline in "Speed" above).
 
-## Clip tint — colorchannelmixer after eq (verified ffmpeg 8.1.1, 2026-10-24)
+## Clip grade — lutrgb + colorchannelmixer, not eq (verified ffmpeg 8.1.1 / Electron 148 Chromium, 2026-11-15, #216)
+
+A clip's Exposure / Contrast / Saturation (`ColorAdjust`) used to draw differently
+in the preview and the export: the preview's CSS `brightness(1 + b) contrast(c)
+saturate(s)` MULTIPLIES exposure, the export's `eq=brightness=b` ADDS it (flat
+greys 64 / 128 / 192 at +0.2: 76 / 153 / 230 in Chromium, 122 / 186 / 250 through
+`eq`). The reference is the preview; the export now rebuilds it from
+`shared/grade.ts` (`gradeColorFilter`, `ffmpegFilters.ts`). Everything below was
+measured, with scratch scripts, on flat 8-bit colours.
+
+**What Chromium's three CSS filters do** (read back from a canvas `ctx.filter`, in
+this project's Electron):
+
+- `brightness(k)`: `out = k · in`, clamped to 0..255 (64 at 1.2 → 76; 192 → 230;
+  255 at 0.8 → 204).
+- `contrast(c)`: `out = c · in + 127.5 · (1 − c)`, clamped (64 at 1.5 → 32; 0 at
+  0.6 → 50; 255 at 0.6 → 204; 128 stays at 1.5).
+- `saturate(s)`: the Filter Effects matrix with luma weights 0.213 / 0.715 / 0.072
+  (NOT the 709 weights the tint uses): `#c04020` at 1.3 → (223, 57, 15); at 0.5 →
+  (140, 76, 60); greys never move.
+- **Order and clamping:** each function clamps before the next. `brightness(1.5)
+  contrast(0.5)` on white reads 191, not 255 (unclamped it would be 254.9);
+  `brightness(1.5) saturate(2)` on (64,128,192) reads (16, 208, 255), which only
+  works out with the 192·1.5 clamped to 255 first.
+- **Quantisation:** after brightness and contrast the value is held as an 8-bit
+  integer and FLOORED (64 · 1.2 = 76.8 → 76); saturate rounds (…207.9 → 208).
+  `shared/grade.ts` `applyGrade` does the same and matched Chromium exactly on 16
+  colours × 13 grades but for one float32 case (contrast 0.6 on black: 50, where
+  the exact value is 51) — read it as "within 1 level".
+
+**The ffmpeg chain:** `lutrgb=r='E':g='E':b='E'` for the exposure + contrast
+curve, `E = clip(clip(val*K,0,maxval)*C+O*maxval,0,maxval)` (`K = 1 + b`,
+`O = 0.5(1 − c)`; the inner `clip` only when `K > 1`), then `colorchannelmixer`
+with the saturation matrix. Neutral parts emit nothing.
+
+- `lutrgb` truncates like Chromium: on RGB frames it matched the exposure /
+  contrast model (floor between stages) exactly on every colour tried;
+  `colorchannelmixer` for the saturation matrix was within 1 level of it (2 on
+  the combined grades).
+- `maxval` keeps the curve right at any bit depth: a `yuv420p10le` input
+  negotiated `gbrp10le` around it. (Not numerically compared at 10 bit.)
+- ffmpeg inserts the YUV ↔ RGB conversion itself, in both directions; no
+  `format=` is needed. **Alpha survives**: a 50%-alpha `yuva420p` source kept
+  alpha 128 through both filters.
+- **The YUV round trip costs a little** — like the tint note below: an
+  identity `lutrgb` followed by `format=yuv420p` moved the 16 test colours by up
+  to 2 levels (mean −0.9). The whole chain against Chromium on
+  the same file, 13 grades × 16 colours, stayed within 8 levels (mean about 1.5),
+  where `eq` missed by up to 155. Of that, ≤ 2 is the round trip and 1–3 is
+  Chromium's canvas decode of the ungraded clip differing from ffmpeg's (below).
+- Placement is unchanged from `eq`: after crop / flips / scale, before `setsar`,
+  `format=` and `setpts`, followed by the tint's `colorchannelmixer`.
+
+**Pre-existing colour-conversion differences (not the grade):**
+
+- Reading an UNGRADED clip: Chromium's canvas `drawImage(video)` vs ffmpeg's
+  decode differs by 1–2 levels on a BT.601-matrix clip. For a clip tagged
+  `bt709` the canvas path decoded it like BT.601 (up to 14 levels off on
+  saturated colours, e.g. `#c04020` 179,53,34 vs ffmpeg's 190,62,30); the DOM
+  `<video>` in the preview does NOT: through the proxy it matched the source
+  within 5 (`e2e/colorParity.spec.ts`, ungraded case). So preview pixels must be
+  read from a real screenshot, not a canvas.
+- The export file carries NO colour tags (ffprobe: `color_space=unknown`) even
+  when the source says `bt709`. Players then guess by size; ffmpeg's own
+  decode of it matched the preview's within the same 5. Not changed here.
+- An exported flat grey patch came back with chroma 127 (source 128) and read
+  (60,62,59) for 64 when decoded to RGB; the cause (the lossy encode, most
+  likely) was not isolated. It is part of the 5 levels of ungraded baseline in
+  the e2e spec.
+- Not measured: a clip with NO colour tags at all (the clips made here always
+  carried at least the matrix, because the encoder writes it from the frame).
+  An untagged HD source's RGB in the filter graph could use a different matrix
+  from the preview's.
+
+`e2e/colorParity.spec.ts` compares real preview screenshots with real export
+frames on 8 colour patches for each slider, all three, and a tint (stated
+tolerance in the spec). Measured max difference, new / old `eq` chain:
+ungraded 5 / 5; exposure +0.2 10 / 49; exposure −0.3 7 / 63; contrast 1.5 10 /
+73; contrast 0.6 7 / 57; saturation 1.4 8 / 8; saturation 0.4 7 / 8; all three 9
+/ 52; all three plus tint 8 / 35. (Old `eq` saturation was already close.)
+
+## Clip tint — colorchannelmixer after the grade (verified ffmpeg 8.1.1, 2026-10-24)
 
 A clip's tint (`VideoContent.tint`, `shared/tint.ts`) is one 3×3 RGB matrix,
 `(1 − a)·I + a·T·Lᵀ` (T the tint colour, L the Rec. 709 luma weights). The
-export writes it as `colorchannelmixer` straight after the clip's `eq`
-(`gradeFilter`, `ffmpegFilters.ts`); the preview applies the SAME numbers as
+export writes it as `colorchannelmixer` straight after the clip's grade
+filters (`gradeFilter`, `ffmpegFilters.ts`); the preview applies the SAME numbers as
 an SVG `feColorMatrix` with `color-interpolation-filters="sRGB"`, after the
 CSS brightness/contrast/saturate chain — both on non-linear sRGB values.
 
 Verified by pushing lavfi `color` sources through the export's own shape
-(`format=yuv420p` input → `eq=…,colorchannelmixer=…,setsar=1,format=yuv420p`)
+(`format=yuv420p` input → `eq=…,colorchannelmixer=…,setsar=1,format=yuv420p` —
+the grade was `eq` when this was measured; it is `lutrgb` / `colorchannelmixer`
+now, see "Clip grade" above, whose e2e also covers grade + tint together)
 and reading the pixel back as rgb24:
 
 - **ffmpeg converts YUV → RGB around `colorchannelmixer` by itself** — no
