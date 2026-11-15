@@ -69,6 +69,22 @@ const CHROMIUM: [string, ReturnType<typeof g>, [number, number, number], [number
   ['exposure +0.5 then saturation 2', g(0.5, 1, 2), [64, 128, 192], [16, 208, 255]]
 ]
 
+describe('values from outside the Inspector’s ranges', () => {
+  it('holds saturation at 2 on both sides, so every matrix entry stays inside colorchannelmixer’s −2..2', () => {
+    expect(gradeSaturationMatrix(5)).toEqual(gradeSaturationMatrix(2))
+    expect(Math.max(...gradeSaturationMatrix(5)!.map(Math.abs))).toBeLessThanOrEqual(2)
+    expect(gradeSaturationMatrix(-1)).toEqual(gradeSaturationMatrix(0))
+    expect(gradeCssFilter({ brightness: 0, contrast: 1, saturation: 5 })).toBe('brightness(1) contrast(1) saturate(2)')
+  })
+
+  it('never writes a negative brightness() (invalid CSS would drop the whole filter)', () => {
+    expect(gradeCssFilter({ brightness: -1.5, contrast: 1, saturation: 1 })).toBe(
+      'brightness(0) contrast(1) saturate(1)'
+    )
+    expect(gradeCurve({ brightness: -1.5, contrast: 1, saturation: 1 })!.gain).toBe(0)
+  })
+})
+
 describe('applyGrade (the reference, pinned to measured Chromium output)', () => {
   it.each(CHROMIUM)('%s', (_name, grade, input, expected) => {
     // Within one level: Chromium's float32 arithmetic can land a level off an exact integer.

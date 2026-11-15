@@ -23,9 +23,19 @@ import { isNeutralColor, type ColorAdjust } from './project'
 /** Round to 6 places so the preview, the export string and the tests print the same numbers. */
 const n6 = (v: number): number => Math.round(v * 1e6) / 1e6
 
+/** The most saturation a grade applies — the Inspector slider's top. Above
+ *  about 2.08 a matrix entry leaves `colorchannelmixer`'s −2..2 range and the
+ *  export would fail, so a value from outside the UI (a hand-edited project, a
+ *  template) is held here on BOTH sides. */
+export const MAX_GRADE_SATURATION = 2
+
+/** A grade's saturation as both sides apply it (0..`MAX_GRADE_SATURATION`). */
+const gradeSaturation = (saturation: number): number => Math.min(MAX_GRADE_SATURATION, Math.max(0, saturation))
+
 /** The preview's CSS `filter` value for a grade (what the export must match). */
 export function gradeCssFilter(c: ColorAdjust): string {
-  return `brightness(${1 + c.brightness}) contrast(${c.contrast}) saturate(${c.saturation})`
+  // A negative brightness() is invalid CSS and would drop the whole filter.
+  return `brightness(${Math.max(0, 1 + c.brightness)}) contrast(${c.contrast}) saturate(${gradeSaturation(c.saturation)})`
 }
 
 /** Exposure gain and contrast: `out = clamp(contrast · clamp(gain · in) + offset)` on a 0..1 scale. */
@@ -48,8 +58,8 @@ export function gradeCurve(c: ColorAdjust): GradeCurve | null {
  * (0.213 / 0.715 / 0.072) — NOT the Rec. 709 weights the tint uses. `null` at 1.
  */
 export function gradeSaturationMatrix(saturation: number): number[] | null {
-  if (saturation === 1) return null
-  const s = saturation
+  const s = gradeSaturation(saturation)
+  if (s === 1) return null
   return [
     0.213 + 0.787 * s,
     0.715 - 0.715 * s,

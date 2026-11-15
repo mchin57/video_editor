@@ -60,6 +60,9 @@ const CASES: { name: string; color?: Grade; tint?: { color: string; amount: numb
   { name: 'saturation 1.4', color: { brightness: 0, contrast: 1, saturation: 1.4 } },
   { name: 'saturation 0.4', color: { brightness: 0, contrast: 1, saturation: 0.4 } },
   { name: 'exposure, contrast and saturation together', color: { brightness: 0.15, contrast: 1.3, saturation: 1.4 } },
+  // Exposure above 1 with contrast below 1: the one combination where the clamp
+  // BETWEEN the two steps changes the picture (bright patches clip, then compress).
+  { name: 'exposure up, contrast down', color: { brightness: 0.4, contrast: 0.6, saturation: 1.5 } },
   {
     name: 'the grade plus a tint',
     color: { brightness: 0.15, contrast: 1.3, saturation: 1.4 },
