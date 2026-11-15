@@ -325,7 +325,8 @@ export function Timeline(): JSX.Element {
     srcDur,
     assetById,
     selection,
-    selKeys
+    selKeys,
+    insertCaret
   })
 
   // Split / delete / link act on the WHOLE selection (a single tile, a link

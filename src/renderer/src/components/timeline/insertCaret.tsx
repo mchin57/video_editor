@@ -9,6 +9,7 @@
 import { useState, type JSX, type RefObject } from 'react'
 import type { TimelineItemRef } from '@shared/project'
 import { getActiveComp } from '@/state/projectStore'
+import { useLatest } from '@/hooks/useLatest'
 import { laneAt, type LaneBox } from '@/lib/lanes'
 import { refKey, refKeys, timelineTiles, type SourceDuration } from '@/lib/links'
 import { seamNear } from '@/lib/ripple'
@@ -46,10 +47,14 @@ export function useInsertCaret({
 }): InsertCaretApi {
   const [dropSec, showDropCaret] = useState<number | null>(null)
   const [dragSec, showDragCaret] = useState<number | null>(null)
+  // A tile drag keeps the `seamAt` of the render it started in, and the lanes
+  // re-pack under it (a tile dragged over another adds a row): read them live.
+  const view = useLatest({ pxPerSec, lanes, srcDur })
   const seamAt = (clientX: number, clientY: number, skip: TimelineItemRef[] = []): number | null => {
     const inner = trackInnerRef.current
     const comp = getActiveComp()
     if (!inner || !comp) return null
+    const { pxPerSec, lanes, srcDur } = view.current
     const box = inner.getBoundingClientRect()
     const skipped = refKeys(skip)
     const tiles = timelineTiles(comp, srcDur).filter((t) => !skipped.has(refKey(t.ref)))

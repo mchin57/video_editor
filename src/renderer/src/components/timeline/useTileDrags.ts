@@ -1,12 +1,13 @@
 /**
  * Timeline ▸ pressing and dragging tiles: select (Ctrl/Cmd-click to build a
- * multi-selection), move the selection, and trim an edge — of a whole link
+ * multi-selection), move the selection (Shift-drag onto a seam: insert it
+ * there, closing the hole it left), and trim an edge — of a whole link
  * group / selection through `trimItemsBy`, or of a lone tile through its own
  * freeze- and speed-aware path — and set a freeze's hold from its overlay's
  * edge. Every drag is one undo step (`commitLive`) and
  * works from its press-time snapshot. The tile rules live in `lib/links.ts`
  * and `lib/timeline.ts`; e2e: link, freezeTrim, timelineInteractions,
- * edgeScrollShrink, keybinds.
+ * edgeScrollShrink, keybinds, shiftDragInsert.
  */
 
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
@@ -35,6 +36,7 @@ import { trimWorkoutEnd, trimWorkoutStart } from '@shared/workoutOverlay'
 import { snap } from '@/lib/snap'
 import { shiftMarks } from '@shared/graphics'
 import { CLICK_SLOP, SNAP_PX } from './constants'
+import type { InsertCaretApi } from './insertCaret'
 
 export interface TileDragDeps {
   scrollRef: RefObject<HTMLDivElement | null>
@@ -50,6 +52,8 @@ export interface TileDragDeps {
   /** The current selection and its ref keys. */
   selection: TimelineItemRef[]
   selKeys: Set<string>
+  /** The seam under a pointer and the caret that shows it (Shift-drag). */
+  insertCaret: Pick<InsertCaretApi, 'seamAt' | 'showDragCaret'>
 }
 
 export function useTileDrags({
@@ -61,7 +65,8 @@ export function useTileDrags({
   srcDur,
   assetById,
   selection,
-  selKeys
+  selKeys,
+  insertCaret
 }: TileDragDeps): {
   startTileDrag: (e: ReactPointerEvent, ref: TimelineItemRef, onClick?: () => void) => void
   startLayerDrag: (e: ReactPointerEvent, layer: Layer, mode: 'start' | 'end') => void
@@ -73,12 +78,17 @@ export function useTileDrags({
   const setPlaying = usePlayback((s) => s.setPlaying)
 
   /**
-   * Follow a horizontal drag from the press `e`: `onMove(dxPx)` gets the
+   * Follow a horizontal drag from the press `e`: `onMove(dxPx, ev)` gets the
    * pointer's travel in px, plus any edge auto-scroll since the press (so a
-   * drag past the track's edge keeps going); `onUp()` runs on release. The
-   * scroller pins the track's width for the drag (`startEdgeScrollX`).
+   * drag past the track's edge keeps going), and the pointer event behind it;
+   * `onUp(ev)` runs on release. The scroller pins the track's width for the
+   * drag (`startEdgeScrollX`).
    */
-  const trackHorizontalDrag = (e: ReactPointerEvent, onMove: (dxPx: number) => void, onUp: () => void): void => {
+  const trackHorizontalDrag = (
+    e: ReactPointerEvent,
+    onMove: (dxPx: number, ev: PointerEvent) => void,
+    onUp: (ev: PointerEvent) => void
+  ): void => {
     const startX = e.clientX
     const sc = scrollRef.current
     const startScroll = sc?.scrollLeft ?? 0
@@ -87,12 +97,12 @@ export function useTileDrags({
     const move = (ev: PointerEvent): void => {
       last = ev
       scroller?.setX(ev.clientX)
-      onMove(ev.clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll))
+      onMove(ev.clientX - startX + ((sc?.scrollLeft ?? 0) - startScroll), ev)
     }
     scroller = sc ? startEdgeScrollX(sc, () => last && move(last)) : null
-    startPointerDrag(move, () => {
+    startPointerDrag(move, (ev) => {
       scroller?.stop()
-      onUp()
+      onUp(ev)
     })
   }
 
@@ -154,6 +164,12 @@ export function useTileDrags({
    * exactly — the earliest tile clamps at 0 and the rest keep their spacing.
    * Snapping follows the tile you grabbed, with the moving tiles' own edges
    * excluded so the group can't snap to itself.
+   *
+   * With SHIFT held the drag is an INSERT: the caret shows on the seam under
+   * the pointer, and releasing there lifts the set out, closes the hole it
+   * left and inserts it at the seam (`moveItemsToSeam`) — one undo step, made
+   * from the pre-drag document. Released away from a seam, or without Shift,
+   * it is the plain move.
    */
   const startGroupMove = (
     e: ReactPointerEvent,
@@ -166,17 +182,23 @@ export function useTileDrags({
     const startSec = tileOf(comp0, primary)?.startSec ?? 0
     const targets = collectSnapTargets(refKeys(refs))
     let dragged = false
+    /** The seam a Shift-drag is over (the dragged tiles don't count as edges). */
+    const seamUnder = (ev: PointerEvent): number | null =>
+      dragged && ev.shiftKey ? insertCaret.seamAt(ev.clientX, ev.clientY, refs) : null
     trackHorizontalDrag(
       e,
-      (dx) => {
+      (dx, ev) => {
         if (!dragged && Math.abs(dx) <= CLICK_SLOP) return // still a click, not a drag
         dragged = true
         const snapped = snap(startSec + dx / pxPerSec, targets, SNAP_PX / pxPerSec)
         // Always recomputed from the pre-drag COMP snapshot, so the delta can't
         // accumulate (and the transform yields a comp, spliced back at editPath).
         useProject.getState().liveUpdate(() => moveItemsBy(comp0, refs, snapped - startSec))
+        insertCaret.showDragCaret(seamUnder(ev))
       },
-      () => {
+      (ev) => {
+        const seam = seamUnder(ev)
+        insertCaret.showDragCaret(null)
         if (!dragged) {
           // Released without moving = a plain click: collapse the selection onto
           // the tile that was clicked (its group). Without this a Ctrl-built
@@ -185,6 +207,13 @@ export function useTileDrags({
           const p = getActiveComp()
           if (p) selectItems(expandGroup(p, primary), primary)
           onClick?.()
+          return
+        }
+        if (seam !== null) {
+          // Back to the pre-drag document, then ONE ordinary edit from it (a
+          // seam the set already sits at changes nothing and records nothing).
+          useProject.getState().liveUpdateRoot(() => before)
+          useProject.getState().moveItemsToSeam(refs, seam, srcDur)
           return
         }
         useProject.getState().commitLive(before)
