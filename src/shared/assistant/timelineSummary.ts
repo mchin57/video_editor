@@ -7,6 +7,7 @@ import type { Composition, Layer } from '../project'
 import { audioClipEnd } from '../project'
 import { compositionDuration, type SourceDuration } from '../compositions'
 import { workoutSpeed } from '../workoutOverlay'
+import { hasVolumeLine, sortedVolumeKeyframes } from '../audioEnvelope'
 
 export interface LayerSummary {
   id: string
@@ -35,6 +36,10 @@ export interface AudioSummary {
   inSec: number
   outSec: number | null
   linkGroupId?: string
+  /** The clip's volume line, when it has one: each point at the TIMELINE second
+   *  it plays (it stays on its sound in the source) and its dB over the clip's
+   *  normal volume (−60 = silence). Absent = flat. @see shared/audioEnvelope.ts */
+  volumeLine?: { atSec: number; db: number }[]
 }
 
 export interface TimelineSummary {
@@ -89,6 +94,12 @@ export function summarizeTimeline(comp: Composition, srcDur: SourceDuration = ()
       outSec: bounded ? r3(c.outSec) : null
     }
     if (c.linkGroupId) a.linkGroupId = c.linkGroupId
+    if (hasVolumeLine(c)) {
+      a.volumeLine = sortedVolumeKeyframes(c).map((k) => ({
+        atSec: r3(c.startSec + (k.sourceSec - c.inSec)),
+        db: k.db
+      }))
+    }
     return a
   })
   return { durationSec: r3(compositionDuration(comp, srcDur)), layers, audioClips }

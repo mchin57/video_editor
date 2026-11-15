@@ -616,6 +616,58 @@ Things the check showed:
   (the AAC encode overshoots the −1 dBFS ceiling by ~0.07 dB — still well
   clear of 0).
 
+## Volume line — an expression `volume` after the delay (verified ffmpeg 8.1.1, 2026-11-14)
+
+An audio clip's volume line (`AudioClip.volumeKeyframes`, shared/audioEnvelope.ts)
+exports as ONE extra filter after the static gain, only when the clip has points:
+`…,adelay=D|D,asetpts=N/SR/TB,volume=G,asetnsamples=n=64:p=0,volume=volume='<volumeLineExpr>':eval=frame[,afade…]`.
+Measured on a 1 kHz tone (lavfi `sine`, ×0.5) through that exact chain, raw f32
+out, RMS per window compared with `lineGainAt` / `envelopeGainAt` from the shared
+module itself (bundled into the check script):
+
+- **`t` downstream of `adelay,asetpts` is TIMELINE time** (measured while
+  planning: a step to ¼ at 3 s came out 12.04 dB quieter after it; the ramps
+  below, with a 1 s delay, agree), so the points go in as
+  `start + (sourceSec − inSec)`.
+- **A ramp linear in dB matches the shared function** to 0.09 dB in 20 ms
+  windows (worst at a kink, where the window averages two slopes): 0 → −24 dB
+  over 4 s, a −24 dB hold, −24 → +6 dB in 1 s, through WAV and AAC sources alike.
+  A stretch with both ends at −60 dB is digital silence (peak 0).
+- **`eval=frame` holds one gain per audio frame**, and the frames that reach it
+  are the decoder's: 1024 samples (21 ms) from AAC (every proxy), **4096 (85 ms)
+  from a PCM WAV**. Without re-chunking, the −24 → +6 dB/1 s ramp was 2.2 dB off
+  at its middle on a WAV (0.34 dB on AAC), and a FAST ramp (0 → −40 dB in 100 ms)
+  jumped 19.2 dB between consecutive 1 ms windows (8.5 dB at 1024-sample frames)
+  — a zipper you can measure, error −4.9 dB relative to the ideal per-sample
+  envelope. `asetnsamples=n=N:p=0` right before the expression fixes it:
+
+  | frame (samples) | fast-ramp error vs ideal | max 1 ms jump | 12 s render |
+  | --- | --- | --- | --- |
+  | 4096 (WAV, native) | −4.9 dB | 19.20 dB | 49 ms |
+  | 1024 | −15.8 dB | 8.53 dB | 49 ms |
+  | 256 | −26.3 dB | 2.13 dB | 57 ms |
+  | **64 (used)** | **−38.1 dB** | **0.53 dB** | 86 ms |
+  | 32 | −44.2 dB | 0.48 dB | 123 ms |
+
+  64 samples (1.3 ms) was chosen: the steps sit ~38 dB under the signal for a
+  ramp steeper than any real dip, at a few ms per second of audio. It applies
+  only to clips with a line, so every other export is byte-identical.
+- **With `afade`**: line → fade-in → fade-out multiply; the shared
+  `envelopeGainAt` (whose `fadeGainAt` is the linear `tri` curve) matched the
+  rendered fades + dip to **0.009 dB** at 12 sampled times. `afade` stays the
+  export's fade.
+- **With a volume level** (the static `volume=` before it): a −6 dB level and a
+  −12 dB line measured **−18.00 dB**.
+- **With ducking**: the line is applied before the sidechain, so it scales the
+  bed the compressor then ducks. A −12 dB dip where no dialogue plays measured
+  **−12.00 dB**; under dialogue a flat line left the ducked level exactly as
+  before (−31.42 dB both ways). (Seen on the way: `sidechaincompress` ends with
+  its SIDECHAIN, so a ducked bed is cut where the last non-ducked source ends —
+  12 s bed, dialogue ending at 7 s → 7.00 s of output. Not caused by the line.)
+- **50 points** (a 2,949-character expression) parse on the command line and
+  from a `-/filter_complex` graph file (identical output), track the shared
+  function to 0.094 dB in 8 ms windows, and cost ~3 ms per second of audio.
+
 ## EXIF orientation — only on the first FRAME (verified ffmpeg 8.1.1, 2026-10)
 
 - **An iPhone JPEG is stored landscape; its orientation is frame side data,

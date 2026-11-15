@@ -6,7 +6,9 @@
 import { writeAtomically } from './atomicWrite'
 import { getBinaries } from './ffmpeg'
 import { runFfmpeg } from './ffmpegRun'
+import { volumeLineExpr } from './ffmpegFilters'
 import { createLogger } from '@shared/log'
+import type { LinePoint } from '@shared/audioEnvelope'
 
 const log = createLogger('audio')
 
@@ -154,7 +156,14 @@ export interface AudioGraphItem {
   /** Pitch-preserving tempo factor (a re-timed video layer's own audio; 1 =
    *  normal). Applied as an `atempo` chain — each stage only accepts 0.5–2. */
   tempo?: number
+  /** The clip's volume line in TIMELINE seconds (`clipLinePoints`,
+   *  shared/audioEnvelope.ts). Absent/empty = flat: no filter is added. */
+  volumeLine?: LinePoint[]
 }
+
+/** Audio frame size the volume line is evaluated at — 1.3 ms at 48 kHz, so a
+ *  fast ramp doesn't step audibly (FFMPEG-NOTES "Volume line"). */
+const VOLUME_LINE_FRAME = 64
 
 /** `atempo` filter chain for an arbitrary tempo: factored into stages within
  *  the filter's [0.5, 2] per-instance range (e.g. 4 → 2×2, 0.25 → 0.5×0.5). */
@@ -205,6 +214,14 @@ export function buildAudioGraph(
     // the export dies mid-encode with EINVAL. Renormalizing after adelay is
     // verified sample-accurate — see docs/FFMPEG-NOTES.md "adelay after atrim".
     parts.push(`adelay=${startMs}|${startMs}`, 'asetpts=N/SR/TB', `volume=${gain}`)
+    // The volume line rides on the static gain: an expression in `t`, which here
+    // (after adelay + asetpts) is timeline time, evaluated per small frame.
+    if (it.volumeLine && it.volumeLine.length > 0) {
+      parts.push(
+        `asetnsamples=n=${VOLUME_LINE_FRAME}:p=0`,
+        `volume=volume='${volumeLineExpr(it.volumeLine)}':eval=frame`
+      )
+    }
     if (it.fadeInSec > 0) parts.push(`afade=t=in:st=${it.startSec.toFixed(2)}:d=${it.fadeInSec.toFixed(2)}`)
     if (it.fadeOutSec > 0)
       parts.push(`afade=t=out:st=${Math.max(0, clipEnd - it.fadeOutSec).toFixed(2)}:d=${it.fadeOutSec.toFixed(2)}`)

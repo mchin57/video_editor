@@ -117,16 +117,25 @@ export function previewAudioState(): AudioContextState | null {
 
 /**
  * Apply `gainDb` to a preview media element. `muted` forces silence.
+ * `envelope` is a LINEAR factor on top — an audio clip's fades × volume line at
+ * the playhead (`envelopeGainAt`, shared/audioEnvelope.ts), re-applied on every
+ * clock tick; 1 = none.
  *
- * At or below 0 dB this is a plain `element.volume` — exact, and the same
- * linear gain `volume=` applies. Above 0 dB the element is routed through a
- * GainNode so the boost is actually audible and matches the export.
+ * At or below unity (gain × envelope) this is a plain `element.volume` —
+ * exact, and the same linear gain `volume=` applies. Above it the element is
+ * routed through a GainNode so the boost is actually audible and matches the
+ * export.
  */
-export function useMediaGain(ref: { current: HTMLMediaElement | null }, gainDb: number, muted = false): void {
+export function useMediaGain(
+  ref: { current: HTMLMediaElement | null },
+  gainDb: number,
+  muted = false,
+  envelope = 1
+): void {
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const linear = muted ? 0 : dbToGain(gainDb)
+    const linear = muted ? 0 : dbToGain(gainDb) * envelope
     // Reach for the graph only when unity is not enough — but once an element
     // is routed it stays routed, since the routing cannot be undone.
     const gain = linear > 1 || graphs.get(el) ? routeThroughGain(el) : null
@@ -138,5 +147,5 @@ export function useMediaGain(ref: { current: HTMLMediaElement | null }, gainDb: 
     } else {
       el.volume = Math.min(1, Math.max(0, linear))
     }
-  }, [ref, gainDb, muted])
+  }, [ref, gainDb, muted, envelope])
 }

@@ -577,14 +577,44 @@ describe('migrateProject — clip tint (v29)', () => {
 })
 
 describe('migrateProject — workout overlays (v30)', () => {
-  it('stamps a v29 document as v30; a workout layer loads as saved', () => {
-    expect(PROJECT_VERSION).toBe(30)
+  it('stamps a v29 document as current; a workout layer loads as saved', () => {
     const w = makeWorkoutLayer('W', 'fit', 2, { inSec: 30, outSec: 830, speed: 100 }, [
       { id: 'p', metric: 'power', x: 190, y: 1440, sizePx: 96, color: '#FFFFFF' }
     ])
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 29, layers: [w] })
-    expect(p.version).toBe(30)
+    expect(p.version).toBe(PROJECT_VERSION)
     expect(p.layers[0]).toEqual(w)
     expect(mediaUses(p)).toEqual([{ mediaId: 'fit', as: 'workout', outSec: 830 }])
+  })
+})
+
+describe('migrateProject — audio volume lines (v31)', () => {
+  it('stamps a v30 document as v31; clips with and without a line load as saved', () => {
+    expect(PROJECT_VERSION).toBe(31)
+    const flat = {
+      id: 'A',
+      mediaId: 'm',
+      startSec: 0,
+      inSec: 0,
+      outSec: 4,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'music' as const
+    }
+    const lined = {
+      ...flat,
+      id: 'B',
+      volumeKeyframes: [
+        { sourceSec: 1, db: 0 },
+        { sourceSec: 2, db: -12 }
+      ]
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 30, audioClips: [flat, lined] })
+    expect(p.version).toBe(31)
+    expect(p.audioClips[0]).toEqual(flat)
+    expect(p.audioClips[0].volumeKeyframes).toBeUndefined()
+    expect(p.audioClips[1]).toEqual(lined)
   })
 })

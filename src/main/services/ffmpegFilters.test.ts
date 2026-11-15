@@ -9,8 +9,10 @@ import {
   piecewiseLinearExpr,
   r,
   speedRampPlayedExpr,
-  tintFilter
+  tintFilter,
+  volumeLineExpr
 } from './ffmpegFilters'
+import { VOLUME_LINE_SILENCE_DB, lineGainAt } from '@shared/audioEnvelope'
 
 describe('ffmpegFilters', () => {
   it('rounds crop geometry to integer pixels (w:h:x:y order)', () => {
@@ -135,5 +137,47 @@ describe('ffmpegFilters', () => {
       expect(buildOpacityCmdLines('op0', [{ t: 1, o: 0.5 }])).toBe('')
       expect(buildOpacityCmdLines('op0', [])).toBe('')
     })
+  })
+})
+
+describe('volumeLineExpr — the export twin of lineGainAt', () => {
+  /** Evaluate the expression the way ffmpeg would (if/lt/pow in `t`). */
+  const evalExpr = (expr: string, t: number): number =>
+    new Function('t', 'IF', 'lt', 'pow', `return ${expr.replace(/\bif\(/g, 'IF(')}`)(
+      t,
+      (c: number, a: number, b: number) => (c ? a : b),
+      (a: number, b: number) => (a < b ? 1 : 0),
+      Math.pow
+    ) as number
+
+  it('is 1 for a flat line', () => {
+    expect(volumeLineExpr([])).toBe('1')
+  })
+
+  it('pins the nested-if string', () => {
+    expect(
+      volumeLineExpr([
+        { t: 4, db: -60 },
+        { t: 2, db: 0 }
+      ])
+    ).toBe('if(lt(t,2.000),1.000000,if(lt(t,4.000),pow(10,(0.000+-60.000*(t-2.000)/2.000)/20),0))')
+  })
+
+  it('agrees with lineGainAt at every sampled time, silence and holds included', () => {
+    const pts = [
+      { t: 1, db: 3 },
+      { t: 2, db: -12 },
+      { t: 3, db: VOLUME_LINE_SILENCE_DB },
+      { t: 3.5, db: VOLUME_LINE_SILENCE_DB },
+      { t: 5, db: 0 },
+      { t: 5.25, db: 12 }
+    ]
+    const expr = volumeLineExpr(pts)
+    for (let t = 0; t <= 6; t += 0.05) expect(evalExpr(expr, t)).toBeCloseTo(lineGainAt(pts, t), 5)
+    for (const t of [1, 2, 3, 3.5, 5, 5.25]) expect(evalExpr(expr, t)).toBeCloseTo(lineGainAt(pts, t), 5)
+  })
+
+  it('a single point is a constant hold', () => {
+    expect(volumeLineExpr([{ t: 3, db: -6 }])).toBe('0.501187')
   })
 })

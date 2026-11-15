@@ -4,6 +4,7 @@ import type { ImportSkip } from '@shared/media'
 import type { GraphicTool } from '@shared/graphics'
 import type { SharedKind } from '@shared/sharedLibrary'
 import { expandGroup } from '@/lib/links'
+import type { PickedVolumePoint } from '@/lib/volumeLine'
 
 /** What the volume-level dialog is doing. */
 export type LevelDialog =
@@ -108,13 +109,25 @@ interface UiState {
    *  undo, a trim) is simply stale. Cleared with the selection. */
   selectedFreeze: PickedFreeze | null
   selectFreeze: (f: PickedFreeze | null) => void
+  /** The volume-line point picked on a selected audio tile (null = none):
+   *  Delete removes it instead of the clip. Resolved with
+   *  `pickedVolumePointIndex` (lib/volumeLine.ts), so a stale pick is none.
+   *  Cleared with the selection. */
+  selectedVolumePoint: PickedVolumePoint | null
+  selectVolumePoint: (p: PickedVolumePoint | null) => void
   /** Clear every selection (clip/caption/audio). */
   clearSelection: () => void
 }
 
 /** What every selection change resets: the stage's edit modes (the armed
  *  graphics tool, the selected mark, pose picking) and the picked freeze. */
-const NO_STAGE_EDIT = { graphicsTool: null, selectedMarkId: null, posePickLayerId: null, selectedFreeze: null }
+const NO_STAGE_EDIT = {
+  graphicsTool: null,
+  selectedMarkId: null,
+  posePickLayerId: null,
+  selectedFreeze: null,
+  selectedVolumePoint: null
+}
 
 /** The primary (last clicked) tile as a ref, or null when nothing is selected.
  *  The three `selected*Id` fields are mutually exclusive, so this is total. */
@@ -140,6 +153,7 @@ const single = (
   | 'selectedMarkId'
   | 'posePickLayerId'
   | 'selectedFreeze'
+  | 'selectedVolumePoint'
 > & {
   captionsGlobalSelected: boolean
 } => ({
@@ -219,6 +233,8 @@ export const useUi = create<UiState>((set) => ({
   setPosePickLayerId: (id) => set({ posePickLayerId: id }),
   selectedFreeze: null,
   selectFreeze: (f) => set({ selectedFreeze: f }),
+  selectedVolumePoint: null,
+  selectVolumePoint: (p) => set({ selectedVolumePoint: p }),
   clearSelection: () =>
     set({
       selection: [],

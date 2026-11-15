@@ -168,4 +168,34 @@ describe('buildAudioGraph', () => {
     expect(res.filter).toContain('afade=t=in:st=0.00:d=1.00')
     expect(res.filter).toContain('afade=t=out:st=8.00:d=2.00')
   })
+  it('pins a flat clip’s whole chain exactly (no volume line = no extra filter)', () => {
+    const flat = buildAudioGraph([item({ startSec: 2, inSec: 1, outSec: 5, gainDb: -6, fadeInSec: 0.5 })], null)!
+    expect(flat.filter).toBe(
+      '[1:a]atrim=1.000:5.000,asetpts=N/SR/TB,adelay=2000|2000,asetpts=N/SR/TB,volume=0.501,afade=t=in:st=2.00:d=0.50[ac0];[ac0]anull[aout]'
+    )
+    expect(
+      buildAudioGraph([item({ startSec: 2, inSec: 1, outSec: 5, gainDb: -6, fadeInSec: 0.5, volumeLine: [] })], null)
+    ).toEqual(flat)
+  })
+  it('a volume line rides after the static gain, re-chunked to 64 samples, before the fades', () => {
+    const res = buildAudioGraph(
+      [
+        item({
+          startSec: 2,
+          inSec: 1,
+          outSec: 5,
+          gainDb: -6,
+          fadeInSec: 0.5,
+          volumeLine: [
+            { t: 3, db: 0 },
+            { t: 4, db: -12 }
+          ]
+        })
+      ],
+      null
+    )!
+    expect(res.filter).toBe(
+      "[1:a]atrim=1.000:5.000,asetpts=N/SR/TB,adelay=2000|2000,asetpts=N/SR/TB,volume=0.501,asetnsamples=n=64:p=0,volume=volume='if(lt(t,3.000),1.000000,if(lt(t,4.000),pow(10,(0.000+-12.000*(t-3.000)/1.000)/20),0.251189))':eval=frame,afade=t=in:st=2.00:d=0.50[ac0];[ac0]anull[aout]"
+    )
+  })
 })

@@ -10,6 +10,7 @@
 
 import { isNeutralColor, type ColorAdjust } from '@shared/project'
 import { isNeutralTint, tintMatrix, type Tint } from '@shared/tint'
+import { isSilenceDb, type LinePoint } from '@shared/audioEnvelope'
 
 /** Round to an integer — ffmpeg pixel geometry (overlay x/y, scale w/h, crop). */
 export const r = (n: number): number => Math.round(n)
@@ -134,6 +135,37 @@ export function buildOpacityCmdLines(id: string, points: { t: number; o: number 
   const last = p[p.length - 1]
   lines.push(`${f3(last.t)}-${f3(last.t + 3600)} [expr] colorchannelmixer@${id} aa '${f3(last.o)}';`)
   return lines.join('\n') + '\n'
+}
+
+/**
+ * An audio clip's VOLUME LINE as a linear-gain ffmpeg expression in `t` (the
+ * export twin of `lineGainAt`, shared/audioEnvelope.ts — keep them in lockstep):
+ * straight lines in dB between points as `pow(10,(dB)/20)`, the first/last
+ * value held outside, and a hold or a stretch wholly at silence as `0`. Same
+ * `lt()` nesting as `piecewiseLinearExpr`, so a segment covers [a, b). Times are
+ * absolute timeline seconds — the `volume` filter must sit AFTER the clip's
+ * `adelay,asetpts` and run with `eval=frame` (FFMPEG-NOTES "Volume line"). The
+ * result contains commas: single-quote it.
+ */
+export function volumeLineExpr(points: LinePoint[]): string {
+  if (points.length === 0) return '1'
+  const p = [...points].sort((a, b) => a.t - b.t)
+  const hold = (db: number): string => (isSilenceDb(db) ? '0' : f6(Math.pow(10, db / 20)))
+  let expr = hold(p[p.length - 1].db)
+  if (p.length === 1) return expr
+  for (let i = p.length - 2; i >= 0; i--) {
+    const a = p[i]
+    const b = p[i + 1]
+    const span = b.t - a.t
+    const seg =
+      isSilenceDb(a.db) && isSilenceDb(b.db)
+        ? '0'
+        : span > 0
+          ? `pow(10,(${f3(a.db)}+${f3(b.db - a.db)}*(t-${f3(a.t)})/${f3(span)})/20)`
+          : hold(b.db)
+    expr = `if(lt(t,${f3(b.t)}),${seg},${expr})`
+  }
+  return `if(lt(t,${f3(p[0].t)}),${hold(p[0].db)},${expr})`
 }
 
 export function piecewiseLinearExpr(points: { t: number; v: number }[]): string {

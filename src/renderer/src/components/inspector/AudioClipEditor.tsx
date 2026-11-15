@@ -16,6 +16,7 @@ import { useUi } from '@/state/ui'
 import { Check, Field, NumberInput, Slider, dangerBtnCls, disabledCls, inputCls } from '../ui'
 import { useLinkGroupSize, LinkedNote, useDeleteTile, OverrideToggle } from './controls'
 import { SoundEffectsSection } from './SoundEffects'
+import { VolumeLineSection } from './VolumeLineSection'
 
 export function AudioClipEditor(): JSX.Element | null {
   const selectedAudioId = useUi((s) => s.selectedAudioId)
@@ -62,6 +63,7 @@ export function AudioClipEditor(): JSX.Element | null {
         🔇 Mute this clip
       </Check>
       <ClipVolumeSection clip={clip} />
+      <VolumeLineSection clip={clip} outSec={effectiveOut(clip, asset?.probe.durationSec ?? clip.outSec)} />
       {/* An audio clip's Start is a MOVE (its trim doesn't change), so unlike a
           layer's it translates onto a group: the whole group shifts by the delta. */}
       <Field label={linked ? 'Start (s) · moves the group' : 'Start (s)'}>

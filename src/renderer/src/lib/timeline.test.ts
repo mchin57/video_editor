@@ -24,6 +24,8 @@ import {
   playedVideoDuration
 } from '@shared/layers'
 import { newMark, type GraphicMark } from '@shared/graphics'
+import { envelopeGainAt } from '@shared/audioEnvelope'
+import { effectiveOut } from '@shared/project'
 import type { AudioClip, CaptionSegment, GraphicsContent, Layer, TextContent, VideoContent } from '@shared/project'
 
 function audio(over: Partial<AudioClip> = {}): AudioClip {
@@ -398,6 +400,51 @@ describe('splitAudioClip', () => {
     const [left, right] = splitAudioClip(audio({ outSec: 10, volumeLevelId: 'lvl' }), 4, 10, makeId)!
     expect(left.volumeLevelId).toBe('lvl')
     expect(right.volumeLevelId).toBe('lvl')
+  })
+  it('pins the volume line at the cut on both halves, so the level is continuous across the seam', () => {
+    const line = [
+      { sourceSec: 3, db: 0 },
+      { sourceSec: 9, db: -12 }
+    ]
+    const whole = audio({ startSec: 5, inSec: 2, outSec: 12, volumeKeyframes: line })
+    const [left, right] = splitAudioClip(whole, 9, 0, makeId)! // cut at source 6
+    const pinned = [
+      { sourceSec: 3, db: 0 },
+      { sourceSec: 6, db: -6 },
+      { sourceSec: 9, db: -12 }
+    ]
+    expect(left.volumeKeyframes).toEqual(pinned)
+    expect(right.volumeKeyframes).toEqual(pinned)
+    // Every timeline second plays at the gain the unsplit clip had there.
+    for (const t of [5, 6, 8, 8.99, 9, 9.01, 11, 14]) {
+      const half = t < 9 ? left : right
+      expect(envelopeGainAt(half, effectiveOut(half, 20), t)).toBeCloseTo(envelopeGainAt(whole, 12, t), 9)
+    }
+    // Deleting the right half's last point can't move the level at the left's seam.
+    const edited = { ...right, volumeKeyframes: right.volumeKeyframes!.slice(0, 2) }
+    expect(envelopeGainAt(edited, 12, 9)).toBeCloseTo(envelopeGainAt(left, 9, 8.999), 3)
+  })
+  it('a clip with no volume line splits into two halves with none', () => {
+    const [left, right] = splitAudioClip(audio({ outSec: 10 }), 4, 10, makeId)!
+    expect('volumeKeyframes' in left).toBe(false)
+    expect('volumeKeyframes' in right).toBe(false)
+  })
+  it('an edge trim keeps the volume points outside the window, so trimming back out restores them', () => {
+    const c = audio({
+      startSec: 0,
+      inSec: 0,
+      outSec: 10,
+      volumeKeyframes: [
+        { sourceSec: 1, db: -6 },
+        { sourceSec: 9, db: 0 }
+      ]
+    })
+    const inward = trimAudioEdge(trimAudioEdge(c, 'start', 3, 10).tile, 'end', -3, 10).tile
+    expect(inward.inSec).toBe(3)
+    expect(inward.outSec).toBe(7)
+    expect(inward.volumeKeyframes).toEqual(c.volumeKeyframes)
+    const back = trimAudioEdge(trimAudioEdge(inward, 'start', -3, 10).tile, 'end', 3, 10).tile
+    expect(back).toEqual(c)
   })
   it('accounts for the clip start and in-point when computing the cut', () => {
     const res = splitAudioClip(audio({ startSec: 5, inSec: 2, outSec: 12 }), 8, 0, makeId)

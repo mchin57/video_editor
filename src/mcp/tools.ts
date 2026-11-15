@@ -153,7 +153,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'get_timeline',
     {
       description:
-        'What is on the timeline now (the composition open in the editor): each layer with TIMELINE start/end and, for video, its SOURCE in/out; for a workout overlay, the stretch of the recording shown (inSec/outSec, seconds into the workout), its speed (workout seconds per video second) and the metrics it shows; audio clips; total duration.'
+        'What is on the timeline now (the composition open in the editor): each layer with TIMELINE start/end and, for video, its SOURCE in/out; for a workout overlay, the stretch of the recording shown (inSec/outSec, seconds into the workout), its speed (workout seconds per video second) and the metrics it shows; audio clips (a clip with a volume line lists its points as volumeLine: TIMELINE atSec + dB over its normal volume, -60 = silence; the editor draws it, and it is not editable through these tools); total duration.'
     },
     async () => result(await call('get_timeline', {}))
   )

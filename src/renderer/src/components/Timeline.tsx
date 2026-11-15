@@ -70,6 +70,8 @@ import {
 import { spanOf, packAudioRows, snapTargetsFor } from './timeline/geometry'
 import { FreezeOverlay, PoseBadge, TileThumb } from './timeline/parts'
 import { TileDescription } from './timeline/TileDescription'
+import { VolumeLineOverlay } from './timeline/VolumeLine'
+import { MIN_VOLUME_LINE_ROW_H } from '@/lib/volumeLine'
 import { TimelineToolbar } from './timeline/TimelineToolbar'
 import { LaneGutter } from './timeline/LaneGutter'
 import { useTileDrags } from './timeline/useTileDrags'
@@ -606,6 +608,9 @@ export function Timeline(): JSX.Element {
             </span>
           )}
         </div>
+        {selected && rowH >= MIN_VOLUME_LINE_ROW_H && (
+          <VolumeLineOverlay clip={a} outSec={eo} pxPerSec={pxPerSec} height={rowH - 2} />
+        )}
         <div
           onPointerDown={(e) => startAudioDrag(e, a, 'start', maxOut)}
           className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-sky-200/70"

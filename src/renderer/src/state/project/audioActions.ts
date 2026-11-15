@@ -2,8 +2,9 @@
  *  tracks, split on silence, and volume levels (a root-level list;
  *  shared/volumeLevels.ts). */
 
-import type { AudioClip } from '@shared/project'
+import type { AudioClip, VolumeKeyframe } from '@shared/project'
 import type { AudioFx } from '@shared/audioFx'
+import { withVolumeKeyframes } from '@shared/audioEnvelope'
 import { updateCompAtPath } from '@shared/compositions'
 import {
   addVolumeLevel,
@@ -20,6 +21,9 @@ import type { Doc } from './core'
 export interface AudioActions {
   addAudioClip: (clip: AudioClip) => void
   updateAudioClip: (id: string, patch: Partial<AudioClip>) => void
+  /** Replace a clip's volume line (empty = flat, the field is removed). One
+   *  undo step; a tile drag edits through `liveUpdate` + `commitLive` instead. */
+  setVolumeKeyframes: (id: string, points: VolumeKeyframe[]) => void
   removeAudioClip: (id: string) => void
   /**
    * Point every piece of a re-rendered effect at its new asset, keeping each
@@ -56,6 +60,9 @@ export const audioActions = ({ get, commit, commitComp }: Doc): AudioActions => 
 
   updateAudioClip: (id, patch) =>
     commitComp((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => ({ ...a, ...patch })) })),
+
+  setVolumeKeyframes: (id, points) =>
+    commitComp((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => withVolumeKeyframes(a, points)) })),
 
   removeAudioClip: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'audio', id }])),
 
