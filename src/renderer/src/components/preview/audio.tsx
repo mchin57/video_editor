@@ -3,6 +3,7 @@
 import { useEffect, useRef, type JSX } from 'react'
 import type { AudioClip } from '@shared/project'
 import { effectiveOut } from '@shared/project'
+import { envelopeGainAt } from '@shared/audioEnvelope'
 import { type MediaAsset } from '@shared/media'
 import { audioUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
@@ -39,9 +40,11 @@ export function AudioFollower({
   // lib/mediaGain.ts. A muted clip is held at gain 0 rather than skipped, so it
   // keeps following the playhead and unmuting mid-playback is instant. The
   // export reaches the same silence by dropping the clip — `audible` is the
-  // shared decision.
+  // shared decision. On top rides the clip's ENVELOPE at the playhead — its
+  // fades × its volume line (shared/audioEnvelope.ts, which the export bakes
+  // into `volume`/`afade`) — re-applied on every clock tick.
   const gain = useClipGain(clip, clips, durationOf)
-  useMediaGain(ref, gain.gainDb, !gain.audible)
+  useMediaGain(ref, gain.gainDb, !gain.audible, envelopeGainAt(clip, eo, time))
 
   useEffect(() => {
     const a = ref.current
