@@ -303,6 +303,18 @@ describe('moveToSeam (lift tiles out and insert them elsewhere)', () => {
     expect(starts(next)).toMatchObject({ V2: 0, A2: 0, V1: 2, A1: 2, V3: 7, A3: 7 })
   })
 
+  it('closes the hole in full when an unlinked tile starts at 0 beside the lifted clip', () => {
+    // A music bed and a title both start at 0. They cannot move earlier, but
+    // they must not hold V2 and V3 back: the hole V1 left still closes.
+    const p = {
+      ...cut(),
+      layers: [...cut().layers, makeTextLayer('Title', 1, 3)],
+      audioClips: [...cut().audioClips, audio('Bed', 0, 30)]
+    }
+    const next = moveToSeam(p, [L('V1'), A('A1')], 7)
+    expect(starts(next)).toMatchObject({ V2: 0, A2: 0, V1: 2, A1: 2, V3: 7, A3: 7, Bed: 0, Title: 0 })
+  })
+
   it('keeps the offsets inside the moved set', () => {
     const p = project({
       layers: [video('V1', 0, 5), video('V2', 5, 2, 'g'), video('V3', 7, 5)],

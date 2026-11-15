@@ -173,8 +173,30 @@ export function makeRoomFor<C extends Composition>(
 }
 
 /**
+ * Close the hole a lifted set left at `[atSec, atSec + lengthSec)`: every tile
+ * (or link group) from `atSec` on moves earlier by `lengthSec`, EACH stopping
+ * at 0 on its own. Unlike `closeGap`, one tile near the start does not hold
+ * the rest back — a music bed or title that starts at 0 beside the lifted clip
+ * stays put while the clips after the hole still close up in full (they start
+ * at least `lengthSec` in, so they always can).
+ */
+function closeHole<C extends Composition>(c: C, atSec: number, lengthSec: number, skip: TimelineItemRef[]): C {
+  const keys = refKeys(tilesFrom(c, atSec, skip))
+  const groups = new Map<string, TimelineItemRef[]>()
+  for (const t of timelineTiles(c)) {
+    if (!keys.has(refKey(t.ref))) continue
+    const g = t.linkGroupId ?? refKey(t.ref)
+    groups.set(g, [...(groups.get(g) ?? []), t.ref])
+  }
+  let next = c
+  // `moveItemsBy` clamps each set at 0 by its earliest member.
+  for (const refs of groups.values()) next = moveItemsBy(next, refs, -lengthSec) as C
+  return next
+}
+
+/**
  * Lift the tiles `refs` out and insert them at `seamSec` (a time on the
- * timeline as it is now): the hole they leave is closed (`closeGap` over their
+ * timeline as it is now): the hole they leave is closed (`closeHole` over their
  * span, from their start), room for them is opened at the seam, and they land
  * there — offsets inside the set kept. Script lines pinned inside the set's
  * span ride with it.
@@ -198,14 +220,15 @@ export function moveToSeam<C extends Composition>(
   if (!(len > 0) || (seam > from + EPS && seam < end - EPS)) return c
   const lifted = set.map((t) => t.ref)
   // A seam before the hole stays put; one after it moves left as the hole closes.
-  const gone = closableGap(c, from, len, lifted)
-  const to = seam <= from + EPS ? seam : seam - gone
+  // The hole always closes in full: everything past it starts at least `len`
+  // in, so it can move the whole way (see `closeHole`).
+  const to = seam <= from + EPS ? seam : seam - len
   if (Math.abs(to - from) < EPS) return c
 
-  let next = shiftTilesFrom(c, from, -gone, lifted)
+  let next = closeHole(c, from, len, lifted)
   next = shiftTilesFrom(next, to, len, lifted)
   next = moveItemsBy(next, lifted, to - from) as C
-  const close = closed(from, gone)
+  const close = closed(from, len)
   const open = opened(to, len)
   return mapScript(next, (t) => (t >= from - EPS && t < end - EPS ? t + (to - from) : open(close(t))))
 }
