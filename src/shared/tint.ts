@@ -3,7 +3,7 @@
  * RGB matrix drives both sides, so the preview and the export cannot drift —
  * the preview applies it as an SVG `feColorMatrix` (in sRGB, after the CSS
  * brightness/contrast/saturate chain), the export as `colorchannelmixer`
- * (after `eq`), both on the same non-linear sRGB values. Verified against the
+ * (after the grade filters, `shared/grade.ts`), both on the same non-linear sRGB values. Verified against the
  * real binary (docs/FFMPEG-NOTES.md "Clip tint").
  *
  * The tinted picture is the pixel's luma (Rec. 709 weights) times the tint

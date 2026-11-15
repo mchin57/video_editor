@@ -6,6 +6,7 @@ import { type MediaAsset } from '@shared/media'
 import { layerTransformAt, stretchedBox, type ResizeBox } from '@shared/layers'
 import { kindInfo } from '@shared/layerKinds'
 import { normalizeDeg } from '@shared/rotation'
+import { gradeCssFilter } from '@shared/grade'
 import { isNeutralTint, tintFeColorMatrix, tintMatrix, type Tint } from '@shared/tint'
 import { LOGICAL } from '@/lib/coords'
 import { pct } from './frame'
@@ -49,8 +50,8 @@ export function videoFillStyle(content: VideoContent, asset: MediaAsset | undefi
   const v = asset?.probe.video
   const col = content.color
   const parts: string[] = []
-  if (col) parts.push(`brightness(${1 + col.brightness}) contrast(${col.contrast}) saturate(${col.saturation})`)
-  // The tint runs after the grade, as the export's colorchannelmixer runs after eq.
+  if (col) parts.push(gradeCssFilter(col))
+  // The tint runs after the grade, as the export's colorchannelmixer runs after the grade filters.
   if (content.tint && !isNeutralTint(content.tint)) parts.push(`url(#${tintFilterId(content.tint)})`)
   const filter = parts.length ? parts.join(' ') : undefined
   if (crop && v) {

@@ -4,11 +4,12 @@
  * keeps the exact filter strings (which the `exporterArgs` tests pin) defined
  * once, so a tweak to crop/eq/rounding can't drift between callers.
  *
- * If you're about to hand-write `crop=…`, `eq=…`, `n.toFixed(3)`, or
+ * If you're about to hand-write `crop=…`, `lutrgb=…`, `n.toFixed(3)`, or
  * `Math.round` for an ffmpeg arg, import from here instead. @see docs/SHARED.md
  */
 
 import { isNeutralColor, type ColorAdjust } from '@shared/project'
+import { gradeCurve, gradeSaturationMatrix } from '@shared/grade'
 import { isNeutralTint, tintMatrix, type Tint } from '@shared/tint'
 import { isSilenceDb, type LinePoint } from '@shared/audioEnvelope'
 
@@ -39,9 +40,42 @@ export function rotateFilter(deg: number): string {
   return `rotate=a=${a}:ow='ceil(rotw(${a})/2)*2':oh='ceil(roth(${a})/2)*2':c=none`
 }
 
-/** `eq=brightness=…:contrast=…:saturation=…` color-correction filter. */
-export function eqFilter(c: { brightness: number; contrast: number; saturation: number }): string {
-  return `eq=brightness=${c.brightness}:contrast=${c.contrast}:saturation=${c.saturation}`
+/**
+ * A clip's colour grade (exposure, contrast, saturation) as ffmpeg filters that
+ * reproduce the preview's CSS `brightness() contrast() saturate()` chain — the
+ * shared definition in `shared/grade.ts`: a `lutrgb` for the per-channel
+ * exposure + contrast curve (clamped between the two), then a
+ * `colorchannelmixer` for the saturation matrix. `maxval` keeps the curve right
+ * at any bit depth; ffmpeg converts YUV to RGB around both by itself and alpha
+ * passes through. Replaces `eq`, which ADDS brightness where the preview
+ * multiplies. Verified against ffmpeg 8.1.1 and Chromium — see FFMPEG-NOTES
+ * "Clip grade". '' for a neutral grade.
+ */
+export function gradeColorFilter(c: ColorAdjust): string {
+  const parts: string[] = []
+  const curve = gradeCurve(c)
+  if (curve) {
+    const { gain, contrast, offset } = curve
+    const scaled = gain === 1 ? 'val' : `val*${gain}`
+    let e: string
+    if (contrast === 1) e = `clip(${scaled},0,maxval)`
+    else {
+      // Exposure above 1 can overshoot, so it clamps BEFORE contrast (as Chromium does between its filters).
+      const exposed = gain > 1 ? `clip(${scaled},0,maxval)` : scaled
+      const shifted = offset >= 0 ? `+${offset}*maxval` : `-${-offset}*maxval`
+      e = `clip(${exposed}*${contrast}${shifted},0,maxval)`
+    }
+    parts.push(`lutrgb=r='${e}':g='${e}':b='${e}'`)
+  }
+  const sat = gradeSaturationMatrix(c.saturation)
+  if (sat) parts.push(mixerFilter(sat))
+  return parts.join(',')
+}
+
+/** `colorchannelmixer` rows from a row-major 3×3 RGB matrix (alpha left alone). */
+function mixerFilter(m: number[]): string {
+  const names = ['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb']
+  return `colorchannelmixer=${names.map((n, i) => `${n}=${m[i]}`).join(':')}`
 }
 
 /**
@@ -51,16 +85,14 @@ export function eqFilter(c: { brightness: number; contrast: number; saturation: 
  * FFMPEG-NOTES "Clip tint".
  */
 export function tintFilter(t: Tint): string {
-  const m = tintMatrix(t)
-  const names = ['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb']
-  return `colorchannelmixer=${names.map((n, i) => `${n}=${m[i]}`).join(':')}`
+  return mixerFilter(tintMatrix(t))
 }
 
-/** The colour-grade fragment for a clip: `eq` then the tint, either optional
- *  ('' when the clip is ungraded). */
+/** The colour-grade fragment for a clip: the grade (`gradeColorFilter`) then the
+ *  tint, either optional ('' when the clip is ungraded). */
 export function gradeFilter(color: ColorAdjust | null | undefined, tint: Tint | null | undefined): string {
   const parts: string[] = []
-  if (color && !isNeutralColor(color)) parts.push(eqFilter(color))
+  if (color && !isNeutralColor(color)) parts.push(gradeColorFilter(color))
   if (tint && !isNeutralTint(tint)) parts.push(tintFilter(tint))
   return parts.join(',')
 }
