@@ -204,7 +204,8 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     // The preview plays proxies; wait for any still encoding (coalesced — cheap when ready).
     await Promise.all([...new Set(items.map((i) => i.mediaId))].map((id) => ensureProxy(id)))
     const placed = await callRenderer('placeSequence', { items: enriched, mode: mode ?? 'append', atSec })
-    return json({ placed, note: 'One undo step: call undo to revert this whole placement.' })
+    const moved = mode === 'insert' ? ' Everything that started at or after atSec moved later to make room.' : ''
+    return json({ placed, note: `One undo step: call undo to revert this whole placement.${moved}` })
   },
 
   remove_items: async ({ ids }) => json(await callRenderer('removeItems', { ids })),

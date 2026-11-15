@@ -80,6 +80,17 @@ describe('time arguments (#11: "Infinitys")', () => {
     expect((await run('render_frame', { times: [0, 2.5] })).isError).toBe(false)
     expect(call).toHaveBeenCalledWith('render_frame', { times: [0, 2.5] })
   })
+
+  it('place_sequence takes the three modes and refuses any other', async () => {
+    const items = [{ mediaId: 'm', inSec: 0, outSec: 1 }]
+    for (const mode of ['append', 'replace', 'insert']) {
+      expect((await run('place_sequence', { items, mode, atSec: 2 })).isError, mode).toBe(false)
+      expect(call).toHaveBeenCalledWith('place_sequence', { items, mode, atSec: 2 })
+    }
+    call.mockClear()
+    expect((await run('place_sequence', { items, mode: 'ripple' })).isError).toBe(true)
+    expect(call).not.toHaveBeenCalled()
+  })
 })
 
 describe('set_text bounds (#10)', () => {

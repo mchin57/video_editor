@@ -45,7 +45,11 @@ Look for tools named `mcp__reel-editor__*` (e.g. `mcp__reel-editor__list_media`)
 
 Call `place_sequence` ONCE with the whole cut as `{mediaId, inSec, outSec}` items in
 order (`mode: "replace"` swaps out the existing video clips and their linked audio — titles,
-images, captions and music stay; `"append"`, the default, adds after the last clip).
+images, captions and music stay; `"append"`, the default, adds after the last clip;
+`"insert"` with `atSec` puts clips into an existing cut — everything that starts at or
+after `atSec`, on every lane, moves later by their length, so nothing is covered. Use a
+clip's `startSec` from `get_timeline` as `atSec` to insert before it: an item that spans
+`atSec` stays where it is).
 It is one undo step. Then `get_timeline` and check the clips, order and total length.
 Fix mistakes with `undo` or `remove_items` and place again. `link_items` / `unlink_items`
 work like the timeline's Link / Unlink buttons: linked items move, split and delete

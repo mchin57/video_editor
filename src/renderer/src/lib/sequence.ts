@@ -2,7 +2,9 @@
  * Lay library clips end-to-end as ONE edit — the assistant's rough-cut
  * primitive (`place_sequence`). Pure. Layers come from the shared constructor
  * and are trimmed through `trimVideoStart`/`trimVideoEnd`, so the
- * source↔timeline mapping is never re-derived here (CLAUDE.md).
+ * source↔timeline mapping is never re-derived here (CLAUDE.md). `insert` mode
+ * makes room for the clips with `openGap` (lib/ripple.ts), the same move as a
+ * drop on a seam.
  */
 
 import type { AudioClip, Composition, Layer, VideoContent } from '@shared/project'
@@ -14,6 +16,7 @@ import { MAX_TEXT_PAST_END_SEC, maxItemEndSec } from '@shared/assistant/onScreen
 import { extractedAudioClip } from '@shared/volumeLevels'
 import { trimVideoEnd, trimVideoStart } from './timeline'
 import { expandSelection, removeItems } from './links'
+import { openGap } from './ripple'
 
 /** Shortest source span an item may keep (seconds). */
 export const MIN_SEQUENCE_ITEM_SEC = 0.1
@@ -78,7 +81,11 @@ export function applySequence(
       `atSec ${plan.atSec} is more than ${MAX_TEXT_PAST_END_SEC}s past the end of the edit (${Math.round(editEnd * 100) / 100}s); times are in seconds`
     )
   }
-  let cursor = Math.max(0, plan.atSec ?? (plan.mode === 'replace' ? 0 : visualDuration(base.layers)))
+  if (plan.mode === 'insert' && plan.atSec === undefined) {
+    throw new Error('mode "insert" needs atSec: the TIMELINE second to insert at')
+  }
+  const startSec = Math.max(0, plan.atSec ?? (plan.mode === 'replace' ? 0 : visualDuration(base.layers)))
+  let cursor = startSec
   const layers: Layer[] = []
   const audioClips: AudioClip[] = []
   const placed: PlacedClip[] = []
@@ -122,12 +129,15 @@ export function applySequence(
     cursor = layer.endSec
   })
 
-  const at = sequenceInsertIndex(comp.layers, base.layers)
+  // Insert: everything from the start point on (every lane, link groups whole,
+  // the script lines pinned there) moves later by the clips' total length.
+  const room = plan.mode === 'insert' ? openGap(base, startSec, cursor - startSec) : base
+  const at = sequenceInsertIndex(comp.layers, room.layers)
   return {
     comp: {
-      ...base,
-      layers: [...base.layers.slice(0, at), ...layers, ...base.layers.slice(at)],
-      audioClips: [...base.audioClips, ...audioClips]
+      ...room,
+      layers: [...room.layers.slice(0, at), ...layers, ...room.layers.slice(at)],
+      audioClips: [...room.audioClips, ...audioClips]
     },
     placed
   }

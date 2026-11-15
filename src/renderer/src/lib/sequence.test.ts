@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createEmptyComposition, type VideoContent } from '@shared/project'
+import { createEmptyComposition, createEmptyProject, type VideoContent } from '@shared/project'
 import { centeredFrame } from '@shared/frame'
 import { makeImageLayer, makeTextLayer, makeVideoLayer, playedVideoDuration } from '@shared/layers'
 import type { SequenceItem } from '@shared/assistant/protocol'
@@ -137,6 +137,73 @@ describe('applySequence', () => {
     expect(comp.audioClips).toEqual([])
     expect(content(comp.layers[0]).mute).toBe(false)
     expect(comp.layers[0].linkGroupId).toBeUndefined()
+  })
+})
+
+describe('applySequence insert mode', () => {
+  /** Two 3 s clips end to end with their linked audio, a title over the second. */
+  const cut = () => {
+    const base = applySequence(
+      createEmptyComposition(),
+      { mode: 'append', items: [item('a', 0, 3), item('b', 0, 3)] },
+      ctx()
+    ).comp
+    return { ...base, layers: [...base.layers, makeTextLayer('title', 3, 5)] }
+  }
+  const fresh = () => {
+    let n = 0
+    return { ...ctx(), newId: () => `new${++n}` }
+  }
+
+  it('puts the clips at atSec and moves everything from there on later by their total length', () => {
+    const start = cut()
+    const { comp, placed } = applySequence(
+      start,
+      { mode: 'insert', atSec: 3, items: [item('c', 0, 2), item('d', 0, 1.5)] },
+      fresh()
+    )
+    expect(placed.map((p) => [p.startSec, p.endSec])).toEqual([
+      [3, 5],
+      [5, 6.5]
+    ])
+    const startOf = (id: string) => comp.layers.find((l) => l.id === id)!.startSec
+    const [first, second] = start.layers
+    expect(startOf(first.id)).toBe(0)
+    expect(startOf(second.id)).toBe(6.5) // 3 + (2 + 1.5)
+    expect(startOf('title')).toBe(6.5)
+    // The second clip's linked audio moved with it; the first clip's stayed.
+    const oldAudio = comp.audioClips.filter((a) => start.audioClips.some((o) => o.id === a.id))
+    expect(oldAudio.map((a) => a.startSec)).toEqual([0, 6.5])
+    // The new clips' own audio sits under them.
+    const newAudio = comp.audioClips.filter((a) => !start.audioClips.some((o) => o.id === a.id))
+    expect(newAudio.map((a) => a.startSec)).toEqual([3, 5])
+  })
+
+  it('leaves a tile that spans atSec where it is, and inserts at 0 by moving everything', () => {
+    const start = cut()
+    const mid = applySequence(start, { mode: 'insert', atSec: 1, items: [item('c', 0, 2)] }, fresh()).comp
+    expect(mid.layers.find((l) => l.id === start.layers[0].id)!.startSec).toBe(0) // spans 1 s: stays
+    expect(mid.layers.find((l) => l.id === start.layers[1].id)!.startSec).toBe(5)
+    const front = applySequence(start, { mode: 'insert', atSec: 0, items: [item('c', 0, 2)] }, fresh())
+    expect(front.placed[0].startSec).toBe(0)
+    expect(front.comp.layers.find((l) => l.id === start.layers[0].id)!.startSec).toBe(2)
+  })
+
+  it('needs atSec, and changes nothing without it', () => {
+    expect(() => applySequence(cut(), { mode: 'insert', items: [item('c', 0, 2)] }, fresh())).toThrow(/needs atSec/)
+  })
+
+  it('moves the script lines pinned at or after atSec when the composition is the project', () => {
+    const project = { ...createEmptyProject('p', 'test'), ...cut() }
+    const withScript = {
+      ...project,
+      script: [
+        { id: 's1', text: '', atSec: 1 },
+        { id: 's2', text: '', atSec: 4 }
+      ]
+    }
+    const { comp } = applySequence(withScript, { mode: 'insert', atSec: 3, items: [item('c', 0, 2)] }, fresh())
+    expect((comp as typeof withScript).script.map((l) => l.atSec)).toEqual([1, 6])
   })
 })
 
