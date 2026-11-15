@@ -23,9 +23,11 @@ export interface SequenceItem {
 
 export interface SequencePlan {
   items: SequenceItem[]
-  /** append: after the current end; replace: clear existing video clips first and start at 0. */
-  mode: 'append' | 'replace'
-  /** Timeline second to start at (overrides the mode's default). */
+  /** append: after the current end; replace: clear existing video clips first
+   *  and start at 0; insert: at `atSec` (required), moving everything that
+   *  starts at or after it later by the clips' total length. */
+  mode: 'append' | 'replace' | 'insert'
+  /** Timeline second to start at (overrides the mode's default; insert needs it). */
   atSec?: number
 }
 

@@ -346,6 +346,82 @@ describe('layers', () => {
   })
 })
 
+describe('insert between', () => {
+  /** Two clips end to end, the second with its sound; a script line on each. */
+  const twoClips = (): void => {
+    open([makeVideoLayer('V1', 'm1', 0, 4), makeVideoLayer('V2', 'm1', 4, 4)], [clip('A2', { startSec: 4, outSec: 4 })])
+    useProject.setState({
+      project: {
+        ...root(),
+        script: [
+          { id: 's1', text: 'one', atSec: 1 },
+          { id: 's2', text: 'two', atSec: 5 }
+        ]
+      }
+    })
+  }
+  const startsNow = (): Record<string, number> =>
+    Object.fromEntries([...root().layers, ...root().audioClips].map((t) => [t.id, t.startSec]))
+
+  it('insertAt adds the new tiles and moves everything after them, as ONE undo step', () => {
+    twoClips()
+    const before = root()
+    s().insertAt(4, () => s().addVideoLayer('New', 'm2', 4, 3, true))
+    expect(startsNow()).toMatchObject({ V1: 0, New: 4, V2: 7, A2: 7 })
+    // The new clip's own (linked) sound stays with it; the script line follows V2.
+    expect(root().audioClips.find((a) => a.id !== 'A2')!.startSec).toBe(4)
+    expect(root().script.map((l) => l.atSec)).toEqual([1, 8])
+    expect(s().past).toEqual([before])
+    s().undo()
+    expect(root()).toBe(before)
+  })
+
+  it('insertAt joins a gesture that is already open instead of closing it', () => {
+    twoClips()
+    const before = root()
+    s().beginGesture()
+    s().addMedia(['m2'])
+    s().insertAt(0, () => s().addLayer(makeTextLayer('T', 0, 2)))
+    s().updateLayer('T', { x: 5 }) // still inside the outer gesture
+    s().endGesture()
+    expect(startsNow()).toMatchObject({ V1: 2, V2: 6, A2: 6, T: 0 })
+    expect(s().past).toEqual([before])
+  })
+
+  it('inside a nested composition it ripples that composition and grows its block; the root script stays', () => {
+    const inner = createEmptyComposition()
+    inner.layers = [makeVideoLayer('I1', 'm1', 0, 3), makeVideoLayer('I2', 'm1', 3, 3)]
+    const block: Layer = { ...makeVideoLayer('C', 'm1', 0, 6), content: { kind: 'compound', comp: inner } }
+    open([block])
+    useProject.setState({ project: { ...root(), script: [{ id: 's', text: '', atSec: 4 }] } })
+    s().enterComposition({ layerId: 'C' })
+    s().insertAt(3, () => s().addLayer(makeTextLayer('T', 3, 5)))
+    expect(activeComp(s())!.layers.map((l) => [l.id, l.startSec])).toEqual([
+      ['I1', 0],
+      ['I2', 5],
+      ['T', 3]
+    ])
+    expect(root().layers[0]).toMatchObject({ startSec: 0, endSec: 8 })
+    expect(root().script[0].atSec).toBe(4)
+    expect(s().past).toHaveLength(1)
+  })
+
+  it('moveItemsToSeam lifts tiles out and inserts them elsewhere in one step; a no-op records nothing', () => {
+    twoClips()
+    s().moveItemsToSeam(
+      [
+        { kind: 'layer', id: 'V2' },
+        { kind: 'audio', id: 'A2' }
+      ],
+      0
+    )
+    expect(startsNow()).toEqual({ V1: 4, V2: 0, A2: 0 })
+    expect(s().past).toHaveLength(1)
+    s().moveItemsToSeam([{ kind: 'layer', id: 'V2' }], 0) // already there
+    expect(s().past).toHaveLength(1)
+  })
+})
+
 describe('captions, audio and levels', () => {
   it('new caption text without words re-times the words to it', () => {
     open()

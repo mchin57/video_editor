@@ -910,6 +910,91 @@ test('inside a compound clip, render_frame uses the same local times as get_text
   expect(captionLuma(dir, images(r)[0], 'nested.jpg')).toBeGreaterThan(20)
 })
 
+test('place_sequence insert makes room: everything from atSec on moves later, in one undo step', async ({
+  electronApp,
+  appPage: page
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (see plan Task 1 Step 1)')
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), 'reel-assistant-'))
+  const c = await connect(await pipeOf(electronApp))
+  const { imported } = JSON.parse(textOf(await call(c, 'import_media', { paths: [blackClip(dir)] }))) as {
+    imported: { id: string }[]
+  }
+  const mediaId = imported[0].id
+  // Two clips end to end (0–2 s, 2–4 s), a caption on the second and a music
+  // bed under both.
+  const { placed: cut } = JSON.parse(
+    textOf(
+      await call(c, 'place_sequence', {
+        items: [
+          { mediaId, inSec: 0, outSec: 2 },
+          { mediaId, inSec: 0, outSec: 2 }
+        ]
+      })
+    )
+  ) as { placed: { layerId: string }[] }
+  const [first, second] = cut.map((p) => p.layerId)
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addCaption({ id: 'cap', startSec: 2.5, endSec: 3.5, text: 'hi', words: [], enabled: true })
+    s.addAudioClip({
+      id: 'bed',
+      mediaId: 'no-such-music',
+      kind: 'music',
+      startSec: 0,
+      inSec: 0,
+      outSec: 20,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false
+    })
+  })
+  const state = (): Promise<{ starts: Record<string, number>; past: number; doc: string }> =>
+    page.evaluate(() => {
+      const s = window.__reelStores.useProject.getState()
+      const p = s.project!
+      const tiles = [...p.layers, ...p.captions.segments, ...p.audioClips]
+      return {
+        starts: Object.fromEntries(tiles.map((t) => [t.id, t.startSec])),
+        past: s.past.length,
+        doc: JSON.stringify(p)
+      }
+    })
+  const before = await state()
+
+  // Insert needs to know where: without atSec it is refused and nothing changes.
+  expect(await refusal(c, 'place_sequence', { mode: 'insert', items: [{ mediaId, inSec: 0, outSec: 1 }] })).toContain(
+    'needs atSec'
+  )
+  expect((await state()).doc).toBe(before.doc)
+
+  const res = await call(c, 'place_sequence', {
+    mode: 'insert',
+    atSec: 2,
+    items: [{ mediaId, inSec: 1, outSec: 2.5 }]
+  })
+  expect(res.isError).toBeFalsy()
+  const { placed, note } = JSON.parse(textOf(res)) as {
+    placed: { layerId: string; startSec: number; endSec: number }[]
+    note: string
+  }
+  expect([placed[0].startSec, placed[0].endSec]).toEqual([2, 3.5])
+  expect(note).toContain('moved later')
+
+  // The new 1.5 s clip sits at 2 s; the second clip and its caption moved 1.5 s;
+  // the first clip and the bed that spans the point did not.
+  const after = await state()
+  expect(after.starts).toEqual({ [first]: 0, [second]: 3.5, [placed[0].layerId]: 2, cap: 4, bed: 0 })
+  expect(after.past).toBe(before.past + 1)
+  await expect(page.getByTestId(`tile-layer-${placed[0].layerId}`)).toBeVisible()
+
+  const undone = JSON.parse(textOf(await call(c, 'undo'))) as { undone: boolean }
+  expect(undone.undone).toBe(true)
+  expect((await state()).doc).toBe(before.doc)
+})
+
 test('a render that fails half-way does not leave its text-layout window behind', async ({
   electronApp,
   appPage: page

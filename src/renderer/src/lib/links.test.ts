@@ -251,6 +251,19 @@ describe('moveItemsBy', () => {
     expect(next.captions.segments[0]).toMatchObject({ startSec: 4, endSec: 6 })
     expect(next.layers[1].startSec).toBe(0) // untouched
   })
+
+  it('carries a caption’s word timings, so a moved caption still splits between its words (#218)', () => {
+    const words = ['one', 'two', 'three', 'four'].map((text, i) => ({ text, startSec: i, endSec: i + 1 }))
+    const seg: CaptionSegment = { ...caption('C1', 0, 4), text: 'one two three four', words }
+    const moved = moveItemsBy(project({ segments: [seg] }), [C('C1')], 10)
+    expect(moved.captions.segments[0].words).toEqual(
+      words.map((w) => ({ ...w, startSec: w.startSec + 10, endSec: w.endSec + 10 }))
+    )
+    // The words used to stay at 0–4 s: all of them left of a cut at 12 s, so the
+    // left half kept every word and the right half fell back to the whole text.
+    const split = splitItemsAt(moved, [C('C1')], 12, () => 0, ids())
+    expect(split.captions.segments.map((s) => s.text)).toEqual(['one two', 'three four'])
+  })
 })
 
 describe('trimItemsBy', () => {

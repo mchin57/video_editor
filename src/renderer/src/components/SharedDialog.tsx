@@ -135,11 +135,11 @@ function Gallery({ initialTab, addMediaId }: { initialTab: SharedKind; addMediaI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addMediaId, initialTab])
 
-  const insert = (item: SharedItem): void => {
+  const insert = (item: SharedItem, insertBetween: boolean): void => {
     setBusy(true)
     setError(null)
     setNote(null)
-    insertShared(item, media).then(
+    insertShared(item, media, { insert: insertBetween }).then(
       () => {
         setBusy(false)
         close()
@@ -358,7 +358,12 @@ function Gallery({ initialTab, addMediaId }: { initialTab: SharedKind; addMediaI
                       type="button"
                       data-testid={`shared-insert-${item.id}`}
                       disabled={busy}
-                      onClick={() => insert(item)}
+                      onClick={(e) => insert(item, e.shiftKey)}
+                      title={
+                        item.kind === 'text'
+                          ? undefined
+                          : 'Shift-click inserts it at the playhead: everything after moves later'
+                      }
                       className={`rounded-md bg-sky-500/90 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-400 ${disabledCls}`}
                     >
                       Insert

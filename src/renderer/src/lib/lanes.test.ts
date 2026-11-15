@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { layoutLanes, packRows, resizeRowH, rowCount, type LaneGeometry, type Span } from './lanes'
+import { laneAt, layoutLanes, packRows, resizeRowH, rowCount, type LaneGeometry, type Span } from './lanes'
 import { snap } from './snap'
 
 const s = (id: string, startSec: number, endSec: number): Span => ({ id, startSec, endSec })
@@ -68,6 +68,19 @@ describe('layoutLanes', () => {
     const open = layoutLanes([clips, audio], {}, GEOM).totalH
     const collapsed = layoutLanes([clips, audio], { audio: { collapsed: true } }, GEOM).totalH
     expect(collapsed).toBeLessThan(open)
+  })
+})
+
+describe('laneAt', () => {
+  it('names the lane whose band holds y, and nothing over the ruler, a gap or the scale', () => {
+    const { lanes, scaleTop } = layoutLanes([clips, audio], {}, GEOM)
+    expect(laneAt(lanes, 10)).toBeNull() // ruler
+    expect(laneAt(lanes, 20)).toBe('clips')
+    expect(laneAt(lanes, 45.9)).toBe('clips')
+    expect(laneAt(lanes, 47)).toBeNull() // the gap between the lanes
+    expect(laneAt(lanes, 50)).toBe('audio')
+    expect(laneAt(lanes, 101)).toBe('audio') // its second row
+    expect(laneAt(lanes, scaleTop + 2)).toBeNull()
   })
 })
 

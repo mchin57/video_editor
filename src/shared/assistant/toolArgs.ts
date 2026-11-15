@@ -20,7 +20,7 @@ export interface ToolArgs {
   get_timeline: NoArgs
   place_sequence: {
     items: { mediaId: string; inSec: number; outSec: number }[]
-    mode?: 'append' | 'replace'
+    mode?: 'append' | 'replace' | 'insert'
     atSec?: number
   }
   remove_items: { ids: string[] }

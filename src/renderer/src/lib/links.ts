@@ -32,6 +32,7 @@
 
 import type { AudioClip, CaptionSegment, Layer, Composition, TimelineItemKind, TimelineItemRef } from '@shared/project'
 import { audioClipEnd } from '@shared/project'
+import { captionInWindow } from './captions'
 import {
   audioTimelineAt,
   splitAudioClip,
@@ -320,6 +321,8 @@ export function unlinkItems(p: Composition, refs: TimelineItemRef[]): Compositio
  * and every offset between them. A single clamp applies to the whole set — the
  * earliest tile stops at 0 and the rest keep their relative placement, so a
  * group can't be squashed by dragging it into the start of the timeline.
+ * A caption's word timings are absolute, so they move with it
+ * (`captionInWindow`): left behind, the next split puts every word on one side.
  */
 export function moveItemsBy(p: Composition, refs: TimelineItemRef[], delta: number): Composition {
   const keys = refKeys(refs)
@@ -335,7 +338,7 @@ export function moveItemsBy(p: Composition, refs: TimelineItemRef[], delta: numb
     captions: {
       ...p.captions,
       segments: p.captions.segments.map((s) =>
-        keys.has(refKey({ kind: 'caption', id: s.id })) ? { ...s, startSec: s.startSec + d, endSec: s.endSec + d } : s
+        keys.has(refKey({ kind: 'caption', id: s.id })) ? captionInWindow(s, s.startSec + d, s.endSec + d) : s
       )
     },
     audioClips: p.audioClips.map((a) =>

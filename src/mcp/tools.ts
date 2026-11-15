@@ -162,14 +162,14 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'place_sequence',
     {
       description:
-        'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0. Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut. Refused: an outSec more than 0.5s past its clip\'s end, or an atSec more than 60s past the end of the edit (times are seconds, not milliseconds).',
+        'Lay clips end-to-end on the timeline in EXACTLY the given order. Each item is a SOURCE window {mediaId, inSec, outSec}. mode "append" (default) adds after the current end; "replace" first removes the existing video clips (and their linked audio) and starts at 0; "insert" puts them at atSec (required) and moves everything that starts at or after atSec, on every lane, later by their total length, so nothing is covered (an item that spans atSec stays where it is, and linked items move together only when the earliest of them starts at or after atSec; pass the startSec of a clip from get_timeline to insert before it). Clips with sound bring linked audio, like a drag from the library. New clips go on the top layer; with "replace" they take the layer of the removed video (the lowest one, if several). The whole call is ONE undo step. Prefer one call for the whole cut. Refused: an outSec more than 0.5s past its clip\'s end, or an atSec more than 60s past the end of the edit (times are seconds, not milliseconds).',
       inputSchema: {
         items: z
           .array(z.object({ mediaId: z.string(), inSec: sec(), outSec: posSec() }))
           .min(1)
           .max(200),
-        mode: z.enum(['append', 'replace']).optional(),
-        atSec: sec().optional().describe('TIMELINE second to start at')
+        mode: z.enum(['append', 'replace', 'insert']).optional(),
+        atSec: sec().optional().describe('TIMELINE second to start at (required for "insert")')
       }
     },
     async (args) => result(await call('place_sequence', args))
