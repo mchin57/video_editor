@@ -317,6 +317,15 @@ describe('moveToSeam (lift tiles out and insert them elsewhere)', () => {
     expect(starts(moveToSeam(p, clip2, 12)).Bed).toBe(0)
   })
 
+  it('does not carry an UNLINKED tile that sat inside the set’s span: it ripples like any other', () => {
+    // C2 (5–7) is a caption over V2 but not linked to it. Closing the hole moves
+    // it earlier with everything from 5 on (to 3); it is before the seam, so it
+    // stays there instead of following V2 to 10. Link it to keep them together.
+    expect(starts(moveToSeam(cut(), clip2, 12)).C2).toBe(3)
+    const together = { ...cut(), captions: { ...cut().captions, segments: [caption('C2', 5, 2, 'g2')] } }
+    expect(starts(moveToSeam(together, [...clip2, C('C2')], 12)).C2).toBe(10)
+  })
+
   it('carries the script lines pinned inside the set; the rest ripple', () => {
     // Lines at 5 and 6 sit on V2 and ride with it (+5); the line at 8 sits on
     // V3 and moves left with it (-2); the line at 1 is before everything.

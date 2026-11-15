@@ -62,12 +62,53 @@ item, move it into the guarded table below.
 | A workout overlay from the library: ＋ End lays the whole recording into 8 s in a Workout lane (shown once a workout tile exists) with its speed on the tile; ＋ Playhead (or a drop) over a clip filmed during the workout syncs to it — the clip's window, real time, linked; widgets drag on the preview (one undo step); the right edge trims the ride window at the tile's speed; S splits into consecutive ride windows | `e2e/workoutOverlay.spec.ts`, `lib/timeline.test.ts`, `lib/links.test.ts` |
 | The workout graph window (Inspector ▸ Graph…): lines toggle, Time / Distance axis, the wheel zooms to exactly 1 s, Fit; a press sets the cursor; S splits, Del deletes, handles trim, Ctrl+Z undoes — inside the window only, keys never reaching the editor; Save is one undo step, Cancel changes nothing; a linked range is locked | `e2e/workoutGraph.spec.ts`, `lib/workoutGraph.test.ts` |
 | A graphics tile's left-edge trim (lone tile and group) and S-split keep every mark at its absolute moment (re-based `atSec`; one whose moment falls before the new start keeps it as a negative `atSec` — on screen from the start, mid-reveal if cut inside one — so trimming back out restores it; a split's right half gets fresh mark ids). The tile's Motion keyframes still ride the start edge, like an image's | `e2e/graphics.spec.ts`, `lib/timeline.test.ts` |
+| A moved caption takes its word timings with it (`moveItemsBy` → `captionInWindow`), so a caption split after a drag still divides between its words (#218) | `lib/links.test.ts`, `e2e/captionMoveSplit.spec.ts` |
+| Ripple rules (`lib/ripple.ts`) — "from this point on" is every tile on every lane that STARTS at or after the point (all tile kinds; an open-ended audio tile by its start); a tile that spans the point stays, uncut; a link group moves whole only when its earliest member starts at or after the point (a straddling group stays whole, its later members included); script lines pinned at or after the point follow, on the root timeline only; `closeGap` undoes `openGap` and never moves past 0 (the set stops together); inside a nested composition only that composition ripples and its parent block grows | `lib/ripple.test.ts`, `state/projectStore.test.ts` |
+| Where a seam is (`seamNear`, `laneAt`) — two tiles meeting in the lane under the pointer (less than a frame apart), or the timeline start in any lane; a lone tile edge, the end of the last tile and a seam in another lane are not seams | `lib/ripple.test.ts`, `lib/lanes.test.ts` |
+| Insert between, new clip: a picture (video / image) dropped from the Library on a seam is inserted — the insert caret shows on the seam while the drag hovers, everything from the seam on moves later by the clip's length (a clip with sound: its group's span), a spanning music bed stays, the timeline start pushes everything; inside a nested composition too. A drop away from a seam (or on another lane's seam) lands on top as before, and so does a dropped SOUND (the Library gives its drag no insert type). One undo step | `e2e/insertBetween.spec.ts`, `state/projectStore.test.ts` |
+| **Shift-click** on the Library's ＋ Playhead / ♪ Playhead, and on the shared library's Insert (sound / graphic / video), inserts at the playhead the same way; a plain click places on top | `e2e/insertBetween.spec.ts`, `e2e/sharedLibrary.spec.ts` |
+| Insert between, existing tile: **Shift-drag** shows the caret on the seam under the pointer; released there, the dragged set (its link group) is lifted out, the hole it left closes and it lands at the seam, with the script lines pinned on it — one undo step. A Shift-drag released away from a seam, and a plain drag onto one, are the ordinary move (`moveToSeam`) | `e2e/shiftDragInsert.spec.ts`, `lib/ripple.test.ts` |
+| The assistant's `place_sequence` `mode: "insert"` makes the same room at `atSec` (required), one undo step | `e2e/assistant.spec.ts`, `lib/sequence.test.ts`, `mcp/tools.test.ts` |
 
 If you change any of the above, the math change should show up as a test diff —
 if it doesn't, the logic probably drifted back inline into the component (where
 it can be deleted silently). Push it back into `lib/`.
 
+## Insert between — what moves (#215)
+
+Placing never used to move anything else. An INSERT does: it opens room at a
+point and everything "from that point on" moves later (`lib/ripple.ts`, the
+rules in the table above). Three ways in: drop a picture from the Library on a
+**seam**, **Shift-click** an add button (the playhead is the point), or
+**Shift-drag** a tile onto a seam. The assistant has `place_sequence`
+`mode: "insert"`.
+
+What follows from the rules, so it is not a surprise later:
+
+- **Every lane moves**, including ones off screen. The caret spans all lanes to
+  say so.
+- **A link group that straddles the point stays behind whole**: a clip whose
+  linked sound starts before the point does not move, even though the clip
+  itself starts after it (pinned in `lib/ripple.test.ts`).
+- **Shift-drag closes the hole from the dragged set's START**: every tile that
+  started at or after it moves earlier by the set's span, so an UNLINKED tile on
+  another lane that started inside the span (a caption over the clip) moves
+  earlier too and does not follow the clip. Link what should travel together.
+- **A seam needs two tiles that meet** (or the timeline start). A tile edge with
+  a gap beside it is not one; a drop there lands on top, as it always did.
+- **Shift-click inserts at the playhead as it is**: a tile the playhead is
+  inside spans the point and stays.
+- Not built yet, on the same primitives: ripple delete (#115), ripple trim
+  (#116), close gaps (#121).
+
 ## Manual — smoke-test in `npm run dev`
+
+- **Insert caret during a real drag:** drag a picture from the Library over a
+  seam (the lime caret appears across all lanes, and goes when the drag leaves
+  the track); press Shift part-way through a tile drag (the code re-reads Shift
+  on pointer moves only, so expect the caret on the next move rather than on the
+  key press). The e2e specs cover the caret through dispatched drag events and
+  a Shift held from just after the press; these two are not automated.
 
 - **Horizontal edge auto-scroll:** drag a block near the left/right edge → the
   track scrolls and the block keeps following. The rate is deliberately FLAT

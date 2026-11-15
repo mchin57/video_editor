@@ -183,6 +183,13 @@ async function dropAsset(page: Page, assetId: string, x: number, y: number, inse
   return box ? box.x + box.width / 2 : null
 }
 
+/** The payload types the Library puts on a drag of the card for `fileName`. */
+async function dragTypes(page: Page, fileName: string): Promise<string[]> {
+  const dt = await page.evaluateHandle(() => new DataTransfer())
+  await page.locator('[data-clip-card]', { hasText: fileName }).dispatchEvent('dragstart', { dataTransfer: dt })
+  return dt.evaluate((d) => [...d.types])
+}
+
 /** The page position of the left edge and vertical middle of a tile. */
 async function tileEdge(page: Page, testId: string): Promise<{ x: number; y: number }> {
   const tile = page.getByTestId(testId)
@@ -204,6 +211,8 @@ test('a picture dropped on the seam between two clips is inserted: everything af
   await arrangeCut(page)
   const before = await snapshot(page)
   expect(before.starts).toEqual({ V1: 0, 'V1.audio': 0, V2: 4, 'V2.audio': 4, C2: 5, Bed: 0 })
+  // The Library marks a picture's drag as one that inserts (the caret goes by it).
+  expect(await dragTypes(page, 'card.png')).toEqual(['application/x-reel-asset', 'application/x-reel-insert'])
 
   // Drop a few px off the seam, over the Clips lane: the point snaps to it.
   const seam = await tileEdge(page, 'tile-layer-V2')
@@ -276,6 +285,7 @@ test('a sound dropped at the start is placed, not inserted', async ({ appPage: p
 
   // The Library gives a sound's drag no insert type, so no caret; and the drop
   // itself decides by what the clip is, whatever the drag claimed.
+  expect(await dragTypes(page, 'tone.mp3')).toEqual(['application/x-reel-asset'])
   const start = await tileEdge(page, 'tile-audio-Bed')
   expect(await dropAsset(page, sound, start.x + 2, start.y, false)).toBeNull()
   expect(await dropAsset(page, sound, start.x + 2, start.y, true)).not.toBeNull()
