@@ -63,6 +63,23 @@ describe('summarizeTimeline', () => {
     expect(s.durationSec).toBe(5)
   })
 
+  it('reports a clip’s volume line at the timeline seconds its points play; a flat clip has none', () => {
+    const lined = audio({
+      startSec: 5,
+      inSec: 2,
+      volumeKeyframes: [
+        { sourceSec: 4, db: -60 },
+        { sourceSec: 3, db: 0 }
+      ]
+    })
+    const s = summarizeTimeline({ ...createEmptyComposition(), audioClips: [lined, audio({ id: 'a2' })] })
+    expect(s.audioClips[0].volumeLine).toEqual([
+      { atSec: 6, db: 0 },
+      { atSec: 7, db: -60 }
+    ])
+    expect('volumeLine' in s.audioClips[1]).toBe(false)
+  })
+
   it('reports a whole-source audio clip with an open end', () => {
     const s = summarizeTimeline({ ...createEmptyComposition(), audioClips: [audio({ outSec: 0 })] })
     expect(s.audioClips[0]).toMatchObject({ endSec: null, outSec: null })

@@ -725,6 +725,24 @@ describe('buildExportArgs', () => {
       )
     })
 
+    it('the line is per clip: an effect track does not inherit its source clip’s line', () => {
+      const dry = clipA({ volumeKeyframes: [{ sourceSec: 2, db: -12 }] })
+      const wet = clipA({
+        id: 'fx1',
+        mediaId: 'wet',
+        kind: 'fx',
+        fx: { settings: { kind: 'echo' }, fromMediaId: 'm1', fromInSec: 0, fromOutSec: 8 } as unknown as AudioClip['fx']
+      })
+      const out = exportAudioClips(
+        [dry, wet],
+        () => ({ path: 'x', durationSec: 10, foldChannel: null }),
+        { levels, seriesOf: () => null },
+        false
+      )
+      expect(out[0].volumeLine).toEqual([{ t: 2, db: -12 }])
+      expect('volumeLine' in out[1]).toBe(false)
+    })
+
     it('a flat line (absent or empty) adds nothing — the ExportAudio has no volumeLine key', () => {
       const src = () => ({ path: 'x', durationSec: 10, foldChannel: null })
       for (const c of [clipA(), clipA({ volumeKeyframes: [] })]) {
