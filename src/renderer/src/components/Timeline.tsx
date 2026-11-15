@@ -21,7 +21,7 @@ import { isWorkoutAsset } from '@shared/media'
 import { freezeSpans, layerLabel, visualDuration } from '@shared/layers'
 import { formatSpeed, workoutSpeed } from '@shared/workoutOverlay'
 import { placeWorkout } from '@/lib/workout'
-import { placeAsset } from '@/lib/placeAsset'
+import { INSERT_DND_MIME, insertsOnDrop, placeAsset } from '@/lib/placeAsset'
 import { useLibrary } from '@/hooks/useMedia'
 import { activeComp, getActiveComp, useProject } from '@/state/projectStore'
 import { useEditor } from '@/state/store'
@@ -73,6 +73,7 @@ import { TileDescription } from './timeline/TileDescription'
 import { TimelineToolbar } from './timeline/TimelineToolbar'
 import { LaneGutter } from './timeline/LaneGutter'
 import { useTileDrags } from './timeline/useTileDrags'
+import { InsertCaret, useInsertCaret } from './timeline/insertCaret'
 import {
   useGutterSync,
   usePlayheadFollow,
@@ -271,6 +272,7 @@ export function Timeline(): JSX.Element {
   /** Source duration of a library asset (0 = unknown, the convention the split
    *  helpers use) — only whole-source audio clips need it. */
   const srcDur: SourceDuration = (mediaId) => assetById.get(mediaId)?.probe.durationSec ?? 0
+  const insertCaret = useInsertCaret({ trackInnerRef, pxPerSec, lanes, srcDur, dropActive: assetDrag.active })
 
   useWheelZoom(scrollRef, pxPerSecRef, setPxPerSec, followModeRef, playingRef)
   usePlayheadFollow(scrollRef, time, playing, followMode, pxPerSec)
@@ -297,14 +299,21 @@ export function Timeline(): JSX.Element {
     assetDrag.reset()
     const asset = assetById.get(id)
     if (!asset || !asset.proxyReady) return
+    // On a seam (where two tiles meet, or the timeline start) a picture is
+    // INSERTED: everything from there on moves later. Anywhere else, on top.
+    const seam = insertsOnDrop(asset) ? insertCaret.seamAt(e.clientX, e.clientY) : null
+    insertCaret.showDropCaret(null)
     const startSec = Math.max(0, snapSec(xToSec(e.clientX)))
     if (isWorkoutAsset(asset)) void placeWorkout(asset, startSec, true)
+    else if (seam !== null) placeAsset(asset, seam, { insert: true })
     else placeAsset(asset, startSec)
   }
   const onDragOver = (e: ReactDragEvent): void => {
     if (!e.dataTransfer.types.includes(DND_MIME)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
+    const insertable = e.dataTransfer.types.includes(INSERT_DND_MIME)
+    insertCaret.showDropCaret(insertable ? insertCaret.seamAt(e.clientX, e.clientY) : null)
   }
 
   const { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag } = useTileDrags({
@@ -773,6 +782,8 @@ export function Timeline(): JSX.Element {
             >
               <div className="absolute -left-1 top-0 h-2 w-2 rounded-full bg-rose-400" />
             </div>
+
+            {insertCaret.caretSec !== null && <InsertCaret sec={insertCaret.caretSec} pxPerSec={pxPerSec} />}
 
             {/* Empty-state hint */}
             {isEmpty && (

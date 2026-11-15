@@ -159,6 +159,10 @@ export interface Doc {
    *  behavior is byte-identical to `commit`). THE indirection that lets every
    *  timeline action edit root and nested docs with one implementation. */
   commitComp: (transform: (c: Composition) => Composition) => void
+  /** Run `fn` — any number of ordinary commits — as ONE undo step: inside a
+   *  gesture that is already open its commits join that one, otherwise it gets
+   *  a gesture of its own (closed even if `fn` throws). */
+  oneStep: (fn: () => void) => void
   /** Switch to a different project document, resetting history, selection and
    *  the playhead. No autosave: main already holds this document's state (an
    *  autosave exists only once there are unsaved edits). */
@@ -254,11 +258,22 @@ export function createDocument(set: SetState, get: GetState): { doc: Doc; state:
     markDirty()
   }
 
+  function oneStep(fn: () => void): void {
+    if (gestureBefore) return fn()
+    gestureBefore = get().project
+    try {
+      fn()
+    } finally {
+      get().endGesture()
+    }
+  }
+
   const doc: Doc = {
     set,
     get,
     commit,
     commitComp: (transform) => commit((p) => updateCompAtPath(p, get().editPath, transform)),
+    oneStep,
     adopt,
     markDirty,
     scheduleSave,

@@ -8,6 +8,7 @@ import { resolveCompAtPath } from '@shared/compositions'
 import { newId } from '@shared/ids'
 import * as links from '@/lib/links'
 import { applyTemplate, type DropMedia } from '@/lib/templates'
+import { makeRoomFor, moveToSeam } from '@/lib/ripple'
 import { primaryRef, useUi } from '@/state/ui'
 import { activeComp, type Doc } from './core'
 
@@ -45,9 +46,23 @@ export interface TimelineActions {
    * a clip effect but no clip was under the playhead.
    */
   dropTemplate: (t: ReelTemplate, atSec: number, media: DropMedia) => { effectSkipped: boolean }
+  /**
+   * INSERT BETWEEN: run `add` — ordinary store actions that put new tiles at
+   * `atSec` — and make room for what it added: every other tile from `atSec`
+   * on, on every lane, moves later by the new tiles' length (`makeRoomFor`,
+   * lib/ripple.ts). ONE undo step for both. `srcDur` is only needed to measure
+   * a new whole-source audio clip.
+   */
+  insertAt: (atSec: number, add: () => void, srcDur?: links.SourceDuration) => void
+  /**
+   * Lift the tiles `refs` out and insert them at `seamSec`: the hole they leave
+   * closes and room opens at the seam (`moveToSeam`, lib/ripple.ts). One undo
+   * step. (The timeline's Shift-drag applies the same helper on release.)
+   */
+  moveItemsToSeam: (refs: TimelineItemRef[], seamSec: number, srcDur?: links.SourceDuration) => void
 }
 
-export const timelineActions = ({ get, commitComp }: Doc): TimelineActions => ({
+export const timelineActions = ({ get, commitComp, oneStep }: Doc): TimelineActions => ({
   linkItems: (refs) => commitComp((p) => links.linkItems(p, refs, newId)),
 
   unlinkItems: (refs) => commitComp((p) => links.unlinkItems(p, refs)),
@@ -101,5 +116,14 @@ export const timelineActions = ({ get, commitComp }: Doc): TimelineActions => ({
     })
     if (added.length) useUi.getState().selectItems(added, added[0])
     return { effectSkipped }
-  }
+  },
+
+  insertAt: (atSec, add, srcDur) =>
+    oneStep(() => {
+      const before = activeComp(get())
+      add()
+      if (before) commitComp((c) => makeRoomFor(before, c, atSec, srcDur))
+    }),
+
+  moveItemsToSeam: (refs, seamSec, srcDur) => commitComp((c) => moveToSeam(c, refs, seamSec, srcDur))
 })

@@ -22,7 +22,7 @@ import { visualDuration } from '@shared/layers'
 import { ClipCard } from '@/components/ClipCard'
 import { MENU_SEPARATOR, btnCls, disabledCls, useContextMenu, type ContextMenuEntry } from '@/components/ui'
 import { placeWorkout } from '@/lib/workout'
-import { placeAsset } from '@/lib/placeAsset'
+import { INSERT_DND_MIME, insertsOnDrop, placeAsset } from '@/lib/placeAsset'
 
 /**
  * A library row: the shared `ClipCard` shell (thumbnail + hover preview + meta),
@@ -162,9 +162,12 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
   // Where to drop a new layer: the playhead, or the end of the current timeline.
   const playhead = (): number => usePlayback.getState().time
   const endOfTimeline = (): number => visualDuration(useProject.getState().project?.layers ?? [])
-  const addVideoAt = (startSec: number): void => {
-    if (ready) placeAsset(asset, startSec)
+  // Shift-click on a Playhead button INSERTS there: everything from the playhead
+  // on moves later by the clip's length (lib/ripple.ts).
+  const addVideoAt = (startSec: number, insert = false): void => {
+    if (ready) placeAsset(asset, startSec, { insert })
   }
+  const insertHint = ' (Shift-click inserts it there: everything after moves later)'
   const addImageAt = addVideoAt
   // Real buttons, so the keyboard reaches them (Tab, then Enter). Not ready =
   // `disabled`; it also lets clicks through to the card, as before.
@@ -208,10 +211,10 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
             disabled={!ready}
             onClick={(e) => {
               e.stopPropagation()
-              addImageAt(playhead())
+              addImageAt(playhead(), e.shiftKey)
             }}
             className={addBtn}
-            title="Add image at the playhead"
+            title={`Add image at the playhead${insertHint}`}
           >
             ＋ Playhead
           </button>
@@ -234,12 +237,12 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
           disabled={!ready}
           onClick={(e) => {
             e.stopPropagation()
-            if (ready) placeAsset(asset, playhead())
+            if (ready) placeAsset(asset, playhead(), { insert: e.shiftKey })
           }}
           className={`rounded px-1 py-0.5 text-center text-[10px] font-semibold whitespace-nowrap transition ${
             onTrack ? 'bg-emerald-500/30 text-emerald-200' : 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/40'
           } ${notReadyCls}`}
-          title="Add to audio track at the playhead"
+          title={`Add to audio track at the playhead${insertHint}`}
         >
           ♪ Playhead
         </button>
@@ -250,10 +253,10 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
             disabled={!ready}
             onClick={(e) => {
               e.stopPropagation()
-              addVideoAt(playhead())
+              addVideoAt(playhead(), e.shiftKey)
             }}
             className={addBtn}
-            title="Add clip at the playhead"
+            title={`Add clip at the playhead${insertHint}`}
           >
             ＋ Playhead
           </button>
@@ -300,6 +303,8 @@ function ClipRow({ asset, mergeable }: { asset: MediaAsset; mergeable: MediaAsse
         }
         // Drag onto the timeline to place a layer at the drop position.
         e.dataTransfer.setData('application/x-reel-asset', asset.id)
+        // Dropped on a seam, a picture is inserted there (the timeline shows a caret).
+        if (insertsOnDrop(asset)) e.dataTransfer.setData(INSERT_DND_MIME, '1')
         e.dataTransfer.effectAllowed = 'copy'
       }}
       onContextMenu={onContextMenu}

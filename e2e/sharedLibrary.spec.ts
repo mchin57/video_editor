@@ -212,6 +212,39 @@ test('a shared graphic shows its picture, refuses a file of the wrong kind, and 
   expect((await project(page)).layers).toEqual([])
 })
 
+test('Shift-click Insert inserts a shared graphic at the playhead: what follows moves later, in one undo step', async ({
+  appPage: page,
+  electronApp,
+  scratchDir
+}) => {
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addVideoLayer('V1', 'no-such-media', 0, 4, false)
+    s.addVideoLayer('V2', 'no-such-media', 4, 4, false)
+    window.__reelStores.usePlayback.getState().setTime(4)
+  })
+  const starts = async (): Promise<Record<string, number>> =>
+    Object.fromEntries(
+      (await project(page)).layers.map((l) => [l.content.kind === 'image' ? 'image' : l.id, l.startSec])
+    )
+
+  await openShared(page, 'graphic')
+  await stubOpen(electronApp, [png(join(scratchDir, 'card.png'))])
+  await page.getByTestId('shared-add').click()
+  await expect(page.getByTestId('shared-note')).toHaveText('Added “card”.')
+  const [id] = await sharedIds(page)
+  await page.getByTestId(`shared-insert-${id}`).click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('shared-dialog')).toHaveCount(0)
+  // The 3 s picture sits at the playhead and the clip that started there follows it.
+  expect(await starts()).toEqual({ V1: 0, image: 4, V2: 7 })
+  expect((await project(page)).mediaIds).toHaveLength(1)
+
+  // One undo takes back the copy into the project, the picture and the move.
+  await page.keyboard.press('Control+z')
+  expect(await starts()).toEqual({ V1: 0, V2: 4 })
+  expect((await project(page)).mediaIds).toEqual([])
+})
+
 test('saved text lands exactly as it was saved, at the playhead', async ({ appPage: page }) => {
   const saved = await page.evaluate(() => {
     const { useProject, useUi } = window.__reelStores

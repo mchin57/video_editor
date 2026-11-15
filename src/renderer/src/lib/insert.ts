@@ -77,9 +77,15 @@ export async function insertTemplate(id: string, library: DropMedia): Promise<{ 
  * was called). A text piece drops like a template's text (one link group when
  * it has several layers, selected); a sound, graphic or video is first copied
  * into the project's library by main, then placed like a library clip — ONE
- * undo step for both.
+ * undo step for both. With `insert` a sound, graphic or video is INSERTED
+ * there (`placeAsset`'s insert: everything after moves later); a text piece
+ * is laid over the picture either way.
  */
-export async function insertShared(item: SharedItem, library: DropMedia): Promise<void> {
+export async function insertShared(
+  item: SharedItem,
+  library: DropMedia,
+  opts: { insert?: boolean } = {}
+): Promise<void> {
   const at = usePlayback.getState().time
   if (item.kind === 'text') {
     useProject.getState().dropTemplate(sharedTextTemplate(item), at, library)
@@ -91,7 +97,7 @@ export async function insertShared(item: SharedItem, library: DropMedia): Promis
   store.beginGesture()
   try {
     store.addMedia([asset.id])
-    placeAsset(asset, at)
+    placeAsset(asset, at, { insert: opts.insert })
   } finally {
     store.endGesture()
   }

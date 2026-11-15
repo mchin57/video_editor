@@ -99,6 +99,12 @@ export function layoutLanes<K extends string>(
   return { lanes, scaleTop, totalH: scaleTop + geom.scaleH }
 }
 
+/** The lane whose band contains vertical position `y` (px, in the same space as
+ *  `LaneBox.top`), or null over the ruler, a gap between lanes or the scale. */
+export function laneAt<K extends string>(lanes: LaneBox<K>[], y: number): K | null {
+  return lanes.find((l) => y >= l.top && y < l.top + l.height)?.key ?? null
+}
+
 /** New height-per-row for a lane resize: the pointer's vertical delta spread
  *  across the lane's rows, clamped to [min,max]. */
 export function resizeRowH(startRowH: number, dyPx: number, rows: number, geom: LaneGeometry): number {
