@@ -698,6 +698,43 @@ describe('buildExportArgs', () => {
       expect(exportAudioClips([clipA({ mute: true })], src, { levels, seriesOf: () => null }, false)).toEqual([])
       expect(exportAudioClips([clipA()], () => null, { levels, seriesOf: () => null }, false)).toEqual([])
     })
+
+    it('a volume line becomes timeline points on the export and one expression volume after the level gain', () => {
+      const c = clipA({
+        startSec: 2,
+        inSec: 1,
+        outSec: 6,
+        volumeLevelId: 'default',
+        volumeKeyframes: [
+          { sourceSec: 3, db: 0 },
+          { sourceSec: 4, db: -12 }
+        ]
+      })
+      const [a] = exportAudioClips(
+        [c],
+        () => ({ path: 'x', durationSec: 10, foldChannel: null }),
+        { levels, seriesOf: () => steady(-30, -20) },
+        false
+      )
+      expect(a.volumeLine).toEqual([
+        { t: 4, db: 0 },
+        { t: 5, db: -12 }
+      ])
+      expect(audioChain(c, steady(-30, -20))).toBe(
+        "[2:a]atrim=1.000:6.000,asetpts=N/SR/TB,adelay=2000|2000,asetpts=N/SR/TB,volume=5.012,asetnsamples=n=64:p=0,volume=volume='if(lt(t,4.000),1.000000,if(lt(t,5.000),pow(10,(0.000+-12.000*(t-4.000)/1.000)/20),0.251189))':eval=frame[ac0]"
+      )
+    })
+
+    it('a flat line (absent or empty) adds nothing — the ExportAudio has no volumeLine key', () => {
+      const src = () => ({ path: 'x', durationSec: 10, foldChannel: null })
+      for (const c of [clipA(), clipA({ volumeKeyframes: [] })]) {
+        const [a] = exportAudioClips([c], src, { levels, seriesOf: () => null }, false)
+        expect('volumeLine' in a).toBe(false)
+      }
+      expect(audioChain(clipA({ volumeKeyframes: [] }), null)).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=0.501[ac0]'
+      )
+    })
   })
 
   it('uses NVENC when available + preferred, else libx264', () => {

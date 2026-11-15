@@ -581,7 +581,26 @@ export interface AudioClip {
    * effect track (`kind: 'fx'`), which follows the clip it was made from.
    */
   volumeLevelId?: string
+  /**
+   * The clip's volume LINE (the "rubber band" on its tile): points anchored to
+   * the audio in SOURCE seconds, each a dB offset on top of the clip's normal
+   * gain (`clipGain`, volume levels included), joined by straight lines in dB.
+   * Absent or empty = a flat line at 0 dB (no change). Trims keep points that
+   * fall outside the window, so trimming back out restores them; a split pins
+   * a point at the cut on both halves. Preview and export both read it through
+   * `shared/audioEnvelope.ts`, together with the fades.
+   */
+  volumeKeyframes?: VolumeKeyframe[]
   kind: AudioKind
+}
+
+/** One point of an audio clip's volume line. @see AudioClip.volumeKeyframes */
+export interface VolumeKeyframe {
+  /** Position in the SOURCE media (seconds) — the point stays on its sound. */
+  sourceSec: number
+  /** Offset from the clip's normal gain (dB): `VOLUME_LINE_SILENCE_DB` (silence)
+   *  up to `VOLUME_LINE_MAX_DB`; 0 = no change. */
+  db: number
 }
 
 /**
@@ -815,7 +834,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 30
+export const PROJECT_VERSION = 31
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1152,6 +1171,8 @@ export function migrateProject(raw: unknown): Project {
   // absent means untinted, so nothing is rewritten.
   // v30 adds the `workout` layer content kind (shared/workoutOverlay.ts) —
   // purely additive, old projects simply have none.
+  // v31 adds the absence-tolerant `AudioClip.volumeKeyframes` (the volume line,
+  // shared/audioEnvelope.ts) — absent means a flat line, so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

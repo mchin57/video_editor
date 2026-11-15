@@ -19,6 +19,7 @@ import { normalizeDeg, rotatedBounds } from '@shared/rotation'
 import type { AudioClip } from '@shared/project'
 import { effectiveDenoise, effectiveOut } from '@shared/project'
 import { clipGain, type GainContext } from '@shared/volumeLevels'
+import { clipLinePoints, type LinePoint } from '@shared/audioEnvelope'
 import { clampInt } from '@shared/math'
 
 /**
@@ -219,6 +220,9 @@ export interface ExportAudio {
   foldChannel?: number | null
   /** Pitch-preserving tempo (a re-timed video layer's own audio; 1 = normal). */
   tempo?: number
+  /** An audio clip's volume line in timeline seconds (`clipLinePoints`); absent
+   *  = flat. A video layer's own sound never has one. */
+  volumeLine?: LinePoint[]
 }
 
 /** What the export reads for one audio clip's media. */
@@ -252,17 +256,22 @@ export function exportAudioClips(
     if (!g.audible) continue
     const src = sourceOf(a.mediaId)
     if (!src) continue
+    const outSec = effectiveOut(a, src.durationSec)
+    // The volume line (shared/audioEnvelope.ts — the preview's own envelope),
+    // only when the clip has one, so a flat clip's args don't change at all.
+    const line = clipLinePoints(a, outSec)
     out.push({
       path: src.path,
       inSec: a.inSec,
-      outSec: effectiveOut(a, src.durationSec),
+      outSec,
       startSec: a.startSec,
       gainDb: g.gainDb,
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
       duck: a.duck,
       denoise: effectiveDenoise(a, denoiseDefault),
-      foldChannel: src.foldChannel
+      foldChannel: src.foldChannel,
+      ...(line.length > 0 ? { volumeLine: line } : {})
     })
   }
   return out
@@ -699,7 +708,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     duck: a.duck,
     denoise: a.denoise,
     foldChannel: a.foldChannel,
-    tempo: a.tempo
+    tempo: a.tempo,
+    volumeLine: a.volumeLine
   }))
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, null) : null
   if (graph) chains.push(graph.filter)

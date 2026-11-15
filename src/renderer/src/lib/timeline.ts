@@ -9,6 +9,7 @@ import type { AudioClip, CaptionSegment, FreezeHold, Layer, LayerKeyframe, Video
 import { audioClipEnd, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
 import { extractedAudioClip } from '@shared/volumeLevels'
+import { hasVolumeLine, splitVolumeKeyframes } from '@shared/audioEnvelope'
 import { playedBetween, sourceAfterPlayed } from '@shared/speed'
 import { clamp } from '@shared/math'
 import { shiftMarks } from '@shared/graphics'
@@ -438,7 +439,10 @@ export function splitAudioClip(
         : Infinity
   if (atSec <= clip.startSec + EPS || atSec >= end - EPS) return null
   const cutSource = clip.inSec + (atSec - clip.startSec)
-  const left: AudioClip = { ...clip, outSec: cutSource, fadeOutSec: 0 }
-  const right: AudioClip = { ...clip, id: makeId(), inSec: cutSource, startSec: atSec, fadeInSec: 0 }
+  // Both halves keep the whole volume line plus a point pinned at the cut
+  // (`splitVolumeKeyframes`), so the level is continuous across the seam.
+  const line = hasVolumeLine(clip) ? { volumeKeyframes: splitVolumeKeyframes(clip.volumeKeyframes!, cutSource) } : {}
+  const left: AudioClip = { ...clip, outSec: cutSource, fadeOutSec: 0, ...line }
+  const right: AudioClip = { ...clip, id: makeId(), inSec: cutSource, startSec: atSec, fadeInSec: 0, ...line }
   return [left, right]
 }
