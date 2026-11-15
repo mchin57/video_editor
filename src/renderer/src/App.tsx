@@ -28,6 +28,8 @@ import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
 import { refetchFresh } from '@/lib/refetchFresh'
 import { pickedFreezeIndex } from '@/lib/links'
+import { pickedVolumePointIndex } from '@/lib/volumeLine'
+import { removeVolumeKeyframe, sortedVolumeKeyframes } from '@shared/audioEnvelope'
 import {
   chooseProjectLocation,
   defaultProjectLocation,
@@ -246,11 +248,18 @@ export default function App(): JSX.Element {
         // Delete the whole selection (one tile, or every tile of a link group) —
         // or, with a graphics mark or a freeze picked, just that one. A stale
         // pick (undone, trimmed away, clip since linked) falls through to the clip.
-        const { selection, selectedLayerId, selectedMarkId, selectedFreeze } = useUi.getState()
+        const { selection, selectedLayerId, selectedMarkId, selectedFreeze, selectedVolumePoint } = useUi.getState()
         const comp = getActiveComp()
         const freezeIndex =
           comp && selectedLayerId && selectedFreeze ? pickedFreezeIndex(comp, selectedLayerId, selectedFreeze) : -1
-        if (selectedLayerId && selectedMarkId) {
+        // A volume-line point picked on an audio tile: just that point.
+        const volumeIndex = comp && selectedVolumePoint ? pickedVolumePointIndex(comp, selectedVolumePoint) : -1
+        if (comp && selectedVolumePoint && volumeIndex >= 0) {
+          e.preventDefault()
+          const clip = comp.audioClips.find((a) => a.id === selectedVolumePoint.clipId)!
+          project.setVolumeKeyframes(clip.id, removeVolumeKeyframe(sortedVolumeKeyframes(clip), volumeIndex))
+          useUi.getState().selectVolumePoint(null)
+        } else if (selectedLayerId && selectedMarkId) {
           e.preventDefault()
           project.updateGraphicsMarks(selectedLayerId, (ms) => ms.filter((m) => m.id !== selectedMarkId))
           useUi.getState().selectMark(null)
