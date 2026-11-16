@@ -261,7 +261,7 @@ export function buildAudioGraph(
       // AFTER the tempo: the stream is cut at each hold into pieces, each piece
       // but the last padded with its hold's silence, and concatenated back into
       // the one chain the delay, gain, line and fades then act on. Sample-exact
-      // and clean in a long mp4 mux (FFMPEG-NOTES "Audio holds").
+      // and clean in a long mp4 mux (FFMPEG-NOTES "Audio clip speed & holds").
       const n = inner.length + 1
       const pieces = Array.from({ length: n }, (_, k) => `ac${i}h${k}`)
       chains.push(`${parts.join(',')},asplit=${n}${pieces.map((p) => `[${p}s]`).join('')}`)
