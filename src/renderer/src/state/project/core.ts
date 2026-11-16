@@ -33,6 +33,7 @@ import type { VideoTimingActions } from './videoTimingActions'
 import type { TimelineActions } from './timelineActions'
 import type { CaptionActions } from './captionActions'
 import type { AudioActions } from './audioActions'
+import type { TransitionActions } from './transitionActions'
 
 const HISTORY_LIMIT = 50
 
@@ -96,7 +97,8 @@ export type ProjectState = DocumentState &
   VideoTimingActions &
   TimelineActions &
   CaptionActions &
-  AudioActions
+  AudioActions &
+  TransitionActions
 
 /**
  * Selector: the composition the editor is pointed at — the root project when

@@ -484,3 +484,63 @@ describe('captions, audio and levels', () => {
     expect(s().past).toHaveLength(steps)
   })
 })
+
+describe('transitions (#64)', () => {
+  /** Two linked A/V pairs that meet at 4 s, and a third clip after them. */
+  function reel(): void {
+    const v = (id: string, start: number, gid: string): Layer => ({
+      ...makeVideoLayer(id, 'm1', start, 4, { mute: true }),
+      linkGroupId: gid
+    })
+    open(
+      [v('V1', 0, 'g1'), v('V2', 4, 'g2'), makeVideoLayer('V3', 'm1', 8, 4)],
+      [
+        clip('A1', { startSec: 0, outSec: 4, linkGroupId: 'g1' }),
+        clip('A2', { startSec: 4, outSec: 4, linkGroupId: 'g2' })
+      ]
+    )
+  }
+  const refs = [
+    { kind: 'layer' as const, id: 'V1' },
+    { kind: 'layer' as const, id: 'V2' }
+  ]
+
+  it('applying is ONE undo step: the slide, the stack, both sides and the crossfade', () => {
+    reel()
+    const before = root()
+    expect(s().applyTransition(refs, 'dissolve')).toEqual({ ok: true })
+    expect(layer('V2')).toMatchObject({ startSec: 3.5, transitionIn: { kind: 'dissolve', sec: 0.5 } })
+    expect(layer('V1').transitionOut).toEqual({ kind: 'dissolve', sec: 0.5 })
+    expect(layer('V3').startSec).toBe(7.5)
+    expect(root().audioClips.map((a) => [a.id, a.startSec, a.fadeInSec, a.fadeOutSec])).toEqual([
+      ['A1', 0, 0, 0.5],
+      ['A2', 3.5, 0.5, 0]
+    ])
+    expect(s().past).toEqual([before])
+    s().undo()
+    expect(root()).toBe(before)
+  })
+
+  it('a selection that does not qualify says why and records nothing', () => {
+    reel()
+    const r = s().applyTransition([{ kind: 'layer', id: 'V1' }], 'dissolve')
+    expect(r.ok).toBe(false)
+    expect(s().past).toHaveLength(0)
+  })
+
+  it('length, kind and removal are one step each', () => {
+    reel()
+    s().applyTransition(refs, 'dipBlack')
+    s().setTransitionLength('V2', 'in', 1)
+    expect(layer('V2').startSec).toBe(3)
+    s().setTransitionKind('V2', 'in', 'dipWhite')
+    expect(layer('V1').transitionOut).toEqual({ kind: 'dipWhite', sec: 1 })
+    s().removeTransition('V1', 'out')
+    expect('transitionIn' in layer('V2')).toBe(false)
+    expect(layer('V2').startSec).toBe(3)
+    expect(s().past).toHaveLength(4)
+    s().setLayerFade('V3', 'out', 1)
+    expect(layer('V3').transitionOut).toEqual({ kind: 'fade', sec: 1 })
+    expect(s().past).toHaveLength(5)
+  })
+})
