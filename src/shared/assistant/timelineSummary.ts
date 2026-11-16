@@ -3,12 +3,13 @@
  * are listed by start time (not stack order); captions are left out. Pure.
  */
 
-import type { Composition, Layer } from '../project'
+import type { Composition, Layer, TransitionKind } from '../project'
 import { audioClipEnd } from '../project'
 import { compositionDuration, type SourceDuration } from '../compositions'
 import { workoutSpeed } from '../workoutOverlay'
 import { hasVolumeLine, sortedVolumeKeyframes } from '../audioEnvelope'
 import { audioHoldSpans, audioSpeed, audioTimelineAt } from '../audioTiming'
+import { pairOf, transitionOf, type TransitionSide } from '../transitions'
 
 export interface LayerSummary {
   id: string
@@ -26,6 +27,17 @@ export interface LayerSummary {
   speed?: number
   shows?: string[]
   linkGroupId?: string
+  /** Video / image: how it comes in at its start and goes out at its end
+   *  (absent = a cut). `withId` = the clip a cross dissolve / dip joins it to
+   *  (they overlap by `sec`); absent on a plain fade. @see shared/transitions.ts */
+  transitionIn?: TransitionSummary
+  transitionOut?: TransitionSummary
+}
+
+export interface TransitionSummary {
+  kind: TransitionKind
+  sec: number
+  withId?: string
 }
 
 export interface AudioSummary {
@@ -57,7 +69,15 @@ export interface TimelineSummary {
 
 const r3 = (n: number): number => Math.round(n * 1000) / 1000
 
-function layerSummary(l: Layer): LayerSummary {
+function transitionSummary(layers: Layer[], l: Layer, side: TransitionSide): TransitionSummary | null {
+  const tr = transitionOf(l, side)
+  if (!tr) return null
+  const pair = pairOf(layers, l.id, side)
+  const withId = pair ? (side === 'in' ? pair.outId : pair.inId) : undefined
+  return { kind: tr.kind, sec: r3(tr.sec), ...(withId ? { withId } : {}) }
+}
+
+function layerSummary(l: Layer, layers: Layer[]): LayerSummary {
   const s: LayerSummary = {
     id: l.id,
     kind: l.content.kind,
@@ -79,6 +99,10 @@ function layerSummary(l: Layer): LayerSummary {
     })
   }
   if (l.linkGroupId) s.linkGroupId = l.linkGroupId
+  const tin = transitionSummary(layers, l, 'in')
+  const tout = transitionSummary(layers, l, 'out')
+  if (tin) s.transitionIn = tin
+  if (tout) s.transitionOut = tout
   return s
 }
 
@@ -87,7 +111,7 @@ function layerSummary(l: Layer): LayerSummary {
  * (`outSec <= 0`) get an endSec only when `srcDur` supplies their source length.
  */
 export function summarizeTimeline(comp: Composition, srcDur: SourceDuration = () => 0): TimelineSummary {
-  const layers = [...comp.layers].sort((a, b) => a.startSec - b.startSec).map(layerSummary)
+  const layers = [...comp.layers].sort((a, b) => a.startSec - b.startSec).map((l) => layerSummary(l, comp.layers))
   const audioClips: AudioSummary[] = comp.audioClips.map((c) => {
     const bounded = c.outSec > 0
     const srcLen = bounded ? Infinity : srcDur(c.mediaId)

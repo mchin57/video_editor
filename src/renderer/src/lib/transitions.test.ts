@@ -15,6 +15,7 @@ import {
   placeAbove,
   removeTransition,
   setFade,
+  setSideTransition,
   setTransitionKind,
   setTransitionLength,
   transitionCandidate
@@ -229,5 +230,34 @@ describe('the ripple pieces', () => {
   it('placeAbove moves the upper tile directly above the lower one', () => {
     const c = comp([video('B', 4, 4), makeTextLayer('T', 0, 9), video('A', 0, 4)])
     expect(placeAbove(c, 'A', 'B').layers.map((l) => l.id)).toEqual(['T', 'A', 'B'])
+  })
+})
+
+describe('setSideTransition — the assistant’s one call', () => {
+  it('joins a clip to its neighbour on that side, with a length', () => {
+    const r = setSideTransition(reel(), 'B', 'out', 'dipWhite', 1)
+    expect(r.transition).toEqual(tr('dipWhite', 1))
+    expect(r.partnerId).toBe('C')
+    expect(get(r.comp, 'C').startSec).toBe(7)
+    expect(get(r.comp, 'C').transitionIn).toEqual(tr('dipWhite', 1))
+  })
+
+  it('switches a joined pair’s kind, makes a plain fade, removes', () => {
+    const joined = setSideTransition(reel(), 'B', 'in', 'dissolve', undefined).comp
+    expect(get(joined, 'B').startSec).toBe(3.5)
+    const dip = setSideTransition(joined, 'A', 'out', 'dipBlack', undefined)
+    expect(dip.partnerId).toBe('B')
+    expect(get(dip.comp, 'B').transitionIn).toEqual(tr('dipBlack', 0.5))
+    const fade = setSideTransition(reel(), 'C', 'out', 'fade', 0.8)
+    expect(fade).toMatchObject({ transition: tr('fade', 0.8), partnerId: null })
+    const none = setSideTransition(dip.comp, 'B', 'in', 'none', undefined)
+    expect(none.transition).toBeNull()
+    expect('transitionOut' in get(none.comp, 'A')).toBe(false)
+  })
+
+  it('throws, changing nothing, without a neighbour or on a kind that takes none', () => {
+    expect(() => setSideTransition(reel(), 'A', 'in', 'dissolve', undefined)).toThrow(/No clip ends where/)
+    expect(() => setSideTransition(reel(), 'T', 'in', 'fade', 1)).toThrow(/Only video and image/)
+    expect(() => setSideTransition(reel(), 'nope', 'in', 'fade', 1)).toThrow(/No layer/)
   })
 })

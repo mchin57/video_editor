@@ -257,3 +257,83 @@ export function setFade<C extends Composition>(c: C, id: string, side: Transitio
   const s = ms(clampTransitionSec(sec, maxTransitionSec(tileLen(l))))
   return mapLayer(c, id, (x) => withTransition(x, side, { kind: 'fade', sec: s }))
 }
+
+/** What `setSideTransition` did, for the assistant's answer. */
+export interface SideTransitionResult<C extends Composition> {
+  comp: C
+  transition: LayerTransition | null
+  partnerId: string | null
+}
+
+/**
+ * ONE call that sets layer `id`'s transition on `side` to `kind` — the
+ * assistant's `set_transition`, as a single edit:
+ *
+ * - `none` removes it (both sides of a pair; the overlap stays);
+ * - `fade` makes it a plain fade (a pair's side breaks off its partner);
+ * - a pair kind on a side that already has a partner switches the pair's kind;
+ *   otherwise the clip is joined to its NEIGHBOUR on that side — the clip
+ *   that ends where it starts (`in`) or starts where it ends (`out`), or
+ *   already overlaps it there — exactly as Add transition does.
+ *
+ * `sec` (optional) is the length, held to the usual bounds. Throws a readable
+ * error, changing nothing, when the layer can't take it.
+ */
+export function setSideTransition<C extends Composition>(
+  c: C,
+  id: string,
+  side: TransitionSide,
+  kind: TransitionKind | 'none',
+  sec: number | undefined,
+  srcDur: SourceDuration = () => 0
+): SideTransitionResult<C> {
+  const l = c.layers.find((x) => x.id === id)
+  if (!l) throw new Error(`No layer with id ${id}`)
+  if (!takesTransitions(l)) throw new Error('Only video and image clips take transitions.')
+  let next: C = c
+  if (kind === 'none') next = removeTransition(c, id, side)
+  else if (kind === 'fade') {
+    const tr = transitionOf(l, side)
+    next = tr && tr.kind !== 'fade' ? setTransitionKind(c, id, side, 'fade') : c
+    next = setFade(next, id, side, sec ?? tr?.sec ?? TRANSITION_DEFAULT_SEC)
+  } else if (pairOf(c.layers, id, side)) {
+    next = setTransitionKind(c, id, side, kind)
+    if (sec !== undefined) next = setTransitionLength(next, id, side, sec, srcDur)
+  } else {
+    const other = neighbourOf(c, l, side)
+    if (!other) {
+      throw new Error(
+        `No clip ${side === 'in' ? 'ends where this one starts' : 'starts where this one ends'}: a ${TRANSITION_KINDS[kind].label.toLowerCase()} joins two clips that meet.`
+      )
+    }
+    const refs = [layerRef(id), layerRef(other.id)]
+    const check = transitionCandidate(c, refs)
+    if (!check.ok) throw new Error(check.reason)
+    next = applyTransition(c, refs, kind, srcDur)
+    if (sec !== undefined) next = setTransitionLength(next, id, side, sec, srcDur)
+  }
+  const after = next.layers.find((x) => x.id === id)!
+  const pair = pairOf(next.layers, id, side)
+  return {
+    comp: next,
+    transition: transitionOf(after, side),
+    partnerId: pair ? (side === 'in' ? pair.outId : pair.inId) : null
+  }
+}
+
+/** The video / image clip that meets `l` on `side` (ends where it starts, or
+ *  starts where it ends — or overlaps it there), the nearest one. */
+function neighbourOf(c: Composition, l: Layer, side: TransitionSide): Layer | null {
+  let best: { l: Layer; d: number } | null = null
+  for (const o of c.layers) {
+    if (o.id === l.id || !takesTransitions(o)) continue
+    const d = side === 'in' ? Math.abs(o.endSec - l.startSec) : Math.abs(l.endSec - o.startSec)
+    const meets = d <= SEAM_GAP_SEC
+    const overlaps =
+      side === 'in'
+        ? o.startSec < l.startSec && o.endSec > l.startSec && o.endSec < l.endSec
+        : l.startSec < o.startSec && l.endSec > o.startSec && l.endSec < o.endSec
+    if ((meets || overlaps) && (!best || d < best.d)) best = { l: o, d }
+  }
+  return best?.l ?? null
+}

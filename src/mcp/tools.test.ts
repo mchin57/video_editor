@@ -128,3 +128,27 @@ describe('set_text bounds (#10)', () => {
     expect(call).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('set_transition (#64)', () => {
+  it('takes a side, a kind and an optional length in range, and forwards them as given', async () => {
+    for (const kind of ['dissolve', 'dipBlack', 'dipWhite', 'fade', 'none']) {
+      expect((await run('set_transition', { id: 'L', side: 'out', kind })).isError, kind).toBe(false)
+      expect(call).toHaveBeenLastCalledWith('set_transition', { id: 'L', side: 'out', kind })
+    }
+    expect((await run('set_transition', { id: 'L', side: 'in', kind: 'dissolve', sec: 1.5 })).isError).toBe(false)
+    expect(call).toHaveBeenLastCalledWith('set_transition', { id: 'L', side: 'in', kind: 'dissolve', sec: 1.5 })
+  })
+
+  it('refuses an unknown kind or side, and a length outside 0.1–2 s, without calling the editor', async () => {
+    call.mockClear()
+    for (const args of [
+      { id: 'L', side: 'in', kind: 'wipe' },
+      { id: 'L', side: 'middle', kind: 'fade' },
+      { id: 'L', side: 'in', kind: 'fade', sec: 0 },
+      { id: 'L', side: 'in', kind: 'fade', sec: 5 }
+    ]) {
+      expect((await run('set_transition', args)).isError, JSON.stringify(args)).toBe(true)
+    }
+    expect(call).not.toHaveBeenCalled()
+  })
+})
