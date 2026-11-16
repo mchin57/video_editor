@@ -310,6 +310,59 @@ black + `signalstats` YAVG readbacks (drives `buildOpacityCmdLines` /
 - A still image needs the `-loop 1` + `fps=30` treatment (like transform
   keyframes) so there are frames for the commands to fire on.
 
+## Transitions — dissolve and dip through the opacity path (verified ffmpeg 8.1.1, 2026-11-16, #64)
+
+A transition is NOT `xfade` (which joins two whole equal-size streams): the
+incoming clip is an ordinary overlay whose opacity ramps through the keyframed-
+opacity path above, and a dip adds a full-frame colour plate. Checked through the
+exporter's own `buildExportArgs` + `buildOpacityCmdLines` (bundled from the
+source), 360×640 x264 sources of two flat colours (A = 200/59/39, B = 38/77/199
+after the round trip), centre 100×100 mean RGB of every output frame:
+
+- **Dissolve = B's opacity 0→1 over the overlap, A untouched underneath.** With
+  B over A and the ramp over [2.5, 3.0], every frame matched
+  `α·B + (1−α)·A` (α the ramp at the frame's time n/30) to **≤ 2.4 code
+  values** (19 frames). The 50/50 point (t = 2.75) falls between frames 82
+  (α 0.467: 123/67/114) and 83 (α 0.533: 112/68/125); the 50/50 blend of the
+  measured sources is 119/68/119 — between them, as it should be. Frame 75
+  (t = 2.5) is A exactly and frame 90 (t = 3.0) B exactly. A must NOT fade out
+  too: two opposite ramps darken the middle (A·(1−α) under B·α lets the layer
+  below through).
+- **Two ramps multiply in one command file.** The layer's own opacity
+  keyframes (1 → 0.4 over [2.5, 3.5]) times the transition ramp (0 → 1 over
+  [2.5, 3.0]) as ONE point list — the product sampled every 1/30 s where both
+  change (it is quadratic there), linear after — matched `kf(t)·ramp(t)` blended
+  over A to **≤ 2.75 code values** at 18 frames across both stretches. No
+  second `colorchannelmixer` is needed: the shared function multiplies.
+- **Dip = A fades out over the first half onto a plate, B fades in over the
+  second half.** A full-frame `drawbox=x=0:y=0:w=iw:h=ih:color=0xFFFFFF:t=fill`
+  painted on the composite just UNDER A (enabled for the whole window), with a
+  green layer under everything: frames went A → 250/240/239 (t 2.733, A at
+  0.067) → 239/242/251 (t 2.767, B at 0.067) → B, never green — the plate hides
+  what is under the pair. `0x000000` gave 12/2/1 and 1/4/13 at the same two
+  frames (dip to black).
+- **`drawbox` on a transparent base needs `replace=1`.** On a `yuva420p` base (a
+  nested comp's intermediate) the default `replace=0` leaves alpha at 0 — the
+  plate would be invisible in the parent; `replace=1` writes alpha 255 inside
+  the box (alphaextract YAVG 0 → 255 → 0 across the enable window). On the
+  opaque `yuv420p` base `replace=1` gives identical pixels (255/255/255 inside,
+  47/174/63 after, both ways), so the plate always carries it.
+- **Audio: two linear `afade`s summed by `amix=normalize=0` dip about 3 dB in
+  the middle when the two sides are different material.** Clip A fade-out 0.5 s
+  and clip B fade-in 0.5 s over the same window, through `buildAudioGraph`, AAC
+  out, RMS relative to the clips alone:
+  - 440 Hz vs 660 Hz tones: **−2.95 dB** over the middle 100 ms, **−3.25 dB**
+    at the worst 20 ms window (theory for linear fades of uncorrelated signals:
+    (1−α)² + α² = 0.5 → −3.01 dB at α = 0.5);
+  - two pink noises (different seeds): −0.99 / −2.90 / −3.98 / −1.41 / −0.80 dB
+    in the five 100 ms windows (theory −0.83 / −2.32 / −2.95 / −2.32 / −0.83;
+    pink noise wanders ±1 dB in 100 ms);
+  - the SAME take on both sides, sample-aligned: −0.42 dB in the middle (theory
+    0 dB — the amplitudes add).
+  So a crossfade between two different shots dips by ~3 dB at its midpoint with
+  today's shared linear curve (`fadeGainAt`). An equal-power curve would hold the
+  level; changing the shared curve is an owner decision, not made here.
+
 ## Graphics marks — draw-on sequences & alpha fade-in (verified ffmpeg 8.1.1, 2026-10-21)
 
 Each graphics mark is an ordinary image overlay (`exportGraphics.ts`); its
