@@ -9,9 +9,9 @@ editor-wide library instead of being imported again in every project.
 
 ## Where to find it
 
-**Insert ▸ Shared ▸** Sounds… / Graphics… / Video… / Text… / Templates…
+**Insert ▸ Shared ▸** Sounds… / Graphics… / Video… / Text… / LUTs… / Templates…
 
-- The first four open the shared library dialog on that tab.
+- The first five open the shared library dialog on that tab.
 - **Templates…** opens the template gallery (it moved here from Insert ▸ Template…).
   Insert ▸ Save selection as template… stays where it was.
 
@@ -70,6 +70,25 @@ template gallery's preview component.
 Previews (pictures, thumbnails, the play button on a sound) are served by the
 `reelmedia://shared/<id>/<file>` protocol host, which reads the shared folder rather than
 the open project (e2e checks a picture preview decodes; sound playback is not tested).
+
+## LUTs
+
+The **LUTs** tab (Insert ▸ Shared ▸ LUTs…) holds colour `.cube` tables (#55). A LUT is
+not inserted on the timeline: a clip's or picture's **Color** section picks it.
+
+- **Add files…** on the LUTs tab takes `.cube` files only. Each is checked by READING it
+  (`parseCube`, shared/cube.ts), never probed; a broken table is refused with the reason
+  (e.g. "the table should have 8 entries…"), and a `.cube` added on another tab is sent to
+  the LUTs tab. The Color section's **Save to shared library** adds the clip's own LUT
+  under its name. The same file is never added twice (fingerprint), as for media.
+- The Color section's LUT list shows the shared LUTs; picking one **copies it into the
+  project's `luts/`** (named by its content, stored once), so a project never points into
+  the shared folder.
+- A LUT card has Rename and Delete, no Insert.
+
+Covered by `main/services/sharedLibrary.test.ts` (adding, refusing) and
+`e2e/colorTable.spec.ts` (Save to shared library, picking it back in the Inspector). The
+dialog's LUTs tab itself is not driven by an e2e.
 
 ## Rename and delete
 

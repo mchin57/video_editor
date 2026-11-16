@@ -1457,9 +1457,22 @@ over 2); at 33 points the same corner was 11 and ordinary grades up to 5, which
 is why the table has 65 points. The error is interpolation across the clamps
 (a kink inside a grid cell); at grid points the table IS the grade.
 
+**Through the app** (`e2e/colorTable.spec.ts`, real preview screenshots vs the
+exported frame, 8 patches of the BT.709 clip, tolerance 12 as in "Clip grade"):
+temperature +0.7 / −0.7: 8 / 10; tint +0.7 / −0.7: 8 / 7; vibrance +0.8 / −0.8:
+8 / 8; everything at once (old sliders, new controls, a wash): 9; a 17-point LUT
+at 100 / 40 %: 7 / 7, at 60 % after a grade: 8 (each case moved the picture by
+14–59 levels). A graded picture (an RGB PNG, the image chain with the table
+after `scale`, before `format=rgba`): 2; its CSS / `lutrgb` path: 4. The canvas
+drawn over a cropped, mirrored, rotated, keyframed clip and a VP9-alpha matte
+matched the plain elements' screenshot to a mean of 0.7 levels over a 13 × 23
+grid, paused and after a second of playback.
+
 **Not measured:** 10-bit sources through `lut3d` (it would work in
 `gbrp10le` while the preview's upload is 8-bit); a GPU without float-texture
-support (WebGL2 guarantees `texelFetch` on `RGB32F`).
+support (WebGL2 guarantees `texelFetch` on `RGB32F`); a picture with an
+embedded ICC profile (the preview uploads it with the browser's default
+colour conversion, ffmpeg ignores the profile).
 
 ## Recording time — when a clip was filmed (verified ffprobe 8.1.1, 2026-10-25)
 
