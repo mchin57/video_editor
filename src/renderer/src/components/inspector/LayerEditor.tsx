@@ -16,6 +16,7 @@ import { useLinkGroupSize, useMaxEndSec, LinkedNote, useDeleteTile, LiveRange, s
 import { MotionFields, KeyframesSection } from './Motion'
 import { TextAnimationFields, LayerTextInput, TextEffectsFields } from './TextFields'
 import { VideoClipSections } from './VideoSections'
+import { ColorSection } from './ColorSection'
 import { GraphicsSection } from './GraphicsSection'
 import { WorkoutSection } from './WorkoutSection'
 
@@ -266,6 +267,8 @@ export function LayerEditor(): JSX.Element | null {
           </button>
         </CollapsibleSection>
       )}
+      {/* A picture takes the same colour look a clip does. */}
+      {c.kind === 'image' && <ColorSection layerId={id} content={c} />}
 
       {/* Text-specific controls */}
       {c.kind === 'text' && (

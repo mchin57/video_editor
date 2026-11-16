@@ -430,3 +430,98 @@ test('with WebGL gone the clip shows ungraded, with a notice', async ({ appPage:
   await expect(page.getByTestId('grade-warning')).toContainText('WebGL unavailable')
   expect(await video.evaluate((v) => getComputedStyle(v).opacity)).toBe('1')
 })
+
+test('the Inspector imports a LUT, sets its strength, shares it and picks it back; the newer controls reset', async ({
+  appPage: page,
+  electronApp,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(120_000)
+  const clip = join(projectsDir, 'E2E', 'patches.mp4')
+  makePatchClip(clip)
+  const cube = join(projectsDir, 'Warm_Look.cube')
+  writeFileSync(cube, warmCube())
+  const broken = join(projectsDir, 'broken.cube')
+  writeFileSync(broken, 'LUT_3D_SIZE 2\n0 0 0\n')
+  const id = await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    window.__reelStores.useProject.getState().addMedia([asset.id])
+    return asset.id
+  }, clip)
+  await waitForProxy(page, id)
+  await page.evaluate((id) => {
+    const { useProject, usePlayback, useUi } = window.__reelStores
+    useProject.getState().addVideoLayer('V', id, 0, 2, false, 540 / 960)
+    usePlayback.getState().setTime(1)
+    useUi.getState().selectLayer('V')
+  }, id)
+  await page.addStyleTag({ content: '[data-testid="safe-zone"] { display: none !important }' })
+  await expect
+    .poll(async () => (await previewPatches(page, electronApp))[1][0], { timeout: 15_000 })
+    .toBeGreaterThan(110)
+  const ungraded = await previewPatches(page, electronApp)
+  const lutOf = () =>
+    page.evaluate(() => {
+      const l = window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'V')!
+      return l.content.kind === 'video' ? (l.content.lut ?? null) : null
+    })
+  const pick = (path: string) =>
+    electronApp.evaluate(({ dialog }, p) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [p] })) as typeof dialog.showOpenDialog
+    }, path)
+
+  // The old Tint is now "Color wash"; "Tint" is the green / magenta balance.
+  await expect(page.getByTestId('lut-controls')).toBeVisible()
+  await expect(page.getByText(/^Color wash/)).toBeVisible()
+  await expect(page.getByTestId('color-greenMagenta')).toContainText('Tint')
+
+  // A file that isn't a usable table is refused with the reason, and nothing is set.
+  await pick(broken)
+  await page.getByTestId('lut-import').click()
+  await expect(page.getByTestId('lut-error')).toContainText('should have 8 entries')
+  expect(await lutOf()).toBeNull()
+
+  // Import LUT…: copied into the project's luts/ and applied at full strength.
+  await pick(cube)
+  await page.getByTestId('lut-import').click()
+  await expect.poll(lutOf).toMatchObject({ name: 'Warm Look', strength: 1 })
+  const lut = (await lutOf())!
+  expect(lut.file).toMatch(/^[0-9a-f]{16}\.cube$/)
+  expect(existsSync(join(projectsDir, 'E2E', 'luts', lut.file))).toBe(true)
+  await expect(page.getByTestId('lut-select')).toHaveValue(`own:${lut.file}`)
+  await expect(page.locator('[data-layer-id="V"] [data-testid="grade-canvas"]')).toHaveCount(1)
+  await expect
+    .poll(async () => worstDiff(await previewPatches(page, electronApp), ungraded), { timeout: 10_000 })
+    .toBeGreaterThan(20)
+
+  // Strength.
+  await page.getByTestId('lut-controls').locator('input[type="range"]').fill('0.4')
+  await expect.poll(async () => (await lutOf())?.strength).toBe(0.4)
+  await expect(page.getByTestId('lut-controls')).toContainText('Strength 40%')
+
+  // Save to shared library, then pick None and choose it back from the shared list.
+  await page.getByTestId('lut-share').click()
+  await expect(page.getByTestId('lut-note')).toContainText('Added “Warm Look”')
+  const shared = await page.evaluate(async () => (await window.api.listShared()).filter((i) => i.kind === 'lut'))
+  expect(shared.map((i) => i.name)).toEqual(['Warm Look'])
+  await page.getByTestId('lut-select').selectOption('')
+  await expect.poll(lutOf).toBeNull()
+  await expect(page.locator('[data-layer-id="V"] [data-testid="grade-canvas"]')).toHaveCount(0)
+  await page.getByTestId('lut-select').selectOption(`shared:${shared[0].id}`)
+  await expect.poll(lutOf).toMatchObject({ file: lut.file, name: 'Warm Look', strength: 1 })
+
+  // A newer control has its own reset, which leaves the others alone.
+  await page.evaluate(() =>
+    window.__reelStores.useProject.getState().updateLayerContent('V', {
+      color: { brightness: 0.1, contrast: 1, saturation: 1, temperature: 0.5, vibrance: 0.3 }
+    })
+  )
+  await page.getByTestId('color-temperature-reset').click()
+  const color = await page.evaluate(() => {
+    const l = window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'V')!
+    return l.content.kind === 'video' ? l.content.color : null
+  })
+  expect(color).toEqual({ brightness: 0.1, contrast: 1, saturation: 1, vibrance: 0.3 })
+  await expect(page.getByTestId('color-temperature-reset')).toHaveCount(0)
+})

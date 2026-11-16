@@ -31,7 +31,9 @@ import { useUi } from '@/state/ui'
 import { TemplatePreview } from './TemplatePreview'
 import { btnCls, dangerBtnCls, disabledCls, inputCls, subtleBtnCls } from './ui'
 
-const SHARED_KEY = ['shared']
+/** The shared library's list (the Inspector's LUT picker reads it too). */
+export const SHARED_QUERY_KEY = ['shared']
+const SHARED_KEY = SHARED_QUERY_KEY
 
 /** What each tab is for, under the tabs. */
 const TAB_HINT: Record<SharedKind, string> = {
