@@ -1,9 +1,17 @@
 /** Preview ▸ graphics: a graphics layer's marks (shapes + telestrator), drawn from the shared `markShapes`, and — on the layer being edited — the armed drawing tool, mark drags and point handles. */
 
-import { useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type JSX,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 import type { GraphicsContent, Layer } from '@shared/project'
 import {
   angleMark,
+  finishPolyline,
   fromCanvas,
   graphicsSvgTransform,
   LABEL_FONT_FAMILY,
@@ -11,6 +19,7 @@ import {
   markStateAt,
   movedMark,
   newMark,
+  polylineMark,
   shapeSvg,
   toCanvas,
   withMarkPoint,
@@ -167,7 +176,8 @@ function startMarkMove(e: ReactPointerEvent, layer: Layer, m: GraphicMark, t: Gr
  * Editing the selected graphics layer, above everything else on the stage:
  *  - with a tool armed, a press anywhere draws that mark (drag = its size, a
  *    click = a default-sized one; an angle is three clicks: joint, then each
- *    limb), appearing at the playhead;
+ *    limb; a connected line is a click per point, finished by a double-click
+ *    or Enter), appearing at the playhead;
  *  - otherwise every mark can be grabbed and dragged, and the selected one
  *    shows its points as handles.
  */
@@ -190,6 +200,10 @@ function GraphicsEditor({
   /** An angle's placed points so far, plus where the pointer is. */
   const [anglePts, setAnglePts] = useState<Pt[]>([])
   const [hover, setHover] = useState<Pt | null>(null)
+  /** A connected line's placed points so far (the ref is the always-current copy, since a
+   *  double-click's two presses can land before a re-render). */
+  const [polyPts, setPolyPts] = useState<Pt[]>([])
+  const polyRef = useRef<Pt[]>([])
   const svgRef = useRef<SVGSVGElement>(null)
 
   const atSec = Math.max(0, time - layer.startSec)
@@ -200,6 +214,29 @@ function GraphicsEditor({
     ui.selectMark(mark.id)
   }
 
+  /** Finish the connected line if it has 2+ distinct points; otherwise keep drawing. */
+  const finishLine = (): void => {
+    const pts = finishPolyline(polyRef.current)
+    if (pts) commit(polylineMark(newId(), pts, atSec))
+  }
+  const finishRef = useRef(finishLine)
+  useEffect(() => {
+    finishRef.current = finishLine
+  })
+
+  useEffect(() => {
+    if (tool !== 'polyline') return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Enter' || polyRef.current.length === 0) return
+      const el = e.target as HTMLElement | null
+      if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return
+      e.preventDefault()
+      finishRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tool])
+
   const onDrawDown = (e: ReactPointerEvent<SVGRectElement>): void => {
     if (!tool) return
     e.stopPropagation()
@@ -207,6 +244,11 @@ function GraphicsEditor({
     const svg = e.currentTarget.ownerSVGElement
     if (!svg) return
     const at = fromCanvas(t, canvasPoint(svg, e))
+    if (tool === 'polyline') {
+      polyRef.current = [...polyRef.current, at]
+      setPolyPts(polyRef.current)
+      return
+    }
     if (tool === 'angle') {
       const pts = [...anglePts, at]
       if (pts.length < 3) setAnglePts(pts)
@@ -240,6 +282,8 @@ function GraphicsEditor({
     })
   }
 
+  const polyPreview =
+    tool === 'polyline' && polyPts.length > 0 ? polylineMark('preview', hover ? [...polyPts, hover] : polyPts, 0) : null
   const selectedMark = !tool ? content.marks.find((m) => m.id === selectedMarkId) : undefined
   const anglePreview =
     tool === 'angle' && anglePts.length > 0
@@ -267,9 +311,14 @@ function GraphicsEditor({
             pointerEvents="all"
             style={{ cursor: 'crosshair' }}
             onPointerDown={onDrawDown}
+            onDoubleClick={() => {
+              if (tool === 'polyline') finishLine()
+            }}
             onPointerMove={(e) => {
               const svg = e.currentTarget.ownerSVGElement
-              if (tool === 'angle' && anglePts.length > 0 && svg) setHover(fromCanvas(t, canvasPoint(svg, e)))
+              if (!svg) return
+              if (tool === 'angle' && anglePts.length > 0) setHover(fromCanvas(t, canvasPoint(svg, e)))
+              if (tool === 'polyline' && polyPts.length > 0) setHover(fromCanvas(t, canvasPoint(svg, e)))
             }}
           />
         ) : null}
@@ -277,6 +326,7 @@ function GraphicsEditor({
           {!tool &&
             content.marks.map((m) => <MarkHit key={m.id} mark={m} onDown={(e) => startMarkMove(e, layer, m, t)} />)}
           {draft && <MarkArt mark={draft} progress={1} opacity={1} />}
+          {polyPreview && polyPreview.points.length >= 2 && <MarkArt mark={polyPreview} progress={1} opacity={0.8} />}
           {anglePreview && anglePts.length >= 2 && <MarkArt mark={anglePreview} progress={1} opacity={0.8} />}
           {anglePreview && anglePts.length === 1 && hover && (
             <MarkArt
@@ -300,17 +350,16 @@ function GraphicsEditor({
           />
         )
       })}
-      {tool === 'angle' &&
-        anglePts.map((p, i) => {
-          const c = toCanvas(t, p)
-          return (
-            <div
-              key={i}
-              className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-300"
-              style={{ left: pct(c.x, LOGICAL.width), top: pct(c.y, LOGICAL.height), zIndex: EDIT_Z + 1 }}
-            />
-          )
-        })}
+      {(tool === 'angle' ? anglePts : tool === 'polyline' ? polyPts : []).map((p, i) => {
+        const c = toCanvas(t, p)
+        return (
+          <div
+            key={i}
+            className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-300"
+            style={{ left: pct(c.x, LOGICAL.width), top: pct(c.y, LOGICAL.height), zIndex: EDIT_Z + 1 }}
+          />
+        )
+      })}
     </>
   )
 }

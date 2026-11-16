@@ -356,8 +356,9 @@ export interface CompoundContent {
 }
 
 /**
- * Shapes and telestrator marks (arrows, lines, rectangles, ellipses, angles)
- * drawn over the picture, each appearing at its own time inside the layer
+ * Shapes and telestrator marks (arrows, lines, connected lines, rectangles,
+ * ellipses, teardrops, angles) drawn over the picture, each appearing at its
+ * own time inside the layer
  * window. Marks are in canonical px before the layer transform, which moves/
  * zooms the whole drawing (keyframes included). How a mark looks and reveals
  * is `shared/graphics.ts` — the preview and the export both draw from it.
@@ -855,7 +856,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 32
+export const PROJECT_VERSION = 33
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1197,6 +1198,9 @@ export function migrateProject(raw: unknown): Project {
   // v32 adds the absence-tolerant `AudioClip.speed` and `AudioClip.freezes`
   // (audio re-timing, shared/audioTiming.ts) — absent means 1× with no holds,
   // so nothing is rewritten.
+  // v33 adds the 'polyline' (connected line) and 'teardrop' mark tools and the
+  // absence-tolerant `GraphicMark.dropWidth` (shared/graphics.ts) — purely
+  // additive, so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't
