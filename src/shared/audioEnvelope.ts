@@ -146,15 +146,20 @@ export function clipLinePoints(
   const points = kept.map((k) => ({ t: audioTimelineAt(clip, k.sourceSec), db: k.db }))
   const lo = kept[0].sourceSec
   const hi = kept[kept.length - 1].sourceSec
-  const holds = audioHoldSpans(clip, outSec).filter((h) => h.holdSec > 0 && h.atSec > lo && h.atSec < hi)
+  // A hold exactly ON the first point pauses the line too (the slope after it
+  // must start where the hold ends); past the last point the line is flat.
+  const holds = audioHoldSpans(clip, outSec).filter((h) => h.holdSec > 0 && h.atSec >= lo && h.atSec < hi)
   if (holds.length === 0) return points
   const srcLine = kept.map((k) => ({ t: k.sourceSec, db: k.db }))
   for (const h of holds) {
     const db = lineDbAt(srcLine, h.atSec)
     points.push({ t: h.startSec, db }, { t: h.endSec, db })
   }
-  // Stable: a point sitting exactly on a hold keeps its place before the pair.
-  return points.sort((a, b) => a.t - b.t)
+  // Stable: a point sitting exactly on a hold keeps its place before the pair;
+  // an exact duplicate (a point on a hold's start) is dropped.
+  return points
+    .sort((a, b) => a.t - b.t)
+    .filter((p, i, all) => i === 0 || p.t !== all[i - 1].t || p.db !== all[i - 1].db)
 }
 
 /**

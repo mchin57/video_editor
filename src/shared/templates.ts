@@ -23,6 +23,7 @@ import type { Tint } from './tint'
 import { isNeutralTint } from './tint'
 import { PROJECT_VERSION, createEmptyProject, isNeutralColor, migrateProject } from './project'
 import { GRAPHIC_TOOLS } from './graphics'
+import { audioPlayedSec } from './audioTiming'
 import { FORBIDDEN_NAME_CHARS, RESERVED_DEVICE_NAME } from './fileName'
 
 /** Bump when the stored shape changes incompatibly (`sanitizeTemplate` refuses newer). */
@@ -105,7 +106,8 @@ export function templateDuration(t: ReelTemplate): number {
   let end = t.clipEffect?.holdSec ?? 0
   for (const l of t.layers) end = Math.max(end, l.endSec)
   for (const a of t.audio) {
-    const len = a.clip.outSec > 0 ? a.clip.outSec - a.clip.inSec : 0
+    // Played length: a sound keeps its speed and holds in a template.
+    const len = a.clip.outSec > 0 ? audioPlayedSec(a.clip, a.clip.outSec) : 0
     end = Math.max(end, a.clip.startSec + len)
   }
   return end

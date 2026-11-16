@@ -172,6 +172,22 @@ describe('audio timing — a re-timed clip maps like a video layer', () => {
     ])
   })
 
+  it('the volume line pauses over a hold that sits exactly on a point', () => {
+    const c = clip({
+      inSec: 2,
+      freezes: [{ atSec: 4, holdSec: 2 }],
+      volumeKeyframes: [
+        { sourceSec: 4, db: -6 },
+        { sourceSec: 8, db: -20 }
+      ]
+    })
+    // Source 4 plays at 12, the hold covers 12..14, then 4→8 plays 14..18.
+    const pts = clipLinePoints(c, 8)
+    expect(lineGainAt(pts, 13)).toBeCloseTo(lineGainAt(pts, 12), 12)
+    expect(lineGainAt(pts, 14)).toBeCloseTo(lineGainAt(pts, 12), 12)
+    expect(lineGainAt(pts, 18)).toBeLessThan(lineGainAt(pts, 14))
+  })
+
   it('fades span the played length: a 0.5× clip fades out at its stretched end', () => {
     const c = clip({ speed: 0.5, fadeOutSec: 2 }) // 10..22
     expect(envelopeGainAt(c, 8, 19.9)).toBeCloseTo(1, 12)

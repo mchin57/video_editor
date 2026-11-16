@@ -47,8 +47,12 @@ export function AudioFollower({
     const a = ref.current
     if (!a) return
     a.preservesPitch = true
+    // A new `src` (an effect track re-rendered under the same clip) reloads the
+    // element, which resets `playbackRate` to `defaultPlaybackRate` — so set
+    // both, and re-apply when the source changes.
+    a.defaultPlaybackRate = rate
     if (a.playbackRate !== rate) a.playbackRate = rate
-  }, [rate])
+  }, [rate, src])
 
   // The gain comes from `clipGain` (shared/volumeLevels.ts) — the export's own
   // call — so a clip in a volume level previews at the level's gain, not its
