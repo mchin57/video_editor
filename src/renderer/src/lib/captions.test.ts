@@ -124,3 +124,25 @@ describe('captionedClipsUnchanged', () => {
     expect(captionedClipsUnchanged([clip('a')], [clip('a'), clip('c')])).toBe(false)
   })
 })
+
+describe('captions from a re-timed clip (#58)', () => {
+  const w = (text: string, startSec: number, endSec: number): CaptionWord => ({ text, startSec, endSec })
+
+  it('words land where their sound plays: at the clip speed, after a hold', () => {
+    // Source 2..10 at 2× from timeline 4, silent 1 s at source 6.
+    const source: CaptionSource = { ...src('m', 4, 2, 10), speed: 2, freezes: [{ atSec: 6, holdSec: 1 }] }
+    const segs = buildTimelineCaptions([source], { m: [w('before', 3, 4), w('after', 7, 8)] })
+    const words = segs.flatMap((s) => s.words)
+    expect(words.map((x) => [x.text, x.startSec, x.endSec])).toEqual([
+      ['before', 4.5, 5],
+      ['after', 7.5, 8]
+    ])
+  })
+
+  it('a clip whose speed or holds changed while captioning is not the same clip', () => {
+    const c = { id: 'a', mediaId: 'm', startSec: 0, inSec: 0, outSec: 5 }
+    expect(captionedClipsUnchanged([c], [{ ...c, speed: 1 }])).toBe(true)
+    expect(captionedClipsUnchanged([c], [{ ...c, speed: 2 }])).toBe(false)
+    expect(captionedClipsUnchanged([c], [{ ...c, freezes: [{ atSec: 1, holdSec: 1 }] }])).toBe(false)
+  })
+})
