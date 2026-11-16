@@ -89,17 +89,49 @@ export interface SpeedKeyframe {
   speed: number
 }
 
-/** Per-clip color correction. Neutral = brightness 0, contrast 1, saturation 1. */
+/**
+ * Per-clip (and per-image) color correction. Neutral = brightness 0, contrast
+ * 1, saturation 1, and the newer controls absent or 0. How each one draws is
+ * `shared/grade.ts`; a grade that uses only the first three keeps the CSS /
+ * `lutrgb` paths, anything newer goes through the baked colour table
+ * (`needsGradeTable`).
+ */
 export interface ColorAdjust {
-  brightness: number // -1..1
+  brightness: number // -1..1 (the Inspector's "Exposure")
   contrast: number // 0..2
   saturation: number // 0..2
+  /** White balance: −1 cooler (blue) … 1 warmer (amber). Absent = 0. */
+  temperature?: number
+  /** Green (−1) … magenta (+1) balance — the Inspector's "Tint". Absent = 0. */
+  greenMagenta?: number
+  /** Saturation that favours the muted colours: −1 … 1. Absent = 0. */
+  vibrance?: number
 }
 
 export const NEUTRAL_COLOR: ColorAdjust = { brightness: 0, contrast: 1, saturation: 1 }
 
+/** Whether any of the newer controls (temperature, green / magenta, vibrance) is set. */
+export function hasNewColorControls(c: ColorAdjust | null | undefined): boolean {
+  return !!c && !!(c.temperature || c.greenMagenta || c.vibrance)
+}
+
 export function isNeutralColor(c: ColorAdjust | null | undefined): boolean {
-  return !c || (c.brightness === 0 && c.contrast === 1 && c.saturation === 1)
+  return !c || (c.brightness === 0 && c.contrast === 1 && c.saturation === 1 && !hasNewColorControls(c))
+}
+
+/**
+ * A `.cube` LUT on a clip or image, applied after the rest of its grade at
+ * `strength`. The file lives in the project folder's `luts/` (copied in on
+ * import, content-named so the same table is stored once) and is baked with
+ * the grade into the one colour table both sides apply (shared/grade.ts).
+ */
+export interface LutRef {
+  /** The file's name inside the project's `luts/` folder. */
+  file: string
+  /** What the Inspector calls it (the imported file's own name). */
+  name: string
+  /** 0..1 (0 = the LUT does nothing, 1 = fully applied). */
+  strength: number
 }
 
 /**
@@ -214,8 +246,10 @@ export interface VideoContent {
   /** Optional color correction (absent = none). */
   color?: ColorAdjust
   /** Optional tint toward one colour, applied after `color` (absent/null = none;
-   *  shared/tint.ts). */
+   *  shared/tint.ts). The Inspector calls it "Color wash". */
   tint?: Tint | null
+  /** Optional `.cube` LUT, applied after the wash (absent/null = none). */
+  lut?: LutRef | null
   /**
    * Per-clip override of the project-wide stabilization default
    * (`Project.stabilizeDefault`). `undefined` = inherit the default; `null` =
@@ -272,6 +306,11 @@ export interface ImageContent {
   /** Mirror horizontally / vertically. Absent = false. */
   flipH?: boolean
   flipV?: boolean
+  /** The same colour look a video clip has (absent = none): grade, colour
+   *  wash and LUT, drawn and exported the same way (shared/grade.ts). */
+  color?: ColorAdjust
+  tint?: Tint | null
+  lut?: LutRef | null
 }
 
 /** A text element composited as a layer. */
@@ -855,7 +894,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 32
+export const PROJECT_VERSION = 33
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1197,6 +1236,11 @@ export function migrateProject(raw: unknown): Project {
   // v32 adds the absence-tolerant `AudioClip.speed` and `AudioClip.freezes`
   // (audio re-timing, shared/audioTiming.ts) — absent means 1× with no holds,
   // so nothing is rewritten.
+  // v33 adds the colour table's controls (#105, #55): the absence-tolerant
+  // `ColorAdjust.temperature` / `greenMagenta` / `vibrance`, the
+  // absence-tolerant `VideoContent.lut` and `ImageContent.color` / `tint` /
+  // `lut` (shared/grade.ts). Absent means neutral — a clip graded before this
+  // keeps its CSS / `lutrgb` look and export exactly — so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

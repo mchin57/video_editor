@@ -619,8 +619,7 @@ describe('migrateProject — audio volume lines (v31)', () => {
 })
 
 describe('migrateProject — audio re-timing (v32)', () => {
-  it('stamps a v31 document as v32; clips with and without speed or holds load as saved', () => {
-    expect(PROJECT_VERSION).toBe(32)
+  it('stamps a v31 document as current; clips with and without speed or holds load as saved', () => {
     const plain = {
       id: 'A',
       mediaId: 'm',
@@ -635,11 +634,59 @@ describe('migrateProject — audio re-timing (v32)', () => {
     }
     const retimed = { ...plain, id: 'B', speed: 0.5, freezes: [{ atSec: 1, holdSec: 2 }] }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 31, audioClips: [plain, retimed] })
-    expect(p.version).toBe(32)
+    expect(p.version).toBe(PROJECT_VERSION)
     // Absent = 1x with no holds: nothing is written onto an old clip.
     expect(p.audioClips[0]).toEqual(plain)
     expect('speed' in p.audioClips[0]).toBe(false)
     expect('freezes' in p.audioClips[0]).toBe(false)
     expect(p.audioClips[1]).toEqual(retimed)
+  })
+})
+
+describe('migrateProject — colour table controls and LUTs (v33)', () => {
+  it('stamps a v32 document as v33; graded clips and images load as saved, nothing is added', () => {
+    expect(PROJECT_VERSION).toBe(33)
+    const base = { hidden: false, startSec: 0, endSec: 2, x: 540, y: 960, scale: 1 }
+    const graded = {
+      ...base,
+      id: 'V',
+      content: {
+        kind: 'video',
+        mediaId: 'm',
+        inSec: 0,
+        outSec: 2,
+        mute: false,
+        gainDb: 0,
+        color: { brightness: 0.2, contrast: 1.3, saturation: 1.4 },
+        tint: { color: '#e8c290', amount: 0.6 }
+      }
+    }
+    const image = { ...base, id: 'I', content: { kind: 'image', mediaId: 'i', opacity: 1 } }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 32, layers: [graded, image] })
+    expect(p.version).toBe(33)
+    // Absent = neutral: an old grade keeps exactly its fields (so its CSS / lutrgb look).
+    expect(p.layers[0]).toEqual(graded)
+    expect(p.layers[1]).toEqual(image)
+    for (const k of ['lut', 'color', 'tint']) expect(k in p.layers[1].content).toBe(false)
+    expect('lut' in p.layers[0].content).toBe(false)
+  })
+
+  it('a document using the new fields loads them as saved', () => {
+    const look = {
+      color: { brightness: 0, contrast: 1, saturation: 1, temperature: 0.4, greenMagenta: -0.2, vibrance: 0.3 },
+      lut: { file: '0123456789ab.cube', name: 'Warm', strength: 0.6 }
+    }
+    const l = {
+      id: 'I',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'image', mediaId: 'i', opacity: 1, ...look }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 33, layers: [l] })
+    expect(p.layers[0]).toEqual(l)
   })
 })

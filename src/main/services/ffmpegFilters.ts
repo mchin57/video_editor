@@ -89,10 +89,12 @@ export function tintFilter(t: Tint): string {
 }
 
 /** The colour-grade fragment for a clip: the grade (`gradeColorFilter`) then the
- *  tint, either optional ('' when the clip is ungraded). */
+ *  tint, either optional ('' when the clip is ungraded). A look that needs the
+ *  colour table (a newer control, a LUT) is not this: see `exportGrade.ts`. */
 export function gradeFilter(color: ColorAdjust | null | undefined, tint: Tint | null | undefined): string {
   const parts: string[] = []
-  if (color && !isNeutralColor(color)) parts.push(gradeColorFilter(color))
+  const grade = color && !isNeutralColor(color) ? gradeColorFilter(color) : ''
+  if (grade) parts.push(grade)
   if (tint && !isNeutralTint(tint)) parts.push(tintFilter(tint))
   return parts.join(',')
 }
