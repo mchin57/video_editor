@@ -323,15 +323,26 @@ describe('layers', () => {
     expect(layer('V').keyframes).toBeUndefined()
   })
 
-  it("a re-timed clip's audio can't be extracted; a 1× clip's can", () => {
-    open([makeVideoLayer('V', 'm1', 0, 4), makeVideoLayer('W', 'm1', 0, 4)])
-    s().setVideoSpeed('V', 2)
-    s().extractLayerAudio('V')
+  // #58: Extract audio works at any constant speed (the clip carries it); only a
+  // speed RAMP still has no audio equivalent. (Replaces "a re-timed clip's audio
+  // can't be extracted", the pre-#58 lock.)
+  it("a ramped clip's audio can't be extracted; a 2× or 1× clip's can", () => {
+    open([makeVideoLayer('R', 'm1', 0, 4), makeVideoLayer('V', 'm1', 0, 4), makeVideoLayer('W', 'm1', 0, 4)])
+    s().addSpeedKeyframe('R', 1)
+    s().updateSpeedKeyframe('R', 0, 2)
+    s().extractLayerAudio('R')
     expect(root().audioClips).toHaveLength(0)
-    s().extractLayerAudio('W')
+    s().setVideoSpeed('V', 2)
+    s().addFreeze('V', 1, 0.5)
+    s().extractLayerAudio('V')
     expect(root().audioClips).toHaveLength(1)
+    expect(root().audioClips[0]).toMatchObject({ startSec: 0, inSec: 0, outSec: 4, speed: 2 })
+    expect(root().audioClips[0].freezes).toEqual([{ atSec: 1, holdSec: 0.5 }])
+    s().extractLayerAudio('W')
+    expect(root().audioClips).toHaveLength(2)
     expect(videoOf('W').mute).toBe(true)
-    expect(root().audioClips[0].linkGroupId).toBeUndefined() // extracting does NOT link
+    expect('speed' in root().audioClips[1]).toBe(false)
+    expect(root().audioClips[1].linkGroupId).toBeUndefined() // extracting does NOT link
   })
 
   it('deleting clears a selection of what was deleted', () => {

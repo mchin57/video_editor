@@ -4,12 +4,13 @@
 
 import { type JSX } from 'react'
 import type { Composition, Layer, VideoContent } from '@shared/project'
-import { DEFAULT_STABILIZE, NEUTRAL_COLOR, effectiveStabilize, isNeutralColor, videoSpeed } from '@shared/project'
+import { DEFAULT_STABILIZE, NEUTRAL_COLOR, effectiveStabilize, isNeutralColor } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect } from '@shared/media'
 import { hasSpeedRamp } from '@shared/speed'
 import { DEFAULT_TINT, isNeutralTint } from '@shared/tint'
-import { projectFormat, useProject } from '@/state/projectStore'
+import { activeComp, projectFormat, useProject } from '@/state/projectStore'
+import { retimeLock } from '@/lib/links'
 import { useUi } from '@/state/ui'
 import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from '../CollapsibleSection'
@@ -29,7 +30,9 @@ export function VideoClipSections({
   layer: Layer
   content: VideoContent
   asset: MediaAsset | undefined
-  /** In a link group: edits that re-time one member are disabled. */
+  /** In a link group: speed and freezes re-time the group's same-source
+   *  members together (unless `retimeLock` says why not); the trim fields, a
+   *  speed ramp and Extract audio stay disabled. */
   linked: boolean
 }): JSX.Element {
   const id = layer.id
@@ -39,7 +42,16 @@ export function VideoClipSections({
   const format = useProject(projectFormat)
   const setCropEditing = useUi((s) => s.setCropEditing)
   const setStillsOpen = useUi((s) => s.setStillsOpen)
-  const retimed = videoSpeed(c) !== 1 || hasSpeedRamp(c)
+  const ramped = hasSpeedRamp(c)
+  const speedLock = useProject((s) => {
+    const comp = activeComp(s)
+    return comp ? retimeLock(comp, { kind: 'layer', id }, 'speed') : null
+  })
+  const freezeLock = useProject((s) => {
+    const comp = activeComp(s)
+    return comp ? retimeLock(comp, { kind: 'layer', id }, 'freeze') : null
+  })
+  const rampLock = linked ? 'Not available on a linked tile — audio clips have no speed ramp yet (unlink first)' : null
 
   return (
     <>
@@ -73,7 +85,7 @@ export function VideoClipSections({
           <Row label="Source">{`${asset.probe.video.displayWidth}×${asset.probe.video.displayHeight} · ${formatFps(asset.probe.video.avgFps)}`}</Row>
         )}
         {asset && <Row label="Duration">{formatDuration(asset.probe.durationSec)}</Row>}
-        <SpeedControl layer={layer} content={c} disabled={linked} />
+        <SpeedControl layer={layer} content={c} lock={speedLock} rampLock={rampLock} />
         <label className="my-2 flex items-center gap-2 text-xs text-zinc-300">
           <input type="checkbox" checked={c.mute} onChange={() => updateContent(id, { mute: !c.mute })} />
           Mute this layer
@@ -96,11 +108,11 @@ export function VideoClipSections({
           {asset?.probe.audio && (
             <button
               onClick={() => extractAudio(id)}
-              disabled={retimed || linked}
+              disabled={ramped || linked}
               className={`rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
               title={
-                retimed
-                  ? 'Not available on a re-timed clip — the audio track plays at 1× (reset speed first)'
+                ramped
+                  ? 'Not available on a clip with a speed ramp — audio clips have no ramp yet (clear the ramp first)'
                   : linked
                     ? 'Not available on a linked tile — the new audio clip would not be part of the group (unlink first)'
                     : "Move this layer's audio onto the audio track and mute the layer"
@@ -127,10 +139,12 @@ export function VideoClipSections({
         startSec={layer.startSec}
         linkGroupId={layer.linkGroupId}
         disabledReason={asset?.probe.audio ? null : 'This clip has no audio track to build an effect from.'}
+        speed={ramped ? undefined : c.speed}
+        freezes={c.freezes}
       />
 
       <CollapsibleSection id="freeze" title="Freeze frames">
-        <FreezeFrames layer={layer} content={c} disabled={linked} />
+        <FreezeFrames layer={layer} content={c} lock={freezeLock} />
       </CollapsibleSection>
 
       <ColorSection layerId={id} content={c} />

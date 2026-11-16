@@ -10,6 +10,7 @@ import {
   parseChannelPeaks,
   monoFoldFrom,
   monoFoldPan,
+  audioItemPlayedSec,
   type AudioGraphItem
 } from './audio'
 
@@ -197,5 +198,87 @@ describe('buildAudioGraph', () => {
     expect(res.filter).toBe(
       "[1:a]atrim=1.000:5.000,asetpts=N/SR/TB,adelay=2000|2000,asetpts=N/SR/TB,volume=0.501,asetnsamples=n=64:p=0,volume=volume='if(lt(t,3.000),1.000000,if(lt(t,4.000),pow(10,(0.000+-12.000*(t-3.000)/1.000)/20),0.251189))':eval=frame,afade=t=in:st=2.00:d=0.50[ac0];[ac0]anull[aout]"
     )
+  })
+})
+
+describe('buildAudioGraph — re-timed audio clips (#58)', () => {
+  it('a 2× clip: atempo after the trim, fade-out ending at its PLAYED end', () => {
+    // Source 0..10 at 2× plays 5 s from t=1: the fade-out ends at 6, not 11.
+    const g = buildAudioGraph([item({ startSec: 1, tempo: 2, fadeOutSec: 1 })], null)!
+    expect(g.filter).toBe(
+      '[1:a]atrim=0.000:10.000,asetpts=N/SR/TB,atempo=2.000,adelay=1000|1000,asetpts=N/SR/TB,volume=0.200,afade=t=out:st=5.00:d=1.00[ac0];[ac0]anull[aout]'
+    )
+    expect(audioItemPlayedSec(item({ tempo: 2 }))).toBe(5)
+    expect(audioItemPlayedSec(item({ tempo: 0.5 }))).toBe(20)
+  })
+
+  it('holds: the tempo-adjusted stream is cut and padded with silence, then concatenated', () => {
+    const g = buildAudioGraph(
+      [
+        item({
+          startSec: 0.5,
+          tempo: 0.5,
+          denoise: true,
+          holds: [
+            { atPlayedSec: 9, holdSec: 2 },
+            { atPlayedSec: 3, holdSec: 1.5 }
+          ]
+        })
+      ],
+      null
+    )!
+    expect(g.filter.split(';')).toEqual([
+      '[1:a]atrim=0.000:10.000,asetpts=N/SR/TB,atempo=0.500,afftdn=nf=-25,asplit=3[ac0h0s][ac0h1s][ac0h2s]',
+      '[ac0h0s]atrim=0.000:3.000,asetpts=N/SR/TB,apad=pad_dur=1.500[ac0h0]',
+      '[ac0h1s]atrim=3.000:9.000,asetpts=N/SR/TB,apad=pad_dur=2.000[ac0h1]',
+      '[ac0h2s]atrim=start=9.000,asetpts=N/SR/TB[ac0h2]',
+      '[ac0h0][ac0h1][ac0h2]concat=n=3:v=0:a=1,adelay=500|500,asetpts=N/SR/TB,volume=0.200[ac0]',
+      '[ac0]anull[aout]'
+    ])
+    // 20 s of stream + 3.5 s of holds.
+    expect(audioItemPlayedSec(item({ tempo: 0.5, holds: [{ atPlayedSec: 3, holdSec: 1.5 }] }))).toBe(21.5)
+  })
+
+  it('a hold at the head is a later start; one at or past the end adds nothing to cut', () => {
+    const g = buildAudioGraph(
+      [
+        item({
+          startSec: 1,
+          fadeInSec: 0.5,
+          fadeOutSec: 1,
+          holds: [
+            { atPlayedSec: 0, holdSec: 2 },
+            { atPlayedSec: 10, holdSec: 3 }
+          ]
+        })
+      ],
+      null
+    )!
+    expect(g.filter).not.toContain('asplit')
+    expect(g.filter).toContain('adelay=3000|3000')
+    // The fades stay on the clip's timeline span (start 1, end 1 + 10 + 5).
+    expect(g.filter).toContain('afade=t=in:st=1.00:d=0.50')
+    expect(g.filter).toContain('afade=t=out:st=15.00:d=1.00')
+  })
+
+  it('two holds at one moment are one cut', () => {
+    const g = buildAudioGraph(
+      [
+        item({
+          holds: [
+            { atPlayedSec: 4, holdSec: 1 },
+            { atPlayedSec: 4, holdSec: 0.5 }
+          ]
+        })
+      ],
+      null
+    )!
+    expect(g.filter).toContain('asplit=2')
+    expect(g.filter).toContain('apad=pad_dur=1.500')
+  })
+
+  it('a clip with no tempo and no holds keeps the chain it always had', () => {
+    const plain = buildAudioGraph([item({ startSec: 2, fadeOutSec: 1 })], null)!.filter
+    expect(buildAudioGraph([item({ startSec: 2, fadeOutSec: 1, tempo: 1, holds: [] })], null)!.filter).toBe(plain)
   })
 })

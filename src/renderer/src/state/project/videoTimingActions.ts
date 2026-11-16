@@ -8,11 +8,13 @@
 import type { Layer, SpeedKeyframe, VideoContent } from '@shared/project'
 import { playedVideoDuration, videoSourceTime } from '@shared/layers'
 import { hasSpeedRamp, videoSpeedAtSource } from '@shared/speed'
+import { addGroupFreeze, removeGroupFreeze, setGroupSpeed } from '@/lib/links'
 import { mapVideoLayer, type Doc } from './core'
 
 export interface VideoTimingActions {
   /** Set a video layer's constant playback speed, recomputing its timeline end
-   *  from the shared duration invariant (source span / speed + holds). */
+   *  from the shared duration invariant (source span / speed + holds) — and on
+   *  its linked same-source audio (`setGroupSpeed`, lib/links.ts). */
   setVideoSpeed: (id: string, speed: number) => void
   /** Add (or update) a speed-ramp keyframe at the SOURCE time under timeline
    *  time `atSec`, seeded with the profile's current speed there. Recomputes
@@ -24,9 +26,12 @@ export interface VideoTimingActions {
   removeSpeedKeyframe: (id: string, index: number) => void
   /** Drop the whole ramp; the clip returns to its constant `speed`. */
   clearSpeedRamp: (id: string) => void
-  /** Add a freeze hold at source time `atSrcSec`, extending the layer by `holdSec`. */
+  /** Add a freeze hold at source time `atSrcSec`, extending the layer by
+   *  `holdSec` — and the same hold on its linked same-source audio
+   *  (`addGroupFreeze`). */
   addFreeze: (id: string, atSrcSec: number, holdSec: number) => void
-  /** Remove the freeze at `index`, shrinking the layer by its hold. */
+  /** Remove the freeze at `index`, shrinking the layer by its hold — and the
+   *  matching hold on its linked same-source audio (`removeGroupFreeze`). */
   removeFreeze: (id: string, index: number) => void
 }
 
@@ -41,8 +46,7 @@ const retimed = (l: Layer, content: VideoContent): Layer => ({
 const sortedRamp = (c: VideoContent): SpeedKeyframe[] => [...(c.speedRamp ?? [])].sort((a, b) => a.atSec - b.atSec)
 
 export const videoTimingActions = ({ commitComp }: Doc): VideoTimingActions => ({
-  setVideoSpeed: (id, speed) =>
-    commitComp((p) => mapVideoLayer(p, id, (l, c) => retimed(l, { ...c, speed: speed === 1 ? undefined : speed }))),
+  setVideoSpeed: (id, speed) => commitComp((p) => setGroupSpeed(p, { kind: 'layer', id }, speed)),
 
   addSpeedKeyframe: (id, atSec) =>
     commitComp((p) =>
@@ -84,28 +88,7 @@ export const videoTimingActions = ({ commitComp }: Doc): VideoTimingActions => (
       mapVideoLayer(p, id, (l, c) => (hasSpeedRamp(c) ? retimed(l, { ...c, speedRamp: undefined }) : l))
     ),
 
-  addFreeze: (id, atSrcSec, holdSec) =>
-    commitComp((p) =>
-      mapVideoLayer(p, id, (l, c) => {
-        if (holdSec <= 0) return l
-        const at = Math.min(c.outSec, Math.max(c.inSec, atSrcSec))
-        const freezes = [...(c.freezes ?? []), { atSec: at, holdSec }].sort((a, b) => a.atSec - b.atSec)
-        return { ...l, endSec: l.endSec + holdSec, content: { ...c, freezes } }
-      })
-    ),
+  addFreeze: (id, atSrcSec, holdSec) => commitComp((p) => addGroupFreeze(p, { kind: 'layer', id }, atSrcSec, holdSec)),
 
-  removeFreeze: (id, index) =>
-    commitComp((p) =>
-      mapVideoLayer(p, id, (l, c) => {
-        const freezes = c.freezes ?? []
-        const f = freezes[index]
-        if (!f) return l
-        const next = freezes.filter((_, i) => i !== index)
-        return {
-          ...l,
-          endSec: Math.max(l.startSec + 0.2, l.endSec - f.holdSec),
-          content: { ...c, freezes: next.length ? next : undefined }
-        }
-      })
-    )
+  removeFreeze: (id, index) => commitComp((p) => removeGroupFreeze(p, { kind: 'layer', id }, index))
 })

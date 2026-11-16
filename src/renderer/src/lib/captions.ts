@@ -5,7 +5,8 @@
  * readable chunks (reel-style). Pure + tested.
  */
 
-import type { AudioClip, CaptionSegment, CaptionWord } from '@shared/project'
+import type { AudioClip, CaptionSegment, CaptionWord, FreezeHold } from '@shared/project'
+import { audioTimelineAt } from '@shared/audioTiming'
 
 /** An audio source on the timeline that captions are derived from. */
 export interface CaptionSource {
@@ -15,6 +16,10 @@ export interface CaptionSource {
   inSec: number
   /** Resolved source out-point (effectiveOut). */
   outSec: number
+  /** The source's re-timing (an audio clip's `speed` / `freezes`; absent = 1×
+   *  with no holds): words land where their sound plays (`audioTimelineAt`). */
+  speed?: number
+  freezes?: FreezeHold[]
 }
 
 export interface CaptionGroupOptions {
@@ -84,8 +89,8 @@ export function buildTimelineCaptions(
       if (!(e > s)) continue
       timelineWords.push({
         text: w.text,
-        startSec: src.startSec + (s - src.inSec),
-        endSec: src.startSec + (e - src.inSec)
+        startSec: audioTimelineAt(src, s),
+        endSec: audioTimelineAt(src, e)
       })
     }
   }
@@ -176,8 +181,8 @@ export function makeCaption(id: string, startSec: number, endSec: number, text =
 }
 
 /** The audio-clip fields a caption run depends on: which clip, which media, and
- *  where its words land on the timeline. */
-type CaptionedClip = Pick<AudioClip, 'id' | 'mediaId' | 'startSec' | 'inSec' | 'outSec'>
+ *  where its words land on the timeline (its window, speed and holds). */
+type CaptionedClip = Pick<AudioClip, 'id' | 'mediaId' | 'startSec' | 'inSec' | 'outSec' | 'speed' | 'freezes'>
 
 /**
  * Whether the clips a caption run transcribed are still on the timeline exactly
@@ -187,7 +192,8 @@ type CaptionedClip = Pick<AudioClip, 'id' | 'mediaId' | 'startSec' | 'inSec' | '
  * that holds the user's work (#5). Order-insensitive; style edits don't count.
  */
 export function captionedClipsUnchanged(started: CaptionedClip[], now: CaptionedClip[]): boolean {
-  const key = (c: CaptionedClip): string => JSON.stringify([c.id, c.mediaId, c.startSec, c.inSec, c.outSec])
+  const key = (c: CaptionedClip): string =>
+    JSON.stringify([c.id, c.mediaId, c.startSec, c.inSec, c.outSec, c.speed ?? 1, c.freezes ?? []])
   const a = started.map(key).sort()
   const b = now.map(key).sort()
   return a.length === b.length && a.every((k, i) => k === b[i])

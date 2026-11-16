@@ -24,6 +24,7 @@
 import type { AudioClip, Composition, Layer, TimelineItemRef, VideoContent } from '@shared/project'
 import { PROJECT_VERSION, isNeutralColor } from '@shared/project'
 import { layerTransformAt, playedVideoDuration, videoTimelineTime } from '@shared/layers'
+import { audioSourceAt } from '@shared/audioTiming'
 import { isNeutralTint } from '@shared/tint'
 import {
   TEMPLATE_FORMAT_VERSION,
@@ -215,7 +216,12 @@ function placedPieces(t: ReelTemplate, atSec: number, makeId: () => string): { l
     if (!a.file) return []
     const start = a.clip.startSec + atSec
     const lead = Math.max(0, -start)
-    const inSec = a.clip.inSec + lead
+    // The head trimmed by `lead` timeline seconds is that much SOURCE at the
+    // sound's speed (the shared mapping).
+    const inSec =
+      lead > 0
+        ? audioSourceAt({ ...a.clip, startSec: start }, a.clip.outSec > 0 ? a.clip.outSec : Infinity, 0)
+        : a.clip.inSec
     if (a.clip.outSec > 0 && inSec >= a.clip.outSec - EPS) return []
     return [{ ...a.clip, id: makeId(), mediaId: a.file, startSec: start + lead, inSec }]
   })
@@ -360,7 +366,8 @@ export function templateFromSelection(
       fadeInSec: a.fadeInSec,
       fadeOutSec: a.fadeOutSec,
       duck: a.duck,
-      kind: a.kind === 'fx' ? 'audio' : a.kind
+      kind: a.kind === 'fx' ? 'audio' : a.kind,
+      ...(a.speed !== undefined && a.speed !== 1 ? { speed: a.speed } : {})
     }
   }))
   return {

@@ -25,6 +25,7 @@
  */
 
 import type { AudioClip, VolumeKeyframe } from './project'
+import { audioHeldAt, audioHoldSpans, audioPlayedSec, audioTimelineAt } from './audioTiming'
 import { clamp } from './math'
 
 /** The top of the volume line (dB over the clip's normal gain). */
@@ -113,14 +114,20 @@ export function lineGainAt(points: readonly LinePoint[], x: number): number {
 }
 
 /**
- * The clip's line in TIMELINE seconds (audio has no speed: a straight offset),
- * trimmed to what the window `inSec..outSec` can hear — the points inside it
- * plus the nearest one beyond each edge, which still shape the slope at the
- * edge. `outSec` is the clip's effective source out-point. The values inside
- * the window are exactly the full line's.
+ * The clip's line in TIMELINE seconds — each point mapped through the clip's
+ * timing (`audioTimelineAt`: its speed and holds; a straight offset at 1× with
+ * none) — trimmed to what the window `inSec..outSec` can hear: the points
+ * inside it plus the nearest one beyond each edge, which still shape the slope
+ * at the edge. `outSec` is the clip's effective source out-point. The values
+ * inside the window are exactly the full line's.
+ *
+ * A HOLD pauses the source, so the line pauses with it: a hold between two
+ * points gets a point at each of its ends carrying the line's value at the
+ * held source second. Without them the slope would be spread across the
+ * (silent) hold and the level after it would arrive early.
  */
 export function clipLinePoints(
-  clip: Pick<AudioClip, 'startSec' | 'inSec' | 'volumeKeyframes'>,
+  clip: Pick<AudioClip, 'startSec' | 'inSec' | 'volumeKeyframes' | 'speed' | 'freezes'>,
   outSec: number
 ): LinePoint[] {
   const src = sortedVolumeKeyframes(clip)
@@ -135,7 +142,24 @@ export function clipLinePoints(
       break
     }
   }
-  return src.slice(first, last + 1).map((k) => ({ t: clip.startSec + (k.sourceSec - clip.inSec), db: k.db }))
+  const kept = src.slice(first, last + 1)
+  const points = kept.map((k) => ({ t: audioTimelineAt(clip, k.sourceSec), db: k.db }))
+  const lo = kept[0].sourceSec
+  const hi = kept[kept.length - 1].sourceSec
+  // A hold exactly ON the first point pauses the line too (the slope after it
+  // must start where the hold ends); past the last point the line is flat.
+  const holds = audioHoldSpans(clip, outSec).filter((h) => h.holdSec > 0 && h.atSec >= lo && h.atSec < hi)
+  if (holds.length === 0) return points
+  const srcLine = kept.map((k) => ({ t: k.sourceSec, db: k.db }))
+  for (const h of holds) {
+    const db = lineDbAt(srcLine, h.atSec)
+    points.push({ t: h.startSec, db }, { t: h.endSec, db })
+  }
+  // Stable: a point sitting exactly on a hold keeps its place before the pair;
+  // an exact duplicate (a point on a hold's start) is dropped.
+  return points
+    .sort((a, b) => a.t - b.t)
+    .filter((p, i, all) => i === 0 || p.t !== all[i - 1].t || p.db !== all[i - 1].db)
 }
 
 /**
@@ -164,7 +188,9 @@ export function fadeGainAt(
  * source out-point (`effectiveOut`).
  */
 export function envelopeGainAt(clip: AudioClip, outSec: number, t: number): number {
-  const fades = fadeGainAt(clip, Math.max(0, outSec - clip.inSec), t)
+  // A hold (freeze) is silence — the export pads it with zeros.
+  if (clip.freezes?.length && audioHeldAt(clip, outSec, t)) return 0
+  const fades = fadeGainAt(clip, audioPlayedSec(clip, outSec), t)
   if (fades === 0 || !hasVolumeLine(clip)) return fades
   return fades * lineGainAt(clipLinePoints(clip, outSec), t)
 }

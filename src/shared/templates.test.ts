@@ -202,6 +202,9 @@ describe('summaries', () => {
     expect(templateDuration({ ...withFiles, layers: [image('i', 'x.png', 1, 6)] })).toBe(6)
     const sound = { ...withFiles.audio[0], clip: { ...withFiles.audio[0].clip, startSec: 2, inSec: 1, outSec: 9 } }
     expect(templateDuration({ ...withFiles, layers: [], audio: [sound] })).toBe(10)
+    // A sound keeps its speed in a template: 8 s of source at 0.5× plays 16 s.
+    const slow = { ...sound, clip: { ...sound.clip, speed: 0.5 } }
+    expect(templateDuration({ ...withFiles, layers: [], audio: [slow] })).toBe(18)
   })
 
   it('previews at the moment the most layers are on screen', () => {

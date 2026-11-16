@@ -26,7 +26,7 @@
  * wet/dry balance survives the source being levelled.
  */
 
-import type { AudioClip, Project, VolumeLevel } from './project'
+import type { AudioClip, Project, VolumeLevel, FreezeHold } from './project'
 import { audioClipAudible, DEFAULT_TARGET_LUFS, DEFAULT_VOLUME_LEVEL_ID, effectiveOut } from './project'
 import { windowLoudness, type LoudnessSeries } from './loudness'
 import { audioClipsDeep, mapAudioClipsDeep } from './compositions'
@@ -224,7 +224,19 @@ export function levelStatusText(status: LevelStatus, gainDb: number): string {
  * are built elsewhere and never auto-join.
  */
 export function extractedAudioClip(
-  f: { id: string; mediaId: string; startSec: number; inSec: number; outSec: number; linkGroupId?: string },
+  f: {
+    id: string
+    mediaId: string
+    startSec: number
+    inSec: number
+    outSec: number
+    linkGroupId?: string
+    /** The footage's constant speed and freeze holds (Extract audio from a
+     *  re-timed clip) — written only when there is one, so a 1× clip with no
+     *  holds is exactly what it always was. */
+    speed?: number
+    freezes?: FreezeHold[]
+  },
   autoJoin: boolean
 ): AudioClip {
   return {
@@ -239,6 +251,8 @@ export function extractedAudioClip(
     duck: false,
     ...(f.linkGroupId ? { linkGroupId: f.linkGroupId } : {}),
     ...(autoJoin ? { volumeLevelId: DEFAULT_VOLUME_LEVEL_ID } : {}),
+    ...(f.speed !== undefined && f.speed !== 1 ? { speed: f.speed } : {}),
+    ...(f.freezes && f.freezes.length > 0 ? { freezes: f.freezes } : {}),
     kind: 'extracted'
   }
 }

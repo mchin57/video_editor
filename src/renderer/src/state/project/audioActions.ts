@@ -14,6 +14,8 @@ import {
   withVolumeLevel
 } from '@shared/volumeLevels'
 import { newId } from '@shared/ids'
+import { audioTimelineAt } from '@shared/audioTiming'
+import { withAudioHolds } from '@/lib/timeline'
 import * as links from '@/lib/links'
 import { replaceAt, updateById } from '@/lib/arrays'
 import type { Doc } from './core'
@@ -25,6 +27,11 @@ export interface AudioActions {
    *  undo step; a tile drag edits through `liveUpdate` + `commitLive` instead. */
   setVolumeKeyframes: (id: string, points: VolumeKeyframe[]) => void
   removeAudioClip: (id: string) => void
+  /** Set an audio clip's constant speed (pitch kept; 1 removes the field) — and
+   *  on every same-source member of its link group, re-placed so they stay in
+   *  sync (`links.setGroupSpeed`). One undo step; a no-op while the group is
+   *  locked (`links.retimeLock`). */
+  setAudioSpeed: (id: string, speed: number, srcDur?: links.SourceDuration) => void
   /**
    * Point every piece of a re-rendered effect at its new asset, keeping each
    * piece's own position and TRIM. A split effect track is several clips over
@@ -66,6 +73,8 @@ export const audioActions = ({ get, commit, commitComp }: Doc): AudioActions => 
 
   removeAudioClip: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'audio', id }])),
 
+  setAudioSpeed: (id, speed, srcDur) => commitComp((p) => links.setGroupSpeed(p, { kind: 'audio', id }, speed, srcDur)),
+
   // Deliberately does NOT touch inSec/outSec: a piece of a split effect track
   // is trimmed into the rendered file, and resetting the trim would expand it
   // back to the whole effect at its own start point.
@@ -83,15 +92,22 @@ export const audioActions = ({ get, commit, commitComp }: Doc): AudioActions => 
       const idx = p.audioClips.findIndex((a) => a.id === audioId)
       if (idx < 0 || ranges.length === 0) return p
       const orig = p.audioClips[idx]
-      const pieces: AudioClip[] = ranges.map((r) => ({
-        ...orig,
-        id: newId(),
-        inSec: r.start,
-        outSec: r.end,
-        startSec: orig.startSec + (r.start - orig.inSec),
-        fadeInSec: 0,
-        fadeOutSec: 0
-      }))
+      // Each piece starts where its first sound plays on the clip as it is
+      // timed now (`audioTimelineAt`: speed and holds), and keeps its own holds.
+      const pieces: AudioClip[] = ranges.map((r) =>
+        withAudioHolds(
+          {
+            ...orig,
+            id: newId(),
+            inSec: r.start,
+            outSec: r.end,
+            startSec: audioTimelineAt(orig, r.start),
+            fadeInSec: 0,
+            fadeOutSec: 0
+          },
+          (orig.freezes ?? []).filter((f) => f.atSec >= r.start && f.atSec <= r.end)
+        )
+      )
       return { ...p, audioClips: replaceAt(p.audioClips, idx, 1, ...pieces) }
     }),
 

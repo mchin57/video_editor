@@ -8,6 +8,7 @@ import { audioClipEnd } from '../project'
 import { compositionDuration, type SourceDuration } from '../compositions'
 import { workoutSpeed } from '../workoutOverlay'
 import { hasVolumeLine, sortedVolumeKeyframes } from '../audioEnvelope'
+import { audioHoldSpans, audioSpeed, audioTimelineAt } from '../audioTiming'
 
 export interface LayerSummary {
   id: string
@@ -40,6 +41,11 @@ export interface AudioSummary {
    *  it plays (it stays on its sound in the source) and its dB over the clip's
    *  normal volume (−60 = silence). Absent = flat. @see shared/audioEnvelope.ts */
   volumeLine?: { atSec: number; db: number }[]
+  /** Constant playback speed when not 1 (pitch kept; 0.5 = twice as long). */
+  speed?: number
+  /** Silent holds (where the linked clip is frozen): each from TIMELINE atSec
+   *  for holdSec seconds. Absent = none. */
+  holds?: { atSec: number; holdSec: number }[]
 }
 
 export interface TimelineSummary {
@@ -94,9 +100,12 @@ export function summarizeTimeline(comp: Composition, srcDur: SourceDuration = ()
       outSec: bounded ? r3(c.outSec) : null
     }
     if (c.linkGroupId) a.linkGroupId = c.linkGroupId
+    if (audioSpeed(c) !== 1) a.speed = r3(audioSpeed(c))
+    const holds = audioHoldSpans(c, bounded ? c.outSec : srcLen > 0 ? srcLen : Infinity)
+    if (holds.length > 0) a.holds = holds.map((h) => ({ atSec: r3(h.startSec), holdSec: r3(h.holdSec) }))
     if (hasVolumeLine(c)) {
       a.volumeLine = sortedVolumeKeyframes(c).map((k) => ({
-        atSec: r3(c.startSec + (k.sourceSec - c.inSec)),
+        atSec: r3(audioTimelineAt(c, k.sourceSec)),
         db: k.db
       }))
     }

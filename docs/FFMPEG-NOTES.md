@@ -668,6 +668,69 @@ module itself (bundled into the check script):
   from a `-/filter_complex` graph file (identical output), track the shared
   function to 0.094 dB in 8 ms windows, and cost ~3 ms per second of audio.
 
+## Audio clip speed & holds — atempo, then cut-and-pad (verified ffmpeg 8.1.1, 2026-11-16, #58)
+
+An audio clip's `speed` exports through the same `atempoChain` a video layer's
+own sound uses (`ExportAudio.tempo`), and its `freezes` as SILENT holds cut into
+the tempo-adjusted stream (`ExportAudio.holds`, `buildAudioGraph`). Checked on a
+20 s lavfi `sine` (AAC proxy and PCM WAV alike), through the exporter's own chain
+shape `atrim,asetpts,<atempo…>,adelay=500,asetpts`, lengths read from the sample
+count of a PCM render:
+
+- **atempo's length vs the picture's played length** (10 s and 3.37 s windows):
+
+  | tempo | 10 s window | 3.37 s window |
+  | --- | --- | --- |
+  | 0.25 | −48.7 ms | −64.2 ms |
+  | 0.5 | −16.9 ms | −22.6 ms |
+  | 0.75 | −6.6 ms | −6.1 ms |
+  | 1.5 | +3.1 ms | +1.1 ms |
+  | 2 | +6.1 ms | +0.7 ms |
+  | 4 | +8.7 ms | +9.2 ms |
+  | 0.3 (`0.5,0.6`) | −38.9 ms | −44.6 ms |
+  | 3 (`2,1.5`) | +5.9 ms | +5.9 ms |
+
+  WAV and AAC agree to 0.3 ms. The error does NOT grow with the length — it is
+  atempo's window at the head and tail, not a rate error.
+- **Where the sound sits** (0.5 s tone bursts every 2 s, burst CENTRE from
+  `silencedetect`, 5 bursts per tempo): every burst lands EARLY by a constant —
+  0.25×: −57…−68 ms; 0.5×: −21…−26 ms; 0.75×: −16…−17 ms; 1.5×: −3…−6 ms;
+  2×: −3…−8 ms; 4×: −6…−10 ms; 1× (no atempo): 0.0. No drift across the clip.
+  So at 0.5× and faster the sound is within a frame (33 ms at 30 fps) of the
+  picture; at 0.25× it leads by about two frames. Not compensated.
+- **A silent hold inside one input: cut the tempo-adjusted stream and pad.**
+  Two candidates, same 20 s stream (window 2..12 at 0.5×), holds at played 3 s
+  (1.5 s) and 9 s (2 s), delay 0.5 s, raw f32 out, runs of exact zeros:
+  - `asplit=3` → per piece `atrim=a:b,asetpts=N/SR/TB,apad=pad_dur=H` (the last
+    piece `atrim=start=a`, no pad) → `concat=n=3:v=0:a=1` → the clip's usual
+    `adelay,asetpts,volume…` — silence at **3.50000–5.00000** and
+    **11.00000–13.00000** (72,000 and 96,000 samples): sample-exact.
+  - `asplit=3` → per piece its own `adelay` (+`asetpts`) → `amix=normalize=0`:
+    identical output. Not used: one chain (the cut-and-pad) keeps the delay,
+    gain, volume line and fades in one place, and adds no `amix` input.
+  - The holds go AFTER `atempo` (a hold is wall-clock, not stretched) and after
+    `afftdn`, at `atPlayedSec` in the tempo-adjusted stream
+    (`audioExportHolds`, shared/audioTiming.ts). A hold at the clip's head is
+    simply a longer `adelay`; one at or past its end is dropped (silence after
+    the last sample is what the mix already has).
+- **No "adelay after atrim" poison** through the pieces: a 26 s mp4 (x264 + AAC)
+  with tempo 0.75, denoise, two holds, a 3 s delay, fades and gain exited 0 with
+  no Non-monotonic DTS warning; audio 25.16 s (expected 25.17 — atempo's tail),
+  silent across both holds to within ~3 ms after AAC.
+- **Everything together** (`exportAudioClips` → `buildAudioGraph`, bundled from
+  the source, on a 440 Hz tone): speed 0.5×, a 1 s hold, denoise, a volume line
+  0 → −12 dB, a 0.5 s fade-in and 1 s fade-out. RMS in 0.1 s windows at 13 times
+  (inside the fade-in, along the line, inside the hold, across the fade-out)
+  matched the shared `envelopeGainAt` to **0.03 dB** after a constant offset that
+  is the source's own level (−24.08 dB RMS) — the hold measured digital silence,
+  as the envelope says. With a dialogue clip ducking the bed across the hold, the
+  output during the hold was the dialogue alone (−24.13 dB vs −24.08), and before
+  the dialogue the bed was unchanged. (The bed again ended with the dialogue:
+  `sidechaincompress`'s end, noted under "Volume line", not the hold.)
+- The preview's twin: `AudioFollower` plays at `playbackRate = speed`
+  (`preservesPitch`), and inside a hold pauses on the held source point with the
+  envelope at 0.
+
 ## EXIF orientation — only on the first FRAME (verified ffmpeg 8.1.1, 2026-10)
 
 - **An iPhone JPEG is stored landscape; its orientation is frame side data,

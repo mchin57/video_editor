@@ -7,7 +7,15 @@
 
 import type { Layer, LayerContent, LayerKeyframe, PillStyle, VideoContent, WorkoutContent } from './project'
 import { workoutPlayedSec, type WorkoutWidget } from './workoutOverlay'
-import { playedBetween, sourceAfterPlayed } from './speed'
+import {
+  freezeExtraSec,
+  heldAtPlayed,
+  holdSpans,
+  playedAtSource,
+  playedDuration,
+  sourceAtPlayed,
+  type Retimed
+} from './speed'
 import { DEFAULT_FONT_ID } from './fonts'
 import { FRAME, FULL_FRAME, type FrameRect } from './frame'
 import { LAYER_KINDS } from './layerKinds'
@@ -201,21 +209,17 @@ export function visualDuration(layers: Layer[]): number {
   return layers.reduce((max, l) => Math.max(max, l.endSec), 0)
 }
 
-/** Total extra played time a video layer's freeze holds add (seconds). Holds
- *  are wall-clock — speed does not scale them. */
-export function freezeExtraSec(content: VideoContent): number {
-  return (content.freezes ?? []).reduce((sum, f) => sum + Math.max(0, f.holdSec), 0)
-}
+// The freeze-aware timeline↔source mapping itself lives in `shared/speed.ts`
+// (`Retimed` — one implementation for video layers AND audio clips); these are
+// the video-layer spellings of it, anchored at the layer's `startSec`.
+export { freezeExtraSec }
 
 /** Played (timeline) duration of a video layer's content: the source span at
  *  the clip's speed profile (constant or ramped), plus the wall-clock freeze
  *  holds. The `endSec` a store action should maintain is
  *  `startSec + playedVideoDuration(content)`. */
 export function playedVideoDuration(content: VideoContent): number {
-  return (
-    Math.max(0, playedBetween(content, content.inSec, Math.max(content.inSec, content.outSec))) +
-    freezeExtraSec(content)
-  )
+  return playedDuration(content)
 }
 
 /**
@@ -226,34 +230,12 @@ export function playedVideoDuration(content: VideoContent): number {
  * window is `playedBetween(in, out) + freezeExtraSec` long.
  */
 export function videoSourceTime(content: VideoContent, layer: Layer, t: number): number {
-  let local = t - layer.startSec // played time within the (stretched) layer
-  const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
-  for (const f of freezes) {
-    // Earlier holds are already removed from `local`, so this freeze sits at its
-    // profile-mapped played distance from the in-point in the reduced timeline.
-    const atPlayed = playedBetween(content, content.inSec, f.atSec)
-    if (local < atPlayed) break // freeze is still ahead — normal profile mapping
-    if (local < atPlayed + f.holdSec) return clampSrc(content, f.atSec) // inside the hold
-    local -= Math.max(0, f.holdSec) // passed it: drop its hold as dead played time
-  }
-  return clampSrc(content, sourceAfterPlayed(content, content.inSec, Math.max(0, local)))
-}
-
-function clampSrc(content: VideoContent, s: number): number {
-  return Math.min(content.outSec, Math.max(content.inSec, s))
+  return sourceAtPlayed(content, t - layer.startSec)
 }
 
 /** True if timeline time `t` falls inside one of the layer's freeze holds. */
 export function isFrozenAt(content: VideoContent, layer: Layer, t: number): boolean {
-  let local = t - layer.startSec
-  const freezes = [...(content.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
-  for (const f of freezes) {
-    const atPlayed = playedBetween(content, content.inSec, f.atSec)
-    if (local < atPlayed) return false
-    if (local < atPlayed + f.holdSec) return true
-    local -= Math.max(0, f.holdSec)
-  }
-  return false
+  return heldAtPlayed(content, t - layer.startSec)
 }
 
 /** One freeze hold placed on the timeline: the held frame shows over
@@ -267,16 +249,16 @@ export interface FreezeSpan {
 }
 
 /** Where each of the layer's freeze holds sits on the timeline, in `atSec`
- *  order — what the timeline draws as freeze overlays on the clip. */
-export function freezeSpans(content: VideoContent, layer: Pick<Layer, 'startSec'>): FreezeSpan[] {
-  const order = (content.freezes ?? []).map((f, index) => ({ ...f, index })).sort((a, b) => a.atSec - b.atSec)
-  let holdsBefore = 0
-  return order.map((f) => {
-    const holdSec = Math.max(0, f.holdSec)
-    const startSec = layer.startSec + playedBetween(content, content.inSec, f.atSec) + holdsBefore
-    holdsBefore += holdSec
-    return { index: f.index, atSec: f.atSec, holdSec, startSec, endSec: startSec + holdSec }
-  })
+ *  order — what the timeline draws as freeze overlays on the clip. Takes any
+ *  `Retimed` timing, so an audio clip's holds place the same way. */
+export function freezeSpans(content: Retimed, layer: Pick<Layer, 'startSec'>): FreezeSpan[] {
+  return holdSpans(content).map((h) => ({
+    index: h.index,
+    atSec: h.atSec,
+    holdSec: h.holdSec,
+    startSec: layer.startSec + h.startPlayed,
+    endSec: layer.startSec + h.endPlayed
+  }))
 }
 
 /**
@@ -285,12 +267,7 @@ export function freezeSpans(content: VideoContent, layer: Pick<Layer, 'startSec'
  * start). Drives "seek to this keyframe" UI.
  */
 export function videoTimelineTime(content: VideoContent, layer: Layer, s: number): number {
-  const clamped = clampSrc(content, s)
-  const holdsBefore = (content.freezes ?? []).reduce(
-    (sum, f) => sum + (f.atSec < clamped ? Math.max(0, f.holdSec) : 0),
-    0
-  )
-  return layer.startSec + playedBetween(content, content.inSec, clamped) + holdsBefore
+  return layer.startSec + playedAtSource(content, Math.min(content.outSec, Math.max(content.inSec, s)))
 }
 
 // --- Re-rendered segments (background removal) -------------------------------

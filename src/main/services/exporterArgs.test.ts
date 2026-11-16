@@ -755,6 +755,35 @@ describe('buildExportArgs', () => {
         '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=0.501[ac0]'
       )
     })
+
+    it('a re-timed clip exports its speed as tempo and its freezes as holds (#58)', () => {
+      const src = () => ({ path: 'x', durationSec: 10, foldChannel: null })
+      const [a] = exportAudioClips(
+        [clipA({ speed: 0.5, freezes: [{ atSec: 2, holdSec: 1.5 }], volumeKeyframes: [{ sourceSec: 4, db: -6 }] })],
+        src,
+        { levels, seriesOf: () => null },
+        false
+      )
+      expect(a.tempo).toBe(0.5)
+      // Source 2 plays 4 s in at 0.5×; the point at source 4 plays after the hold.
+      expect(a.holds).toEqual([{ atPlayedSec: 4, holdSec: 1.5 }])
+      expect(a.volumeLine).toEqual([{ t: 9.5, db: -6 }])
+      expect(audioChain(clipA({ speed: 2 }), null)).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,atempo=2.000,adelay=0|0,asetpts=N/SR/TB,volume=0.501[ac0]'
+      )
+    })
+
+    it('an untimed clip (or speed 1, no holds) has no tempo or holds key — args as before #58', () => {
+      const src = () => ({ path: 'x', durationSec: 10, foldChannel: null })
+      for (const c of [clipA(), clipA({ speed: 1, freezes: [] })]) {
+        const [a] = exportAudioClips([c], src, { levels, seriesOf: () => null }, false)
+        expect('tempo' in a).toBe(false)
+        expect('holds' in a).toBe(false)
+      }
+      expect(audioChain(clipA({ speed: 1, freezes: [] }), null)).toBe(
+        '[2:a]atrim=0.000:8.000,asetpts=N/SR/TB,adelay=0|0,asetpts=N/SR/TB,volume=0.501[ac0]'
+      )
+    })
   })
 
   it('uses NVENC when available + preferred, else libx264', () => {

@@ -18,8 +18,19 @@
  * inline. @see docs/SHARED.md
  */
 
-import type { SpeedKeyframe, VideoContent } from './project'
-import { MAX_VIDEO_SPEED, MIN_VIDEO_SPEED, videoSpeed } from './project'
+import type { FreezeHold, SpeedKeyframe, VideoContent } from './project'
+
+/** Allowed constant-speed range (matches the Inspector control). */
+export const MIN_VIDEO_SPEED = 0.25
+export const MAX_VIDEO_SPEED = 4
+
+/** A clip's effective constant speed: its `speed`, clamped, defaulting to 1.
+ *  Serves video layers and audio clips alike (re-exported by `project.ts`). */
+export function videoSpeed(c: { speed?: number }): number {
+  const s = c.speed
+  if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return 1
+  return Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, s))
+}
 
 /** Slopes below this are treated as flat (avoids ln/exp blowup on ~0). */
 const FLAT_EPS = 1e-9
@@ -186,4 +197,102 @@ export function sourceAfterPlayed(
     remaining -= segTotal
   }
   return Math.max(loLimit, lo - remaining * videoSpeedAtSource(c, lo))
+}
+
+// --- Freeze-aware mapping, for anything that plays a source window -----------
+
+/**
+ * The timing of one stretch of source media on the timeline: a source window,
+ * a speed profile and wall-clock freeze holds. `VideoContent` satisfies it as
+ * is; an audio clip does once its out-point is resolved (`audioTiming`,
+ * `shared/project.ts` — audio has no ramp, so `speedRamp` is simply absent).
+ * THE shape every timeline↔source helper below takes, so video and audio map
+ * through one implementation. @see docs/SHARED.md
+ */
+export interface Retimed {
+  inSec: number
+  outSec: number
+  speed?: number
+  speedRamp?: SpeedKeyframe[]
+  freezes?: FreezeHold[]
+}
+
+/** Total extra played time the freeze holds add (seconds). Holds are
+ *  wall-clock — speed does not scale them. */
+export function freezeExtraSec(c: Pick<Retimed, 'freezes'>): number {
+  return (c.freezes ?? []).reduce((sum, f) => sum + Math.max(0, f.holdSec), 0)
+}
+
+/** Played (timeline) length of the window: the source span at the speed
+ *  profile, plus the freeze holds. A tile's end is `startSec + playedDuration`. */
+export function playedDuration(c: Retimed): number {
+  return Math.max(0, playedBetween(c, c.inSec, Math.max(c.inSec, c.outSec))) + freezeExtraSec(c)
+}
+
+const clampToWindow = (c: Retimed, s: number): number => Math.min(c.outSec, Math.max(c.inSec, s))
+
+const sortedFreezes = (c: Pick<Retimed, 'freezes'>): FreezeHold[] =>
+  [...(c.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
+
+/**
+ * SOURCE second playing `local` played seconds after the window's start,
+ * honoring the speed profile AND the freeze holds: played time runs
+ * `inSec → outSec` along the profile, pausing on each freeze's source point for
+ * its wall-clock `holdSec`. Clamped to the window.
+ */
+export function sourceAtPlayed(c: Retimed, local: number): number {
+  for (const f of sortedFreezes(c)) {
+    // Earlier holds are already removed from `local`, so this freeze sits at its
+    // profile-mapped played distance from the in-point in the reduced timeline.
+    const atPlayed = playedBetween(c, c.inSec, f.atSec)
+    if (local < atPlayed) break // freeze is still ahead — normal profile mapping
+    if (local < atPlayed + f.holdSec) return clampToWindow(c, f.atSec) // inside the hold
+    local -= Math.max(0, f.holdSec) // passed it: drop its hold as dead played time
+  }
+  return clampToWindow(c, sourceAfterPlayed(c, c.inSec, Math.max(0, local)))
+}
+
+/** Whether `local` played seconds after the window's start falls inside a hold. */
+export function heldAtPlayed(c: Retimed, local: number): boolean {
+  for (const f of sortedFreezes(c)) {
+    const atPlayed = playedBetween(c, c.inSec, f.atSec)
+    if (local < atPlayed) return false
+    if (local < atPlayed + f.holdSec) return true
+    local -= Math.max(0, f.holdSec)
+  }
+  return false
+}
+
+/** One freeze hold in PLAYED seconds from the window's start: it covers
+ *  `[startPlayed, endPlayed)`. `index` is its position in `c.freezes`. */
+export interface HoldSpan {
+  index: number
+  atSec: number
+  holdSec: number
+  startPlayed: number
+  endPlayed: number
+}
+
+/** Where each hold sits in played time, in `atSec` order. */
+export function holdSpans(c: Retimed): HoldSpan[] {
+  const order = (c.freezes ?? []).map((f, index) => ({ ...f, index })).sort((a, b) => a.atSec - b.atSec)
+  let holdsBefore = 0
+  return order.map((f) => {
+    const holdSec = Math.max(0, f.holdSec)
+    const startPlayed = playedBetween(c, c.inSec, f.atSec) + holdsBefore
+    holdsBefore += holdSec
+    return { index: f.index, atSec: f.atSec, holdSec, startPlayed, endPlayed: startPlayed + holdSec }
+  })
+}
+
+/**
+ * PLAYED seconds from the window's start at which SOURCE second `s` plays — the
+ * inverse of `sourceAtPlayed` (for a source point a hold sits on, the hold's
+ * start). NOT clamped to the window: a point before the in-point comes back
+ * negative, one past the out-point beyond the played length (callers that want
+ * the clamp apply it to `s` first).
+ */
+export function playedAtSource(c: Retimed, s: number): number {
+  const holdsBefore = (c.freezes ?? []).reduce((sum, f) => sum + (f.atSec < s ? Math.max(0, f.holdSec) : 0), 0)
+  return playedBetween(c, c.inSec, s) + holdsBefore
 }

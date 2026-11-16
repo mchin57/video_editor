@@ -299,6 +299,17 @@ describe('applyTemplate — the overlays', () => {
     expect(comp.audioClips.map((a) => [a.startSec, a.inSec, a.outSec])).toEqual([[0, 0.5, 3]])
   })
 
+  it('a sped-up sound keeps its speed, and its trimmed head is that much SOURCE at it (#58)', () => {
+    const fast = tpl({
+      clipEffect: null,
+      layers: [],
+      audio: [{ ...tpl().audio[0], clip: { ...tpl().audio[0].clip, startSec: -1.5, outSec: 6, speed: 2 } }]
+    })
+    const { comp } = applyTemplate(createEmptyComposition(), fast, 1, media, makeId)
+    // 0.5 s of timeline before 0 at 2× is 1 s of source.
+    expect(comp.audioClips.map((a) => [a.startSec, a.inSec, a.outSec, a.speed])).toEqual([[0, 1, 6, 2]])
+  })
+
   it('drops every built-in starter onto an empty edit', () => {
     for (const t of BUILT_IN_TEMPLATES) {
       const { comp, effectSkipped } = applyTemplate(createEmptyComposition(), t, 2, media, makeId)

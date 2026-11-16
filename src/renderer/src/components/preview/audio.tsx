@@ -4,6 +4,7 @@ import { useEffect, useRef, type JSX } from 'react'
 import type { AudioClip } from '@shared/project'
 import { effectiveOut } from '@shared/project'
 import { envelopeGainAt } from '@shared/audioEnvelope'
+import { audioHeldAt, audioPlayedSec, audioResyncSec, audioSourceAt, audioSpeed } from '@shared/audioTiming'
 import { type MediaAsset } from '@shared/media'
 import { audioUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
@@ -30,8 +31,28 @@ export function AudioFollower({
 }): JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
   const eo = effectiveOut(clip, asset.probe.durationSec)
-  const active = time >= clip.startSec - 0.001 && time < clip.startSec + (eo - clip.inSec)
-  const target = clip.inSec + (time - clip.startSec)
+  // Where the clip is on the timeline and which source second plays under the
+  // playhead both come from the shared timing helpers (shared/audioTiming.ts) —
+  // the export cuts and stretches the same clip from the same numbers.
+  const active = time >= clip.startSec - 0.001 && time < clip.startSec + audioPlayedSec(clip, eo)
+  const target = audioSourceAt(clip, eo, time)
+  // Inside a hold (a freeze) the clip is SILENT — the element waits, paused on
+  // the held source point, like a frozen video frame (and the envelope is 0).
+  const held = active && audioHeldAt(clip, eo, time)
+  // A re-timed clip plays at its speed with the pitch kept, the twin of the
+  // export's atempo; the drift that triggers a re-seek is measured in SOURCE
+  // seconds, so it scales with the rate (`audioResyncSec`).
+  const rate = audioSpeed(clip)
+  useEffect(() => {
+    const a = ref.current
+    if (!a) return
+    a.preservesPitch = true
+    // A new `src` (an effect track re-rendered under the same clip) reloads the
+    // element, which resets `playbackRate` to `defaultPlaybackRate` — so set
+    // both, and re-apply when the source changes.
+    a.defaultPlaybackRate = rate
+    if (a.playbackRate !== rate) a.playbackRate = rate
+  }, [rate, src])
 
   // The gain comes from `clipGain` (shared/volumeLevels.ts) — the export's own
   // call — so a clip in a volume level previews at the level's gain, not its
@@ -49,14 +70,16 @@ export function AudioFollower({
   useEffect(() => {
     const a = ref.current
     if (!a) return
-    if (playing && active) {
-      if (Math.abs(a.currentTime - target) > 0.3) a.currentTime = target
+    if (playing && active && !held) {
+      if (Math.abs(a.currentTime - target) > audioResyncSec(rate, true)) a.currentTime = target
       if (a.paused) void a.play().catch(() => {})
     } else {
       if (!a.paused) a.pause()
-      if (active && a.readyState >= 1 && Math.abs(a.currentTime - target) > 0.05) a.currentTime = target
+      if (active && a.readyState >= 1 && Math.abs(a.currentTime - target) > audioResyncSec(rate, false)) {
+        a.currentTime = target
+      }
     }
-  }, [playing, active, target])
+  }, [playing, active, held, target, rate])
 
   // `data-testid` distinguishes the mix follower from the library card's own
   // preview player (`ClipCard`), which is a separate <audio> on the same source.

@@ -7,6 +7,7 @@
  */
 
 import type { AudioClip, Composition } from '@shared/project'
+import { audioSourceAt, audioTimelineAt } from '@shared/audioTiming'
 import {
   VOLUME_LINE_MAX_DB,
   VOLUME_LINE_SILENCE_DB,
@@ -40,14 +41,19 @@ export function fracToDb(frac: number): number {
   return amp <= FLOOR_AMP ? VOLUME_LINE_SILENCE_DB : Math.max(VOLUME_LINE_SILENCE_DB, 40 * Math.log10(amp))
 }
 
-/** The tile-local x (px) of SOURCE second `sourceSec`. */
-export function sourceToX(clip: Pick<AudioClip, 'inSec'>, sourceSec: number, pxPerSec: number): number {
-  return (sourceSec - clip.inSec) * pxPerSec
+type TileTiming = Pick<AudioClip, 'inSec' | 'speed' | 'freezes'>
+
+/** The tile-local x (px) of SOURCE second `sourceSec` — through the clip's
+ *  timing (`audioTimelineAt`), so a point sits where its sound plays on a
+ *  re-timed tile too. */
+export function sourceToX(clip: TileTiming, sourceSec: number, pxPerSec: number): number {
+  return audioTimelineAt({ ...clip, startSec: 0 }, sourceSec) * pxPerSec
 }
 
-/** The SOURCE second at tile-local x (px). */
-export function xToSource(clip: Pick<AudioClip, 'inSec'>, x: number, pxPerSec: number): number {
-  return clip.inSec + x / pxPerSec
+/** The SOURCE second at tile-local x (px), within the clip's window up to
+ *  `outSec` (its effective source out-point; open-ended when not given). */
+export function xToSource(clip: TileTiming, x: number, pxPerSec: number, outSec = Infinity): number {
+  return audioSourceAt({ ...clip, startSec: 0 }, outSec, x / pxPerSec)
 }
 
 /**
