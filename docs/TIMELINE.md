@@ -135,8 +135,9 @@ the assistant's `set_transition`) MAKES that overlap, and that is what moves:
 - **Changing the length slides the incoming side again** by the change; a fade
   the user changed is left alone.
 - **Removing leaves the overlap** (and the fades): nothing slides back.
-- **Trims and moves do not touch transitions.** A trim under a transition, or
-  moving one clip of a pair on its own, breaks the pair; each side then plays
+- **Trims, moves and deletes do not touch transitions.** A trim under a
+  transition, moving one clip of a pair on its own, or deleting one, breaks the
+  pair; each side then plays
   alone — a dissolve in is a fade in, a dissolve out a cut, a dip side a fade to
   or from its colour (`layerOpacityAt`, `transitionPlates`). Re-apply, or remove
   it, from the Inspector.
