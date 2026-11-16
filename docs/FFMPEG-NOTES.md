@@ -362,6 +362,21 @@ after the round trip), centre 100×100 mean RGB of every output frame:
   So a crossfade between two different shots dips by ~3 dB at its midpoint with
   today's shared linear curve (`fadeGainAt`). An equal-power curve would hold the
   level; changing the shared curve is an owner decision, not made here.
+- **What the export emits** (`exportTransitions.ts`, `layerOpacityPoints`): the
+  incoming clip's points go through the existing `opacityAnim` (so it takes the
+  rgba pipeline for its whole length), a dip side's plate is one
+  `[prev]drawbox=…:replace=1:enable='between(t,a,b)'[out]` step inserted just
+  before the layer it goes under (no new input), and a layer without a
+  transition gets exactly its old keyframe points — an export without
+  transitions is byte-identical (`exporter.test.ts` snapshots unchanged). The
+  real app's export of a red and a blue clip (e2e `transitionExport.spec.ts`):
+  dissolve midpoint 114/38/125 between red 198/39/38 and blue 39/37/198, dip to
+  black 1/1/13, dip to white 240/240/252, crossfade middle −2.95 dB.
+- **Cost of the rgba pipeline**: a 19.5 s 1080×1920 synthetic reel (two
+  `testsrc2` clips, the second with a dissolve ramp) took 1.86 / 2.50 s plain vs
+  2.01 / 2.42 s with the ramp on x264, 2.15 / 2.02 s vs 2.28 / 2.04 s on NVENC
+  (two runs each) — within run-to-run noise. Not measured on a real 4K iPhone
+  reel.
 
 ## Graphics marks — draw-on sequences & alpha fade-in (verified ffmpeg 8.1.1, 2026-10-21)
 
