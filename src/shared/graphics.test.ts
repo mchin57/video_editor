@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   DRAW_ON_FRAMES,
+  CLICK_SLOP,
+  DEFAULT_DROP_WIDTH,
+  canFill,
+  finishPolyline,
+  polylineMark,
+  teardropOutline,
   drawOnFrameCount,
   REVEAL_SEC,
   angleDeg,
@@ -273,5 +279,150 @@ describe('shiftMarks', () => {
     expect(markStateAt(shiftMarks(ms, 0.7)[0], 0)!.opacity).toBeCloseTo(0.5)
     expect(shiftMarks(ms, -1).map((m) => m.atSec)).toEqual([1.5, 4])
     expect(shiftMarks(ms, 0)).toBe(ms)
+  })
+})
+
+describe('teardrop', () => {
+  const drop = (over: Partial<GraphicMark> = {}): GraphicMark =>
+    mark({
+      tool: 'teardrop',
+      points: [
+        { x: 500, y: 300 },
+        { x: 500, y: 700 }
+      ],
+      ...over
+    })
+  const widest = (m: GraphicMark): number => {
+    const [tip, base] = m.points
+    const len = Math.hypot(base.x - tip.x, base.y - tip.y)
+    const perp = { x: -(base.y - tip.y) / len, y: (base.x - tip.x) / len }
+    const ds = teardropOutline(m).map((q) => (q.x - tip.x) * perp.x + (q.y - tip.y) * perp.y)
+    return Math.max(...ds) - Math.min(...ds)
+  }
+
+  it('starts at the tip, closes, and reaches the base', () => {
+    const m = drop()
+    const o = teardropOutline(m)
+    expect(o).toHaveLength(97)
+    expect(o[0].x).toBeCloseTo(500)
+    expect(o[0].y).toBeCloseTo(300)
+    expect(Math.hypot(o[96].x - o[0].x, o[96].y - o[0].y)).toBeLessThan(1e-6)
+    const far = o.reduce((a, q) => (Math.hypot(q.x - 500, q.y - 300) > Math.hypot(a.x - 500, a.y - 300) ? q : a))
+    expect(Math.hypot(far.x - 500, far.y - 700)).toBeLessThan(1)
+  })
+
+  it('is dropWidth x length wide, on any axis', () => {
+    expect(widest(drop())).toBeCloseTo(DEFAULT_DROP_WIDTH * 400, -1)
+    expect(Math.abs(widest(drop()) / (DEFAULT_DROP_WIDTH * 400) - 1)).toBeLessThan(0.01)
+    const diag = drop({
+      dropWidth: 0.4,
+      points: [
+        { x: 100, y: 100 },
+        { x: 400, y: 500 }
+      ]
+    })
+    expect(Math.abs(widest(diag) / (0.4 * 500) - 1)).toBeLessThan(0.01)
+    const o = teardropOutline(diag)
+    const far = o.reduce((a, q) => (Math.hypot(q.x - 100, q.y - 100) > Math.hypot(a.x - 100, a.y - 100) ? q : a))
+    expect(Math.hypot(far.x - 400, far.y - 500)).toBeLessThan(1)
+  })
+
+  it('draws nothing when the tip and base coincide', () => {
+    const p = { x: 5, y: 5 }
+    expect(markShapes(drop({ points: [p, p] }))).toEqual([])
+  })
+
+  it('a drag spans press to release; a click drops a tip-up one centred on it', () => {
+    const a = { x: 400, y: 400 }
+    const b = { x: 500, y: 700 }
+    expect(newMark('teardrop', 'n', a, b, 0).points).toEqual([a, b])
+    expect(newMark('teardrop', 'n', a, a, 0).points).toEqual([
+      { x: 400, y: 290 },
+      { x: 400, y: 510 }
+    ])
+  })
+
+  it('fills only once complete; a drawing-on drop is an outline prefix', () => {
+    const m = drop({ fill: '#00ff0066' })
+    const [full] = paths(markShapes(m))
+    expect(full.fill).toBe('#00ff0066')
+    expect(full.d.endsWith('Z')).toBe(true)
+    const [part] = paths(markShapes(m, 0.5))
+    expect(part.fill).toBeNull()
+    expect(pointsOf(part.d).length).toBeLessThan(97)
+    expect(pointsOf(part.d)[0]).toEqual({ x: 500, y: 300 })
+  })
+
+  it('a zero-width border means no stroke', () => {
+    const [s] = paths(markShapes(drop({ fill: '#00ff0066', widthPx: 0 })))
+    expect(s.stroke).toBeNull()
+    expect(s.fill).toBe('#00ff0066')
+    expect(paths(markShapes(drop({ widthPx: 4 })))[0].stroke).toBe('#ff0000')
+  })
+
+  it('has bounds that hold its whole outline', () => {
+    const m = drop({
+      points: [
+        { x: 100, y: 100 },
+        { x: 400, y: 500 }
+      ]
+    })
+    const b = markBounds(m)
+    for (const q of teardropOutline(m)) {
+      expect(q.x).toBeGreaterThanOrEqual(b.x + m.widthPx)
+      expect(q.x).toBeLessThanOrEqual(b.x + b.w - m.widthPx)
+      expect(q.y).toBeGreaterThanOrEqual(b.y + m.widthPx)
+      expect(q.y).toBeLessThanOrEqual(b.y + b.h - m.widthPx)
+    }
+  })
+})
+
+describe('connected line', () => {
+  const pts = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 200, y: 100 }
+  ]
+  const m = polylineMark('p', pts, 0)
+
+  it('is one open path through every point, drawn on by length', () => {
+    const full = paths(markShapes(m))
+    expect(full).toHaveLength(1)
+    expect(pointsOf(full[0].d)).toEqual(pts)
+    expect(full[0].d.endsWith('Z')).toBe(false)
+    expect(full[0].fill).toBeNull()
+    // Total length 300: half is 150 = 100 along the first leg... then 50 up the second.
+    expect(pointsOf(paths(markShapes(m, 0.5))[0].d)).toEqual([pts[0], pts[1], { x: 100, y: 50 }])
+  })
+
+  it('has bounds covering every point', () => {
+    const b = markBounds(m)
+    expect(b.x).toBeLessThan(0)
+    expect(b.y).toBeLessThan(0)
+    expect(b.x + b.w).toBeGreaterThan(200)
+    expect(b.y + b.h).toBeGreaterThan(100)
+  })
+
+  it('finishes by dropping double-click and near duplicates, or not at all', () => {
+    const a = { x: 100, y: 100 }
+    const b = { x: 400, y: 100 }
+    expect(finishPolyline([a, b, b])).toEqual([a, b])
+    expect(finishPolyline([a, { x: a.x + CLICK_SLOP - 1, y: a.y }, b, { x: b.x + 3, y: b.y }])).toEqual([a, b])
+    expect(finishPolyline([a])).toBeNull()
+    expect(finishPolyline([a, a])).toBeNull()
+    expect(finishPolyline([])).toBeNull()
+  })
+})
+
+describe('fills and titles', () => {
+  it('only rect, ellipse and teardrop can fill', () => {
+    expect(['rect', 'ellipse', 'teardrop'].every((t) => canFill(t as never))).toBe(true)
+    expect(['arrow', 'line', 'polyline', 'angle'].some((t) => canFill(t as never))).toBe(false)
+  })
+
+  it('titles the new tools by their labels', () => {
+    expect(markTitle(mark({ tool: 'teardrop' }))).toBe('Teardrop')
+    expect(markTitle(mark({ tool: 'polyline' }))).toBe('Connected line')
   })
 })

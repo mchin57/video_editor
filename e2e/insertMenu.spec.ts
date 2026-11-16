@@ -49,7 +49,7 @@ test('Insert ▸ Graphics adds an empty tile in a Graphics lane and opens the dr
   await expect(page.getByTestId('lane-graphics')).toBeVisible()
   await expect(page.getByTestId(`tile-layer-${layer.id}`)).toBeVisible()
   await expect(page.getByTestId('inspector-kind')).toHaveText('Graphics layer')
-  for (const t of ['arrow', 'line', 'rect', 'ellipse', 'angle']) {
+  for (const t of ['arrow', 'line', 'polyline', 'rect', 'ellipse', 'teardrop', 'angle']) {
     await expect(page.getByTestId(`graphics-tool-${t}`)).toBeVisible()
   }
   // One undo step takes it away again.
