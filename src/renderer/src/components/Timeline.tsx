@@ -71,6 +71,7 @@ import {
 import { spanOf, packAudioRows, snapTargetsFor } from './timeline/geometry'
 import { FreezeOverlay, PoseBadge, TileThumb } from './timeline/parts'
 import { TileDescription } from './timeline/TileDescription'
+import { TransitionWedges, transitionMenu } from './timeline/transitions'
 import { VolumeLineOverlay } from './timeline/VolumeLine'
 import { MIN_VOLUME_LINE_ROW_H } from '@/lib/volumeLine'
 import { TimelineToolbar } from './timeline/TimelineToolbar'
@@ -319,18 +320,19 @@ export function Timeline(): JSX.Element {
     insertCaret.showDropCaret(insertable ? insertCaret.seamAt(e.clientX, e.clientY) : null)
   }
 
-  const { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag } = useTileDrags({
-    scrollRef,
-    pxPerSec,
-    collectSnapTargets,
-    snapSec,
-    startEdgeScrollX,
-    srcDur,
-    assetById,
-    selection,
-    selKeys,
-    insertCaret
-  })
+  const { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag, startTransitionDrag } =
+    useTileDrags({
+      scrollRef,
+      pxPerSec,
+      collectSnapTargets,
+      snapSec,
+      startEdgeScrollX,
+      srcDur,
+      assetById,
+      selection,
+      selKeys,
+      insertCaret
+    })
 
   // Split / delete / link act on the WHOLE selection (a single tile, a link
   // group, or a Ctrl-built set) — one undo step each.
@@ -381,6 +383,12 @@ export function Timeline(): JSX.Element {
         key={l.id}
         data-testid={`tile-layer-${l.id}`}
         onPointerDown={(e) => startTileDrag(e, { kind: 'layer', id: l.id })}
+        onContextMenu={(e) => {
+          // Video / image tiles: Add transition ▸ / Remove (rows built now).
+          const now = getActiveComp()
+          const rows = now ? transitionMenu(now, l, useUi.getState().selection, srcDur) : []
+          if (rows.length > 0) tileMenu.open(e, rows)
+        }}
         {...descHoverProps(asset)}
         title={linked ? `${layerLabel(l)} · linked` : layerLabel(l)}
         className={`group absolute flex cursor-move items-start gap-1 overflow-hidden rounded border pl-1 ${
@@ -455,6 +463,15 @@ export function Timeline(): JSX.Element {
               onEdgeDown={(e) => startFreezeDrag(e, l, s.index)}
             />
           ))}
+        {comp && (
+          <TransitionWedges
+            layer={l}
+            comp={comp}
+            pxPerSec={pxPerSec}
+            height={rowH - 2}
+            onDown={(e, side) => startTransitionDrag(e, l, side)}
+          />
+        )}
         <div
           onPointerDown={(e) => startLayerDrag(e, l, 'start')}
           className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"

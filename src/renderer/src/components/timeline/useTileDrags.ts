@@ -4,7 +4,8 @@
  * there, closing the hole it left), and trim an edge — of a whole link
  * group / selection through `trimItemsBy`, or of a lone tile through its own
  * freeze- and speed-aware path — and set a freeze's hold from its overlay's
- * edge. Every drag is one undo step (`commitLive`) and
+ * edge, and change a transition's length from its wedge (or pull a fade out of
+ * a tile's top corner). Every drag is one undo step (`commitLive`) and
  * works from its press-time snapshot. The tile rules live in `lib/links.ts`
  * and `lib/timeline.ts`; e2e: link, freezeTrim, timelineInteractions,
  * edgeScrollShrink, keybinds, shiftDragInsert.
@@ -34,6 +35,8 @@ import { startPointerDrag } from '@/lib/pointerDrag'
 import { setFreezeHold, trimAudioEdge, trimVideoEndBy, trimVideoStart } from '@/lib/timeline'
 import { trimWorkoutEnd, trimWorkoutStart } from '@shared/workoutOverlay'
 import { snap } from '@/lib/snap'
+import { setFade, setTransitionLength } from '@/lib/transitions'
+import { pairOf, transitionOf, TRANSITION_MIN_SEC, type TransitionSide } from '@shared/transitions'
 import { shiftMarks } from '@shared/graphics'
 import { CLICK_SLOP, SNAP_PX } from './constants'
 import type { InsertCaretApi } from './insertCaret'
@@ -73,6 +76,7 @@ export function useTileDrags({
   startCaptionDrag: (e: ReactPointerEvent, seg: CaptionSegment, mode: 'start' | 'end') => void
   startAudioDrag: (e: ReactPointerEvent, clip: AudioClip, mode: 'start' | 'end', maxOut: number) => void
   startFreezeDrag: (e: ReactPointerEvent, layer: Layer, index: number) => void
+  startTransitionDrag: (e: ReactPointerEvent, layer: Layer, side: TransitionSide) => void
 } {
   const selectItems = useUi((s) => s.selectItems)
   const setPlaying = usePlayback((s) => s.setPlaying)
@@ -369,6 +373,51 @@ export function useTileDrags({
     )
   }
 
+  /**
+   * Drag a transition's wedge — or a tile's top corner, where there is none, to
+   * pull a fade out of that edge. Live from the press-time snapshot, one undo
+   * step on release; a press without a drag only selects the tile. The wedge
+   * edge that moves follows the pointer: a fade in grows to the right, a fade
+   * out to the left, and a pair (cross dissolve / dip) grows LEFT — the
+   * incoming clip slides in under the pointer (`setTransitionLength`). A fade
+   * dragged below half the minimum length is removed (`setFade`).
+   */
+  const startTransitionDrag = (e: ReactPointerEvent, layer: Layer, side: TransitionSide): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    setPlaying(false)
+    const before = useProject.getState().project
+    const comp0 = getActiveComp()
+    if (!before || !comp0) return
+    const ref: TimelineItemRef = { kind: 'layer', id: layer.id }
+    selectItems(expandGroup(comp0, ref), ref)
+    const tr = transitionOf(layer, side)
+    const sec0 = tr?.sec ?? 0
+    // A fade (or a corner handle) grows away from its edge; a pair grows left
+    // (its incoming clip slides in), through the pair rules.
+    const isFade = !tr || tr.kind === 'fade'
+    const sign = !pairOf(comp0.layers, layer.id, side) && side === 'in' ? 1 : -1
+    let dragged = false
+    trackHorizontalDrag(
+      e,
+      (dx) => {
+        if (!dragged && Math.abs(dx) <= CLICK_SLOP) return
+        dragged = true
+        const sec = sec0 + (sign * dx) / pxPerSec
+        useProject
+          .getState()
+          .liveUpdate(() =>
+            isFade
+              ? setFade(comp0, layer.id, side, sec < TRANSITION_MIN_SEC / 2 ? 0 : sec)
+              : setTransitionLength(comp0, layer.id, side, sec, srcDur)
+          )
+      },
+      () => {
+        if (dragged) useProject.getState().commitLive(before)
+      }
+    )
+  }
+
   // Trim a caption block's left/right edge (moving it is `startTileDrag`).
   const startCaptionDrag = (e: ReactPointerEvent, seg: CaptionSegment, mode: 'start' | 'end'): void => {
     e.stopPropagation()
@@ -434,5 +483,5 @@ export function useTileDrags({
     )
   }
 
-  return { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag }
+  return { startTileDrag, startLayerDrag, startCaptionDrag, startAudioDrag, startFreezeDrag, startTransitionDrag }
 }
