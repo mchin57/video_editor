@@ -1,0 +1,190 @@
+/**
+ * Transitions on the real timeline (#64). Selecting two clips that meet and
+ * choosing Add transition ▸ Cross dissolve slides the second clip, its linked
+ * sound and everything after it left by the length (they overlap by it), with
+ * a wedge on the edge; dragging the wedge changes the length (one undo step);
+ * a fade at a clip's end comes from the Inspector or the tile's top corner;
+ * the preview fades the layer box and shows a dip's plate. The rules are pinned
+ * in lib/transitions.test.ts and shared/transitions.test.ts; this is the real
+ * right-click, drag, field and Ctrl+Z.
+ *
+ * ARRANGE via store actions, ACT with real pointer / key events, ASSERT on the
+ * store and the DOM.
+ */
+import type { Page } from '@playwright/test'
+import { test, expect } from './fixtures'
+
+/** px per second of the timeline (persisted zoom; 48 on a fresh profile). */
+const pps = (page: Page): Promise<number> => page.evaluate(() => Number(localStorage.getItem('timelinePps')) || 48)
+
+type Tile = { startSec: number; endSec: number; transitionIn?: unknown; transitionOut?: unknown }
+const layerOf = (page: Page, id: string): Promise<Tile> =>
+  page.evaluate((i) => window.__reelStores.useProject.getState().project!.layers.find((l) => l.id === i)!, id)
+const historyLen = (page: Page): Promise<number> =>
+  page.evaluate(() => window.__reelStores.useProject.getState().past.length)
+
+/** Three clips that meet — A 0–4, B 4–8, C 8–12 — each with its linked sound. */
+async function arrangeThree(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.addVideoLayer('A', 'no-such-media', 0, 4, true)
+    s.addVideoLayer('B', 'no-such-media', 4, 4, true)
+    s.addVideoLayer('C', 'no-such-media', 8, 4, true)
+  })
+}
+
+/** The linked audio clip of layer `id`. */
+const audioOf = (page: Page, id: string): Promise<{ startSec: number; fadeInSec: number; fadeOutSec: number }> =>
+  page.evaluate((i) => {
+    const p = window.__reelStores.useProject.getState().project!
+    const gid = p.layers.find((l) => l.id === i)!.linkGroupId
+    return p.audioClips.find((a) => a.linkGroupId === gid)!
+  }, id)
+
+/** Drag with real pointer events from the centre of `box` by `dxPx`. */
+async function dragBy(page: Page, box: { x: number; y: number; width: number; height: number }, dxPx: number) {
+  const cx = box.x + box.width / 2
+  const cy = box.y + box.height / 2
+  await page.mouse.move(cx, cy)
+  await page.mouse.down()
+  await page.mouse.move(cx + dxPx, cy, { steps: 8 })
+  await page.mouse.up()
+}
+
+test('Add transition on two clips that meet: the second slides in by the length, later tiles follow; one undo step', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  const scale = await pps(page)
+  const before = await historyLen(page)
+
+  // Select A, Ctrl-add B, right-click B → Add transition ▸ Cross dissolve.
+  await page.getByTestId('tile-layer-A').click({ position: { x: 90, y: 14 } })
+  await page.getByTestId('tile-layer-B').click({ position: { x: 90, y: 14 }, modifiers: ['Control'] })
+  await page.getByTestId('tile-layer-B').click({ button: 'right', position: { x: 90, y: 14 } })
+  await page.getByTestId('ctx-add-transition').click()
+  await page.getByTestId('ctx-transition-dissolve').click()
+  await expect(page.getByTestId('context-menu')).toHaveCount(0)
+
+  // B (and its sound) start 0.5 s earlier, overlapping A by the length; C follows.
+  expect(await layerOf(page, 'A')).toMatchObject({
+    startSec: 0,
+    endSec: 4,
+    transitionOut: { kind: 'dissolve', sec: 0.5 }
+  })
+  expect(await layerOf(page, 'B')).toMatchObject({
+    startSec: 3.5,
+    endSec: 7.5,
+    transitionIn: { kind: 'dissolve', sec: 0.5 }
+  })
+  expect(await layerOf(page, 'C')).toMatchObject({ startSec: 7.5, endSec: 11.5 })
+  expect(await audioOf(page, 'B')).toMatchObject({ startSec: 3.5, fadeInSec: 0.5 })
+  expect(await audioOf(page, 'A')).toMatchObject({ startSec: 0, fadeOutSec: 0.5 })
+  // The incoming clip is above the outgoing one.
+  const order = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.map((l) => l.id))
+  expect(order.indexOf('B')).toBeGreaterThan(order.indexOf('A'))
+  expect(await historyLen(page)).toBe(before + 1)
+
+  // On the timeline: B's tile overlaps A's by 0.5 s, and the wedge covers it.
+  const a = (await page.getByTestId('tile-layer-A').boundingBox())!
+  const b = (await page.getByTestId('tile-layer-B').boundingBox())!
+  expect(Math.abs(a.x + a.width - b.x - 0.5 * scale)).toBeLessThan(3)
+  const wedge = (await page.getByTestId('transition-wedge-in-B').boundingBox())!
+  expect(Math.abs(wedge.x - b.x)).toBeLessThan(2)
+  expect(Math.abs(wedge.width - 0.5 * scale)).toBeLessThan(2)
+  await expect(page.getByTestId('transition-wedge-out-A')).toBeVisible()
+
+  // Ctrl+Z takes the whole apply back.
+  await page.keyboard.press('Control+z')
+  expect(await layerOf(page, 'B')).toMatchObject({ startSec: 4, endSec: 8 })
+  expect((await layerOf(page, 'B')).transitionIn).toBeUndefined()
+  expect((await layerOf(page, 'C')).startSec).toBe(8)
+  expect((await audioOf(page, 'B')).fadeInSec).toBe(0)
+})
+
+test('Add transition is greyed with the reason when the selection is not two clips that meet', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  await page.getByTestId('tile-layer-A').click({ button: 'right', position: { x: 90, y: 14 } })
+  const row = page.getByTestId('ctx-add-transition')
+  await expect(row).toBeDisabled()
+  await expect(row).toContainText('Select two neighbouring')
+  await page.keyboard.press('Escape')
+})
+
+test('dragging the wedge changes the length — the incoming clip slides with it — as one undo step', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  await page.evaluate(() => {
+    const L = (id: string) => ({ kind: 'layer' as const, id })
+    window.__reelStores.useProject.getState().applyTransition([L('A'), L('B')], 'dissolve')
+  })
+  const scale = await pps(page)
+  const before = await historyLen(page)
+
+  // A pair grows to the LEFT: the incoming clip's start follows the pointer.
+  await dragBy(page, (await page.getByTestId('transition-wedge-in-B').boundingBox())!, -0.5 * scale)
+  const b = await layerOf(page, 'B')
+  expect(b.startSec).toBeCloseTo(3, 1)
+  expect((b.transitionIn as { sec: number }).sec).toBeCloseTo(1, 1)
+  expect(((await layerOf(page, 'A')).transitionOut as { sec: number }).sec).toBeCloseTo(1, 1)
+  expect((await layerOf(page, 'C')).startSec).toBeCloseTo(7, 1)
+  expect(await historyLen(page)).toBe(before + 1)
+  const wedge = (await page.getByTestId('transition-wedge-in-B').boundingBox())!
+  expect(Math.abs(wedge.width - scale)).toBeLessThan(4)
+
+  await page.keyboard.press('Control+z')
+  expect(await layerOf(page, 'B')).toMatchObject({ startSec: 3.5, transitionIn: { kind: 'dissolve', sec: 0.5 } })
+  expect((await layerOf(page, 'C')).startSec).toBe(7.5)
+})
+
+test('a fade at a clip’s end: the Inspector field, and the tile’s top corner (one undo step); the preview fades', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  const scale = await pps(page)
+
+  // Inspector: C fades out over its last second.
+  await page.getByTestId('tile-layer-C').click({ position: { x: 90, y: 14 } })
+  const out = page.getByLabel('Fade out seconds')
+  await out.fill('1')
+  await out.press('Enter')
+  expect((await layerOf(page, 'C')).transitionOut).toEqual({ kind: 'fade', sec: 1 })
+
+  // Corner: drag C's top-left handle 0.6 s right → a 0.6 s fade in.
+  const before = await historyLen(page)
+  const tile = page.getByTestId('tile-layer-C')
+  await tile.hover({ position: { x: 90, y: 14 } })
+  await dragBy(page, (await page.getByTestId('fade-handle-in-C').boundingBox())!, 0.6 * scale)
+  const fadeIn = (await layerOf(page, 'C')).transitionIn as { kind: string; sec: number }
+  expect(fadeIn.kind).toBe('fade')
+  expect(fadeIn.sec).toBeCloseTo(0.6, 1)
+  expect(await historyLen(page)).toBe(before + 1)
+  await expect(page.getByTestId('transition-wedge-in-C')).toBeVisible()
+
+  // The preview: halfway through the fade in, C's box is at half opacity.
+  await page.evaluate((t) => window.__reelStores.usePlayback.getState().setTime(t), 8 + fadeIn.sec / 2)
+  const half = await page.locator('[data-resizebox]').evaluate((el) => Number(getComputedStyle(el).opacity))
+  expect(half).toBeCloseTo(0.5, 1)
+  // Halfway through the fade out: half again.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(11.5))
+  const late = await page.locator('[data-resizebox]').evaluate((el) => Number(getComputedStyle(el).opacity))
+  expect(late).toBeCloseTo(0.5, 1)
+})
+
+test('a dip shows its colour plate in the preview while neither clip does', async ({ appPage: page }) => {
+  await arrangeThree(page)
+  await page.evaluate(() => {
+    const L = (id: string) => ({ kind: 'layer' as const, id })
+    const s = window.__reelStores.useProject.getState()
+    s.applyTransition([L('A'), L('B')], 'dipWhite')
+    window.__reelStores.usePlayback.getState().setTime(3.75) // the middle of the 3.5–4 window
+  })
+  const plate = page.getByTestId('dip-plate')
+  await expect(plate).toHaveCount(1)
+  expect(await plate.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 255, 255)')
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(4.5))
+  await expect(plate).toHaveCount(0)
+})
