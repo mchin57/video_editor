@@ -16,7 +16,7 @@ import {
 import type { AudioClip, Layer, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
-import { audioPlayedSec } from '@shared/audioTiming'
+import { audioHoldSpans, audioPlayedSec, audioSpeed } from '@shared/audioTiming'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { isWorkoutAsset } from '@shared/media'
 import { freezeSpans, layerLabel, visualDuration } from '@shared/layers'
@@ -537,6 +537,8 @@ export function Timeline(): JSX.Element {
     const rowH = laneRowHeight(laneKey)
     const fxName = a.fx ? fxLabel(a.fx.settings) : null
     const level = levelOf(a, volumeLevels)
+    const speed = audioSpeed(a)
+    const holds = audioHoldSpans(a, eo)
     return (
       <div
         key={a.id}
@@ -552,7 +554,7 @@ export function Timeline(): JSX.Element {
         }`}
         style={{ left, width, top: laneTop(laneKey) + (rows.get(a.id) ?? 0) * rowH, height: rowH - 2 }}
       >
-        {asset && (
+        {asset && holds.length === 0 && (
           <img
             src={waveformUrl(asset)}
             alt=""
@@ -566,6 +568,45 @@ export function Timeline(): JSX.Element {
             }}
           />
         )}
+        {/* With holds the waveform is drawn per stretch of sound between them
+            (each a window onto the same picture at the clip's speed), and each
+            hold as a silent box — where the export pads silence. */}
+        {asset &&
+          holds.length > 0 &&
+          [a.inSec, ...holds.map((h) => h.atSec)].map((from, k) => {
+            const to = k < holds.length ? holds[k].atSec : eo
+            const x0 = (k === 0 ? 0 : holds[k - 1].endSec - a.startSec) * pxPerSec
+            const w = (Math.max(0, to - from) / speed) * pxPerSec
+            return (
+              <div
+                key={`wave-${k}`}
+                className="pointer-events-none absolute inset-y-0 overflow-hidden"
+                style={{ left: x0, width: w }}
+              >
+                <img
+                  src={waveformUrl(asset)}
+                  alt=""
+                  onError={(e) => (e.currentTarget.style.display = 'none')}
+                  className={`absolute inset-y-0 max-w-none ${a.mute ? 'opacity-20' : 'opacity-70'}`}
+                  style={{
+                    left: (-from / speed) * pxPerSec,
+                    width: (maxOut / speed) * pxPerSec,
+                    height: '100%',
+                    objectFit: 'fill'
+                  }}
+                />
+              </div>
+            )
+          })}
+        {holds.map((h) => (
+          <div
+            key={`hold-${h.index}`}
+            data-testid={`audio-hold-${a.id}-${h.index}`}
+            title={`Silent for ${h.holdSec.toFixed(1)}s (a freeze on the linked clip)`}
+            className="pointer-events-none absolute inset-y-0 border-x border-sky-200/40 bg-[repeating-linear-gradient(135deg,rgba(255,255,255,0.08)_0_4px,transparent_4px_8px)]"
+            style={{ left: (h.startSec - a.startSec) * pxPerSec, width: h.holdSec * pxPerSec }}
+          />
+        ))}
         {/* The title row sits top-left (every tile kind does); the badges share it,
             right-aligned, so a clip carrying several doesn't stack them. */}
         <div className="pointer-events-none absolute inset-x-1.5 top-0.5 flex min-w-0 items-center gap-1">
@@ -577,8 +618,17 @@ export function Timeline(): JSX.Element {
             {linked ? '🔗' : fxName ? '✧' : a.kind === 'extracted' ? '🎙' : '♪'}&nbsp;
             {fxName ?? asset?.fileName ?? a.mediaId}
           </span>
-          {(a.mute || denoiseOverridden(a) || level) && (
+          {(a.mute || denoiseOverridden(a) || level || speed !== 1) && (
             <span className="ml-auto flex shrink-0 items-center gap-1">
+              {speed !== 1 && (
+                <span
+                  data-testid={`tile-speed-${a.id}`}
+                  className="rounded bg-fuchsia-500/70 px-1 text-[8px] font-bold leading-tight text-fuchsia-50"
+                  title={`Playback speed ${speed}× (pitch kept)`}
+                >
+                  {speed}×
+                </span>
+              )}
               {level && (
                 <span
                   data-testid={`tile-level-${a.id}`}

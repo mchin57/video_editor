@@ -96,3 +96,14 @@ export function audioExportHolds(clip: Timed, outSec: number): { atPlayedSec: nu
     .sort((a, b) => a.atSec - b.atSec)
     .map((f) => ({ atPlayedSec: playedBetween(t, clip.inSec, f.atSec), holdSec: f.holdSec }))
 }
+
+/**
+ * How far (SOURCE seconds) the preview's `<audio>` may drift from the clip's
+ * mapped source position before it is re-seeked. While playing, the element
+ * advances `speed` source seconds per timeline second, so the allowance grows
+ * with the rate (0.3 s of source at 1×, a constant 0.3 s of TIMELINE time when
+ * faster); paused or scrubbing it stays tight. Slower than 1× keeps 0.3 s.
+ */
+export function audioResyncSec(speed: number, playing: boolean): number {
+  return playing ? 0.3 * Math.max(1, speed) : 0.05
+}

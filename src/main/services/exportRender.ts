@@ -58,6 +58,7 @@ import { buildAss, type AssOverlay } from './assBuilder'
 import { createTextRenderer, type TextImageSpec, type TextRenderer } from './textImage'
 import type { LaidOutLine } from './textLayout'
 import { exportLayer } from './exportLayers'
+import { audioItemPlayedSec } from './audio'
 import { addCaptions, fullFrameImage } from './exportText'
 import { createLogger } from '@shared/log'
 
@@ -212,7 +213,9 @@ export class CompositionRender {
     await this.writeBurnedText()
 
     const visEnd = comp.layers.reduce((m, l) => (l.hidden ? m : Math.max(m, l.endSec)), 0)
-    const audioEnd = this.audio.reduce((m, a) => Math.max(m, a.startSec + Math.max(0.01, a.outSec - a.inSec)), 0)
+    // Each source's played length: its window at its tempo plus its holds — the
+    // same number the graph ends its fade-out at (`audioItemPlayedSec`).
+    const audioEnd = this.audio.reduce((m, a) => Math.max(m, a.startSec + audioItemPlayedSec(a)), 0)
     const totalDur = Math.max(visEnd, audioEnd, 0.1)
 
     // The off-screen renderer has written all its PNGs to disk by now; free it

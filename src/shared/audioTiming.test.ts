@@ -178,3 +178,12 @@ describe('audio timing — a re-timed clip maps like a video layer', () => {
     expect(envelopeGainAt(c, 8, 21)).toBeCloseTo(0.5, 12)
   })
 })
+
+describe('a hold is silence in the shared envelope (the preview twin of the padded export)', () => {
+  it('envelopeGainAt is 0 inside a hold and unchanged outside it', () => {
+    const c = clip({ speed: 2, freezes: [{ atSec: 4, holdSec: 1 }] }) // 10..11 sound, 11..12 silent, 12..14 sound
+    expect(envelopeGainAt(c, 8, 10.5)).toBe(1)
+    expect(envelopeGainAt(c, 8, 11.5)).toBe(0)
+    expect(envelopeGainAt(c, 8, 12.5)).toBe(1)
+  })
+})

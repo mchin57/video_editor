@@ -27,6 +27,11 @@ export interface AudioActions {
    *  undo step; a tile drag edits through `liveUpdate` + `commitLive` instead. */
   setVolumeKeyframes: (id: string, points: VolumeKeyframe[]) => void
   removeAudioClip: (id: string) => void
+  /** Set an audio clip's constant speed (pitch kept; 1 removes the field) — and
+   *  on every same-source member of its link group, re-placed so they stay in
+   *  sync (`links.setGroupSpeed`). One undo step; a no-op while the group is
+   *  locked (`links.retimeLock`). */
+  setAudioSpeed: (id: string, speed: number, srcDur?: links.SourceDuration) => void
   /**
    * Point every piece of a re-rendered effect at its new asset, keeping each
    * piece's own position and TRIM. A split effect track is several clips over
@@ -67,6 +72,8 @@ export const audioActions = ({ get, commit, commitComp }: Doc): AudioActions => 
     commitComp((p) => ({ ...p, audioClips: updateById(p.audioClips, id, (a) => withVolumeKeyframes(a, points)) })),
 
   removeAudioClip: (id) => commitComp((p) => links.removeItems(p, [{ kind: 'audio', id }])),
+
+  setAudioSpeed: (id, speed, srcDur) => commitComp((p) => links.setGroupSpeed(p, { kind: 'audio', id }, speed, srcDur)),
 
   // Deliberately does NOT touch inSec/outSec: a piece of a split effect track
   // is trimmed into the rendered file, and resetting the trim would expand it

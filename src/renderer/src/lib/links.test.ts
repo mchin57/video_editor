@@ -6,7 +6,13 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  addGroupFreeze,
   canLinkItems,
+  removeGroupFreeze,
+  retimeLock,
+  RETIME_CAPTION_LOCK,
+  RETIME_RAMP_LOCK,
+  setGroupSpeed,
   canSplitItems,
   canUnlinkItems,
   expandGroup,
@@ -709,5 +715,126 @@ describe('toggleMuteItems (the M key)', () => {
     const p = project({ layers: [layer('L1', 0, 10), textLayer('T1', 0, 3)], audioClips: [audio('A1', 2, 6)] })
     expect(muted(toggleMuteItems(p, [A('A1')]))).toEqual([false, false, true])
     expect(toggleMuteItems(p, [L('T1'), C('nope')])).toBe(p)
+  })
+})
+
+describe('re-timing a link group (#58)', () => {
+  /** A clip and the audio extracted from it (SAME media), linked, plus a music
+   *  bed on other media linked into the same group. */
+  const extracted = (over: Partial<AudioClip> = {}): AudioClip => ({
+    ...audio('A1', 2, 6, 'g1'),
+    mediaId: 'media-L1',
+    inSec: 0,
+    outSec: 6,
+    kind: 'extracted',
+    ...over
+  })
+  const group = (a: Partial<AudioClip> = {}): Project =>
+    project({
+      layers: [layer('L1', 2, 6, 'g1')], // source 0..6 at 2..8
+      audioClips: [extracted(a), audio('M1', 0, 20, 'g1')]
+    })
+  const videoOf = (p: Composition, id: string): VideoContent =>
+    p.layers.find((l) => l.id === id)!.content as VideoContent
+  const clipOf = (p: Composition, id: string): AudioClip => p.audioClips.find((a) => a.id === id)!
+  const tile = (p: Composition, ref: TimelineItemRef): { startSec: number; endSec: number } => {
+    const t = timelineTiles(p).find((x) => x.ref.kind === ref.kind && x.ref.id === ref.id)!
+    return { startSec: t.startSec, endSec: t.endSec }
+  }
+
+  it('a speed on the clip re-times its same-source audio too; the start stays, both ends follow', () => {
+    const next = setGroupSpeed(group(), L('L1'), 0.5)
+    expect(videoOf(next, 'L1').speed).toBe(0.5)
+    expect(clipOf(next, 'A1').speed).toBe(0.5)
+    expect(tile(next, L('L1'))).toEqual({ startSec: 2, endSec: 14 })
+    expect(tile(next, A('A1'))).toEqual({ startSec: 2, endSec: 14 })
+    // The bed on other media keeps its place and its speed.
+    expect(clipOf(next, 'M1')).toEqual(group().audioClips[1])
+    // From the audio side it is the same edit; back to 1× removes the field.
+    const back = setGroupSpeed(setGroupSpeed(group(), A('A1'), 2), A('A1'), 1)
+    expect('speed' in clipOf(back, 'A1')).toBe(false)
+    expect(videoOf(back, 'L1').speed).toBeUndefined()
+    expect(tile(back, L('L1'))).toEqual({ startSec: 2, endSec: 8 })
+  })
+
+  it('a J-cut (audio starting earlier in the source) stays in sync and the group start stays', () => {
+    // Audio source 0..6 at 2..8; video source 1..6 at 3..8 — in sync.
+    const p = project({
+      layers: [{ ...layer('L1', 3, 5, 'g1'), content: { ...videoOf(group(), 'L1'), inSec: 1, outSec: 6 } }],
+      audioClips: [extracted()]
+    })
+    const next = setGroupSpeed(p, L('L1'), 2)
+    expect(tile(next, A('A1')).startSec).toBe(2) // the earliest member stays
+    expect(tile(next, A('A1')).endSec).toBeCloseTo(5, 9)
+    expect(tile(next, L('L1')).startSec).toBeCloseTo(2.5, 9) // source 1 at 2×: 0.5 s in
+    expect(tile(next, L('L1')).endSec).toBeCloseTo(5, 9)
+  })
+
+  it('an effect track rendered from the audio follows it (its file starts at fx.fromInSec)', () => {
+    const fx: AudioClip = {
+      ...audio('F1', 4, 4, 'g1'),
+      mediaId: 'fx-render',
+      kind: 'fx',
+      fx: { settings: { kind: 'echo', echo: {} as never }, fromMediaId: 'media-L1', fromInSec: 2, fromOutSec: 6 }
+    }
+    const p = { ...group(), audioClips: [extracted(), fx] }
+    const next = setGroupSpeed(p, L('L1'), 2)
+    // Source 2 played 2 s in at 1× (t=4); at 2× it plays 1 s in (t=3).
+    expect(clipOf(next, 'F1')).toMatchObject({ startSec: 3, speed: 2 })
+  })
+
+  it('a group with a caption stays locked; a ramped member locks speed but not freezes', () => {
+    const withCaption = { ...group(), captions: { ...group().captions, segments: [caption('C1', 2, 3, 'g1')] } }
+    expect(retimeLock(withCaption, L('L1'), 'speed')).toBe(RETIME_CAPTION_LOCK)
+    expect(retimeLock(withCaption, A('A1'), 'freeze')).toBe(RETIME_CAPTION_LOCK)
+    expect(setGroupSpeed(withCaption, L('L1'), 2)).toBe(withCaption)
+    expect(addGroupFreeze(withCaption, L('L1'), 3, 1)).toBe(withCaption)
+    const ramped = group()
+    ramped.layers[0] = {
+      ...ramped.layers[0],
+      content: { ...videoOf(ramped, 'L1'), speedRamp: [{ atSec: 1, speed: 2 }] }
+    }
+    expect(retimeLock(ramped, A('A1'), 'speed')).toBe(RETIME_RAMP_LOCK)
+    expect(retimeLock(ramped, A('A1'), 'freeze')).toBeNull()
+    expect(retimeLock(project({ layers: [layer('X', 0, 4)] }), L('X'), 'speed')).toBeNull()
+  })
+
+  it('a freeze on the clip adds the same silent hold to its audio; removing it takes both away', () => {
+    const next = addGroupFreeze(group(), L('L1'), 3, 2)
+    expect(videoOf(next, 'L1').freezes).toEqual([{ atSec: 3, holdSec: 2 }])
+    expect(clipOf(next, 'A1').freezes).toEqual([{ atSec: 3, holdSec: 2 }])
+    expect(tile(next, L('L1')).endSec).toBe(10)
+    expect(tile(next, A('A1')).endSec).toBe(10)
+    expect(clipOf(next, 'M1')).toEqual(group().audioClips[1])
+    const back = removeGroupFreeze(next, A('A1'), 0)
+    expect(videoOf(back, 'L1').freezes).toBeUndefined()
+    expect('freezes' in clipOf(back, 'A1')).toBe(false)
+    expect(tile(back, L('L1')).endSec).toBe(8)
+  })
+
+  it('older projects: audio already cut into pieces around a freeze keeps working', () => {
+    // Video source 0..6 with a 2 s hold at 3 (2..10); audio pieces 0..3 at 2..5
+    // and 3..6 at 7..10 — how Extract audio used to cut a frozen clip.
+    const p = project({
+      layers: [
+        {
+          ...layer('L1', 2, 8, 'g1'),
+          content: { ...videoOf(group(), 'L1'), freezes: [{ atSec: 3, holdSec: 2 }] }
+        }
+      ],
+      audioClips: [extracted({ outSec: 3 }), extracted({ id: 'A2', inSec: 3, outSec: 6, startSec: 7 })]
+    })
+    // A second freeze earlier in the source pushes the later piece back too.
+    const added = addGroupFreeze(p, L('L1'), 1, 1)
+    expect(clipOf(added, 'A1').freezes).toEqual([{ atSec: 1, holdSec: 1 }])
+    expect(clipOf(added, 'A2').startSec).toBe(8)
+    // Removing the original freeze pulls the piece after it back by its hold.
+    const removed = removeGroupFreeze(added, L('L1'), 1)
+    expect(videoOf(removed, 'L1').freezes).toEqual([{ atSec: 1, holdSec: 1 }])
+    expect(clipOf(removed, 'A2').startSec).toBe(6)
+    // Speed keeps the pieces in step with the picture (source 3 after the hold).
+    const fast = setGroupSpeed(p, L('L1'), 2)
+    expect(clipOf(fast, 'A2').startSec).toBeCloseTo(2 + 1.5 + 2, 9)
+    expect(tile(fast, L('L1')).endSec).toBeCloseTo(2 + 3 + 2, 9)
   })
 })

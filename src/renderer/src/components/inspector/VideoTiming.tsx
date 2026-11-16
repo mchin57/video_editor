@@ -8,19 +8,23 @@ import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { Field, NumberInput, disabledCls, inputCls } from '../ui'
+import { LockedBy, SpeedPresets } from './SpeedPresets'
 
 /** Freeze-frame controls: hold the current frame for a chosen duration, and list
- *  existing holds. Adding a freeze extends only this clip (no ripple) — which is
- *  why `disabled` (a linked tile) locks both adding and removing. */
+ *  existing holds. Adding a freeze extends only this clip (no ripple) — and, on
+ *  a linked clip, its same-source audio by the same hold (silence), through the
+ *  store's group-aware actions. `lock` (`retimeLock`: a linked caption) says
+ *  why both adding and removing are unavailable. */
 export function FreezeFrames({
   layer,
   content,
-  disabled
+  lock
 }: {
   layer: Layer
   content: VideoContent
-  disabled?: boolean
+  lock?: string | null
 }): JSX.Element {
+  const disabled = !!lock
   const addFreeze = useProject((s) => s.addFreeze)
   const removeFreeze = useProject((s) => s.removeFreeze)
   const [hold, setHold] = useState(2)
@@ -37,9 +41,7 @@ export function FreezeFrames({
           disabled={disabled}
           className={`mb-2 flex-1 rounded bg-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:bg-white/20 ${disabledCls}`}
           title={
-            disabled
-              ? 'Not available on a linked tile — a freeze would stretch only this one (unlink first)'
-              : 'Hold the frame at the playhead for the chosen duration'
+            lock ?? 'Hold the frame at the playhead for the chosen duration (its linked audio falls silent for it)'
           }
         >
           ⏸ Pause clip here
@@ -61,7 +63,7 @@ export function FreezeFrames({
                 onClick={() => removeFreeze(layer.id, i)}
                 disabled={disabled}
                 className={`rounded px-1 text-rose-300 hover:bg-rose-500/20 ${disabledCls}`}
-                title="Remove this freeze"
+                title={lock ?? 'Remove this freeze'}
               >
                 ✕
               </button>
@@ -72,22 +74,26 @@ export function FreezeFrames({
     </div>
   )
 }
-const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
-/** Clip speed: constant presets + a free field, plus a keyframed speed RAMP.
- *  Everything commits through store actions so `endSec` keeps the shared
- *  duration invariant (`playedBetween(in, out) + freeze holds`) and each
- *  change is one undo step. With a ramp active the constant controls disable
- *  (the ramp overrides them) and the clip's own audio is muted — no
- *  variable-tempo audio path, preview and export agree. `disabled` locks the
- *  whole section for a LINKED tile: re-timing one member would desync the group. */
+/** Clip speed: constant presets + a free field (`SpeedPresets`, shared with
+ *  audio clips), plus a keyframed speed RAMP. Everything commits through store
+ *  actions so `endSec` keeps the shared duration invariant
+ *  (`playedBetween(in, out) + freeze holds`) and each change is one undo step;
+ *  a constant speed on a LINKED clip re-times its same-source audio with it
+ *  (`setGroupSpeed`). With a ramp active the constant controls disable (the
+ *  ramp overrides them) and the clip's own audio is muted — no variable-tempo
+ *  audio path, preview and export agree. `lock` (`retimeLock`) locks the
+ *  constant speed; `rampLock` the ramp, which stays locked on every linked
+ *  tile (audio clips have no ramp yet). */
 export function SpeedControl({
   layer,
   content,
-  disabled
+  lock,
+  rampLock
 }: {
   layer: Layer
   content: VideoContent
-  disabled?: boolean
+  lock?: string | null
+  rampLock?: string | null
 }): JSX.Element {
   const layerId = layer.id
   const setSpeed = useProject((s) => s.setVideoSpeed)
@@ -100,35 +106,16 @@ export function SpeedControl({
   const ramped = hasSpeedRamp(content)
   const ramp = sortedRamp(content)
   return (
-    // Outer wrapper keeps pointer events so the "why" tooltip still shows.
-    <div title={disabled ? 'Not available on a linked tile — re-timing one member would desync the group' : undefined}>
-      <div className={disabled ? 'pointer-events-none opacity-40' : ''}>
-        <Field label={`Speed · ${ramped ? 'ramp' : `${cur}×`}`}>
-          <div className={`flex flex-wrap gap-1 ${ramped ? 'pointer-events-none opacity-40' : ''}`}>
-            {SPEED_PRESETS.map((v) => (
-              <button
-                key={v}
-                onClick={() => setSpeed(layerId, v)}
-                disabled={ramped}
-                className={`rounded px-1.5 py-0.5 text-[10px] ${
-                  !ramped && cur === v ? 'bg-sky-500/40 text-sky-100' : 'bg-white/10 text-zinc-300 hover:bg-white/20'
-                }`}
-                title={v < 1 ? `Slow motion (${v}×)` : v > 1 ? `Speed up (${v}×)` : 'Normal speed'}
-              >
-                {v}×
-              </button>
-            ))}
-            <NumberInput
-              min={MIN_VIDEO_SPEED}
-              max={MAX_VIDEO_SPEED}
-              step={0.05}
-              value={cur}
-              disabled={ramped}
-              onCommit={(v) => setSpeed(layerId, v)}
-              className={`${inputCls} w-16 flex-none`}
-            />
-          </div>
-        </Field>
+    <div>
+      <LockedBy lock={lock ?? null}>
+        <SpeedPresets
+          value={cur}
+          label={ramped ? 'ramp' : undefined}
+          inactive={ramped}
+          onPick={(v) => setSpeed(layerId, v)}
+        />
+      </LockedBy>
+      <LockedBy lock={rampLock ?? null}>
         <div className="mt-1">
           <button
             onClick={() => addRampKf(layerId, usePlayback.getState().time)}
@@ -186,7 +173,7 @@ export function SpeedControl({
             </>
           )}
         </div>
-      </div>
+      </LockedBy>
     </div>
   )
 }

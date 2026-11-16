@@ -49,10 +49,11 @@ export interface TemplateClipEffect {
   tint: Tint | null
 }
 
-/** An audio clip's mix and timing, minus its identity and media. */
+/** An audio clip's mix and timing, minus its identity and media. `speed`
+ *  (absent = 1×) is the clip's constant speed. */
 export type TemplateAudioClip = Pick<
   AudioClip,
-  'startSec' | 'inSec' | 'outSec' | 'gainDb' | 'mute' | 'fadeInSec' | 'fadeOutSec' | 'duck' | 'kind'
+  'startSec' | 'inSec' | 'outSec' | 'gainDb' | 'mute' | 'fadeInSec' | 'fadeOutSec' | 'duck' | 'kind' | 'speed'
 >
 
 /** A sound the template plays, or an empty SLOT for one the user picks. */
@@ -276,7 +277,11 @@ function validAudio(v: unknown): v is TemplateAudio {
   if (!isObj(v) || !isStr(v.label) || !isObj(v.clip)) return false
   if (v.file !== null && !isTemplateFileName(v.file)) return false
   const c = v.clip
-  return [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(isNum) && isStr(c.kind)
+  return (
+    [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(isNum) &&
+    isStr(c.kind) &&
+    (c.speed === undefined || (isNum(c.speed) && c.speed > 0))
+  )
 }
 
 function validEffect(v: unknown): v is TemplateClipEffect {

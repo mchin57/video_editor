@@ -1,6 +1,7 @@
 /** Inspector ▸ sound effects: echo / ensemble / chorus rendered from a clip onto their own track. */
 
 import { useState, type JSX } from 'react'
+import type { FreezeHold } from '@shared/project'
 import type { AudioFx, AudioFxKind, AudioFxSettings, ChorusEffect, EchoEffect, EnsembleEffect } from '@shared/audioFx'
 import {
   CHORUS_RANGE,
@@ -49,7 +50,9 @@ export function SoundEffectsSection({
   linkGroupId,
   existing,
   replaceClipId,
-  disabledReason
+  disabledReason,
+  speed,
+  freezes
 }: {
   sourceMediaId: string
   inSec: number
@@ -60,6 +63,10 @@ export function SoundEffectsSection({
   replaceClipId?: string
   /** Non-null disables the section and says why (e.g. the clip has no audio). */
   disabledReason?: string | null
+  /** The dry clip's constant speed and freeze holds (source seconds): a NEW
+   *  track plays at the same speed with the same silent holds, in step with it. */
+  speed?: number
+  freezes?: FreezeHold[]
 }): JSX.Element {
   const addFx = useAddAudioFx()
   const start = existing?.settings ?? null
@@ -92,7 +99,7 @@ export function SoundEffectsSection({
       : undefined
     setNote(null)
     addFx.mutate(
-      { settings, sourceMediaId, inSec, outSec, startSec, linkGroupId, replaceClipId },
+      { settings, sourceMediaId, inSec, outSec, startSec, linkGroupId, replaceClipId, speed, freezes },
       {
         onSuccess: (asset) =>
           setNote({

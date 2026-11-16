@@ -461,6 +461,38 @@ function audioTileOut(clip: AudioClip, sourceDurationSec: number): number {
 }
 
 /**
+ * THE extracted-audio clip for a video layer (Extract audio): ONE clip over the
+ * layer's source window, at its start, carrying its constant speed and its
+ * freeze holds — which play as SILENCE (`AudioClip.freezes`) — so it plays in
+ * step with the picture at any speed. A ramped clip has no audio equivalent
+ * (the caller refuses it). `extractedAudioClip` decides auto-join.
+ */
+export function extractAudioClip(
+  layer: Layer,
+  content: VideoContent,
+  makeId: () => string,
+  /** Settings ▸ auto-join: the clip lands in the Default volume level. */
+  autoJoinLevel: boolean
+): AudioClip {
+  return extractedAudioClip(
+    {
+      id: makeId(),
+      mediaId: content.mediaId,
+      startSec: layer.startSec,
+      inSec: content.inSec,
+      outSec: content.outSec,
+      speed: content.speed,
+      freezes: content.freezes?.map((f) => ({ ...f }))
+    },
+    autoJoinLevel
+  )
+}
+
+/**
+ * LEGACY (before audio clips had holds, #58): the extracted-audio PIECES for a
+ * video layer — Extract audio now builds one clip with holds
+ * (`extractAudioClip`); kept with its tests for the review of #58.
+ *
  * Build the extracted-audio clip(s) for a video layer, honoring its freeze holds:
  * the audio is split at each freeze's source point and the later pieces are pushed
  * back by the accumulated hold time, so the freeze windows fall silent (the dialogue

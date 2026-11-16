@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MediaAsset } from '@shared/media'
 import type { AudioFxSettings } from '@shared/audioFx'
+import type { FreezeHold } from '@shared/project'
 import type { QuickCutRequest, RelinkResult } from '@shared/ipc'
 import type { MergeSegment } from '@shared/merge'
 import {
@@ -185,6 +186,19 @@ export interface AddAudioFxInput {
   /** Re-render an EXISTING effect track in place (swapping its audio) rather
    *  than adding another one. Its timeline position and mix settings survive. */
   replaceClipId?: string
+  /** The dry clip's constant speed and freeze holds (SOURCE seconds): a new
+   *  track carries them — the holds moved into the rendered file's time, which
+   *  starts at `inSec` — so it plays in step with the clip it came from. */
+  speed?: number
+  freezes?: FreezeHold[]
+}
+
+/** The dry clip's holds inside the rendered window, in the rendered file's time. */
+function fxHolds(input: AddAudioFxInput): { freezes?: FreezeHold[] } {
+  const holds = (input.freezes ?? [])
+    .filter((f) => f.atSec >= input.inSec && f.atSec <= input.outSec)
+    .map((f) => ({ atSec: f.atSec - input.inSec, holdSec: f.holdSec }))
+  return holds.length > 0 ? { freezes: holds } : {}
 }
 
 /**
@@ -244,6 +258,8 @@ export function useAddAudioFx(): ReturnType<typeof useMutation<MediaAsset, Error
         // An effect track is a layer of the same performance, not a bed to duck
         // under it, and captioning it would transcribe the dry words twice.
         duck: false,
+        ...(input.speed !== undefined && input.speed !== 1 ? { speed: input.speed } : {}),
+        ...fxHolds(input),
         excludeFromCaptions: true,
         ...(input.linkGroupId ? { linkGroupId: input.linkGroupId } : {}),
         kind: 'fx',

@@ -7,7 +7,6 @@ import type { CropRect, ImageContent, Layer, LayoutCell, TextContent, VideoConte
 import type { GraphicMark } from '@shared/graphics'
 import type { WorkoutWidget } from '@shared/workoutOverlay'
 import type { PoseSettings } from '@shared/pose'
-import { videoSpeed } from '@shared/project'
 import {
   MAX_COMP_DEPTH,
   compDepth,
@@ -35,7 +34,7 @@ import { kindInfo } from '@shared/layerKinds'
 import { newId } from '@shared/ids'
 import type { PlacedClip, SequencePlan } from '@shared/assistant/protocol'
 import type { TextEdit, TextEditResult } from '@shared/assistant/onScreenText'
-import { extractAudioPieces } from '@/lib/timeline'
+import { extractAudioClip } from '@/lib/timeline'
 import * as links from '@/lib/links'
 import { applyRanges, type WorkoutTile } from '@/lib/workoutGraph'
 import { applySequence, makeExtractedAudioClip } from '@/lib/sequence'
@@ -384,16 +383,16 @@ export const layerActions = ({ get, commit, commitComp }: Doc): LayerActions => 
     commitComp((p) => {
       const layer = p.layers.find((l) => l.id === id)
       if (!layer || layer.content.kind !== 'video') return p
-      // A re-timed clip's audio can't be detached to the (1×) audio lane —
-      // the AudioClip model has no tempo. The Inspector disables the action.
-      if (videoSpeed(layer.content) !== 1 || hasSpeedRamp(layer.content)) return p
+      // A RAMPED clip's audio can't be detached — audio clips have no ramp
+      // (#58 follow-up). The Inspector disables the action.
+      if (hasSpeedRamp(layer.content)) return p
       const c = layer.content
-      // Freeze holds split the audio into pieces with silent gaps so the dialogue
-      // cuts while a frame is held (and stays synced to the stretched video).
-      const pieces = extractAudioPieces(layer, c, newId, useAppSettings.getState().autoJoinDefaultLevel)
+      // One clip at the clip's speed, its freeze holds as silent holds, so the
+      // dialogue cuts while a frame is held and stays in step with the picture.
+      const clip = extractAudioClip(layer, c, newId, useAppSettings.getState().autoJoinDefaultLevel)
       return {
         ...mapLayer(p, id, (l) => ({ ...l, content: { ...c, mute: true } })),
-        audioClips: [...p.audioClips, ...pieces]
+        audioClips: [...p.audioClips, clip]
       }
     }),
 

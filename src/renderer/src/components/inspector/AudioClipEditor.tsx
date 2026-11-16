@@ -8,7 +8,7 @@ import { LevelLoudnessField } from '../VolumeLevelDialog'
 import { effectiveDenoise, effectiveOut } from '@shared/project'
 import { useLibrary } from '@/hooks/useMedia'
 import { detectSilence } from '@/ipc/client'
-import { expandGroup } from '@/lib/links'
+import { expandGroup, retimeLock } from '@/lib/links'
 import { speechSegments } from '@/lib/silence'
 import { activeComp, useProject } from '@/state/projectStore'
 import { idle } from '@/lib/interaction'
@@ -17,6 +17,8 @@ import { Check, Field, NumberInput, Slider, dangerBtnCls, disabledCls, inputCls 
 import { useLinkGroupSize, LinkedNote, useDeleteTile, OverrideToggle } from './controls'
 import { SoundEffectsSection } from './SoundEffects'
 import { VolumeLineSection } from './VolumeLineSection'
+import { LockedBy, SpeedPresets } from './SpeedPresets'
+import { audioHoldSpans, audioSpeed } from '@shared/audioTiming'
 
 export function AudioClipEditor(): JSX.Element | null {
   const selectedAudioId = useUi((s) => s.selectedAudioId)
@@ -28,6 +30,11 @@ export function AudioClipEditor(): JSX.Element | null {
   const moveItems = useProject((s) => s.moveItemsBy)
   const denoiseDefault = useProject((s) => s.project?.denoiseDefault ?? false)
   const splitOnSilence = useProject((s) => s.splitAudioOnSilence)
+  const setSpeed = useProject((s) => s.setAudioSpeed)
+  const speedLock = useProject((s) => {
+    const comp = activeComp(s)
+    return comp && selectedAudioId ? retimeLock(comp, { kind: 'audio', id: selectedAudioId }, 'speed') : null
+  })
   const { data: assets = [] } = useLibrary()
   const [splitting, setSplitting] = useState(false)
   const [splitNote, setSplitNote] = useState<string | null>(null)
@@ -64,6 +71,15 @@ export function AudioClipEditor(): JSX.Element | null {
       </Check>
       <ClipVolumeSection clip={clip} />
       <VolumeLineSection clip={clip} outSec={effectiveOut(clip, asset?.probe.durationSec ?? clip.outSec)} />
+      {/* The same speed control as a video layer's (pitch kept). On a linked
+          clip it re-times the group's same-source members with it. */}
+      <LockedBy lock={speedLock}>
+        <SpeedPresets
+          value={audioSpeed(clip)}
+          onPick={(v) => setSpeed(clip.id, v, (id) => assets.find((a) => a.id === id)?.probe.durationSec ?? 0)}
+        />
+      </LockedBy>
+      <AudioHolds clip={clip} outSec={effectiveOut(clip, asset?.probe.durationSec ?? clip.outSec)} />
       {/* An audio clip's Start is a MOVE (its trim doesn't change), so unlike a
           layer's it translates onto a group: the whole group shifts by the delta. */}
       <Field label={linked ? 'Start (s) · moves the group' : 'Start (s)'}>
@@ -138,12 +154,32 @@ export function AudioClipEditor(): JSX.Element | null {
         linkGroupId={clip.linkGroupId}
         existing={clip.fx}
         replaceClipId={clip.fx ? clip.id : undefined}
+        speed={clip.speed}
+        freezes={clip.freezes}
       />
 
       <button onClick={remove} className={`mt-2 w-full ${dangerBtnCls}`}>
         {linked ? `Delete linked group (${groupSize})` : 'Remove audio clip'}
       </button>
     </div>
+  )
+}
+/** The clip's silent holds (freezes), listed read-only: they are added and
+ *  removed from the linked video clip's Freeze frames, which keeps the two in
+ *  step. */
+function AudioHolds({ clip, outSec }: { clip: AudioClip; outSec: number }): JSX.Element | null {
+  const spans = audioHoldSpans(clip, outSec)
+  if (spans.length === 0) return null
+  return (
+    <Field label="Silent holds">
+      <ul data-testid="audio-holds" className="flex flex-col gap-1">
+        {spans.map((h) => (
+          <li key={h.index} className="rounded bg-black/30 px-2 py-1 text-[11px] text-zinc-300">
+            {h.startSec.toFixed(1)}–{h.endSec.toFixed(1)}s · silent {h.holdSec.toFixed(1)}s
+          </li>
+        ))}
+      </ul>
+    </Field>
   )
 }
 const NO_LEVELS: VolumeLevel[] = []

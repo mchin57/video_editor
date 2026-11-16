@@ -13,13 +13,14 @@
 
 import type { FfmpegCapabilities } from '@shared/ffmpeg'
 import { presetFor } from '@shared/formats'
-import { buildAudioGraph, type AudioGraphItem } from './audio'
+import { buildAudioGraph, type AudioGraphItem, type AudioHold } from './audio'
 import { cropFilter, f3, piecewiseLinearExpr, r, rotateFilter, speedRampPlayedExpr } from './ffmpegFilters'
 import { normalizeDeg, rotatedBounds } from '@shared/rotation'
 import type { AudioClip } from '@shared/project'
 import { effectiveDenoise, effectiveOut } from '@shared/project'
 import { clipGain, type GainContext } from '@shared/volumeLevels'
 import { clipLinePoints, type LinePoint } from '@shared/audioEnvelope'
+import { audioExportHolds, audioSpeed } from '@shared/audioTiming'
 import { clampInt } from '@shared/math'
 
 /**
@@ -218,8 +219,12 @@ export interface ExportAudio {
   /** Mirror this stereo channel to both sides (one-sided source), or null. See
    *  `AudioStreamInfo.monoFoldChannel`. */
   foldChannel?: number | null
-  /** Pitch-preserving tempo (a re-timed video layer's own audio; 1 = normal). */
+  /** Pitch-preserving tempo (a re-timed video layer's own audio, or an audio
+   *  clip's `speed`; 1 = normal). */
   tempo?: number
+  /** An audio clip's silent holds (its freezes), in the tempo-adjusted stream
+   *  (`audioExportHolds`); absent = none. */
+  holds?: AudioHold[]
   /** An audio clip's volume line in timeline seconds (`clipLinePoints`); absent
    *  = flat. A video layer's own sound never has one. */
   volumeLine?: LinePoint[]
@@ -260,6 +265,10 @@ export function exportAudioClips(
     // The volume line (shared/audioEnvelope.ts — the preview's own envelope),
     // only when the clip has one, so a flat clip's args don't change at all.
     const line = clipLinePoints(a, outSec)
+    // Speed and holds through the shared timing (shared/audioTiming.ts), only
+    // when the clip has them, so an untimed clip's args don't change at all.
+    const tempo = audioSpeed(a)
+    const holds = audioExportHolds(a, outSec)
     out.push({
       path: src.path,
       inSec: a.inSec,
@@ -271,6 +280,8 @@ export function exportAudioClips(
       duck: a.duck,
       denoise: effectiveDenoise(a, denoiseDefault),
       foldChannel: src.foldChannel,
+      ...(tempo !== 1 ? { tempo } : {}),
+      ...(holds.length > 0 ? { holds } : {}),
       ...(line.length > 0 ? { volumeLine: line } : {})
     })
   }
@@ -709,6 +720,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     denoise: a.denoise,
     foldChannel: a.foldChannel,
     tempo: a.tempo,
+    holds: a.holds,
     volumeLine: a.volumeLine
   }))
   const graph = audioItems.length > 0 ? buildAudioGraph(audioItems, null) : null

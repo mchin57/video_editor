@@ -153,12 +153,58 @@ export interface AudioGraphItem {
   /** Mirror this stereo channel to both sides (mono-fold), or null. See
    *  `AudioStreamInfo.monoFoldChannel`. */
   foldChannel?: number | null
-  /** Pitch-preserving tempo factor (a re-timed video layer's own audio; 1 =
-   *  normal). Applied as an `atempo` chain — each stage only accepts 0.5–2. */
+  /** Pitch-preserving tempo factor (a re-timed video layer's own audio, or an
+   *  audio clip's `speed`; 1 = normal). Applied as an `atempo` chain — each
+   *  stage only accepts 0.5–2. */
   tempo?: number
+  /** Silent holds inside the clip (an audio clip's freezes,
+   *  `audioExportHolds`): each at its position in the TEMPO-ADJUSTED stream
+   *  (played seconds from the clip's start, holds not counted). Absent/empty =
+   *  none: the chain is unchanged. */
+  holds?: AudioHold[]
   /** The clip's volume line in TIMELINE seconds (`clipLinePoints`,
    *  shared/audioEnvelope.ts). Absent/empty = flat: no filter is added. */
   volumeLine?: LinePoint[]
+}
+
+/** One silent hold in an audio item's tempo-adjusted stream. */
+export interface AudioHold {
+  atPlayedSec: number
+  holdSec: number
+}
+
+/**
+ * How long an audio item plays on the timeline: its source window at its
+ * tempo, plus its holds — the length the fade-out ends at and the export's
+ * duration counts. At tempo 1 with no holds it is exactly `outSec − inSec`
+ * (floored at 10 ms), the arithmetic the graph has always used.
+ */
+export function audioItemPlayedSec(it: Pick<AudioGraphItem, 'inSec' | 'outSec' | 'tempo' | 'holds'>): number {
+  const tempo = it.tempo != null && Number.isFinite(it.tempo) && it.tempo > 0 ? it.tempo : 1
+  const span = Math.max(0.01, it.outSec - it.inSec)
+  const held = (it.holds ?? []).reduce((s, h) => s + Math.max(0, h.holdSec), 0)
+  return (tempo === 1 ? span : span / tempo) + held
+}
+
+/**
+ * The item's holds as the graph cuts them: merged per point, in order, a hold
+ * at the stream's head separated out (it is just more delay) and holds at or
+ * past its end dropped (silence after the last sample is the mix's default).
+ */
+function cutHolds(it: AudioGraphItem): { lead: number; inner: AudioHold[] } {
+  const tempo = it.tempo != null && Number.isFinite(it.tempo) && it.tempo > 0 ? it.tempo : 1
+  const streamSec = Math.max(0.01, it.outSec - it.inSec) / tempo
+  let lead = 0
+  const inner: AudioHold[] = []
+  for (const h of [...(it.holds ?? [])].sort((a, b) => a.atPlayedSec - b.atPlayedSec)) {
+    if (!(h.holdSec > 0)) continue
+    if (h.atPlayedSec <= 0.0005) lead += h.holdSec
+    else if (h.atPlayedSec >= streamSec - 0.0005) continue
+    else if (inner.length && Math.abs(inner[inner.length - 1].atPlayedSec - h.atPlayedSec) < 0.0005)
+      inner[inner.length - 1] = { ...inner[inner.length - 1], holdSec: inner[inner.length - 1].holdSec + h.holdSec }
+    else inner.push(h)
+  }
+  return { lead, inner }
 }
 
 /** Audio frame size the volume line is evaluated at — 1.3 ms at 48 kHz, so a
@@ -200,14 +246,33 @@ export function buildAudioGraph(
 
   items.forEach((it, i) => {
     const gain = dbToGain(it.gainDb).toFixed(3)
-    const startMs = Math.round(Math.max(0, it.startSec) * 1000)
-    const clipEnd = it.startSec + Math.max(0.01, it.outSec - it.inSec)
+    const { lead, inner } = cutHolds(it)
+    // A hold at the clip's very start is only a later start.
+    const startMs = Math.round(Math.max(0, it.startSec + lead) * 1000)
+    const clipEnd = it.startSec + audioItemPlayedSec(it)
     const fold = it.foldChannel != null ? `${monoFoldPan(it.foldChannel)},` : ''
-    const parts = [`[${it.inputLabel}]${fold}atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`, 'asetpts=N/SR/TB']
+    let parts = [`[${it.inputLabel}]${fold}atrim=${it.inSec.toFixed(3)}:${it.outSec.toFixed(3)}`, 'asetpts=N/SR/TB']
     // Tempo before the delay: atempo rescales the trimmed clip's duration, then
     // adelay places the shortened/stretched result at its timeline position.
     if (it.tempo != null && it.tempo !== 1) parts.push(...atempoChain(it.tempo))
     if (it.denoise) parts.push('afftdn=nf=-25')
+    if (inner.length > 0) {
+      // Holds (freezes) are wall-clock silence inside the clip, so they go in
+      // AFTER the tempo: the stream is cut at each hold into pieces, each piece
+      // but the last padded with its hold's silence, and concatenated back into
+      // the one chain the delay, gain, line and fades then act on. Sample-exact
+      // and clean in a long mp4 mux (FFMPEG-NOTES "Audio holds").
+      const n = inner.length + 1
+      const pieces = Array.from({ length: n }, (_, k) => `ac${i}h${k}`)
+      chains.push(`${parts.join(',')},asplit=${n}${pieces.map((p) => `[${p}s]`).join('')}`)
+      pieces.forEach((p, k) => {
+        const from = k === 0 ? 0 : inner[k - 1].atPlayedSec
+        const range = k < n - 1 ? `${from.toFixed(3)}:${inner[k].atPlayedSec.toFixed(3)}` : `start=${from.toFixed(3)}`
+        const pad = k < n - 1 ? `,apad=pad_dur=${inner[k].holdSec.toFixed(3)}` : ''
+        chains.push(`[${p}s]atrim=${range},asetpts=N/SR/TB${pad}[${p}]`)
+      })
+      parts = [`${pieces.map((p) => `[${p}]`).join('')}concat=n=${n}:v=0:a=1`]
+    }
     // The second asetpts is load-bearing: in ffmpeg 8.1.1 an atrim'd stream fed
     // into a non-zero adelay emits one frame with a near-INT64_MAX PTS at the
     // delay boundary, which poisons the muxer's DTS fixup until it overflows and

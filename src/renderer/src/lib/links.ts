@@ -30,7 +30,19 @@
  * final positions, so this is renderer-only (like `lib/timeline.ts`). Typed against `Composition`, so the SAME ops serve the root timeline and any nested comp.
  */
 
-import type { AudioClip, CaptionSegment, Layer, Composition, TimelineItemKind, TimelineItemRef } from '@shared/project'
+import type {
+  AudioClip,
+  CaptionSegment,
+  Composition,
+  FreezeHold,
+  Layer,
+  TimelineItemKind,
+  TimelineItemRef,
+  VideoContent
+} from '@shared/project'
+import { audioTiming } from '@shared/project'
+import { playedVideoDuration } from '@shared/layers'
+import { hasSpeedRamp, playedAtSource, type Retimed } from '@shared/speed'
 import { captionInWindow } from './captions'
 import {
   audioTileEnd,
@@ -43,6 +55,7 @@ import {
   trimAudioEdge,
   trimCaptionEdge,
   trimLayerEdge,
+  withAudioHolds,
   type Trimmed,
   type TrimEdge
 } from './timeline'
@@ -671,5 +684,266 @@ export function toggleMuteItems(p: Composition, refs: TimelineItemRef[]): Compos
       layerHit(l) && l.content.kind === 'video' ? { ...l, content: { ...l.content, mute } } : l
     ),
     audioClips: p.audioClips.map((a) => (audioHit(a) ? { ...a, mute } : a))
+  }
+}
+
+// --- Re-timing a link group (speed, freeze holds) -----------------------------
+
+/** Why a group can't be re-timed as one: a linked caption's word timings
+ *  aren't re-timed yet (#58 follow-up), so a group holding one keeps the lock. */
+export const RETIME_CAPTION_LOCK =
+  'Not available while a caption is linked — linked captions are not re-timed yet (unlink the caption first)'
+/** A constant speed can't apply to a member with a speed ramp (it overrides
+ *  `speed`), and an audio clip has no ramp — the group would desync. */
+export const RETIME_RAMP_LOCK =
+  'Not available while a linked clip has a speed ramp — audio clips have no ramp (clear the ramp or unlink first)'
+
+/**
+ * One tile's timing in the SHARED source time of the media its group member
+ * plays: a video layer's own source; an audio clip's own source; an effect
+ * track's window shifted onto the clip it was rendered from (its file starts at
+ * `fx.fromInSec` of that source). `win` is the tile's `Retimed` window there.
+ */
+interface RetimeMember {
+  ref: TimelineItemRef
+  mediaId: string
+  offset: number
+  startSec: number
+  win: Retimed
+}
+
+function retimeMember(p: Composition, ref: TimelineItemRef, srcDur: SourceDuration): RetimeMember | null {
+  if (ref.kind === 'layer') {
+    const l = p.layers.find((x) => x.id === ref.id)
+    if (l?.content.kind !== 'video') return null
+    return { ref, mediaId: l.content.mediaId, offset: 0, startSec: l.startSec, win: l.content }
+  }
+  if (ref.kind !== 'audio') return null
+  const a = p.audioClips.find((x) => x.id === ref.id)
+  if (!a) return null
+  const offset = a.fx ? a.fx.fromInSec : 0
+  const out = a.outSec > 0 ? a.outSec : srcDur(a.mediaId) > 0 ? srcDur(a.mediaId) : Infinity
+  const t = audioTiming(a, out)
+  return {
+    ref,
+    mediaId: a.fx ? a.fx.fromMediaId : a.mediaId,
+    offset,
+    startSec: a.startSec,
+    win: {
+      ...t,
+      inSec: t.inSec + offset,
+      outSec: t.outSec + offset,
+      freezes: t.freezes?.map((f) => ({ ...f, atSec: f.atSec + offset }))
+    }
+  }
+}
+
+/**
+ * The members of `ref`'s link group that play the SAME source media as `ref`
+ * (`ref` included, first): the clip, its extracted audio, an effect track made
+ * from that audio. Re-timing one of them re-times them all; members on other
+ * media (a music bed linked in, text) keep their place. Just `ref` when it is
+ * unlinked; `[]` when it is not a video layer or an audio clip.
+ */
+function retimeMembers(p: Composition, ref: TimelineItemRef, srcDur: SourceDuration): RetimeMember[] {
+  const self = retimeMember(p, ref, srcDur)
+  if (!self) return []
+  const others = expandGroup(p, ref)
+    .filter((r) => !sameRef(r, ref))
+    .map((r) => retimeMember(p, r, srcDur))
+    .filter((m): m is RetimeMember => !!m && m.mediaId === self.mediaId)
+  return [self, ...others]
+}
+
+/**
+ * Why `ref` can't be re-timed (its speed with `what: 'speed'`, a freeze with
+ * `'freeze'`) as a group, or null when it can. Only a LINKED tile is ever
+ * locked — and then only while its group holds a caption, or (for speed) a
+ * same-source member has a speed ramp. The Inspector shows the reason.
+ */
+export function retimeLock(p: Composition, ref: TimelineItemRef, what: 'speed' | 'freeze'): string | null {
+  const group = expandGroup(p, ref)
+  if (group.length < 2) return null
+  if (group.some((r) => r.kind === 'caption')) return RETIME_CAPTION_LOCK
+  if (what === 'speed' && retimeMembers(p, ref, () => 0).some((m) => m.ref.kind === 'layer' && hasSpeedRamp(m.win))) {
+    return RETIME_RAMP_LOCK
+  }
+  return null
+}
+
+/** Shift one tile (a video layer or an audio clip) along the timeline. */
+function shiftTile(p: Composition, ref: TimelineItemRef, d: number): Composition {
+  if (d === 0) return p
+  if (ref.kind === 'layer') {
+    return {
+      ...p,
+      layers: p.layers.map((l) => (l.id === ref.id ? { ...l, startSec: l.startSec + d, endSec: l.endSec + d } : l))
+    }
+  }
+  return { ...p, audioClips: p.audioClips.map((a) => (a.id === ref.id ? { ...a, startSec: a.startSec + d } : a)) }
+}
+
+/**
+ * Set a constant `speed` on `ref` AND every same-source member of its link
+ * group, as one edit. The group's start stays (its earliest same-source member
+ * keeps its place) and every member is re-placed so the source it plays stays
+ * in sync: each keeps its offset from the shared source→timeline mapping (0
+ * for an in-sync pair), measured through the anchor's timing before and after.
+ * Each end is recomputed from the new speed (a video's `endSec`; an audio
+ * clip's end is derived). Holds are wall-clock, so they keep their length.
+ * Returns `p` unchanged when the group is locked (`retimeLock`).
+ */
+export function setGroupSpeed(
+  p: Composition,
+  ref: TimelineItemRef,
+  speed: number,
+  srcDur: SourceDuration = () => 0
+): Composition {
+  if (retimeLock(p, ref, 'speed')) return p
+  const members = retimeMembers(p, ref, srcDur)
+  if (members.length === 0) return p
+  const stored = speed === 1 ? undefined : speed
+  const anchor = members.reduce((a, b) => (b.startSec < a.startSec ? b : a))
+  const before = (s: number): number => anchor.startSec + playedAtSource(anchor.win, s)
+  const after = (s: number): number => anchor.startSec + playedAtSource({ ...anchor.win, speed: stored }, s)
+  const placed = new Map(
+    members.map((m) => [refKey(m.ref), Math.max(0, after(m.win.inSec) + m.startSec - before(m.win.inSec))])
+  )
+  const at = (kind: TimelineItemKind, id: string): number | undefined => placed.get(refKey({ kind, id }))
+  return {
+    ...p,
+    layers: p.layers.map((l) => {
+      const start = at('layer', l.id)
+      if (start === undefined || l.content.kind !== 'video') return l
+      const content: VideoContent = { ...l.content, speed: stored }
+      return { ...l, startSec: start, endSec: start + playedVideoDuration(content), content }
+    }),
+    audioClips: p.audioClips.map((a) => {
+      const start = at('audio', a.id)
+      if (start === undefined) return a
+      const next: AudioClip = { ...a, startSec: start, speed: stored }
+      if (stored === undefined) delete next.speed
+      return next
+    })
+  }
+}
+
+/**
+ * Add a freeze hold of `holdSec` at source second `atSec` of `ref` (clamped to
+ * its window) — and the same hold at the same SOURCE moment on every
+ * same-source member of its group, as one edit, so the picture and its sound
+ * pause together (an audio clip's hold is silence). A member whose window
+ * contains the moment gets the hold and grows by it; a member that starts after
+ * it in the source moves later by it; one that ends before it is untouched.
+ * Members on other media keep their place. Returns `p` unchanged when locked.
+ */
+export function addGroupFreeze(
+  p: Composition,
+  ref: TimelineItemRef,
+  atSec: number,
+  holdSec: number,
+  srcDur: SourceDuration = () => 0
+): Composition {
+  if (!(holdSec > 0) || retimeLock(p, ref, 'freeze')) return p
+  const members = retimeMembers(p, ref, srcDur)
+  if (members.length === 0) return p
+  const self = members[0]
+  const s = Math.min(self.win.outSec, Math.max(self.win.inSec, atSec + self.offset))
+  let next = p
+  for (const m of members) {
+    if (s < m.win.inSec) next = shiftTile(next, m.ref, holdSec)
+    else if (s <= m.win.outSec) next = withHold(next, m.ref, { atSec: s - m.offset, holdSec })
+  }
+  return next
+}
+
+/**
+ * Remove freeze `index` of `ref` — and the matching hold (same source moment)
+ * from every same-source member of its group, as one edit. A member without
+ * that hold that starts at or after the moment moves earlier by it (the pieces
+ * an older project cut its extracted audio into around a freeze). Returns `p`
+ * unchanged when locked or when there is no such freeze.
+ */
+export function removeGroupFreeze(
+  p: Composition,
+  ref: TimelineItemRef,
+  index: number,
+  srcDur: SourceDuration = () => 0
+): Composition {
+  if (retimeLock(p, ref, 'freeze')) return p
+  const members = retimeMembers(p, ref, srcDur)
+  const f = members.length ? ownFreezes(p, ref)?.[index] : undefined
+  if (!f) return p
+  const s = f.atSec + members[0].offset
+  let next = p
+  for (const m of members) {
+    const i = m === members[0] ? index : matchingHold(ownFreezes(next, m.ref) ?? [], s - m.offset, f.holdSec)
+    if (i >= 0) next = withoutHold(next, m.ref, i)
+    else if (m.win.inSec >= s - HOLD_EPS) next = shiftTile(next, m.ref, -f.holdSec)
+  }
+  return next
+}
+
+/** Source-time tolerance for "the same moment" across members. */
+const HOLD_EPS = 1e-6
+
+function ownFreezes(p: Composition, ref: TimelineItemRef): FreezeHold[] | undefined {
+  if (ref.kind === 'layer') {
+    const c = p.layers.find((l) => l.id === ref.id)?.content
+    return c?.kind === 'video' ? (c.freezes ?? []) : undefined
+  }
+  const a = p.audioClips.find((x) => x.id === ref.id)
+  return a ? (a.freezes ?? []) : undefined
+}
+
+/** The index of the hold at source `atSec` (preferring one `holdSec` long), or -1. */
+function matchingHold(freezes: FreezeHold[], atSec: number, holdSec: number): number {
+  const at = freezes.map((f, i) => ({ f, i })).filter(({ f }) => Math.abs(f.atSec - atSec) < HOLD_EPS)
+  return (at.find(({ f }) => Math.abs(f.holdSec - holdSec) < HOLD_EPS) ?? at[0])?.i ?? -1
+}
+
+function withHold(p: Composition, ref: TimelineItemRef, hold: FreezeHold): Composition {
+  const sorted = (fs: FreezeHold[] | undefined): FreezeHold[] => [...(fs ?? []), hold].sort((a, b) => a.atSec - b.atSec)
+  if (ref.kind === 'layer') {
+    return {
+      ...p,
+      layers: p.layers.map((l) =>
+        l.id === ref.id && l.content.kind === 'video'
+          ? { ...l, endSec: l.endSec + hold.holdSec, content: { ...l.content, freezes: sorted(l.content.freezes) } }
+          : l
+      )
+    }
+  }
+  return { ...p, audioClips: p.audioClips.map((a) => (a.id === ref.id ? { ...a, freezes: sorted(a.freezes) } : a)) }
+}
+
+function withoutHold(p: Composition, ref: TimelineItemRef, index: number): Composition {
+  if (ref.kind === 'layer') {
+    return {
+      ...p,
+      layers: p.layers.map((l) => {
+        if (l.id !== ref.id || l.content.kind !== 'video') return l
+        const freezes = l.content.freezes ?? []
+        const f = freezes[index]
+        if (!f) return l
+        const kept = freezes.filter((_, i) => i !== index)
+        return {
+          ...l,
+          endSec: Math.max(l.startSec + 0.2, l.endSec - f.holdSec),
+          content: { ...l.content, freezes: kept.length ? kept : undefined }
+        }
+      })
+    }
+  }
+  return {
+    ...p,
+    audioClips: p.audioClips.map((a) =>
+      a.id === ref.id
+        ? withAudioHolds(
+            a,
+            (a.freezes ?? []).filter((_, i) => i !== index)
+          )
+        : a
+    )
   }
 }

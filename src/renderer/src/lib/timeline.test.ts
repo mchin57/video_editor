@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  extractAudioClip,
   extractAudioPieces,
   MIN_HOLD_SEC,
   reorder,
@@ -831,5 +832,66 @@ describe('audio trim & split at 1× with no holds equal the old straight offset'
         expect('freezes' in left || 'freezes' in right).toBe(false)
       }
     }
+  })
+})
+
+describe('re-timed audio clips: trim and split through the shared mapping (#58)', () => {
+  const makeId = (): string => 'R'
+
+  it('a 2× clip: a timeline delta takes twice the source off either edge', () => {
+    const clip = audio({ startSec: 4, inSec: 2, outSec: 8, speed: 2 }) // plays 4..7
+    const left = trimAudioEdge(clip, 'start', 1, 10)
+    expect(left.tile).toMatchObject({ inSec: 4, startSec: 5 })
+    expect(left.achieved).toBeCloseTo(1, 9)
+    const right = trimAudioEdge(clip, 'end', -1, 10)
+    expect(right.tile.outSec).toBeCloseTo(6, 9)
+    expect(right.achieved).toBeCloseTo(-1, 9)
+    // Growing past the source end stops there: 2 s of source = 1 s of timeline.
+    expect(trimAudioEdge(clip, 'end', 5, 10).achieved).toBeCloseTo(1, 9)
+  })
+
+  it('a 2× clip splits at the source second under the cut', () => {
+    const clip = audio({ startSec: 4, inSec: 2, outSec: 8, speed: 2 })
+    const [left, right] = splitAudioClip(clip, 5.5, 10, makeId)!
+    expect(left).toMatchObject({ inSec: 2, outSec: 5, speed: 2 })
+    expect(right).toMatchObject({ inSec: 5, outSec: 8, startSec: 5.5, speed: 2 })
+  })
+
+  it('a clip with a hold: the end edge walks back into the hold, then the sound before it', () => {
+    // 0..3 plays 0..3, silent 3..5, 3..10 plays 5..12.
+    const clip = audio({ freezes: [{ atSec: 3, holdSec: 2 }] })
+    const past = trimAudioEdge(clip, 'end', -7.5, 10) // all the sound after the hold, then 0.5 s of it
+    expect(past.tile.outSec).toBeCloseTo(3, 9)
+    expect(past.tile.freezes).toEqual([{ atSec: 3, holdSec: 1.5 }])
+    expect(past.achieved).toBeCloseTo(-7.5, 9)
+    // The start edge past the hold drops it and moves the start by the sound AND the hold.
+    const start = trimAudioEdge(clip, 'start', 4, 10)
+    expect(start.tile.inSec).toBeCloseTo(4, 9)
+    expect(start.tile.startSec).toBeCloseTo(6, 9)
+    expect('freezes' in start.tile).toBe(false)
+  })
+
+  it('a split inside a hold divides it between the halves; one after it keeps it left', () => {
+    const clip = audio({ freezes: [{ atSec: 3, holdSec: 2 }] })
+    const [l1, r1] = splitAudioClip(clip, 4, 10, makeId)!
+    expect(l1).toMatchObject({ outSec: 3, freezes: [{ atSec: 3, holdSec: 1 }] })
+    expect(r1).toMatchObject({ inSec: 3, startSec: 4, freezes: [{ atSec: 3, holdSec: 1 }] })
+    const [l2, r2] = splitAudioClip(clip, 8, 10, makeId)!
+    expect(l2).toMatchObject({ outSec: 6, freezes: [{ atSec: 3, holdSec: 2 }] })
+    expect(r2).toMatchObject({ inSec: 6, startSec: 8 })
+    expect('freezes' in r2).toBe(false)
+  })
+})
+
+describe('extractAudioClip (#58)', () => {
+  it('one clip carrying the layer speed and freeze holds; none on an untimed clip', () => {
+    const layer = makeVideoLayer('a', 'm', 3, 10)
+    const c = { ...(layer.content as VideoContent), speed: 2, freezes: [{ atSec: 4, holdSec: 1 }] }
+    const clip = extractAudioClip({ ...layer, endSec: 3 + 6 }, c, () => 'x', false)
+    expect(clip).toMatchObject({ id: 'x', startSec: 3, inSec: 0, outSec: 10, speed: 2, kind: 'extracted' })
+    expect(clip.freezes).toEqual([{ atSec: 4, holdSec: 1 }])
+    const plain = extractAudioClip(layer, layer.content as VideoContent, () => 'y', true)
+    expect('speed' in plain || 'freezes' in plain).toBe(false)
+    expect(plain.volumeLevelId).toBe('default')
   })
 })

@@ -80,6 +80,14 @@ describe('summarizeTimeline', () => {
     expect('volumeLine' in s.audioClips[1]).toBe(false)
   })
 
+  it("reports a re-timed audio clip's speed and its holds on the timeline (#58)", () => {
+    const re = audio({ startSec: 5, inSec: 2, outSec: 8, speed: 2, freezes: [{ atSec: 4, holdSec: 1.5 }] })
+    const s = summarizeTimeline({ ...createEmptyComposition(), audioClips: [re, audio({ id: 'a2' })] })
+    // 2..4 at 2× plays 5..6, silent 6..7.5, 4..8 plays 7.5..9.5.
+    expect(s.audioClips[0]).toMatchObject({ endSec: 9.5, speed: 2, holds: [{ atSec: 6, holdSec: 1.5 }] })
+    expect('speed' in s.audioClips[1] || 'holds' in s.audioClips[1]).toBe(false)
+  })
+
   it('reports a whole-source audio clip with an open end', () => {
     const s = summarizeTimeline({ ...createEmptyComposition(), audioClips: [audio({ outSec: 0 })] })
     expect(s.audioClips[0]).toMatchObject({ endSec: null, outSec: null })

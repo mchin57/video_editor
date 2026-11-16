@@ -25,7 +25,7 @@
  */
 
 import type { AudioClip, VolumeKeyframe } from './project'
-import { audioHoldSpans, audioPlayedSec, audioTimelineAt } from './audioTiming'
+import { audioHeldAt, audioHoldSpans, audioPlayedSec, audioTimelineAt } from './audioTiming'
 import { clamp } from './math'
 
 /** The top of the volume line (dB over the clip's normal gain). */
@@ -183,6 +183,8 @@ export function fadeGainAt(
  * source out-point (`effectiveOut`).
  */
 export function envelopeGainAt(clip: AudioClip, outSec: number, t: number): number {
+  // A hold (freeze) is silence — the export pads it with zeros.
+  if (clip.freezes?.length && audioHeldAt(clip, outSec, t)) return 0
   const fades = fadeGainAt(clip, audioPlayedSec(clip, outSec), t)
   if (fades === 0 || !hasVolumeLine(clip)) return fades
   return fades * lineGainAt(clipLinePoints(clip, outSec), t)
