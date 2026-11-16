@@ -6,11 +6,12 @@
  */
 
 import type { AudioClip, CaptionSegment, FreezeHold, Layer, LayerKeyframe, VideoContent } from '@shared/project'
-import { audioClipEnd, effectiveOut } from '@shared/project'
+import { audioTiming, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
 import { extractedAudioClip } from '@shared/volumeLevels'
 import { hasVolumeLine, splitVolumeKeyframes } from '@shared/audioEnvelope'
-import { playedBetween, sourceAfterPlayed } from '@shared/speed'
+import { audioTimelineAt } from '@shared/audioTiming'
+import { freezeExtraSec, playedBetween, playedDuration, sourceAfterPlayed, type Retimed } from '@shared/speed'
 import { clamp } from '@shared/math'
 import { shiftMarks } from '@shared/graphics'
 import { splitWorkout, trimWorkoutEnd, trimWorkoutStart } from '@shared/workoutOverlay'
@@ -80,27 +81,19 @@ export function reorder<T>(items: T[], from: number, to: number): T[] {
 }
 
 /**
- * Split a video layer at an absolute timeline time `atSec` into [left, right]
- * sharing the same source, or null if the cut falls at/outside the layer's span.
- *
- * Freeze holds (and the clip's speed profile — constant `speed` or a keyframed
- * `speedRamp`) make the timeline→source mapping NONLINEAR, so the cut's source
- * point is found by walking the holds (mirroring `videoSourceTime`) and the
- * freezes are partitioned between the halves — a hold the cut lands inside is
- * itself split, so both halves keep the invariant
- * `window = playedBetween(inSec, outSec) + Σ holds`. The ramp keyframes are
- * source-anchored, so both halves keep the full ramp list unchanged; transform
- * keyframes are start-relative and get partitioned (`splitLayerKeyframes`).
+ * Where a cut `cutLocal` played seconds into a re-timed window lands in the
+ * SOURCE, and how its freeze holds divide between the two halves. Shared by
+ * the video and audio splits (`splitVideoLayer`, `splitAudioClip`): the holds
+ * make the mapping nonlinear, so the cut's source point is found by walking
+ * them (mirroring `sourceAtPlayed`); a hold the cut lands inside is itself
+ * split, so both halves keep `window = playedBetween(in, out) + Σ holds`.
  */
-export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
-  if (layer.content.kind !== 'video') return null
+function splitWindow(
+  c: Retimed,
+  cutLocal: number
+): { cutSource: number; leftFreezes: FreezeHold[]; rightFreezes: FreezeHold[] } {
   const eps = EPS
-  if (atSec <= layer.startSec + eps || atSec >= layer.endSec - eps) return null
-  const [leftKfs, rightKfs] = splitLayerKeyframes(layer, atSec)
-  const c = layer.content as VideoContent
   const freezes = [...(c.freezes ?? [])].sort((a, b) => a.atSec - b.atSec)
-
-  const cutLocal = atSec - layer.startSec // cut position in played time
   const leftFreezes: FreezeHold[] = []
   const rightFreezes: FreezeHold[] = []
   let holdBefore = 0 // played time consumed by holds fully before the cut
@@ -122,6 +115,28 @@ export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => strin
     }
   }
   if (cutSource == null) cutSource = sourceAfterPlayed(c, c.inSec, cutLocal - holdBefore, c.outSec)
+  return { cutSource, leftFreezes, rightFreezes }
+}
+
+/**
+ * Split a video layer at an absolute timeline time `atSec` into [left, right]
+ * sharing the same source, or null if the cut falls at/outside the layer's span.
+ *
+ * Freeze holds (and the clip's speed profile — constant `speed` or a keyframed
+ * `speedRamp`) make the timeline→source mapping NONLINEAR, so the cut's source
+ * point is found by walking the holds (mirroring `videoSourceTime`) and the
+ * freezes are partitioned between the halves — a hold the cut lands inside is
+ * itself split, so both halves keep the invariant
+ * `window = playedBetween(inSec, outSec) + Σ holds`. The ramp keyframes are
+ * source-anchored, so both halves keep the full ramp list unchanged; transform
+ * keyframes are start-relative and get partitioned (`splitLayerKeyframes`).
+ */
+export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
+  if (layer.content.kind !== 'video') return null
+  if (atSec <= layer.startSec + EPS || atSec >= layer.endSec - EPS) return null
+  const [leftKfs, rightKfs] = splitLayerKeyframes(layer, atSec)
+  const c = layer.content as VideoContent
+  const { cutSource, leftFreezes, rightFreezes } = splitWindow(c, atSec - layer.startSec)
 
   const left: Layer = {
     ...layer,
@@ -219,47 +234,50 @@ export function splitCaptionSegment(
 }
 
 /**
- * Trim a video layer's LEFT edge to source in-point `ni` (caller clamps `ni` to
- * `[0, outSec)`). Holds before the new in-point are dropped and the start shifts
- * by the trimmed source time PLUS the dropped hold time, keeping `endSec` fixed
- * and the window invariant intact. Computed from the drag-start snapshot, so
- * dragging back left restores previously dropped holds.
+ * A re-timed window with its LEFT edge trimmed to source in-point `ni`: holds
+ * before the new in-point are dropped, and `shift` is how far the tile's start
+ * moves — the trimmed source time PLUS the dropped hold time, which keeps the
+ * end fixed and the window invariant intact. Shared by video and audio.
  */
-export function trimVideoStart(layer: Layer, c: VideoContent, ni: number): Layer {
+function trimWindowStart(c: Retimed, ni: number): { freezes: FreezeHold[]; shift: number } {
   const freezes = c.freezes ?? []
-  const kept = freezes.filter((f) => f.atSec >= ni)
   const dropped = freezes.reduce((s, f) => s + (f.atSec < ni ? Math.max(0, f.holdSec) : 0), 0)
-  const startSec = Math.max(0, layer.startSec + playedBetween(c, c.inSec, ni) + dropped)
-  return { ...layer, startSec, content: { ...c, inSec: ni, freezes: kept.length ? kept : undefined } }
+  return { freezes: freezes.filter((f) => f.atSec >= ni), shift: playedBetween(c, c.inSec, ni) + dropped }
 }
 
 /**
- * Trim the RIGHT edge to source out-point `no` (caller clamps to `(inSec, src]`).
- * Holds past the new out-point are dropped; the new end keeps the remaining
- * holds' time — recomputing `endSec` without them silently cut the hold time
- * out of a frozen clip (the pre-helper inline math did exactly that).
+ * A re-timed window with its RIGHT edge trimmed to source out-point `no`: holds
+ * past it are dropped, and `played` is the new played length — which keeps the
+ * remaining holds' time (recomputing it without them silently cut the hold
+ * time out of a frozen clip; the pre-helper inline math did exactly that).
  */
-export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
-  const freezes = c.freezes ?? []
-  const kept = freezes.filter((f) => f.atSec <= no)
+function trimWindowEnd(c: Retimed, no: number): { freezes: FreezeHold[]; played: number } {
+  const kept = (c.freezes ?? []).filter((f) => f.atSec <= no)
   const keptHold = kept.reduce((s, f) => s + Math.max(0, f.holdSec), 0)
-  const endSec = layer.startSec + playedBetween(c, c.inSec, no) + keptHold
-  return { ...layer, endSec, content: { ...c, outSec: no, freezes: kept.length ? kept : undefined } }
+  return { freezes: kept, played: playedBetween(c, c.inSec, no) + keptHold }
 }
 
 /**
- * Trim the RIGHT edge by a TIMELINE delta (negative = shorter), walking back
- * through the clip as it plays: the footage after the last freeze, then that
- * freeze's hold, then the footage before it, and so on. So dragging the edge
- * into a freeze cuts everything past it and then shortens the hold (a hold used
- * up, or cut under EPS, is dropped) — continuous in the delta to within EPS,
- * which a group trim relies on. Lengthening extends the footage, up to source
- * second `maxSrc`. At least MIN_SOURCE_SEC of source always stays.
+ * The out-point and holds after trimming the RIGHT edge by a TIMELINE delta
+ * (negative = shorter), walking back through the window as it plays: the
+ * footage after the last freeze, then that freeze's hold, then the footage
+ * before it, and so on. So dragging the edge into a freeze cuts everything past
+ * it and then shortens the hold (a hold used up, or cut under EPS, is dropped)
+ * — continuous in the delta to within EPS, which a group trim relies on.
+ * Lengthening extends the footage, up to source second `maxSrc`. At least
+ * MIN_SOURCE_SEC of source always stays; null when the window is already
+ * shorter than that (nothing to trim).
  */
-export function trimVideoEndBy(layer: Layer, c: VideoContent, deltaSec: number, maxSrc: number): Layer {
+function trimWindowEndBy(
+  c: Retimed,
+  deltaSec: number,
+  maxSrc: number
+): { outSec: number; freezes: FreezeHold[] } | null {
   const minSrc = c.inSec + MIN_SOURCE_SEC
-  if (deltaSec >= 0) return trimVideoEnd(layer, c, clamp(sourceAfterPlayed(c, c.outSec, deltaSec), minSrc, maxSrc))
-  if (c.outSec < minSrc) return layer
+  if (deltaSec >= 0) {
+    return { outSec: clamp(sourceAfterPlayed(c, c.outSec, deltaSec), minSrc, maxSrc), freezes: c.freezes ?? [] }
+  }
+  if (c.outSec < minSrc) return null
   const kept = (c.freezes ?? []).filter((f) => f.atSec <= c.outSec).sort((a, b) => a.atSec - b.atSec)
   let out = c.outSec
   let left = -deltaSec
@@ -286,7 +304,47 @@ export function trimVideoEndBy(layer: Layer, c: VideoContent, deltaSec: number, 
     left -= Math.max(0, last.holdSec)
     kept.pop()
   }
-  return trimVideoEnd(layer, { ...c, freezes: kept }, out)
+  return { outSec: out, freezes: kept }
+}
+
+/**
+ * Trim a video layer's LEFT edge to source in-point `ni` (caller clamps `ni` to
+ * `[0, outSec)`). Holds before the new in-point are dropped and the start shifts
+ * by the trimmed source time PLUS the dropped hold time, keeping `endSec` fixed
+ * and the window invariant intact (`trimWindowStart`). Computed from the
+ * drag-start snapshot, so dragging back left restores previously dropped holds.
+ */
+export function trimVideoStart(layer: Layer, c: VideoContent, ni: number): Layer {
+  const { freezes: kept, shift } = trimWindowStart(c, ni)
+  const startSec = Math.max(0, layer.startSec + shift)
+  return { ...layer, startSec, content: { ...c, inSec: ni, freezes: kept.length ? kept : undefined } }
+}
+
+/**
+ * Trim the RIGHT edge to source out-point `no` (caller clamps to `(inSec, src]`).
+ * Holds past the new out-point are dropped; the new end keeps the remaining
+ * holds' time (`trimWindowEnd`).
+ */
+export function trimVideoEnd(layer: Layer, c: VideoContent, no: number): Layer {
+  const { freezes: kept, played } = trimWindowEnd(c, no)
+  return {
+    ...layer,
+    endSec: layer.startSec + played,
+    content: { ...c, outSec: no, freezes: kept.length ? kept : undefined }
+  }
+}
+
+/**
+ * Trim the RIGHT edge by a TIMELINE delta (negative = shorter), walking back
+ * through the clip as it plays (`trimWindowEndBy`): the footage after the last
+ * freeze, then that freeze's hold, then the footage before it, and so on.
+ * Lengthening extends the footage, up to source second `maxSrc`. At least
+ * MIN_SOURCE_SEC of source always stays.
+ */
+export function trimVideoEndBy(layer: Layer, c: VideoContent, deltaSec: number, maxSrc: number): Layer {
+  const next = trimWindowEndBy(c, deltaSec, maxSrc)
+  if (!next) return layer
+  return trimVideoEnd(layer, { ...c, freezes: next.freezes }, next.outSec)
 }
 
 /** Shortest hold a freeze overlay drag leaves (removing one is Delete's job). */
@@ -360,13 +418,46 @@ export function trimCaptionEdge(seg: CaptionSegment, edge: TrimEdge, deltaSec: n
 export function trimAudioEdge(clip: AudioClip, edge: TrimEdge, deltaSec: number, srcDurSec = 0): Trimmed<AudioClip> {
   const maxOut = srcDurSec > 0 ? srcDurSec : clip.outSec > 0 ? clip.outSec : 1
   const effOut = effectiveOut(clip, maxOut)
+  const t = audioTiming(clip, effOut)
   if (edge === 'start') {
-    const ni = clamp(clip.inSec + deltaSec, 0, effOut - MIN_SOURCE_SEC)
-    const tile = { ...clip, inSec: ni, startSec: Math.max(0, clip.startSec + (ni - clip.inSec)) }
+    const ni = clamp(sourceAfterPlayed(t, clip.inSec, deltaSec), 0, effOut - MIN_SOURCE_SEC)
+    const { freezes, shift } = trimWindowStart(t, ni)
+    const tile = withAudioHolds({ ...clip, inSec: ni, startSec: Math.max(0, clip.startSec + shift) }, freezes)
     return { tile, achieved: tile.startSec - clip.startSec }
   }
-  const no = clamp(effOut + deltaSec, clip.inSec + MIN_SOURCE_SEC, maxOut)
-  return { tile: { ...clip, outSec: no }, achieved: no - effOut }
+  const next = trimWindowEndBy(t, deltaSec, maxOut)
+  if (!next) return { tile: clip, achieved: 0 }
+  // How far the end moved: the played time of the source added or removed,
+  // plus the change in hold time (a trim into a hold shortens or drops it).
+  const achieved = playedBetween(t, effOut, next.outSec) + freezeExtraSec({ freezes: next.freezes }) - freezeExtraSec(t)
+  return { tile: withAudioHolds({ ...clip, outSec: next.outSec }, next.freezes), achieved }
+}
+
+/** `clip` carrying `holds` — the field is absent, never an empty list (and a
+ *  clip that had none is returned untouched, so an untimed clip never grows it). */
+export function withAudioHolds(clip: AudioClip, holds: FreezeHold[]): AudioClip {
+  if (holds.length > 0) return { ...clip, freezes: holds }
+  if (!('freezes' in clip)) return clip
+  const { freezes: _dropped, ...rest } = clip
+  return rest
+}
+
+/**
+ * Timeline end of an audio TILE, tolerating an unknown source duration
+ * (`sourceDurationSec` <= 0): an explicit out-point wins as it is, a
+ * whole-source clip ends where its source does, and one whose source length
+ * isn't known yet is open-ended (`Infinity`). The one rule `timelineTiles` and
+ * `splitAudioClip` both follow, so a tile and its split never disagree.
+ */
+export function audioTileEnd(clip: AudioClip, sourceDurationSec: number): number {
+  const out = audioTileOut(clip, sourceDurationSec)
+  return Number.isFinite(out) ? clip.startSec + playedDuration(audioTiming(clip, out)) : Infinity
+}
+
+/** The source out-point `audioTileEnd` plays to (`Infinity` = open-ended). */
+function audioTileOut(clip: AudioClip, sourceDurationSec: number): number {
+  if (clip.outSec > 0) return clip.outSec
+  return sourceDurationSec > 0 ? sourceDurationSec : Infinity
 }
 
 /**
@@ -411,38 +502,41 @@ export function extractAudioPieces(
   return pieces.length ? pieces : [base(content.inSec, content.outSec, 0)]
 }
 
+// The audio source↔timeline mapping lives in `shared/audioTiming.ts` (the
+// preview, the export and the volume line use it too); re-exported for the
+// callers that have always found it here.
+export { audioTimelineAt }
+
 /**
  * Split an audio clip at a timeline time (seconds from 0). Returns [left, right]
  * sharing the same source, or null if the cut falls at/outside the clip's span.
  * The left piece keeps the original fade-in and drops its fade-out; the right
  * piece keeps the fade-out and drops its fade-in (the new seam is hard). For
  * whole-source clips (outSec<=0) `sourceDurationSec` resolves where they end;
- * pass <=0 when unknown (only the lower edge is then guarded).
+ * pass <=0 when unknown (only the lower edge is then guarded). The cut's source
+ * point and the division of holds come from the clip's own timing.
  */
-/** The TIMELINE second at which an audio clip plays source second `sourceSec`
- *  (audio has no speed or holds: a straight offset). */
-export function audioTimelineAt(clip: Pick<AudioClip, 'startSec' | 'inSec'>, sourceSec: number): number {
-  return clip.startSec + (sourceSec - clip.inSec)
-}
-
 export function splitAudioClip(
   clip: AudioClip,
   atSec: number,
   sourceDurationSec: number,
   makeId: () => string
 ): [AudioClip, AudioClip] | null {
-  const end =
-    clip.outSec > 0
-      ? clip.startSec + (clip.outSec - clip.inSec)
-      : sourceDurationSec > 0
-        ? audioClipEnd(clip, sourceDurationSec)
-        : Infinity
+  const end = audioTileEnd(clip, sourceDurationSec)
   if (atSec <= clip.startSec + EPS || atSec >= end - EPS) return null
-  const cutSource = clip.inSec + (atSec - clip.startSec)
+  // The cut's source point comes from the clip's own timing (speed + holds);
+  // a hold the cut lands inside is divided between the halves (`splitWindow`).
+  const { cutSource, leftFreezes, rightFreezes } = splitWindow(
+    audioTiming(clip, audioTileOut(clip, sourceDurationSec)),
+    atSec - clip.startSec
+  )
   // Both halves keep the whole volume line plus a point pinned at the cut
   // (`splitVolumeKeyframes`), so the level is continuous across the seam.
   const line = hasVolumeLine(clip) ? { volumeKeyframes: splitVolumeKeyframes(clip.volumeKeyframes!, cutSource) } : {}
-  const left: AudioClip = { ...clip, outSec: cutSource, fadeOutSec: 0, ...line }
-  const right: AudioClip = { ...clip, id: makeId(), inSec: cutSource, startSec: atSec, fadeInSec: 0, ...line }
+  const left: AudioClip = withAudioHolds({ ...clip, outSec: cutSource, fadeOutSec: 0, ...line }, leftFreezes)
+  const right: AudioClip = withAudioHolds(
+    { ...clip, id: makeId(), inSec: cutSource, startSec: atSec, fadeInSec: 0, ...line },
+    rightFreezes
+  )
   return [left, right]
 }

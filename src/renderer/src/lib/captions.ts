@@ -5,7 +5,8 @@
  * readable chunks (reel-style). Pure + tested.
  */
 
-import type { AudioClip, CaptionSegment, CaptionWord } from '@shared/project'
+import type { AudioClip, CaptionSegment, CaptionWord, FreezeHold } from '@shared/project'
+import { audioTimelineAt } from '@shared/audioTiming'
 
 /** An audio source on the timeline that captions are derived from. */
 export interface CaptionSource {
@@ -15,6 +16,10 @@ export interface CaptionSource {
   inSec: number
   /** Resolved source out-point (effectiveOut). */
   outSec: number
+  /** The source's re-timing (an audio clip's `speed` / `freezes`; absent = 1×
+   *  with no holds): words land where their sound plays (`audioTimelineAt`). */
+  speed?: number
+  freezes?: FreezeHold[]
 }
 
 export interface CaptionGroupOptions {
@@ -84,8 +89,8 @@ export function buildTimelineCaptions(
       if (!(e > s)) continue
       timelineWords.push({
         text: w.text,
-        startSec: src.startSec + (s - src.inSec),
-        endSec: src.startSec + (e - src.inSec)
+        startSec: audioTimelineAt(src, s),
+        endSec: audioTimelineAt(src, e)
       })
     }
   }

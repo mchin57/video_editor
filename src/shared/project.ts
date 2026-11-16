@@ -252,16 +252,12 @@ export interface VideoContent {
   pose?: PoseSettings | null
 }
 
-/** Allowed constant-speed range (matches the Inspector control). */
-export const MIN_VIDEO_SPEED = 0.25
-export const MAX_VIDEO_SPEED = 4
+// The speed range and `videoSpeed` live in `speed.ts` (so this module can use
+// the shared timing helpers without an import cycle); re-exported here, where
+// callers have always found them.
+import { playedDuration, type Retimed } from './speed'
 
-/** A video clip's effective speed: its `speed`, clamped, defaulting to 1. */
-export function videoSpeed(c: Pick<VideoContent, 'speed'>): number {
-  const s = c.speed
-  if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return 1
-  return Math.min(MAX_VIDEO_SPEED, Math.max(MIN_VIDEO_SPEED, s))
-}
+export { MAX_VIDEO_SPEED, MIN_VIDEO_SPEED, videoSpeed } from './speed'
 
 /** A still image (logo, photo, sticker, graphic) composited as a layer. */
 export interface ImageContent {
@@ -591,6 +587,21 @@ export interface AudioClip {
    * `shared/audioEnvelope.ts`, together with the fades.
    */
   volumeKeyframes?: VolumeKeyframe[]
+  /**
+   * Constant playback speed (absent = 1), pitch kept — the same field, range
+   * and meaning as `VideoContent.speed`: 0.5 takes twice as long on the
+   * timeline. All timeline↔source math goes through the shared helpers
+   * (`audioTiming` here, `shared/audioTiming.ts`, `shared/speed.ts`) — never
+   * divide by this inline. There is no audio speed RAMP yet.
+   */
+  speed?: number
+  /**
+   * Source-time holds (absent/empty = none), the audio twin of
+   * `VideoContent.freezes`: at source second `atSec` the clip falls SILENT for
+   * `holdSec` wall-clock seconds, then carries on — what keeps extracted audio
+   * in step with a frozen picture. Kept sorted by `atSec`.
+   */
+  freezes?: FreezeHold[]
   kind: AudioKind
 }
 
@@ -812,9 +823,19 @@ export function stabilizeOverridden(c: Pick<VideoContent, 'stabilize'>): boolean
   return isOverridden(c.stabilize)
 }
 
-/** Timeline end of an audio clip, given its source duration. */
+/**
+ * An audio clip's timing in the shape the shared mapping helpers take
+ * (`Retimed`, shared/speed.ts): its source window with the out-point RESOLVED
+ * (`outSec` — pass `effectiveOut(c, sourceDuration)`), its speed and its holds.
+ */
+export function audioTiming(c: Pick<AudioClip, 'inSec' | 'speed' | 'freezes'>, outSec: number): Retimed {
+  return { inSec: c.inSec, outSec, speed: c.speed, freezes: c.freezes }
+}
+
+/** Timeline end of an audio clip, given its source duration: its start plus its
+ *  played length (the source window at the clip's speed, plus its holds). */
 export function audioClipEnd(c: AudioClip, sourceDurationSec: number): number {
-  return c.startSec + Math.max(0, effectiveOut(c, sourceDurationSec) - c.inSec)
+  return c.startSec + playedDuration(audioTiming(c, effectiveOut(c, sourceDurationSec)))
 }
 
 /** An empty timeline core — the seed for a new project AND for a fresh nested
@@ -834,7 +855,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 31
+export const PROJECT_VERSION = 32
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1173,6 +1194,9 @@ export function migrateProject(raw: unknown): Project {
   // purely additive, old projects simply have none.
   // v31 adds the absence-tolerant `AudioClip.volumeKeyframes` (the volume line,
   // shared/audioEnvelope.ts) — absent means a flat line, so nothing is rewritten.
+  // v32 adds the absence-tolerant `AudioClip.speed` and `AudioClip.freezes`
+  // (audio re-timing, shared/audioTiming.ts) — absent means 1× with no holds,
+  // so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

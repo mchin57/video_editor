@@ -12,7 +12,7 @@
 
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import type { AudioClip, CaptionSegment, Composition, Layer, Project, TimelineItemRef } from '@shared/project'
-import { effectiveOut } from '@shared/project'
+import { audioClipEnd } from '@shared/project'
 import { freezeSpans } from '@shared/layers'
 import type { MediaAsset } from '@shared/media'
 import { sourceAfterPlayed } from '@shared/speed'
@@ -31,7 +31,7 @@ import {
   type SourceDuration
 } from '@/lib/links'
 import { startPointerDrag } from '@/lib/pointerDrag'
-import { setFreezeHold, trimVideoEndBy, trimVideoStart } from '@/lib/timeline'
+import { setFreezeHold, trimAudioEdge, trimVideoEndBy, trimVideoStart } from '@/lib/timeline'
 import { trimWorkoutEnd, trimWorkoutStart } from '@shared/workoutOverlay'
 import { snap } from '@/lib/snap'
 import { shiftMarks } from '@shared/graphics'
@@ -411,14 +411,12 @@ export function useTileDrags({
     const before = useProject.getState().project
     const comp0 = getActiveComp()
     if (!before || !comp0) return
-    const { startSec, inSec } = clip
-    const effOut = effectiveOut(clip, maxOut)
     const ref: TimelineItemRef = { kind: 'audio', id: clip.id }
     const refs = edgeRefs(comp0, ref)
     selectItems(refs, ref)
     if (refs.length > 1) {
       // The right edge sits at the clip's timeline end; the left edge at its start.
-      const edge0 = mode === 'start' ? startSec : startSec + (effOut - inSec)
+      const edge0 = mode === 'start' ? clip.startSec : audioClipEnd(clip, maxOut)
       return startGroupTrim(e, before, comp0, refs, mode, edge0)
     }
     trackHorizontalDrag(
@@ -427,14 +425,9 @@ export function useTileDrags({
         const d = dx / pxPerSec
         useProject.getState().liveUpdate((p) => ({
           ...p,
-          audioClips: p.audioClips.map((a) => {
-            if (a.id !== clip.id) return a
-            if (mode === 'start') {
-              const ni = clamp(inSec + d, 0, effOut - 0.1)
-              return { ...a, inSec: ni, startSec: Math.max(0, startSec + (ni - inSec)) }
-            }
-            return { ...a, outSec: clamp(effOut + d, a.inSec + 0.1, maxOut) }
-          })
+          // From the drag-start clip, through the shared trim (the clip's own
+          // speed and holds decide what a timeline delta takes off its source).
+          audioClips: p.audioClips.map((a) => (a.id === clip.id ? trimAudioEdge(clip, mode, d, maxOut).tile : a))
         }))
       },
       commitFrom(before)

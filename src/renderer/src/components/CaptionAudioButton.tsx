@@ -43,7 +43,9 @@ export function CaptionAudioButton(): JSX.Element | null {
           mediaId: clip.mediaId,
           startSec: clip.startSec,
           inSec: clip.inSec,
-          outSec: effectiveOut(clip, dur)
+          outSec: effectiveOut(clip, dur),
+          speed: clip.speed,
+          freezes: clip.freezes
         }
         const segs = buildTimelineCaptions([source], { [clip.mediaId]: transcript.words }).map((s, i) => ({
           ...s,

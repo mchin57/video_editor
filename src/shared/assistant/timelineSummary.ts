@@ -8,6 +8,7 @@ import { audioClipEnd } from '../project'
 import { compositionDuration, type SourceDuration } from '../compositions'
 import { workoutSpeed } from '../workoutOverlay'
 import { hasVolumeLine, sortedVolumeKeyframes } from '../audioEnvelope'
+import { audioTimelineAt } from '../audioTiming'
 
 export interface LayerSummary {
   id: string
@@ -96,7 +97,7 @@ export function summarizeTimeline(comp: Composition, srcDur: SourceDuration = ()
     if (c.linkGroupId) a.linkGroupId = c.linkGroupId
     if (hasVolumeLine(c)) {
       a.volumeLine = sortedVolumeKeyframes(c).map((k) => ({
-        atSec: r3(c.startSec + (k.sourceSec - c.inSec)),
+        atSec: r3(audioTimelineAt(c, k.sourceSec)),
         db: k.db
       }))
     }

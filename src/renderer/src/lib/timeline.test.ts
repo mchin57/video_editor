@@ -784,3 +784,52 @@ describe('reorder', () => {
     expect(reorder(['a', 'b'], 5, 0)).toEqual(['a', 'b'])
   })
 })
+
+describe('audio trim & split at 1× with no holds equal the old straight offset', () => {
+  // The arithmetic `trimAudioEdge` / `splitAudioClip` used before the shared
+  // timing helpers (shared/audioTiming.ts) — the oracle for an untimed clip.
+  const oldTrim = (clip: AudioClip, edge: 'start' | 'end', d: number, srcDur: number): AudioClip => {
+    const maxOut = srcDur > 0 ? srcDur : clip.outSec > 0 ? clip.outSec : 1
+    const effOut = effectiveOut(clip, maxOut)
+    if (edge === 'start') {
+      const ni = Math.min(Math.max(clip.inSec + d, 0), effOut - 0.1)
+      return { ...clip, inSec: ni, startSec: Math.max(0, clip.startSec + (ni - clip.inSec)) }
+    }
+    return { ...clip, outSec: Math.min(Math.max(effOut + d, clip.inSec + 0.1), maxOut) }
+  }
+  const clips = [
+    audio({ startSec: 4, inSec: 2, outSec: 8 }),
+    audio({ startSec: 0.5, inSec: 0, outSec: 0 }),
+    audio({ startSec: 12, inSec: 3.3, outSec: 9.1, fadeInSec: 1, fadeOutSec: 1 })
+  ]
+
+  it('trims either edge to the same tile', () => {
+    for (const c of clips) {
+      for (const d of [-20, -3.5, -0.4, 0, 0.25, 1, 2.75, 50]) {
+        for (const edge of ['start', 'end'] as const) {
+          const got = trimAudioEdge(c, edge, d, 10).tile
+          const want = oldTrim(c, edge, d, 10)
+          expect(got.inSec).toBeCloseTo(want.inSec, 9)
+          expect(got.startSec).toBeCloseTo(want.startSec, 9)
+          expect(got.outSec).toBeCloseTo(want.outSec, 9)
+          expect('freezes' in got).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('splits at the same source point', () => {
+    for (const c of clips) {
+      const end = c.startSec + (effectiveOut(c, 10) - c.inSec)
+      for (const f of [0.1, 0.33, 0.5, 0.9]) {
+        const at = c.startSec + (end - c.startSec) * f
+        const [left, right] = splitAudioClip(c, at, 10, () => 'R')!
+        const cut = c.inSec + (at - c.startSec)
+        expect(left.outSec).toBeCloseTo(cut, 9)
+        expect(right.inSec).toBeCloseTo(cut, 9)
+        expect(right.startSec).toBe(at)
+        expect('freezes' in left || 'freezes' in right).toBe(false)
+      }
+    }
+  })
+})

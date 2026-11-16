@@ -16,6 +16,7 @@ import {
 import type { AudioClip, Layer, TimelineItemRef } from '@shared/project'
 import { audioClipEnd, denoiseOverridden, effectiveOut, stabilizeOverridden, videoSpeed } from '@shared/project'
 import { fxLabel } from '@shared/audioFx'
+import { audioPlayedSec } from '@shared/audioTiming'
 import { hasSpeedRamp, sortedRamp } from '@shared/speed'
 import { isWorkoutAsset } from '@shared/media'
 import { freezeSpans, layerLabel, visualDuration } from '@shared/layers'
@@ -530,7 +531,7 @@ export function Timeline(): JSX.Element {
     const maxOut = asset?.probe.durationSec ?? (a.outSec || 1)
     const eo = effectiveOut(a, maxOut)
     const left = a.startSec * pxPerSec
-    const width = Math.max(12, (eo - a.inSec) * pxPerSec)
+    const width = Math.max(12, audioPlayedSec(a, eo) * pxPerSec)
     const selected = isSelected('audio', a.id)
     const linked = isLinkedTile(a.linkGroupId)
     const rowH = laneRowHeight(laneKey)

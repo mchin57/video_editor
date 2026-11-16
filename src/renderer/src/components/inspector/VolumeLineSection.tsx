@@ -10,6 +10,7 @@ import {
   sortedVolumeKeyframes
 } from '@shared/audioEnvelope'
 import { levelOf } from '@shared/volumeLevels'
+import { audioSourceAt, audioTimelineAt } from '@shared/audioTiming'
 import { useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { Field, NumberInput, subtleBtnCls } from '../ui'
@@ -28,7 +29,7 @@ export function VolumeLineSection({ clip, outSec }: { clip: AudioClip; outSec: n
   const levels = useProject((s) => s.project?.volumeLevels ?? NO_LEVELS)
   const picked = useUi((s) => s.selectedVolumePoint)
   const points = sortedVolumeKeyframes(clip)
-  const toTimeline = (sourceSec: number): number => clip.startSec + (sourceSec - clip.inSec)
+  const toTimeline = (sourceSec: number): number => audioTimelineAt(clip, sourceSec)
   const level = levelOf(clip, levels)
   const boosts = points.some((k) => k.db > 0)
 
@@ -71,7 +72,7 @@ export function VolumeLineSection({ clip, outSec }: { clip: AudioClip; outSec: n
                           moveVolumeKeyframe(
                             points,
                             i,
-                            { sourceSec: clip.inSec + (t - clip.startSec), db: k.db },
+                            { sourceSec: audioSourceAt(clip, outSec, t), db: k.db },
                             { min: clip.inSec, max: outSec }
                           )
                         )

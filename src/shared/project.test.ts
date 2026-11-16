@@ -589,8 +589,7 @@ describe('migrateProject — workout overlays (v30)', () => {
 })
 
 describe('migrateProject — audio volume lines (v31)', () => {
-  it('stamps a v30 document as v31; clips with and without a line load as saved', () => {
-    expect(PROJECT_VERSION).toBe(31)
+  it('stamps a v30 document as current; clips with and without a line load as saved', () => {
     const flat = {
       id: 'A',
       mediaId: 'm',
@@ -612,9 +611,35 @@ describe('migrateProject — audio volume lines (v31)', () => {
       ]
     }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 30, audioClips: [flat, lined] })
-    expect(p.version).toBe(31)
+    expect(p.version).toBe(PROJECT_VERSION)
     expect(p.audioClips[0]).toEqual(flat)
     expect(p.audioClips[0].volumeKeyframes).toBeUndefined()
     expect(p.audioClips[1]).toEqual(lined)
+  })
+})
+
+describe('migrateProject — audio re-timing (v32)', () => {
+  it('stamps a v31 document as v32; clips with and without speed or holds load as saved', () => {
+    expect(PROJECT_VERSION).toBe(32)
+    const plain = {
+      id: 'A',
+      mediaId: 'm',
+      startSec: 0,
+      inSec: 0,
+      outSec: 4,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      duck: false,
+      kind: 'extracted' as const
+    }
+    const retimed = { ...plain, id: 'B', speed: 0.5, freezes: [{ atSec: 1, holdSec: 2 }] }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 31, audioClips: [plain, retimed] })
+    expect(p.version).toBe(32)
+    // Absent = 1x with no holds: nothing is written onto an old clip.
+    expect(p.audioClips[0]).toEqual(plain)
+    expect('speed' in p.audioClips[0]).toBe(false)
+    expect('freezes' in p.audioClips[0]).toBe(false)
+    expect(p.audioClips[1]).toEqual(retimed)
   })
 })

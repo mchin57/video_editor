@@ -31,9 +31,9 @@
  */
 
 import type { AudioClip, CaptionSegment, Layer, Composition, TimelineItemKind, TimelineItemRef } from '@shared/project'
-import { audioClipEnd } from '@shared/project'
 import { captionInWindow } from './captions'
 import {
+  audioTileEnd,
   audioTimelineAt,
   splitAudioClip,
   splitCaptionSegment,
@@ -125,14 +125,6 @@ export interface Tile {
    * today, but they answer different questions: keep them apart.
    */
   splittable: boolean
-}
-
-/** Timeline end of an audio tile, tolerating an unknown source duration exactly
- *  the way `splitAudioClip` does (an explicit out-point wins; a whole-source
- *  clip with no known duration is open-ended). */
-function audioTileEnd(a: AudioClip, sourceDurationSec: number): number {
-  if (a.outSec > 0) return a.startSec + Math.max(0, a.outSec - a.inSec)
-  return sourceDurationSec > 0 ? audioClipEnd(a, sourceDurationSec) : Infinity
 }
 
 /** Every timeline tile in document order: layers (stack order), then captions,

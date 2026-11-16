@@ -23,6 +23,7 @@ import {
   volumeLineDbAt,
   withVolumeKeyframes
 } from '@shared/audioEnvelope'
+import { audioPlayedSec } from '@shared/audioTiming'
 import { updateById } from '@/lib/arrays'
 import { startPointerDrag } from '@/lib/pointerDrag'
 import { dbToFrac, fracToDb, pickedVolumePointIndex, sourceToX, volumeLinePolyline, xToSource } from '@/lib/volumeLine'
@@ -55,7 +56,7 @@ export function VolumeLineOverlay({
   const svgRef = useRef<SVGSVGElement>(null)
   const picked = useUi((s) => s.selectedVolumePoint)
   const points = sortedVolumeKeyframes(clip)
-  const width = Math.max(12, (outSec - clip.inSec) * pxPerSec)
+  const width = Math.max(12, audioPlayedSec(clip, outSec) * pxPerSec)
   const pickedIndex = picked && picked.clipId === clip.id ? pickedVolumePointIndex({ audioClips: [clip] }, picked) : -1
 
   /** Drag point `index` of `start` (the line as the gesture began, maybe with
@@ -65,6 +66,7 @@ export function VolumeLineOverlay({
     const y0 = dbToFrac(p0.db) * height
     const x0 = e.clientX
     const yStart = e.clientY
+    const xStart = sourceToX(clip, p0.sourceSec, pxPerSec)
     useUi.getState().selectVolumePoint({ clipId: clip.id, index, sourceSec: p0.sourceSec })
     let dragged = false
     startPointerDrag(
@@ -76,7 +78,9 @@ export function VolumeLineOverlay({
         const next = moveVolumeKeyframe(
           start,
           index,
-          { sourceSec: p0.sourceSec + dx / pxPerSec, db: fracToDb((y0 + dy) / height) },
+          // The pointer moves in TIMELINE px; the point lands on the source
+          // second playing under it (the clip's speed and holds included).
+          { sourceSec: xToSource(clip, xStart + dx, pxPerSec, outSec), db: fracToDb((y0 + dy) / height) },
           { min: clip.inSec, max: outSec }
         )
         liveSetLine(clip.id, next)
@@ -98,7 +102,7 @@ export function VolumeLineOverlay({
     const before = begin(e)
     const svg = svgRef.current
     if (!before || !svg) return
-    const at = xToSource(clip, e.clientX - svg.getBoundingClientRect().left, pxPerSec)
+    const at = xToSource(clip, e.clientX - svg.getBoundingClientRect().left, pxPerSec, outSec)
     // A new point sits ON the line, so adding one never changes the sound.
     const { points: added, index } = addVolumeKeyframe(points, { sourceSec: at, db: volumeLineDbAt(points, at) })
     liveSetLine(clip.id, added)

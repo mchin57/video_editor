@@ -4,6 +4,7 @@ import { useEffect, useRef, type JSX } from 'react'
 import type { AudioClip } from '@shared/project'
 import { effectiveOut } from '@shared/project'
 import { envelopeGainAt } from '@shared/audioEnvelope'
+import { audioPlayedSec, audioSourceAt } from '@shared/audioTiming'
 import { type MediaAsset } from '@shared/media'
 import { audioUrl, videoProxyUrl } from '@/ipc/client'
 import { useMediaGain } from '@/lib/mediaGain'
@@ -30,8 +31,11 @@ export function AudioFollower({
 }): JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
   const eo = effectiveOut(clip, asset.probe.durationSec)
-  const active = time >= clip.startSec - 0.001 && time < clip.startSec + (eo - clip.inSec)
-  const target = clip.inSec + (time - clip.startSec)
+  // Where the clip is on the timeline and which source second plays under the
+  // playhead both come from the shared timing helpers (shared/audioTiming.ts) —
+  // the export cuts and stretches the same clip from the same numbers.
+  const active = time >= clip.startSec - 0.001 && time < clip.startSec + audioPlayedSec(clip, eo)
+  const target = audioSourceAt(clip, eo, time)
 
   // The gain comes from `clipGain` (shared/volumeLevels.ts) — the export's own
   // call — so a clip in a volume level previews at the level's gain, not its
