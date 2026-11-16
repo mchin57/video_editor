@@ -9,6 +9,8 @@ import { compositionDuration, type SourceDuration } from '../compositions'
 import { workoutSpeed } from '../workoutOverlay'
 import { hasVolumeLine, sortedVolumeKeyframes } from '../audioEnvelope'
 import { audioHoldSpans, audioSpeed, audioTimelineAt } from '../audioTiming'
+import { activeLut, type ColorLook } from '../grade'
+import { isNeutralTint } from '../tint'
 
 export interface LayerSummary {
   id: string
@@ -25,7 +27,24 @@ export interface LayerSummary {
    *  metrics its widgets show (`power`, `liveMap`, …). */
   speed?: number
   shows?: string[]
+  /** A video clip's or picture's colour look, when it has one, in the
+   *  Inspector's words (only what is set): exposure (−1…1), contrast and
+   *  saturation (1 = unchanged), temperature (−1 cool … 1 warm), tint (−1 green
+   *  … 1 magenta), vibrance (−1…1), the colour wash, and the LUT by name with
+   *  its strength (0…1). @see shared/grade.ts */
+  color?: ColorSummary
   linkGroupId?: string
+}
+
+export interface ColorSummary {
+  exposure?: number
+  contrast?: number
+  saturation?: number
+  temperature?: number
+  tint?: number
+  vibrance?: number
+  colorWash?: { color: string; amount: number }
+  lut?: { name: string; strength: number }
 }
 
 export interface AudioSummary {
@@ -57,6 +76,24 @@ export interface TimelineSummary {
 
 const r3 = (n: number): number => Math.round(n * 1000) / 1000
 
+/** A clip's or picture's look for the model; undefined when it has none. */
+function colorSummary(look: ColorLook): ColorSummary | undefined {
+  const s: ColorSummary = {}
+  const c = look.color
+  if (c) {
+    if (c.brightness !== 0) s.exposure = r3(c.brightness)
+    if (c.contrast !== 1) s.contrast = r3(c.contrast)
+    if (c.saturation !== 1) s.saturation = r3(c.saturation)
+    if (c.temperature) s.temperature = r3(c.temperature)
+    if (c.greenMagenta) s.tint = r3(c.greenMagenta)
+    if (c.vibrance) s.vibrance = r3(c.vibrance)
+  }
+  if (look.tint && !isNeutralTint(look.tint)) s.colorWash = { color: look.tint.color, amount: r3(look.tint.amount) }
+  const lut = activeLut(look.lut)
+  if (lut) s.lut = { name: lut.name, strength: r3(lut.strength) }
+  return Object.keys(s).length ? s : undefined
+}
+
 function layerSummary(l: Layer): LayerSummary {
   const s: LayerSummary = {
     id: l.id,
@@ -77,6 +114,10 @@ function layerSummary(l: Layer): LayerSummary {
       speed: r3(workoutSpeed(c)),
       shows: c.widgets.map((w) => w.metric)
     })
+  }
+  if (c.kind === 'video' || c.kind === 'image') {
+    const color = colorSummary(c)
+    if (color) s.color = color
   }
   if (l.linkGroupId) s.linkGroupId = l.linkGroupId
   return s
