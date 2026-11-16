@@ -135,6 +135,7 @@ function VideoLayerView({
       style={boxStyle}
       onPointerDown={onMoveDown}
       data-resizebox={selected ? '' : undefined}
+      data-layer-id={layer.id}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
       {/* Flips mirror the CROPPED picture, so they act on this box-filling
@@ -513,6 +514,7 @@ function StackImage({
       style={box}
       onPointerDown={onMoveDown}
       data-resizebox={selected ? '' : undefined}
+      data-layer-id={layer.id}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
       {graded ? <GradeNotice status={grade} lutName={content.lut?.name} /> : <TintFilter tint={content.tint} />}
