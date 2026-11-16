@@ -556,6 +556,40 @@ describe('buildExportArgs', () => {
     expect(s).toContain("overlay=100:50:enable='between(t,0.000,3.000)'")
   })
 
+  it('grades an image once it is sized, before format=rgba and its opacity (static and keyframed)', () => {
+    const grade = 'lut3d=file=grade_0123456789ab.cube:interp=tetrahedral'
+    const img = { path: 'C:/i/p.png', boxW: 300, boxH: 200, x: 0, y: 0, startSec: 0, endSec: 3, opacity: 0.5, grade }
+    const s = buildExportArgs(plan({ visuals: [{ kind: 'image', image: img }] }), 'o').join(' ')
+    expect(s).toContain(`[1:v]scale=300:200,${grade},format=rgba,colorchannelmixer=aa=0.500[pi1]`)
+    const kf = {
+      ...img,
+      opacity: 1,
+      keyframes: [
+        { t: 0, w: 300, h: 200, cx: 150, cy: 100 },
+        { t: 2, w: 600, h: 400, cx: 300, cy: 200 }
+      ]
+    }
+    const k = buildExportArgs(plan({ visuals: [{ kind: 'image', image: kf }] }), 'o').join(' ')
+    expect(k).toContain(`[1:v]${grade},format=rgba,fps=30,scale=w=`)
+    const rot = buildExportArgs(plan({ visuals: [{ kind: 'image', image: { ...kf, rotationDeg: 30 } }] }), 'o').join(
+      ' '
+    )
+    expect(rot).toContain(`[1:v]scale=600:400,${grade},format=rgba,fps=30,rotate=`)
+    // A legacy grade string goes in the same place.
+    const legacy = "lutrgb=r='clip(val*1.2,0,maxval)':g='clip(val*1.2,0,maxval)':b='clip(val*1.2,0,maxval)'"
+    const l = buildExportArgs(plan({ visuals: [{ kind: 'image', image: { ...img, grade: legacy } }] }), 'o').join(' ')
+    expect(l).toContain(`[1:v]scale=300:200,${legacy},format=rgba,colorchannelmixer=aa=0.500[pi1]`)
+  })
+
+  it('a table-graded video carries its lut3d where the grade sits today', () => {
+    const grade = 'lut3d=file=grade_0123456789ab.cube:interp=tetrahedral'
+    const s = buildExportArgs(
+      plan({ visuals: [{ kind: 'video', video: { ...vid, crop: { x: 0, y: 0, w: 540, h: 960 }, colorEq: grade } }] }),
+      'o'
+    ).join(' ')
+    expect(s).toContain(`[1:v]crop=540:960:0:0,scale=1080:1920:flags=bicubic,${grade},setsar=1,format=yuv420p,`)
+  })
+
   it('omits colorchannelmixer at full opacity', () => {
     const img = { path: 'p.png', boxW: 1, boxH: 1, x: 0, y: 0, startSec: 0, endSec: 1, opacity: 1 }
     const s = buildExportArgs(

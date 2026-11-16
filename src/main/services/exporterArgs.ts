@@ -181,6 +181,9 @@ export interface ExportImage {
   /** Free layer rotation, clockwise degrees about the box centre, applied
    *  AFTER the box is sized (absent/0 = none). */
   rotationDeg?: number
+  /** The image's colour look (`lookFilter`, exportGrade.ts), or ''/absent.
+   *  Runs once the picture is sized, before `format=rgba` and any alpha change. */
+  grade?: string
   /** Position/scale keyframes (empty/absent = static). A keyframed image input
    *  becomes `-loop 1` + `fps=30` so it is a real frame stream `t` can drive. */
   keyframes?: ExportKeyframe[]
@@ -655,6 +658,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
           const mb = maxKfBox(ikfs)
           steps.push(`scale=${r(mb.w)}:${r(mb.h)}`)
         }
+        if (im.grade) steps.push(im.grade)
         steps.push('format=rgba')
         if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
         steps.push('fps=30')
@@ -663,7 +667,9 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         const sk = irot ? rotatedKfs(ikfs, irot) : ikfs
         steps.push(`scale=w='${kfDimExpr(sk, 'w')}':h='${kfDimExpr(sk, 'h')}':eval=frame`)
       } else {
-        steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`, 'format=rgba')
+        steps.push(`scale=${r(im.boxW)}:${r(im.boxH)}`)
+        if (im.grade) steps.push(im.grade)
+        steps.push('format=rgba')
         if (!oanim && op < 0.999) steps.push(`colorchannelmixer=aa=${op.toFixed(3)}`)
         if (irot) steps.push(rotateFilter(irot))
         // A real frame stream for the commands / the fade (a sequence is one already).

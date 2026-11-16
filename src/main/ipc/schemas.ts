@@ -63,12 +63,25 @@ const audioFxSettings = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chorus'), chorus: z.object({ voices: num, rateHz: num, depth: num }) })
 ])
 
+/** A `LutRef` (shared/project.ts); main checks `file` is a name it writes before reading it. */
+const lutRef = z.object({ file: z.string().min(1), name: z.string(), strength: num })
+
 const stillRequest = z.object({
   mediaId: id,
   sourceSec: num,
   crop: z.object({ x: num, y: num, w: num, h: num }).nullable(),
-  color: z.object({ brightness: num, contrast: num, saturation: num }).nullable(),
+  color: z
+    .object({
+      brightness: num,
+      contrast: num,
+      saturation: num,
+      temperature: num.optional(),
+      greenMagenta: num.optional(),
+      vibrance: num.optional()
+    })
+    .nullable(),
   tint: z.object({ color: z.string(), amount: num }).nullable().optional(),
+  lut: lutRef.nullable().optional(),
   flipH: z.boolean().optional(),
   flipV: z.boolean().optional()
 })

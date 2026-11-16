@@ -8,6 +8,7 @@
  *   <Name>/generated/         media the editor made (background removal, audio fx,
  *                             extracted audio, stills), as real files
  *   <Name>/transcripts/<id>.json  whisper word timings (slow to rebuild)
+ *   <Name>/luts/<hash>.cube   imported colour LUTs (on first use)
  *   <Name>/cache/<id>/        proxies, thumb, waveform, display PNG, loudness
  *                             series, whisper scratch. Always safe to delete.
  *
@@ -33,6 +34,15 @@ export const transcriptPath = (root: string, id: string): string => join(transcr
  *  Created on first use, like the data in it. */
 export const poseRoot = (root: string): string => join(root, 'pose')
 export const posePath = (root: string, id: string): string => join(poseRoot(root), `${id}.json`)
+/** Imported `.cube` LUTs (`LutRef.file`), content-named so one table is stored
+ *  once. Created on first use; Save As copies it like `pose/`. */
+export const lutsRoot = (root: string): string => join(root, 'luts')
+/** A LUT file's path, or null for a name that isn't one the editor writes
+ *  (never resolve a stored name that could leave the folder). */
+export const lutPath = (root: string, file: string): string | null =>
+  isLutFileName(file) ? join(lutsRoot(root), file) : null
+/** The names the editor gives imported LUTs: 16 hex of their content's hash. */
+export const isLutFileName = (name: string): boolean => /^[0-9a-f]{16}\.cube$/.test(name)
 
 /** Written into a `generated/` the app created. Cleanup only ever deletes in a
  *  `generated/` that has it: a footage folder taken over as a project may

@@ -97,9 +97,12 @@ export interface StillRequest {
   /** Source-pixel crop to apply (null = full frame). */
   crop: { x: number; y: number; w: number; h: number } | null
   /** Color correction to apply (null = none). */
-  color: { brightness: number; contrast: number; saturation: number } | null
-  /** Tint to apply after the color correction (absent/null = none). */
+  color: import('./project').ColorAdjust | null
+  /** Tint ("Color wash") to apply after the color correction (absent/null = none). */
   tint?: import('./tint').Tint | null
+  /** LUT to apply after the wash (absent/null = none) — a look that needs the
+   *  colour table renders through it, as the clip does (shared/grade.ts). */
+  lut?: import('./project').LutRef | null
   /** Mirror the (cropped) picture, like the clip does on screen. Layer rotation
    *  is a transform like position, so a still does not bake it in. */
   flipH?: boolean

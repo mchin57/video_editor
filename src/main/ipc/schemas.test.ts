@@ -28,6 +28,21 @@ describe('IPC argument schemas', () => {
     ).toBeNull()
   })
 
+  it('passes a still’s whole colour look through (newer controls and LUT), not just the old three', () => {
+    const req = {
+      mediaId: 'abc123',
+      sourceSec: 1,
+      crop: null,
+      color: { brightness: 0.1, contrast: 1, saturation: 1, temperature: 0.4, greenMagenta: -0.2, vibrance: 0.3 },
+      tint: null,
+      lut: { file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 }
+    }
+    expect(INVOKE_SCHEMAS.captureStillToLibrary.parse([req])[0]).toEqual(req)
+    expect(check('captureStillToLibrary', { ...req, lut: { file: 'x', name: 'X', strength: 'all' } })).toMatch(
+      /lut\.strength/
+    )
+  })
+
   it('ignores extra trailing arguments, as before', () => {
     expect(check('getSettings', 'stray')).toBeNull()
     expect(check('ensureProxy', 'abc123', 'stray')).toBeNull()
