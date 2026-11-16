@@ -47,9 +47,10 @@ describe('lookFilter', () => {
     expect(file).toMatch(/^grade_[0-9a-f]{12}\.cube$/)
     expect(f).toBe(lut3dFilter(file))
     expect(f).toBe(`lut3d=file=${file}:interp=tetrahedral`)
-    const written = parseCube(readFileSync(join(dir, file), 'utf8'))
-    expect(written.size).toBe(GRADE_TABLE_SIZE)
-    expect(Array.from(written.data)).toEqual(Array.from(bakeGradeTable(look, null)))
+    // The file IS the shared bake, as `.cube` text (compared as one string: 65³ entries).
+    const text = readFileSync(join(dir, file), 'utf8')
+    expect(text.startsWith(`LUT_3D_SIZE ${GRADE_TABLE_SIZE}\n`)).toBe(true)
+    expect(text === writeCube(GRADE_TABLE_SIZE, bakeGradeTable(look, null))).toBe(true)
     // The same look again reuses the file; a different one adds another.
     expect(await lookFilter(look, dir, root)).toBe(f)
     await lookFilter({ color: { ...g(0), vibrance: 0.4 } }, dir, root)
@@ -65,11 +66,12 @@ describe('lookFilter', () => {
     const look: ColorLook = { lut: { ...imported, strength: 0.5 } }
     const f = await lookFilter(look, dir, root)
     const file = f.match(/file=(\S+?):/)![1]
-    const table = parseCube(readFileSync(join(dir, file), 'utf8'))
-    expect(Array.from(table.data)).toEqual(Array.from(bakeGradeTable(look, await readLut(root, imported.file))))
+    const baked = bakeGradeTable(look, await readLut(root, imported.file))
+    expect(readFileSync(join(dir, file), 'utf8') === writeCube(GRADE_TABLE_SIZE, baked)).toBe(true)
     // Mid grey at half strength: blue 0.5 → 0.4 in the LUT → 0.45 mixed.
     const mid = ((32 * GRADE_TABLE_SIZE + 32) * GRADE_TABLE_SIZE + 32) * 3
-    expect(table.data[mid + 2]).toBeCloseTo(0.45, 5)
+    expect(baked[mid + 2]).toBeCloseTo(0.45, 5)
+    expect(parseCube(WARM).size).toBe(2)
   })
 
   it('fails with the LUT’s name when its file has gone, rather than exporting without it', async () => {

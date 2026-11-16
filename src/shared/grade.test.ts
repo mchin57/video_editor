@@ -211,10 +211,12 @@ const lookup = (t: Float32Array, size: number, rgb: number[]): number[] =>
 describe('bakeGradeTable', () => {
   it('an identity look bakes an identity table that leaves colours alone', () => {
     const t = bakeGradeTable({}, null, 17)
-    for (let i = 0; i < 17 ** 3; i++) {
-      const want = [i % 17, Math.floor(i / 17) % 17, Math.floor(i / 289)].map((v) => Math.fround(cubeN6(v / 16)))
-      expect([t[i * 3], t[i * 3 + 1], t[i * 3 + 2]]).toEqual(want)
-    }
+    const want = Float32Array.from(
+      Array.from({ length: 17 ** 3 }, (_, i) => [i % 17, Math.floor(i / 17) % 17, Math.floor(i / 289)]).flatMap((c) =>
+        c.map((v) => cubeN6(v / 16))
+      )
+    )
+    expect(t.every((v, i) => v === want[i])).toBe(true)
     const big = bakeGradeTable({}, null)
     for (const rgb of [
       [0.2, 0.7, 0.4],
