@@ -67,11 +67,26 @@ export function makePatchClip(out: string): void {
   ])
 }
 
-/** A frame of `file` at `t` as a per-pixel RGB reader (ffmpeg's own decode). */
-export function frameAt(file: string, t: number): (x: number, y: number) => number[] {
+/** A frame of `file` at `t` as a per-pixel RGB reader (ffmpeg's own decode),
+ *  1080×1920 — a still of another size is scaled to it (nearest neighbour). */
+export function frameAt(file: string, t: number, still = false): (x: number, y: number) => number[] {
   const buf = execFileSync(
     FFMPEG,
-    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    [
+      '-v',
+      'error',
+      ...(still ? [] : ['-ss', String(t)]),
+      '-i',
+      file,
+      '-frames:v',
+      '1',
+      ...(still ? ['-vf', `scale=${W}:${H}:flags=neighbor`] : []),
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      '-'
+    ],
     { maxBuffer: W * H * 3 + 1024 }
   )
   return (x, y) => {

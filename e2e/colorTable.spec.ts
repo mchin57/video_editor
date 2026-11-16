@@ -525,3 +525,63 @@ test('the Inspector imports a LUT, sets its strength, shares it and picks it bac
   expect(color).toEqual({ brightness: 0.1, contrast: 1, saturation: 1, vibrance: 0.3 })
   await expect(page.getByTestId('color-temperature-reset')).toHaveCount(0)
 })
+
+test('a still of a table-graded clip has the colours its export has (the table in a scratch folder)', async ({
+  appPage: page,
+  electronApp,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(120_000)
+  const clip = join(projectsDir, 'E2E', 'patches.mp4')
+  makePatchClip(clip)
+  const cube = join(projectsDir, 'warm.cube')
+  writeFileSync(cube, warmCube())
+  const id = await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    window.__reelStores.useProject.getState().addMedia([asset.id])
+    return asset.id
+  }, clip)
+  await waitForProxy(page, id)
+  const lut = await importLut(page, electronApp, cube)
+  const look = { color: { ...neutral, temperature: 0.6, vibrance: 0.5 }, lut: { ...lut, strength: 0.7 } }
+  await page.evaluate(
+    ({ id, look }) => {
+      window.__reelStores.useProject.getState().addVideoLayer('V', id, 0, 2, false, 540 / 960)
+      window.__reelStores.useProject.getState().updateLayerContent('V', look as never)
+    },
+    { id, look }
+  )
+  const dir = mkdtempSync(join(tmpdir(), 'reel-colortable-still-'))
+  const png = join(dir, 'still.png')
+  await electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
+  }, png)
+  const saved = await page.evaluate(
+    ({ id, look }) =>
+      window.api.captureStillToDisk(
+        { mediaId: id, sourceSec: 1, crop: null, color: look.color, tint: null, lut: look.lut },
+        'still.png'
+      ),
+    { id, look }
+  )
+  expect(saved).toBe(png)
+  const still = exportedPatches(frameAt(png, 0, true))
+  const exported = await exportPatches(page, electronApp, join(dir, 'export.mp4'))
+  const plainStill = join(dir, 'plain.png')
+  await electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
+  }, plainStill)
+  await page.evaluate(
+    (id) => window.api.captureStillToDisk({ mediaId: id, sourceSec: 1, crop: null, color: null }, 'plain.png'),
+    id
+  )
+  const plain = exportedPatches(frameAt(plainStill, 0, true))
+  console.log(`[colorTable] still vs export: worst ${worstDiff(still, exported)}; moved ${worstDiff(still, plain)}`)
+  // The still (a PNG) and the export (an H.264 encode) agree within the parity tolerance (measured: 7).
+  expect(
+    worstDiff(still, exported),
+    `still ${JSON.stringify(still)} vs export ${JSON.stringify(exported)}`
+  ).toBeLessThanOrEqual(TOLERANCE)
+  expect(worstDiff(still, plain), 'the still is graded').toBeGreaterThan(15)
+})
