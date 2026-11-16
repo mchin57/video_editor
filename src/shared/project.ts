@@ -443,7 +443,27 @@ export interface Layer {
   /** Link group this tile belongs to (absent = unlinked). @see linkGroupId docs
    *  on `CaptionSegment`/`AudioClip` — one id space across all three arrays. */
   linkGroupId?: string
+  /**
+   * How the tile comes in at its START and goes out at its END (#64; absent =
+   * a cut). Honored for video and image layers only. A cross dissolve or dip
+   * between two clips is the PAIR `outgoing.transitionOut` + `incoming
+   * .transitionIn` (same kind and length) over the window where the two tiles
+   * overlap; a fade stands alone. Stored on the tile, so it moves, copies and
+   * splits with it (the left half keeps `transitionIn`, the right half
+   * `transitionOut`). All the math lives in `shared/transitions.ts`.
+   */
+  transitionIn?: LayerTransition
+  transitionOut?: LayerTransition
   content: LayerContent
+}
+
+/** What a tile edge's transition is (`shared/transitions.ts` `TRANSITION_KINDS`). */
+export type TransitionKind = 'dissolve' | 'dipBlack' | 'dipWhite' | 'fade'
+
+/** One edge's transition: its kind and its length in timeline seconds. */
+export interface LayerTransition {
+  kind: TransitionKind
+  sec: number
 }
 
 export interface CaptionWord {
@@ -855,7 +875,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 32
+export const PROJECT_VERSION = 33
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1197,6 +1217,9 @@ export function migrateProject(raw: unknown): Project {
   // v32 adds the absence-tolerant `AudioClip.speed` and `AudioClip.freezes`
   // (audio re-timing, shared/audioTiming.ts) — absent means 1× with no holds,
   // so nothing is rewritten.
+  // v33 adds the absence-tolerant `Layer.transitionIn` / `Layer.transitionOut`
+  // (transitions, shared/transitions.ts) — absent means a cut, so nothing is
+  // rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

@@ -25,15 +25,9 @@ import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { cellSpan, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { type MediaAsset } from '@shared/media'
 import { textWrapWidth } from '@shared/textStyle'
-import {
-  effectiveImageAspect,
-  isFrozenAt,
-  layersAtTime,
-  layerTransformAt,
-  videoSourceTime,
-  type FrameRect
-} from '@shared/layers'
+import { effectiveImageAspect, isFrozenAt, layersAtTime, videoSourceTime, type FrameRect } from '@shared/layers'
 import { assertNever } from '@shared/layerKinds'
+import { layerOpacityAt, transitionPlates } from '@shared/transitions'
 import { clampAnimWindows, effectiveTextAnimation, textAnimStateAt } from '@shared/textAnim'
 import { motionPosAt, textMotion } from '@shared/motion'
 import { rotateVec } from '@shared/rotation'
@@ -57,6 +51,7 @@ import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
 import { StackWorkout } from './workout'
 import { PoseOverlay } from './pose'
+import { dipPlatesUnder } from './transitions'
 
 /** One composited video layer: a <video> that follows the master clock. */
 function VideoLayerView({
@@ -379,10 +374,10 @@ interface StackLayerProps {
  *  transform applied at `time`, and its content narrowed to the kind. */
 type KindViewProps<C> = StackLayerProps & { depth: number; muted: boolean; layer: Layer; content: C }
 
-/** Keyframed opacity (video/image): same shared interpolation the export bakes
- *  into its sendcmd `aa` ramp — applied on the layer box. */
+/** Opacity (video/image): keyframed opacity × transition ramps, the same shared
+ *  function the export bakes into its sendcmd `aa` ramp — applied on the layer box. */
 const keyframedOpacity = (rawLayer: Layer, time: number): CSSProperties => {
-  const op = layerTransformAt(rawLayer, time).opacity
+  const op = layerOpacityAt(rawLayer, time)
   return op < 1 ? { opacity: op } : {}
 }
 
@@ -690,6 +685,7 @@ export function CompFill({
   const srcDur = (id: string): number => assetById.get(id)?.probe.durationSec ?? 0
   if (time < 0 || time >= compositionDuration(comp, srcDur)) return null
   const active = layersAtTime(comp.layers, time).filter((l) => !l.hidden)
+  const plates = transitionPlates(comp.layers)
   return (
     <div
       data-testid="comp-fill"
@@ -707,7 +703,8 @@ export function CompFill({
         {/* The comp's own audio track — without this a comp whose clips are
             muted and extracted to its audio lane would play silent. */}
         {!muted && <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />}
-        {active.map((l, i) => (
+        {active.map((l, i) => [
+          ...dipPlatesUnder(plates, l.id, time, 10 + i, frame),
           <StackLayer
             key={l.id}
             rawLayer={l}
@@ -720,7 +717,7 @@ export function CompFill({
             depth={depth}
             muted={muted}
           />
-        ))}
+        ])}
       </div>
     </div>
   )

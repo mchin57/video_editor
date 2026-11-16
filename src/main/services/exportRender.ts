@@ -25,7 +25,8 @@ import type { ExportOptions } from '@shared/ipc'
 import type { LoudnessSeries } from '@shared/loudness'
 import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { presetFor } from '@shared/formats'
-import { frameToOutput, opacityKeyframePoints, stretchedBox, type FrameRect } from '@shared/layers'
+import { frameToOutput, stretchedBox, type FrameRect } from '@shared/layers'
+import { layerOpacityPoints } from '@shared/transitions'
 import { seriesNeeded } from '@shared/volumeLevels'
 import { getBundledFontsDir } from '../config'
 import { audioProxyIfReady, getAsset } from './mediaStore'
@@ -58,6 +59,7 @@ import { buildAss, type AssOverlay } from './assBuilder'
 import { createTextRenderer, type TextImageSpec, type TextRenderer } from './textImage'
 import type { LaidOutLine } from './textLayout'
 import { exportLayer } from './exportLayers'
+import { platesByLayer } from './exportTransitions'
 import { audioItemPlayedSec } from './audio'
 import { addCaptions, fullFrameImage } from './exportText'
 import { createLogger } from '@shared/log'
@@ -202,10 +204,14 @@ export class CompositionRender {
     this.tmpDir = join(ctx.tmpRoot, `r${ctx.n.v++}`)
     await fsp.mkdir(this.tmpDir, { recursive: true })
 
+    // A dip's colour plate goes in just under the layer it belongs beneath.
+    const plates = platesByLayer(comp.layers)
     for (const l of comp.layers) {
-      if (!l.hidden) await exportLayer(this, l)
+      if (l.hidden) continue
+      this.visuals.push(...(plates.get(l.id) ?? []))
+      await exportLayer(this, l)
     }
-    if (!this.visuals.some((v) => v.kind !== 'text')) {
+    if (!this.visuals.some((v) => v.kind === 'video' || v.kind === 'image')) {
       throw new Error('Timeline has no video or image layer — add one first.')
     }
     await this.addAudioClips()
@@ -382,12 +388,15 @@ export class CompositionRender {
 
   /**
    * Keyframed OPACITY: a per-visual sendcmd file drives `colorchannelmixer aa`
-   * per frame (verified — FFMPEG-NOTES "Keyframed opacity"). `base` folds an
-   * image layer's static opacity into the animated values; a single point
-   * needs no command file (the initial `aa=` covers a constant).
+   * per frame (verified — FFMPEG-NOTES "Keyframed opacity"). The points are the
+   * layer's keyframed opacity times its transition ramps (`layerOpacityPoints`,
+   * the preview's own `layerOpacityAt` — FFMPEG-NOTES "Transitions"); without a
+   * transition they are exactly the keyframes'. `base` folds an image layer's
+   * static opacity into the animated values; a single point needs no command
+   * file (the initial `aa=` covers a constant).
    */
   async opacityAnim(l: Layer, base = 1): Promise<OpacityAnim | undefined> {
-    const pts = opacityKeyframePoints(l)
+    const pts = layerOpacityPoints(l)
     if (!pts) return undefined
     const n = this.seq.opacity++
     const scaled = base !== 1 ? pts.map((p) => ({ t: p.t, o: p.o * base })) : pts

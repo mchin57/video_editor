@@ -141,6 +141,11 @@ describe('sanitizeTemplate', () => {
     expect(sanitizeTemplate(withText({ animation: { in: 'fadeIn' } }))).toBeNull()
     expect(sanitizeTemplate(withText({ fontSizePx: -4 }))).toBeNull()
     expect(sanitizeTemplate({ ...rightBack, layers: [{ ...t, keyframes: [{ tSec: 0 }] }] })).toBeNull()
+    // A tile edge's transition (#64): a known kind and a positive length.
+    const withEdge = (tr: unknown): unknown => ({ ...rightBack, layers: [{ ...t, transitionIn: tr }] })
+    expect(sanitizeTemplate(withEdge({ kind: 'fade', sec: 0.5 }))).not.toBeNull()
+    expect(sanitizeTemplate(withEdge({ kind: 'wipe', sec: 0.5 }))).toBeNull()
+    expect(sanitizeTemplate(withEdge({ kind: 'fade', sec: -1 }))).toBeNull()
   })
 })
 

@@ -22,6 +22,7 @@ import { clipGain, type GainContext } from '@shared/volumeLevels'
 import { clipLinePoints, type LinePoint } from '@shared/audioEnvelope'
 import { audioExportHolds, audioSpeed } from '@shared/audioTiming'
 import { clampInt } from '@shared/math'
+import { plateFilter } from './exportTransitions'
 
 /**
  * Per-frame opacity animation for a visual: `sendcmd` (reading `cmdFile`,
@@ -201,9 +202,21 @@ export interface ExportImage {
   fadeIn?: { startSec: number; durSec: number }
 }
 
+/** A dip's full-frame colour plate (transitions, `exportTransitions.ts`): painted
+ *  over the composite so far, for its window. */
+export interface ExportPlate {
+  /** `#rrggbb` */
+  color: string
+  startSec: number
+  endSec: number
+}
+
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
 export type ExportVisual =
-  { kind: 'video'; video: ExportVideo } | { kind: 'image'; image: ExportImage } | { kind: 'text'; assFile: string }
+  | { kind: 'video'; video: ExportVideo }
+  | { kind: 'image'; image: ExportImage }
+  | { kind: 'text'; assFile: string }
+  | { kind: 'plate'; plate: ExportPlate }
 
 /** An audio source to mix (a video layer's audio, or an audio clip). */
 export interface ExportAudio {
@@ -685,6 +698,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
           ? centredPos(im.x, im.y, im.boxW, im.boxH)
           : `${r(im.x)}:${r(im.y)}`
       chains.push(`[${prev}][pi${i}]overlay=${ixy}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`)
+    } else if (vis.kind === 'plate') {
+      chains.push(`[${prev}]${plateFilter(vis.plate)}[${out}]`)
     } else {
       chains.push(`[${prev}]ass=${vis.assFile}${assOpts}[${out}]`)
     }

@@ -11,7 +11,7 @@ import {
   pillRadiusPx,
   stabilizeOverridden
 } from './project'
-import type { CaptionSegment, CaptionsConfig, AudioClip } from './project'
+import type { CaptionSegment, CaptionsConfig, AudioClip, Layer } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { makeWorkoutLayer } from './layers'
 
@@ -619,8 +619,7 @@ describe('migrateProject — audio volume lines (v31)', () => {
 })
 
 describe('migrateProject — audio re-timing (v32)', () => {
-  it('stamps a v31 document as v32; clips with and without speed or holds load as saved', () => {
-    expect(PROJECT_VERSION).toBe(32)
+  it('stamps a v31 document as current; clips with and without speed or holds load as saved', () => {
     const plain = {
       id: 'A',
       mediaId: 'm',
@@ -635,11 +634,40 @@ describe('migrateProject — audio re-timing (v32)', () => {
     }
     const retimed = { ...plain, id: 'B', speed: 0.5, freezes: [{ atSec: 1, holdSec: 2 }] }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 31, audioClips: [plain, retimed] })
-    expect(p.version).toBe(32)
+    expect(p.version).toBe(PROJECT_VERSION)
     // Absent = 1x with no holds: nothing is written onto an old clip.
     expect(p.audioClips[0]).toEqual(plain)
     expect('speed' in p.audioClips[0]).toBe(false)
     expect('freezes' in p.audioClips[0]).toBe(false)
     expect(p.audioClips[1]).toEqual(retimed)
+  })
+})
+
+describe('migrateProject — transitions (v33)', () => {
+  it('stamps a v32 document as v33; layers with and without transitions load as saved', () => {
+    expect(PROJECT_VERSION).toBe(33)
+    const plain: Layer = {
+      id: 'v',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'image', mediaId: 'm', opacity: 1 }
+    }
+    const faded: Layer = {
+      ...plain,
+      id: 'w',
+      transitionIn: { kind: 'dissolve', sec: 0.5 },
+      transitionOut: { kind: 'fade', sec: 1 }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 32, layers: [plain, faded] })
+    expect(p.version).toBe(33)
+    // Absent = a cut: nothing is written onto an old layer.
+    expect(p.layers[0]).toEqual(plain)
+    expect('transitionIn' in p.layers[0]).toBe(false)
+    expect('transitionOut' in p.layers[0]).toBe(false)
+    expect(p.layers[1]).toEqual(faded)
   })
 })
