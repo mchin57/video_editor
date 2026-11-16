@@ -77,7 +77,7 @@ describe('buildExportArgs', () => {
     expect(s).toContain('-map [v0]')
   })
 
-  it('applies hdr tonemap, crop, and color eq in order when present', () => {
+  it('applies hdr tonemap, crop, scale and the color grade in order when present', () => {
     const s = buildExportArgs(
       plan({
         visuals: [
@@ -87,7 +87,7 @@ describe('buildExportArgs', () => {
               ...vid,
               hdrChain: 'tonemapX',
               crop: { x: 10, y: 20, w: 600, h: 1000 },
-              colorEq: 'eq=brightness=0.1'
+              colorEq: "lutrgb=r='clip(val*1.1,0,maxval)':g='clip(val*1.1,0,maxval)':b='clip(val*1.1,0,maxval)'"
             }
           }
         ]
@@ -95,7 +95,9 @@ describe('buildExportArgs', () => {
       'o'
     ).join(' ')
     expect(s).toContain(
-      '[1:v]tonemapX,crop=600:1000:10:20,scale=1080:1920:flags=bicubic,eq=brightness=0.1,setsar=1,format=yuv420p,setpts=PTS-STARTPTS+1.000/TB[pv1]'
+      '[1:v]tonemapX,crop=600:1000:10:20,scale=1080:1920:flags=bicubic,' +
+        "lutrgb=r='clip(val*1.1,0,maxval)':g='clip(val*1.1,0,maxval)':b='clip(val*1.1,0,maxval)'" +
+        ',setsar=1,format=yuv420p,setpts=PTS-STARTPTS+1.000/TB[pv1]'
     )
   })
 

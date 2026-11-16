@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildOpacityCmdLines,
   cropFilter,
-  eqFilter,
   f3,
   f6,
+  gradeColorFilter,
   gradeFilter,
   piecewiseLinearExpr,
   r,
@@ -19,10 +19,27 @@ describe('ffmpegFilters', () => {
     expect(cropFilter({ x: 10.4, y: 20.6, w: 600.5, h: 1000.2 })).toBe('crop=601:1000:10:21')
   })
 
-  it('builds the eq color filter in brightness:contrast:saturation order', () => {
-    expect(eqFilter({ brightness: 0.1, contrast: 1.2, saturation: 0.8 })).toBe(
-      'eq=brightness=0.1:contrast=1.2:saturation=0.8'
+  it('builds the grade as a lutrgb curve then a saturation colorchannelmixer (the chain verified against Chromium)', () => {
+    // Exposure above 1 clamps before contrast, as Chromium does between its filters.
+    expect(gradeColorFilter({ brightness: 0.2, contrast: 1.5, saturation: 1 })).toBe(
+      "lutrgb=r='clip(clip(val*1.2,0,maxval)*1.5-0.25*maxval,0,maxval)':g='clip(clip(val*1.2,0,maxval)*1.5-0.25*maxval,0,maxval)':b='clip(clip(val*1.2,0,maxval)*1.5-0.25*maxval,0,maxval)'"
     )
+    // Exposure alone, below 1: no inner clamp needed. Contrast below 1 lifts by a positive offset.
+    expect(gradeColorFilter({ brightness: -0.2, contrast: 1, saturation: 1 })).toBe(
+      "lutrgb=r='clip(val*0.8,0,maxval)':g='clip(val*0.8,0,maxval)':b='clip(val*0.8,0,maxval)'"
+    )
+    expect(gradeColorFilter({ brightness: 0, contrast: 0.6, saturation: 1 })).toBe(
+      "lutrgb=r='clip(val*0.6+0.2*maxval,0,maxval)':g='clip(val*0.6+0.2*maxval,0,maxval)':b='clip(val*0.6+0.2*maxval,0,maxval)'"
+    )
+    // Saturation alone: just the Filter Effects matrix.
+    expect(gradeColorFilter({ brightness: 0, contrast: 1, saturation: 1.3 })).toBe(
+      'colorchannelmixer=rr=1.2361:rg=-0.2145:rb=-0.0216:gr=-0.0639:gg=1.0855:gb=-0.0216:br=-0.0639:bg=-0.2145:bb=1.2784'
+    )
+    // All three: curve first, then the matrix.
+    expect(gradeColorFilter({ brightness: 0.2, contrast: 1.5, saturation: 1.3 })).toMatch(
+      /^lutrgb=r='[^']+':g='[^']+':b='[^']+',colorchannelmixer=rr=1.2361:/
+    )
+    expect(gradeColorFilter({ brightness: 0, contrast: 1, saturation: 1 })).toBe('')
   })
 
   it('builds the tint as colorchannelmixer rows from the shared matrix (the values verified against ffmpeg)', () => {
@@ -33,13 +50,16 @@ describe('ffmpegFilters', () => {
     )
   })
 
-  it('grades with eq then the tint, skipping whichever is neutral', () => {
+  it('grades with the grade filters then the tint, skipping whichever is neutral', () => {
     const color = { brightness: 0.1, contrast: 1, saturation: 1 }
     const tint = { color: '#ffffff', amount: 0.5 }
     expect(gradeFilter(null, null)).toBe('')
     expect(gradeFilter({ brightness: 0, contrast: 1, saturation: 1 }, { color: '#ff0000', amount: 0 })).toBe('')
-    expect(gradeFilter(color, null)).toBe('eq=brightness=0.1:contrast=1:saturation=1')
-    expect(gradeFilter(color, tint)).toBe(`eq=brightness=0.1:contrast=1:saturation=1,${tintFilter(tint)}`)
+    expect(gradeFilter(color, null)).toBe(gradeColorFilter(color))
+    expect(gradeFilter(color, null)).toBe(
+      "lutrgb=r='clip(val*1.1,0,maxval)':g='clip(val*1.1,0,maxval)':b='clip(val*1.1,0,maxval)'"
+    )
+    expect(gradeFilter(color, tint)).toBe(`${gradeColorFilter(color)},${tintFilter(tint)}`)
     expect(gradeFilter(undefined, tint)).toBe(tintFilter(tint))
   })
 
