@@ -7,6 +7,7 @@
 import { registerAssistantBridge } from '../assistant/bridge'
 import { registerAnalysisHandlers } from './analysis'
 import { registerExportHandlers } from './export'
+import { registerLutHandlers } from './luts'
 import { registerMediaHandlers } from './media'
 import { registerProjectHandlers } from './project'
 import { registerSettingsHandlers } from './settings'
@@ -22,4 +23,5 @@ export function registerIpcHandlers(): void {
   registerAnalysisHandlers()
   registerTemplateHandlers()
   registerSharedLibraryHandlers()
+  registerLutHandlers()
 }

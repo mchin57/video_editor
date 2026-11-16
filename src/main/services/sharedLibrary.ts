@@ -28,6 +28,7 @@ import {
   makeSharedText,
   migrateSharedItem,
   sanitizeSharedItem,
+  isLutPath,
   sharedKindOf,
   sortShared,
   type SharedAddResult,
@@ -38,6 +39,7 @@ import { getSubdir } from '../config'
 import { replaceFile } from './atomicWrite'
 import { fingerprintFile, sameFingerprint } from './fingerprint'
 import { safeFileName } from './projectLayout'
+import { readLutFile } from './luts'
 
 const log = createLogger('shared-library')
 
@@ -47,7 +49,8 @@ const THUMB = 'thumb.jpg'
 const KIND_NOUN: Record<Exclude<SharedKind, 'text'>, string> = {
   sound: 'a sound',
   graphic: 'a picture',
-  video: 'a video'
+  video: 'a video',
+  lut: 'a LUT'
 }
 
 /** Where the shared library lives: `<data>/shared`. */
@@ -144,6 +147,18 @@ async function addOne(
   const same = (await listShared(root)).find((i) => i.fingerprint && sameFingerprint(i.fingerprint, fp))
   if (same) return { item: same, existing: true }
 
+  // A colour LUT is a text table, not media: checked by parsing, never probed.
+  if (isLutPath(srcPath)) {
+    if (only && only !== 'lut') throw new Error(`It isn't ${KIND_NOUN[only]}, so it belongs on the LUTs tab.`)
+    try {
+      await readLutFile(srcPath)
+    } catch (error) {
+      throw new Error((error as Error).message.replace(/^“[^”]*” /, 'It '), { cause: error })
+    }
+    return addFileItem(root, srcPath, 'lut', fp, null, deps, name)
+  }
+  if (only === 'lut') throw new Error('Only .cube LUT files go on the LUTs tab.')
+
   let probe: ProbeInfo
   try {
     probe = await deps.probe(srcPath)
@@ -155,7 +170,20 @@ async function addOne(
   if (!kind) throw new Error("Only sounds, pictures and video can be shared, so it wasn't added.")
   if (only && kind !== only)
     throw new Error(`It isn't ${KIND_NOUN[only]}, so it belongs on the ${SHARED_KIND_LABELS[kind]} tab.`)
+  return addFileItem(root, srcPath, kind, fp, probe, deps, name)
+}
 
+/** Copy `srcPath` into a new item folder and write its record (removing the
+ *  folder again if anything fails). `probe` is null for a LUT. */
+async function addFileItem(
+  root: string,
+  srcPath: string,
+  kind: Exclude<SharedKind, 'text'>,
+  fp: Fingerprint,
+  probe: ProbeInfo | null,
+  deps: SharedDeps,
+  name?: string
+): Promise<{ item: SharedItem; existing: boolean }> {
   const id = newId()
   const dir = join(root, id)
   const file = safeFileName(basename(srcPath))
@@ -167,7 +195,7 @@ async function addOne(
     await fsp.mkdir(dir, { recursive: true })
     await fsp.copyFile(srcPath, join(dir, fileName))
     let preview: string | null = drawable ? fileName : null
-    if (kind !== 'sound' && !drawable) {
+    if (probe && kind !== 'sound' && !drawable) {
       await bestEffort(
         deps.thumbnail(join(dir, fileName), join(dir, THUMB), probe, kind === 'graphic'),
         `thumbnail for shared ${fileName}`,
@@ -183,7 +211,7 @@ async function addOne(
       addedAt: new Date().toISOString(),
       file: fileName,
       preview,
-      durationSec: kind === 'graphic' ? 0 : Math.max(0, probe.durationSec || 0),
+      durationSec: !probe || kind === 'graphic' ? 0 : Math.max(0, probe.durationSec || 0),
       fingerprint: fp,
       layers: []
     }

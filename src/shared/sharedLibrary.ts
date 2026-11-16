@@ -31,8 +31,10 @@ export const SHARED_FORMAT_VERSION = 1
 /** Each item's own record file, which no media file may be named. */
 export const SHARED_ITEM_JSON = 'item.json'
 
-/** The gallery tabs (Insert ▸ Shared ▸ …), in menu order. */
-export const SHARED_KINDS = ['sound', 'graphic', 'video', 'text'] as const
+/** The gallery tabs (Insert ▸ Shared ▸ …), in menu order. A `lut` is a colour
+ *  `.cube` table: it isn't inserted — a clip's or picture's Color section picks
+ *  it (copying it into the project's `luts/`, main/services/luts.ts). */
+export const SHARED_KINDS = ['sound', 'graphic', 'video', 'text', 'lut'] as const
 export type SharedKind = (typeof SHARED_KINDS)[number]
 
 /** A tab's label, and its menu row ("Sounds…"). */
@@ -40,8 +42,12 @@ export const SHARED_KIND_LABELS: Record<SharedKind, string> = {
   sound: 'Sounds',
   graphic: 'Graphics',
   video: 'Video',
-  text: 'Text'
+  text: 'Text',
+  lut: 'LUTs'
 }
+
+/** The file extension a shared LUT has. */
+export const LUT_EXTS = ['cube'] as const
 
 /** Longest item name kept (the template limit). */
 export const SHARED_NAME_MAX = TEMPLATE_NAME_MAX
@@ -70,8 +76,9 @@ export interface SharedItem {
   projectVersion?: number
 }
 
-/** Which tab a file of library kind `kind` goes in (null = can't be shared). */
-export function sharedKindOf(kind: MediaKind): Exclude<SharedKind, 'text'> | null {
+/** Which tab a file of library kind `kind` goes in (null = can't be shared).
+ *  A `.cube` is not media; it is recognised by its extension (`isLutPath`). */
+export function sharedKindOf(kind: MediaKind): Exclude<SharedKind, 'text' | 'lut'> | null {
   switch (kind) {
     case 'audio':
       return 'sound'
@@ -86,8 +93,11 @@ export function sharedKindOf(kind: MediaKind): Exclude<SharedKind, 'text'> | nul
 
 /** The file extensions the Add files… picker offers on tab `kind`. */
 export function sharedExtsFor(kind: Exclude<SharedKind, 'text'>): readonly string[] {
-  return kind === 'sound' ? AUDIO_EXTS : kind === 'graphic' ? IMAGE_EXTS : VIDEO_EXTS
+  return kind === 'sound' ? AUDIO_EXTS : kind === 'graphic' ? IMAGE_EXTS : kind === 'lut' ? LUT_EXTS : VIDEO_EXTS
 }
+
+/** Whether a file is a `.cube` colour table by its name. */
+export const isLutPath = (path: string): boolean => /\.cube$/i.test(path)
 
 /** Image types the gallery draws straight from the file (others get a thumb). */
 export const BROWSER_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'] as const

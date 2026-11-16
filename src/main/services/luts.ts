@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, promises as fsp } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { CubeError, parseCube, type CubeTable } from '@shared/cube'
+import type { ImportedLut } from '@shared/ipc'
 import { cleanTemplateName } from '@shared/templates'
 import { writeAtomically } from './atomicWrite'
 import { isLutFileName, lutPath, lutsRoot } from './projectLayout'
@@ -20,11 +21,7 @@ import { isLutFileName, lutPath, lutsRoot } from './projectLayout'
 /** Largest `.cube` taken (a 65-point table is about 8 MB of text; 256 points is ~400 MB). */
 export const MAX_LUT_BYTES = 64 * 1024 * 1024
 
-/** What an import gives the Inspector: the stored file and a name to show. */
-export interface ImportedLut {
-  file: string
-  name: string
-}
+export type { ImportedLut }
 
 /** The stored name for a table's bytes: 16 hex of their SHA-1, `.cube`. */
 export const lutFileFor = (bytes: Buffer): string =>

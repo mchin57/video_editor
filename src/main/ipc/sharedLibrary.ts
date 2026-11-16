@@ -3,7 +3,7 @@
  *  (services/sharedLibrary.ts; docs/SHARED-LIBRARY.md). */
 
 import { parse } from 'node:path'
-import { SHARED_KIND_LABELS, sharedExtsFor } from '@shared/sharedLibrary'
+import { SHARED_KIND_LABELS, isLutPath, sharedExtsFor } from '@shared/sharedLibrary'
 import { probeFile } from '../services/ffprobe'
 import { copyIntoProject, requireUsable } from '../services/mediaStore'
 import { requireSession } from '../services/projectSession'
@@ -52,6 +52,7 @@ export function registerSharedLibraryHandlers(): void {
     // (importGenerated dedupes by fingerprint).
     const s = requireSession()
     const { path, displayName } = await sharedFile(sharedRoot(), id)
+    if (isLutPath(path)) throw new Error('A LUT isn’t inserted: pick it in a clip’s Color section.')
     return copyIntoProject(path, displayName, s)
   })
 }

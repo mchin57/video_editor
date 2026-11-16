@@ -167,12 +167,17 @@ export const INVOKE_SCHEMAS = {
   instantiateTemplate: args(id),
 
   listShared: args(),
-  addSharedFilesDialog: args(z.enum(['sound', 'graphic', 'video'])),
+  addSharedFilesDialog: args(z.enum(['sound', 'graphic', 'video', 'lut'])),
   addSharedFromLibrary: args(id),
   saveSharedText: args(z.string(), z.array(z.unknown())),
   renameShared: args(id, z.string()),
   deleteShared: args(id),
   instantiateShared: args(id),
+
+  readLut: args(id),
+  importLutDialog: args(),
+  shareLut: args(id, z.string()),
+  copySharedLut: args(id),
 
   assistantStatus: args()
 } satisfies { [K in InvokeName]: z.ZodType<InvokeArgs<K>> }

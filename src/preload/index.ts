@@ -118,6 +118,12 @@ const api = {
   deleteShared: invoke('deleteShared'),
   instantiateShared: invoke('instantiateShared'),
 
+  // Colour LUTs (the project's luts/)
+  readLut: invoke('readLut'),
+  importLutDialog: invoke('importLutDialog'),
+  shareLut: invoke('shareLut'),
+  copySharedLut: invoke('copySharedLut'),
+
   // AI assistant: main asks the renderer to run store ops; the renderer answers.
   onAssistantRequest: subscribe('assistantRequest'),
   assistantRespond: send('assistantResponse'),

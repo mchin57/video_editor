@@ -84,6 +84,11 @@ export const IPC = {
   renameShared: 'shared:rename',
   deleteShared: 'shared:delete',
   instantiateShared: 'shared:instantiate',
+  // Colour LUTs in the open project's luts/ (shared/cube.ts, main/services/luts.ts)
+  readLut: 'luts:read',
+  importLutDialog: 'luts:importDialog',
+  shareLut: 'luts:share',
+  copySharedLut: 'luts:copyShared',
   // AI assistant: main ⇄ renderer bridge + status for Settings
   assistantResponse: 'assistant:response',
   assistantStatus: 'assistant:status'
@@ -230,6 +235,12 @@ type SharedItem = import('./sharedLibrary').SharedItem
 type SharedAddResult = import('./sharedLibrary').SharedAddResult
 type SharedFileKind = Exclude<import('./sharedLibrary').SharedKind, 'text'>
 
+/** A LUT taken into the project: its stored name in `luts/` and a name to show. */
+export interface ImportedLut {
+  file: string
+  name: string
+}
+
 export interface IpcInvoke {
   getCapabilities: Fn<[], import('./ffmpeg').FfmpegCapabilities>
   getDataDir: Fn<[], string>
@@ -349,6 +360,18 @@ export interface IpcInvoke {
   deleteShared: Fn<[id: string], SharedItem[]>
   /** Item `id`'s file copied into the open project's library. */
   instantiateShared: Fn<[id: string], MediaAsset>
+
+  // Colour LUTs — `.cube` tables copied into the open project's `luts/`
+  // (content-named, stored once). A file that isn't a usable table is refused
+  // with the reason (the call rejects).
+  /** The parsed table `file` names in the open project's `luts/`. */
+  readLut: Fn<[file: string], import('./cube').CubeTable>
+  /** Pick a `.cube` and copy it in; null when the dialog is canceled. */
+  importLutDialog: Fn<[], ImportedLut | null>
+  /** Put the project's LUT `file` in the shared library as `name`. */
+  shareLut: Fn<[file: string, name: string], SharedAddResult>
+  /** Shared LUT `id` copied into the open project's `luts/`. */
+  copySharedLut: Fn<[id: string], ImportedLut>
 
   /** The AI assistant's pipe server status, for Settings. */
   assistantStatus: Fn<[], import('./assistant/protocol').AssistantStatus>

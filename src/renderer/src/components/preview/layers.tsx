@@ -49,9 +49,12 @@ import {
   layerRotation,
   flipTransform,
   videoFillStyle,
+  lookCssFilter,
   mediaAspect,
   TintFilter
 } from './geometry'
+import { GradeCanvas, GradeNotice, type GradeStatus } from './GradeCanvas'
+import { needsGradeTable } from '@shared/grade'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
@@ -90,6 +93,9 @@ function VideoLayerView({
   // doesn't drift past it (and trigger reseek jitter).
   const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
+  // A look the CSS filters can't draw goes through the colour table (GradeCanvas).
+  const graded = needsGradeTable(content)
+  const [grade, setGrade] = useState<GradeStatus>('ok')
 
   // Clip speed: the element plays at the same rate the shared time mapping
   // advances, so the drift-resync stays quiet. Constant speed sets the rate
@@ -144,7 +150,7 @@ function VideoLayerView({
           src={videoProxyUrl(asset)}
           muted={silenced}
           playsInline
-          style={fill}
+          style={graded && grade !== 'unavailable' ? { ...fill, opacity: 0 } : fill}
           onLoadedMetadata={() => {
             const v = ref.current
             if (v) {
@@ -153,7 +159,9 @@ function VideoLayerView({
             }
           }}
         />
+        {graded && <GradeCanvas look={content} video={ref} style={fill} onStatus={setGrade} />}
       </div>
+      {graded && <GradeNotice status={grade} lutName={content.lut?.name} />}
       {/* Outside the flip wrapper: the overlay mirrors its points itself, so
           angle labels never read backwards. */}
       <PoseOverlay layer={layer} content={content} asset={asset} time={time} editable={editable} />
@@ -459,6 +467,7 @@ function StackImage({
   onMoveDown
 }: KindViewProps<ImageContent>): JSX.Element {
   const asset = assetById.get(content.mediaId)
+  const [grade, setGrade] = useState<GradeStatus>('ok')
   // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
   const base = mediaAspect(asset, {})
   const cr = content.crop
@@ -475,6 +484,8 @@ function StackImage({
   // box, so swap its width/height (cqw/cqh resolve to the box via its
   // container context) for odd quarter-turns.
   const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
+  const graded = needsGradeTable(content)
+  const filter = lookCssFilter(content)
   const imgStyle: CSSProperties = cr
     ? {
         position: 'absolute',
@@ -484,9 +495,19 @@ function StackImage({
         top: `${-(cr.y / cr.h) * 100}%`,
         objectFit: 'fill',
         maxWidth: 'none',
-        opacity: content.opacity
+        opacity: content.opacity,
+        filter
       }
-    : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
+    : {
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        objectFit: 'fill',
+        opacity: content.opacity,
+        filter
+      }
+  const src = imageUrl(asset ?? { id: content.mediaId })
   return (
     <div
       style={box}
@@ -494,6 +515,7 @@ function StackImage({
       data-resizebox={selected ? '' : undefined}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
+      {graded ? <GradeNotice status={grade} lutName={content.lut?.name} /> : <TintFilter tint={content.tint} />}
       <div
         style={{
           position: 'absolute',
@@ -505,7 +527,13 @@ function StackImage({
           overflow: 'hidden'
         }}
       >
-        <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} style={imgStyle} />
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          style={graded && grade !== 'unavailable' ? { ...imgStyle, opacity: 0 } : imgStyle}
+        />
+        {graded && <GradeCanvas look={content} imageSrc={src} style={imgStyle} onStatus={setGrade} />}
       </div>
     </div>
   )

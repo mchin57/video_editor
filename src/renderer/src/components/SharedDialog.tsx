@@ -38,7 +38,8 @@ const TAB_HINT: Record<SharedKind, string> = {
   sound: 'Sound effects and music beds you reuse. Insert puts one on the audio track at the playhead.',
   graphic: 'Logos, stickers and overlays. Insert puts one on the timeline at the playhead for 3 seconds.',
   video: 'Clips you reuse, like an intro or an end card. Insert puts one on the timeline at the playhead.',
-  text: 'Text you reuse, saved exactly as it looks (style, position, size, animation, length). Insert drops it at the playhead.'
+  text: 'Text you reuse, saved exactly as it looks (style, position, size, animation, length). Insert drops it at the playhead.',
+  lut: 'Colour LUTs (.cube) you reuse. Pick one in a clip’s or picture’s Color section; it copies into the project.'
 }
 
 const close = (): void => useUi.getState().setSharedOpen(null)
@@ -295,7 +296,9 @@ function Gallery({ initialTab, addMediaId }: { initialTab: SharedKind; addMediaI
               ? 'Loading…'
               : tab === 'text'
                 ? 'No shared text yet. Select text layers on the timeline, name them above and Save.'
-                : `No shared ${SHARED_KIND_LABELS[tab].toLowerCase()} yet. Use Add files…, or right-click a clip in the Library and choose Add to shared library.`}
+                : tab === 'lut'
+                  ? 'No shared LUTs yet. Use Add files…, or Save to shared library in a clip’s Color section.'
+                  : `No shared ${SHARED_KIND_LABELS[tab].toLowerCase()} yet. Use Add files…, or right-click a clip in the Library and choose Add to shared library.`}
           </p>
         ) : (
           <ul className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto" data-testid="shared-list">
@@ -354,20 +357,23 @@ function Gallery({ initialTab, addMediaId }: { initialTab: SharedKind; addMediaI
                     </span>
                   )}
                   <div className="mt-auto flex flex-wrap gap-1 pt-1">
-                    <button
-                      type="button"
-                      data-testid={`shared-insert-${item.id}`}
-                      disabled={busy}
-                      onClick={(e) => insert(item, e.shiftKey)}
-                      title={
-                        item.kind === 'text'
-                          ? undefined
-                          : 'Shift-click inserts it at the playhead: everything after moves later'
-                      }
-                      className={`rounded-md bg-sky-500/90 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-400 ${disabledCls}`}
-                    >
-                      Insert
-                    </button>
+                    {/* A LUT isn't placed on the timeline: a Color section picks it. */}
+                    {item.kind !== 'lut' && (
+                      <button
+                        type="button"
+                        data-testid={`shared-insert-${item.id}`}
+                        disabled={busy}
+                        onClick={(e) => insert(item, e.shiftKey)}
+                        title={
+                          item.kind === 'text'
+                            ? undefined
+                            : 'Shift-click inserts it at the playhead: everything after moves later'
+                        }
+                        className={`rounded-md bg-sky-500/90 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-400 ${disabledCls}`}
+                      >
+                        Insert
+                      </button>
+                    )}
                     <button
                       type="button"
                       data-testid={`shared-rename-${item.id}`}
@@ -451,7 +457,9 @@ function Preview({ item, playing, onPlay }: { item: SharedItem; playing: boolean
           className="max-h-full max-w-full object-contain"
         />
       ) : (
-        <span className="text-[10px] text-zinc-500">{item.kind === 'video' ? 'Video' : 'Picture'}</span>
+        <span className="text-[10px] text-zinc-500">
+          {item.kind === 'video' ? 'Video' : item.kind === 'lut' ? 'LUT' : 'Picture'}
+        </span>
       )}
     </div>
   )
