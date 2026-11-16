@@ -7,11 +7,14 @@ import {
   cleanTemplateName,
   isTemplateFileName,
   mapTemplateFiles,
+  mapTemplateLuts,
   migrateTemplate,
   parseTemplateShare,
   sanitizeTemplate,
   templateDuration,
+  templateAllFiles,
   templateFiles,
+  templateLutFiles,
   templatePreviewTime,
   templateSummary,
   type ReelTemplate
@@ -93,6 +96,55 @@ describe('template files', () => {
   it('refuses a template whose files differ only in case (one file on Windows)', () => {
     const clash = { ...withFiles, layers: [...withFiles.layers, image('i2', 'STING.MP3')] }
     expect(sanitizeTemplate(clash)).toBeNull()
+  })
+})
+
+describe('LUTs in a template (#55)', () => {
+  const lut = { file: 'warm.cube', name: 'Warm', strength: 0.6 }
+  const pic = image('i1', 'logo.png')
+  const withLuts: ReelTemplate = {
+    ...withFiles,
+    clipEffect: {
+      ...rightBack.clipEffect!,
+      color: { brightness: 0, contrast: 1, saturation: 1, temperature: 0.4, greenMagenta: -0.1, vibrance: 0.2 },
+      lut
+    },
+    layers: [...rightBack.layers, { ...pic, content: { ...pic.content, lut: { ...lut, file: 'cool.cube' } } } as Layer]
+  }
+
+  it('lists the LUT files apart from the media, and both in templateAllFiles', () => {
+    expect(templateFiles(withLuts)).toEqual(['logo.png', 'sting.mp3'])
+    expect(templateLutFiles(withLuts)).toEqual(['warm.cube', 'cool.cube'])
+    expect(templateAllFiles(withLuts)).toEqual(['logo.png', 'sting.mp3', 'warm.cube', 'cool.cube'])
+  })
+
+  it('maps LUT files on their own; a null drops that LUT and keeps the rest of the look', () => {
+    const mapped = mapTemplateLuts(withLuts, (f) => `p-${f}`)
+    expect(mapped.clipEffect!.lut).toEqual({ ...lut, file: 'p-warm.cube' })
+    expect(templateLutFiles(mapped)).toEqual(['p-warm.cube', 'p-cool.cube'])
+    expect(templateFiles(mapped)).toEqual(templateFiles(withLuts))
+    const dropped = mapTemplateLuts(withLuts, () => null)
+    expect(dropped.clipEffect!.lut).toBeNull()
+    expect(dropped.clipEffect!.color).toEqual(withLuts.clipEffect!.color)
+  })
+
+  it('is a valid template; a LUT that is not a bare .cube name, or a mistyped control, is refused', () => {
+    expect(sanitizeTemplate(withLuts)).not.toBeNull()
+    const bad = (fx: object) => sanitizeTemplate({ ...withLuts, clipEffect: { ...withLuts.clipEffect!, ...fx } })
+    expect(bad({ lut: { ...lut, file: '../x.cube' } })).toBeNull()
+    expect(bad({ lut: { ...lut, file: 'x.png' } })).toBeNull()
+    expect(bad({ lut: { ...lut, strength: 'full' } })).toBeNull()
+    expect(bad({ color: { brightness: 0, contrast: 1, saturation: 1, vibrance: '1' } })).toBeNull()
+    const picBad = { ...withLuts, layers: [{ ...pic, content: { ...pic.content, lut: { file: 'a/b.cube' } } }] }
+    expect(sanitizeTemplate(picBad)).toBeNull()
+  })
+
+  it('a share file must carry its LUTs too, and the summary says LUT', () => {
+    const files = { 'logo.png': 'TE9HTw==', 'sting.mp3': 'U1Q=', 'warm.cube': 'Q1VCRQ==' }
+    expect(parseTemplateShare({ format: 'reel-template', version: 1, template: withLuts, files })).toEqual({
+      error: 'That template is missing its file "cool.cube".'
+    })
+    expect(templateSummary(withLuts)).toContain('LUT')
   })
 })
 

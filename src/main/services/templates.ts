@@ -22,10 +22,13 @@ import {
   TEMPLATE_JSON,
   isTemplateFileName,
   mapTemplateFiles,
+  mapTemplateLuts,
   migrateTemplate,
   parseTemplateShare,
   sanitizeTemplate,
+  templateAllFiles,
   templateFiles,
+  templateLutFiles,
   type ReelTemplate,
   type TemplateEntry,
   type TemplateShareFile
@@ -69,7 +72,8 @@ async function readUserTemplate(root: string, id: string): Promise<ReelTemplate 
     log.warn(`template ${id} is damaged; skipped`)
     return null
   }
-  return mapTemplateFiles(migrateTemplate(t), (f) => (existsSync(join(dir, f)) ? f : null))
+  const here = (f: string): string | null => (existsSync(join(dir, f)) ? f : null)
+  return mapTemplateLuts(mapTemplateFiles(migrateTemplate(t), here), here)
 }
 
 /** Every user template, by name. */
@@ -154,13 +158,16 @@ const fileNameFor = (name: string, taken: Set<string>): string => {
 /**
  * Save a template made from the selection. Its media references are LIBRARY
  * ids; `resolve` gives each one's original (path + display name), which is
- * COPIED into the template. A user template with the same name is replaced
- * (like saved text styles). Returns the updated list.
+ * COPIED into the template. Its LUT references are the project's `luts/`
+ * names; `lutPath` gives each one's file (null = gone: that LUT is left out),
+ * copied in too. A user template with the same name is replaced (like saved
+ * text styles). Returns the updated list.
  */
 export async function saveTemplate(
   root: string,
   template: ReelTemplate,
-  resolve: (mediaId: string) => Promise<Pick<MediaAsset, 'originalPath' | 'fileName'>>
+  resolve: (mediaId: string) => Promise<Pick<MediaAsset, 'originalPath' | 'fileName'>>,
+  lutPath: (file: string) => string | null = () => null
 ): Promise<TemplateEntry[]> {
   const files = new Map<string, FileSource>()
   const taken = new Set<string>([TEMPLATE_JSON])
@@ -171,9 +178,18 @@ export async function saveTemplate(
     files.set(name, { from: asset.originalPath })
     byMedia.set(mediaId, name)
   }
+  const byLut = new Map<string, string>()
+  for (const file of templateLutFiles(template)) {
+    const from = lutPath(file)
+    if (!from || !existsSync(from)) continue
+    const name = fileNameFor(file, taken)
+    files.set(name, { from })
+    byLut.set(file, name)
+  }
   const id = newId()
+  const withMedia = mapTemplateFiles(template, (m) => byMedia.get(m) ?? null)
   const t: ReelTemplate = {
-    ...mapTemplateFiles(template, (m) => byMedia.get(m) ?? null),
+    ...mapTemplateLuts(withMedia, (f) => byLut.get(f) ?? null),
     id,
     formatVersion: TEMPLATE_FORMAT_VERSION,
     projectVersion: template.projectVersion ?? PROJECT_VERSION
@@ -210,14 +226,14 @@ export async function setTemplateSound(
   if (!base.audio[slot]) throw new Error('That template has no such sound slot.')
   const t: ReelTemplate = found.builtIn ? { ...base, id: newId(), basedOn: base.id } : base
   const dir = dirOf(root, t.id)!
-  const taken = new Set([TEMPLATE_JSON.toLowerCase(), ...templateFiles(t).map((f) => f.toLowerCase())])
+  const taken = new Set([TEMPLATE_JSON.toLowerCase(), ...templateAllFiles(t).map((f) => f.toLowerCase())])
   const name = fileNameFor(basename(srcPath), taken)
   const old = t.audio[slot].file
   const next: ReelTemplate = { ...t, audio: t.audio.map((a, i) => (i === slot ? { ...a, file: name } : a)) }
   // A built-in copy also carries any other files the built-in has (none today).
   const files = new Map<string, FileSource>([[name, { from: srcPath }]])
   await writeTemplate(root, next, files)
-  if (old && !templateFiles(next).includes(old)) {
+  if (old && !templateAllFiles(next).includes(old)) {
     await bestEffort(fsp.rm(join(dir, old), { force: true }), `removing replaced sound ${old}`, log)
   }
   return listTemplates(root)
@@ -227,7 +243,7 @@ export async function setTemplateSound(
 export async function exportTemplate(root: string, id: string, destPath: string): Promise<void> {
   const { t } = await findTemplate(root, id)
   const files: Record<string, string> = {}
-  for (const f of templateFiles(t)) {
+  for (const f of templateAllFiles(t)) {
     files[f] = (await fsp.readFile(join(root, t.id, f))).toString('base64')
   }
   // On the other side it is simply the user's own template.
@@ -270,12 +286,17 @@ export async function importTemplate(root: string, srcPath: string): Promise<Tem
  * Template `id` ready to drop into the open project: each of its media files
  * adopted into the project's library through `adopt` (a COPY, so the project
  * never points into the templates folder), and its references swapped for the
- * new media ids. A missing file leaves its slot empty.
+ * new media ids. Its LUTs go into the project's `luts/` through `adoptLut`
+ * (which returns the stored name). A missing file leaves its slot empty / its
+ * LUT out.
  */
 export async function instantiateTemplate(
   root: string,
   id: string,
-  adopt: (copyOf: string, displayName: string) => Promise<MediaAsset>
+  adopt: (copyOf: string, displayName: string) => Promise<MediaAsset>,
+  adoptLut: (path: string) => Promise<string> = async () => {
+    throw new Error('No project to copy a LUT into.')
+  }
 ): Promise<{ template: ReelTemplate; assets: MediaAsset[] }> {
   const { t } = await findTemplate(root, id)
   const assets: MediaAsset[] = []
@@ -287,5 +308,11 @@ export async function instantiateTemplate(
     assets.push(asset)
     byFile.set(f, asset.id)
   }
-  return { template: mapTemplateFiles(t, (f) => byFile.get(f) ?? null), assets }
+  const byLut = new Map<string, string>()
+  for (const f of templateLutFiles(t)) {
+    const path = join(root, t.id, f)
+    if (existsSync(path)) byLut.set(f, await adoptLut(path))
+  }
+  const withMedia = mapTemplateFiles(t, (f) => byFile.get(f) ?? null)
+  return { template: mapTemplateLuts(withMedia, (f) => byLut.get(f) ?? null), assets }
 }

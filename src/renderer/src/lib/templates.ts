@@ -26,6 +26,7 @@ import { PROJECT_VERSION, isNeutralColor } from '@shared/project'
 import { layerTransformAt, playedVideoDuration, videoTimelineTime } from '@shared/layers'
 import { audioSourceAt } from '@shared/audioTiming'
 import { isNeutralTint } from '@shared/tint'
+import { activeLut } from '@shared/grade'
 import {
   TEMPLATE_FORMAT_VERSION,
   cleanTemplateName,
@@ -163,6 +164,8 @@ export function applyClipEffect(
   }
   if (fx.color && !isNeutralColor(fx.color)) content.color = { ...fx.color }
   if (fx.tint && !isNeutralTint(fx.tint)) content.tint = { ...fx.tint }
+  // Its LUT is already the project's copy (`mapTemplateLuts` on instantiate).
+  if (fx.lut) content.lut = { ...fx.lut }
   // The zoom runs across the whole head hold (the rest of an earlier hold included).
   const zoomSec = freezes.find((f) => Math.abs(f.atSec - vc.inSec) < EPS)!.holdSec
   const base = { x: at.x, y: at.y, scale: at.scale }
@@ -286,7 +289,9 @@ function captureEffect(l: Layer): { fx: TemplateClipEffect; originSec: number } 
       holdSec: hold.holdSec,
       zoom: zoomed && a.scale > 0 ? { scale: b.scale / a.scale, dx: b.x - a.x, dy: b.y - a.y } : null,
       color: c.color && !isNeutralColor(c.color) ? { ...c.color } : null,
-      tint: c.tint && !isNeutralTint(c.tint) ? { ...c.tint } : null
+      tint: c.tint && !isNeutralTint(c.tint) ? { ...c.tint } : null,
+      // The project's LUT file name here; main copies it into the template on save.
+      ...(activeLut(c.lut) ? { lut: { ...c.lut! } } : {})
     }
   }
 }

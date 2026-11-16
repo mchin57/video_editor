@@ -225,3 +225,71 @@ describe('instantiateTemplate', () => {
     expect(template.audio[0].file).toBeNull()
   })
 })
+
+describe('LUTs in templates (#55)', () => {
+  /** The selection with a frozen clip's effect and the picture both using the project's LUT. */
+  function graded(): ReelTemplate {
+    const lut = { file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 }
+    const t = selection('Warm look')
+    return {
+      ...t,
+      clipEffect: {
+        holdSec: 1,
+        zoom: null,
+        color: { brightness: 0, contrast: 1, saturation: 1, temperature: 0.4 },
+        tint: null,
+        lut
+      },
+      layers: t.layers.map((l) => ({ ...l, content: { ...l.content, lut } }) as typeof l)
+    }
+  }
+  const projectLuts = (): string => {
+    const d = join(dir, 'project', 'luts')
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, '0123456789abcdef.cube'), 'LUT_1D_SIZE 2\n0 0 0\n1 1 1\n')
+    return d
+  }
+
+  it('saves its OWN copy of the LUT, carries it through the share file, and drops it into the project', async () => {
+    const luts = projectLuts()
+    await saveTemplate(root, graded(), resolve, (f) => join(luts, f))
+    const [t] = await mine()
+    expect(t.clipEffect!.lut).toEqual({ file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 })
+    expect(t.clipEffect!.color).toMatchObject({ temperature: 0.4 })
+    expect(readdirSync(join(root, t.id)).sort()).toEqual(
+      ['0123456789abcdef.cube', 'ding.mp3', 'logo.png', 'template.json'].sort()
+    )
+    rmSync(luts, { recursive: true })
+
+    // Share file round trip.
+    const share = join(dir, 'warm.reeltemplate')
+    await exportTemplate(root, t.id, share)
+    expect(Object.keys(JSON.parse(readFileSync(share, 'utf8')).files)).toContain('0123456789abcdef.cube')
+    await importTemplate(root, share)
+    const copy = (await mine()).find((x) => x.id !== t.id)!
+    expect(existsSync(join(root, copy.id, '0123456789abcdef.cube'))).toBe(true)
+
+    // Dropping: the LUT goes through adoptLut (the project's luts/), the picture's too.
+    const adoptedLuts: string[] = []
+    const { template } = await instantiateTemplate(
+      root,
+      t.id,
+      async (path, name) => ({ id: `lib-${name}`, originalPath: path }) as MediaAsset,
+      async (path) => {
+        adoptedLuts.push(path)
+        return 'fedcba9876543210.cube'
+      }
+    )
+    expect(adoptedLuts).toEqual([join(root, t.id, '0123456789abcdef.cube')])
+    expect(template.clipEffect!.lut!.file).toBe('fedcba9876543210.cube')
+    expect(template.layers[0].content).toMatchObject({ lut: { file: 'fedcba9876543210.cube', strength: 0.6 } })
+  })
+
+  it('leaves out a LUT whose project file has gone (the rest of the look stays)', async () => {
+    await saveTemplate(root, graded(), resolve, () => null)
+    const [t] = await mine()
+    expect(t.clipEffect!.lut).toBeNull()
+    expect(t.clipEffect!.color).toMatchObject({ temperature: 0.4 })
+    expect((t.layers[0].content as { lut?: unknown }).lut).toBeNull()
+  })
+})

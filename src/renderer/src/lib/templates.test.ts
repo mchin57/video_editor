@@ -346,6 +346,33 @@ describe('templateFromSelection', () => {
     ])
   })
 
+  it('carries the newer controls and a LUT through a drop and back (#105, #55)', () => {
+    const look = {
+      ...fx,
+      color: { brightness: 0.1, contrast: 1, saturation: 1, temperature: 0.4, greenMagenta: -0.2, vibrance: 0.3 },
+      lut: { file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 }
+    }
+    const { comp, added } = applyTemplate(edit(), tpl({ clipEffect: look }), 4, media, makeId)
+    const held = vid(comp, added[0].id)
+    expect(held.content.color).toEqual(look.color)
+    expect(held.content.lut).toEqual(look.lut)
+    expect(videos(comp)[0].content.lut).toBeUndefined()
+    const got = templateFromSelection(comp, added, 'Warm hold', 'new', () => 'Sting')
+    if ('error' in got) throw new Error(got.error)
+    expect(got.template.clipEffect).toMatchObject({ color: look.color, lut: look.lut })
+    // A LUT at strength 0 isn't carried.
+    const off = applyTemplate(
+      edit(),
+      tpl({ clipEffect: { ...look, lut: { ...look.lut, strength: 0 } } }),
+      4,
+      media,
+      makeId
+    )
+    const again = templateFromSelection(off.comp, off.added, 'Off', 'new', () => 'Sting')
+    if ('error' in again) throw new Error(again.error)
+    expect(again.template.clipEffect!.lut).toBeUndefined()
+  })
+
   it('times overlays from the earliest piece when no clip is frozen', () => {
     const c = {
       ...createEmptyComposition(),
