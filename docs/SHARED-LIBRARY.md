@@ -78,15 +78,19 @@ not inserted on the timeline: a clip's or picture's **Color** section picks it.
 
 - **Add files…** on the LUTs tab takes `.cube` files only. Each is checked by READING it
   (`parseCube`, shared/cube.ts), never probed; a broken table is refused with the reason
-  (e.g. "the table should have 8 entries…"), and a `.cube` added on another tab is sent to
-  the LUTs tab. The Color section's **Save to shared library** adds the clip's own LUT
+  (e.g. "the table should have 8 entries…"). A `.cube` added on another tab is NOT added:
+  it is listed as skipped with the reason "It isn't a sound, so it belongs on the LUTs tab"
+  ("a picture", "a video" on those tabs), like any file added on the wrong tab — unless that
+  table is already in the library, which is reported as already there — and a non-`.cube`
+  file on the LUTs tab is skipped with "Only .cube LUT files go on the LUTs tab". The Color
+  section's **Save to shared library** adds the clip's own LUT
   under its name. The same file is never added twice (fingerprint), as for media.
 - The Color section's LUT list shows the shared LUTs; picking one **copies it into the
   project's `luts/`** (named by its content, stored once), so a project never points into
   the shared folder.
 - A LUT card has Rename and Delete, no Insert.
 
-Covered by `main/services/sharedLibrary.test.ts` (adding, refusing) and
+Covered by `main/services/sharedLibrary.test.ts` (adding, refusing a broken or misfiled file) and
 `e2e/colorTable.spec.ts` (Save to shared library, picking it back in the Inspector). The
 dialog's LUTs tab itself is not driven by an e2e.
 
