@@ -129,22 +129,38 @@ export function useTileDrags({
     if (!before || !comp0) return
     const tile = tileOf(comp0, ref)
     if (!tile) return
-    // Right button: select (unless it is already part of the selection) and
-    // let the context menu open — never start a move.
-    if (e.button === 2) {
-      if (!selKeys.has(refKey(ref))) selectItems(expandGroup(comp0, ref), ref)
-      return
-    }
-    if ((e.ctrlKey || e.metaKey) && tile.linkable) {
-      toggleSelected(comp0, ref)
-      return
-    }
+    if (pressOnlySelects(e, comp0, ref, tile.linkable)) return
     setPlaying(false)
     // Grabbing something that's already part of a multi-selection drags the whole
     // set; otherwise the press selects this tile's group (or just this tile).
     const refs = selKeys.has(refKey(ref)) && selection.length > 1 ? selection : expandGroup(comp0, ref)
     selectItems(refs, ref)
     startGroupMove(e, before, comp0, refs, ref, onClick)
+  }
+
+  /**
+   * The presses on a tile that only SELECT, shared by the tile body and the
+   * handles on it (a transition's grip, a corner fade handle), so they all
+   * behave alike: the right button selects the tile (or keeps the selection it
+   * is already part of — the context menu acts on it) and never drags;
+   * Ctrl/Cmd toggles the tile's group in the multi-selection. True when the
+   * press was one of these (nothing more to do).
+   */
+  const pressOnlySelects = (
+    e: ReactPointerEvent,
+    comp0: Composition,
+    ref: TimelineItemRef,
+    linkable: boolean
+  ): boolean => {
+    if (e.button === 2) {
+      if (!selKeys.has(refKey(ref))) selectItems(expandGroup(comp0, ref), ref)
+      return true
+    }
+    if ((e.ctrlKey || e.metaKey) && linkable) {
+      toggleSelected(comp0, ref)
+      return true
+    }
+    return false
   }
 
   /** Ctrl/Cmd-click: add this tile's whole group to the selection, or drop it if
@@ -386,11 +402,13 @@ export function useTileDrags({
   const startTransitionDrag = (e: ReactPointerEvent, layer: Layer, side: TransitionSide): void => {
     e.stopPropagation()
     e.preventDefault()
-    setPlaying(false)
     const before = useProject.getState().project
     const comp0 = getActiveComp()
     if (!before || !comp0) return
     const ref: TimelineItemRef = { kind: 'layer', id: layer.id }
+    // A right-press or Ctrl/Cmd-click selects exactly as on the tile body.
+    if (pressOnlySelects(e, comp0, ref, tileOf(comp0, ref)?.linkable ?? false)) return
+    setPlaying(false)
     selectItems(expandGroup(comp0, ref), ref)
     const tr = transitionOf(layer, side)
     const sec0 = tr?.sec ?? 0

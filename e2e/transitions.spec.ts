@@ -230,6 +230,54 @@ test('a transition’s wedge never blocks the tile: the edge trims, the wedge bo
   expect(await historyLen(page)).toBe(before + 2)
 })
 
+test('a grip or corner handle selects like the tile: right-press keeps the selection (Add transition works), Ctrl toggles', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  await page.evaluate(() => {
+    const L = (id: string) => ({ kind: 'layer' as const, id })
+    window.__reelStores.useProject.getState().applyTransition([L('A'), L('B')], 'dissolve')
+  })
+  const selectedLayers = (): Promise<string[]> =>
+    page.evaluate(() =>
+      window.__reelStores.useUi
+        .getState()
+        .selection.filter((r) => r.kind === 'layer')
+        .map((r) => r.id)
+        .sort()
+    )
+  const before = await historyLen(page)
+
+  // Ctrl/Cmd-click on B's grip adds B to the selection, as on the tile body.
+  await page.getByTestId('tile-layer-A').click({ position: { x: 90, y: 14 } })
+  await page.getByTestId('transition-grip-in-B').click({ modifiers: ['Control'] })
+  expect(await selectedLayers()).toEqual(['A', 'B'])
+
+  // A right-press on it, even one that moves, keeps that selection and never drags.
+  const g = (await page.getByTestId('transition-grip-in-B').boundingBox())!
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2)
+  await page.mouse.down({ button: 'right' })
+  await page.mouse.move(g.x + g.width / 2 - 30, g.y + g.height / 2, { steps: 5 })
+  await page.mouse.up({ button: 'right' })
+  expect(await selectedLayers()).toEqual(['A', 'B'])
+  expect((await layerOf(page, 'B')).transitionIn).toEqual({ kind: 'dissolve', sec: 0.5 })
+  expect(await historyLen(page)).toBe(before)
+  // (Close a context menu if the release opened one; Escape with none open deselects.)
+  if ((await page.getByTestId('context-menu').count()) > 0) await page.keyboard.press('Escape')
+
+  // Ctrl-select B and C, right-click C's top-left fade handle: the menu's
+  // Add transition acts on the pair (the press did not narrow the selection).
+  await page.getByTestId('tile-layer-B').click({ position: { x: 90, y: 14 } })
+  await page.getByTestId('tile-layer-C').click({ position: { x: 90, y: 14 }, modifiers: ['Control'] })
+  await page.getByTestId('tile-layer-C').hover({ position: { x: 90, y: 14 } })
+  await page.getByTestId('fade-handle-in-C').click({ button: 'right' })
+  expect(await selectedLayers()).toEqual(['B', 'C'])
+  await page.getByTestId('ctx-add-transition').click()
+  await page.getByTestId('ctx-transition-dipBlack').click()
+  expect((await layerOf(page, 'B')).transitionOut).toEqual({ kind: 'dipBlack', sec: 0.5 })
+  expect((await layerOf(page, 'C')).transitionIn).toEqual({ kind: 'dipBlack', sec: 0.5 })
+})
+
 test('a fade at a clip’s end: the Inspector field, and the tile’s top corner (one undo step); the preview fades', async ({
   appPage: page
 }) => {
