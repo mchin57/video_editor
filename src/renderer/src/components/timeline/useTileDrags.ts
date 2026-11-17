@@ -4,8 +4,8 @@
  * there, closing the hole it left), and trim an edge — of a whole link
  * group / selection through `trimItemsBy`, or of a lone tile through its own
  * freeze- and speed-aware path — and set a freeze's hold from its overlay's
- * edge, and change a transition's length from its wedge (or pull a fade out of
- * a tile's top corner). Every drag is one undo step (`commitLive`) and
+ * edge, and change a transition's length from its wedge's grip (or pull a fade
+ * out of a tile's top corner). Every drag is one undo step (`commitLive`) and
  * works from its press-time snapshot. The tile rules live in `lib/links.ts`
  * and `lib/timeline.ts`; e2e: link, freezeTrim, timelineInteractions,
  * edgeScrollShrink, keybinds, shiftDragInsert.
@@ -374,13 +374,14 @@ export function useTileDrags({
   }
 
   /**
-   * Drag a transition's wedge — or a tile's top corner, where there is none, to
-   * pull a fade out of that edge. Live from the press-time snapshot, one undo
-   * step on release; a press without a drag only selects the tile. The wedge
-   * edge that moves follows the pointer: a fade in grows to the right, a fade
-   * out to the left, and a pair (cross dissolve / dip) grows LEFT — the
-   * incoming clip slides in under the pointer (`setTransitionLength`). A fade
-   * dragged below half the minimum length is removed (`setFade`).
+   * Drag a transition's GRIP (the inner tip of its wedge — the wedge itself
+   * lets presses through to the tile) — or a tile's top corner, where there is
+   * none, to pull a fade out of that edge. Live from the press-time snapshot,
+   * one undo step on release; a press without a drag only selects the tile. A
+   * fade in grows to the right, a fade out to the left (the grip follows the
+   * pointer), and a pair (cross dissolve / dip) grows LEFT — the incoming clip
+   * slides in with the pointer (`setTransitionLength`). A fade dragged below
+   * half the minimum length is removed (`setFade`).
    */
   const startTransitionDrag = (e: ReactPointerEvent, layer: Layer, side: TransitionSide): void => {
     e.stopPropagation()

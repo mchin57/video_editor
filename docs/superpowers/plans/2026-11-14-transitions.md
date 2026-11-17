@@ -65,6 +65,20 @@ Taken as defaults, not asked:
 - Removing a transition does NOT slide the clip back out; it leaves the overlap as a
   plain overlap (one undo step undoes the whole apply).
 
+## Owner decisions after the review (2026-11-17)
+
+5. **A dip's colour card sits only behind the clips**, sized to the two clips' boxes and
+   following their position, scale, rotation and keyframes, so a picture-in-picture dip
+   doesn't blank the main video underneath. (Not a full-frame card.)
+6. **A clip trimmed shorter than its transition keeps the transition's length, and the
+   Inspector warns** that the clip never reaches full opacity. Nothing is clamped.
+7. **Resizing a dissolve moves only tiles after the cut:** the incoming clip, its link
+   group, and tiles that start at or after the incoming clip's ORIGINAL start. A tile
+   that starts inside the overlap (an unlinked caption over the outgoing clip's last
+   words) stays with the outgoing clip.
+8. **Fades stay linear.** The automatic crossfade dips about 3 dB in the middle; an
+   equal-power curve is a separate change for later.
+
 ## Phases
 
 **Phase 0: real-ffmpeg checks.**

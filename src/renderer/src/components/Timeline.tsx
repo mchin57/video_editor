@@ -391,7 +391,7 @@ export function Timeline(): JSX.Element {
         }}
         {...descHoverProps(asset)}
         title={linked ? `${layerLabel(l)} · linked` : layerLabel(l)}
-        className={`group absolute flex cursor-move items-start gap-1 overflow-hidden rounded border pl-1 ${
+        className={`group isolate absolute flex cursor-move items-start gap-1 overflow-hidden rounded border pl-1 ${
           selected ? st.sel : st.block
         } ${l.hidden ? 'opacity-40' : ''}`}
         style={{ left, width, top: laneTop(laneKey) + (rows.get(l.id) ?? 0) * rowH, height: rowH - 2 }}
@@ -472,13 +472,15 @@ export function Timeline(): JSX.Element {
             onDown={(e, side) => startTransitionDrag(e, l, side)}
           />
         )}
+        {/* The trim handles sit above everything else on the tile (a wedge's
+            grip included): the outermost 6 px of an edge always trims. */}
         <div
           onPointerDown={(e) => startLayerDrag(e, l, 'start')}
-          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
+          className="absolute left-0 top-0 z-30 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
         />
         <div
           onPointerDown={(e) => startLayerDrag(e, l, 'end')}
-          className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
+          className="absolute right-0 top-0 z-30 h-full w-1.5 cursor-ew-resize hover:bg-white/50"
         />
       </div>
     )

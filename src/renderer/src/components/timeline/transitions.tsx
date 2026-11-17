@@ -1,12 +1,18 @@
 /**
  * Timeline ▸ transitions on a video / image tile (#64): the WEDGE on a tile edge
- * that shows a transition (dragging it changes the length — one undo step,
- * `startTransitionDrag` in useTileDrags), the top-corner handles that pull a
- * plain fade out of a clip's start or end, and the right-click menu's
- * "Add transition ▸". The edits are in `lib/transitions.ts`.
+ * that shows a transition, the GRIP on its inner tip that changes the length
+ * (one undo step, `startTransitionDrag` in useTileDrags), the top-corner
+ * handles that pull a plain fade out of a clip's start or end, and the
+ * right-click menu's "Add transition ▸". The edits are in `lib/transitions.ts`.
+ *
+ * Who gets a press near a tile edge (docs/TIMELINE.md "Transitions"): the trim
+ * handle always wins in the outermost TRIM_HANDLE_PX (it sits above
+ * everything here); the wedge itself is only a picture — a press on it falls
+ * through to the tile and moves it like the rest of the tile; only the grip
+ * changes the length.
  */
 
-import type { JSX, PointerEvent as ReactPointerEvent } from 'react'
+import { Fragment, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Composition, Layer, TimelineItemRef } from '@shared/project'
 import {
   pairOf,
@@ -29,12 +35,27 @@ const WEDGE_FILL: Record<keyof typeof TRANSITION_KINDS, string> = {
   fade: 'rgba(252,211,77,0.5)'
 }
 
+/** Width (px) of a tile's trim handles (`w-1.5` in Timeline.tsx): the band at
+ *  each edge where a press always trims. */
+export const TRIM_HANDLE_PX = 6
+/** Hit width (px) of a wedge's length grip. */
+const GRIP_PX = 6
+
 const sideName = (side: TransitionSide): string => (side === 'in' ? 'in' : 'out')
 
 /**
+ * Where a side's grip sits: its offset (px) from the tile edge on that side —
+ * centred on the wedge's inner tip (`wedgePx` in from the edge), but never
+ * inside the trim handle's band, so a very short wedge's grip stays reachable
+ * beside the handle instead of under it.
+ */
+export const gripOffsetPx = (wedgePx: number): number => Math.max(TRIM_HANDLE_PX, wedgePx - GRIP_PX / 2)
+
+/**
  * The wedges on one tile: for each side with a transition, a triangle over its
- * window (rising at the start, falling at the end), and for each side without
- * one, a small handle in the top corner that drags a fade out of the edge.
+ * window (rising at the start, falling at the end) with a grip on its inner
+ * tip, and for each side without one, a small handle in the top corner that
+ * drags a fade out of the edge.
  */
 export function TransitionWedges({
   layer,
@@ -72,31 +93,42 @@ export function TransitionWedges({
         const pair = pairOf(comp.layers, layer.id, side)
         const label = `${TRANSITION_KINDS[tr.kind].label} ${sideName(side)} · ${tr.sec.toFixed(2)} s${
           pair ? '' : tr.kind === 'fade' ? '' : ' (no partner)'
-        } — drag to change`
+        } — drag to change the length`
         const points = side === 'in' ? `0,0 ${w},0 0,${height}` : `0,0 ${w},0 ${w},${height}`
+        const edge = side === 'in' ? 'left' : 'right'
         return (
-          <svg
-            key={side}
-            data-testid={`transition-wedge-${side}-${layer.id}`}
-            data-kind={tr.kind}
-            data-sec={tr.sec}
-            onPointerDown={(e) => onDown(e, side)}
-            className="absolute top-0 z-10 cursor-ew-resize"
-            style={{ [side === 'in' ? 'left' : 'right']: 0, width: w, height }}
-            width={w}
-            height={height}
-          >
-            <title>{label}</title>
-            <polygon points={points} fill={WEDGE_FILL[tr.kind]} />
-            <line
-              x1={0}
-              y1={side === 'in' ? height : 0}
-              x2={w}
-              y2={side === 'in' ? 0 : height}
-              stroke="rgba(255,255,255,0.85)"
-              strokeWidth={1}
-            />
-          </svg>
+          <Fragment key={side}>
+            {/* The picture only: presses fall through to the tile (a move). */}
+            <svg
+              data-testid={`transition-wedge-${side}-${layer.id}`}
+              data-kind={tr.kind}
+              data-sec={tr.sec}
+              className="pointer-events-none absolute top-0 z-10"
+              style={{ [edge]: 0, width: w, height }}
+              width={w}
+              height={height}
+            >
+              <polygon points={points} fill={WEDGE_FILL[tr.kind]} />
+              <line
+                x1={0}
+                y1={side === 'in' ? height : 0}
+                x2={w}
+                y2={side === 'in' ? 0 : height}
+                stroke="rgba(255,255,255,0.85)"
+                strokeWidth={1}
+              />
+            </svg>
+            {/* The length grip on the inner tip (the top of the wedge's far edge). */}
+            <div
+              data-testid={`transition-grip-${side}-${layer.id}`}
+              title={label}
+              onPointerDown={(e) => onDown(e, side)}
+              className="absolute top-0 z-20 flex cursor-ew-resize justify-center"
+              style={{ [edge]: gripOffsetPx(w), width: GRIP_PX, height: Math.max(10, Math.round(height / 2)) }}
+            >
+              <span className="h-full w-0.5 rounded-b bg-white/90 shadow-[0_0_2px_rgba(0,0,0,0.8)]" />
+            </div>
+          </Fragment>
         )
       })}
     </>

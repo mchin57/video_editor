@@ -113,7 +113,7 @@ test('Add transition is greyed with the reason when the selection is not two cli
   await page.keyboard.press('Escape')
 })
 
-test('dragging the wedge changes the length — the incoming clip slides with it — as one undo step', async ({
+test('dragging the wedge’s grip changes the length — the incoming clip slides with it — as one undo step', async ({
   appPage: page
 }) => {
   await arrangeThree(page)
@@ -125,7 +125,7 @@ test('dragging the wedge changes the length — the incoming clip slides with it
   const before = await historyLen(page)
 
   // A pair grows to the LEFT: the incoming clip's start follows the pointer.
-  await dragBy(page, (await page.getByTestId('transition-wedge-in-B').boundingBox())!, -0.5 * scale)
+  await dragBy(page, (await page.getByTestId('transition-grip-in-B').boundingBox())!, -0.5 * scale)
   const b = await layerOf(page, 'B')
   expect(b.startSec).toBeCloseTo(3, 1)
   expect((b.transitionIn as { sec: number }).sec).toBeCloseTo(1, 1)
@@ -138,6 +138,96 @@ test('dragging the wedge changes the length — the incoming clip slides with it
   await page.keyboard.press('Control+z')
   expect(await layerOf(page, 'B')).toMatchObject({ startSec: 3.5, transitionIn: { kind: 'dissolve', sec: 0.5 } })
   expect((await layerOf(page, 'C')).startSec).toBe(7.5)
+})
+
+/** Press at (`x`, `y`) px inside `testId`'s box and drag `dxPx` across. */
+async function dragAt(page: Page, testId: string, x: number, y: number, dxPx: number): Promise<void> {
+  const box = (await page.getByTestId(testId).boundingBox())!
+  await page.mouse.move(box.x + x, box.y + y)
+  await page.mouse.down()
+  await page.mouse.move(box.x + x + dxPx, box.y + y, { steps: 8 })
+  await page.mouse.up()
+}
+
+/** A tile's own trim handles (the edge bands without a test id). */
+const trimHandle = (page: Page, id: string, edge: 'start' | 'end') => {
+  const handles = page.getByTestId(`tile-layer-${id}`).locator('div.cursor-ew-resize:not([data-testid])')
+  return edge === 'start' ? handles.first() : handles.last()
+}
+
+test('a transition’s wedge never blocks the tile: the edge trims, the wedge body moves, only the grip resizes', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  // A dissolve between A and B, and a fade in on C (the corner fade).
+  await page.evaluate(() => {
+    const L = (id: string) => ({ kind: 'layer' as const, id })
+    const s = window.__reelStores.useProject.getState()
+    s.applyTransition([L('A'), L('B')], 'dissolve')
+    s.setLayerFade('C', 'in', 0.6)
+  })
+  const scale = await pps(page)
+  const dissolve = { kind: 'dissolve', sec: 0.5 }
+  const fade = { kind: 'fade', sec: 0.6 }
+
+  // 1. The trim handle wins at the edge, under the wedge: the window changes,
+  // the transition stays on the tile. B's start (in-wedge), A's end
+  // (out-wedge), C's start (fade-in wedge).
+  for (const [id, edge, dx, field, tr] of [
+    ['B', 'start', 0.25, 'transitionIn', dissolve],
+    ['A', 'end', -0.25, 'transitionOut', dissolve],
+    ['C', 'start', 0.25, 'transitionIn', fade]
+  ] as const) {
+    const t0 = await layerOf(page, id)
+    const before = await historyLen(page)
+    await dragBy(page, (await trimHandle(page, id, edge).boundingBox())!, dx * scale)
+    const t1 = await layerOf(page, id)
+    if (edge === 'start') {
+      expect(t1.startSec - t0.startSec, `${id} start trimmed`).toBeCloseTo(dx, 1)
+      expect(t1.endSec).toBe(t0.endSec)
+    } else {
+      expect(t1.endSec - t0.endSec, `${id} end trimmed`).toBeCloseTo(dx, 1)
+      expect(t1.startSec).toBe(t0.startSec)
+    }
+    expect(t1[field], `${id} keeps its transition`).toEqual(tr)
+    expect(await historyLen(page)).toBe(before + 1)
+    await page.keyboard.press('Control+z')
+    expect(await layerOf(page, id)).toMatchObject({ startSec: t0.startSec, endSec: t0.endSec })
+  }
+
+  // 2. Pressing the wedge body (inside the triangle, clear of the trim band and
+  // the grip) moves the tile like the rest of it; the length is untouched.
+  for (const [id, tr] of [
+    ['B', dissolve],
+    ['C', fade]
+  ] as const) {
+    const t0 = await layerOf(page, id)
+    await dragAt(page, `tile-layer-${id}`, 11, 4, 1 * scale)
+    const t1 = await layerOf(page, id)
+    expect(t1.startSec - t0.startSec, `${id} moved`).toBeCloseTo(1, 1)
+    expect(t1.endSec - t1.startSec).toBeCloseTo(t0.endSec - t0.startSec, 6)
+    expect(t1.transitionIn, `${id} length unchanged`).toEqual(tr)
+    await page.keyboard.press('Control+z')
+    expect((await layerOf(page, id)).startSec).toBe(t0.startSec)
+  }
+
+  // 3. The grip on the wedge's inner tip changes the length, one undo step.
+  // A fade in grows to the right with the pointer.
+  const grip = page.getByTestId('transition-grip-in-C')
+  await expect(grip).toHaveAttribute('title', /drag to change the length/)
+  expect(await grip.evaluate((el) => getComputedStyle(el).cursor)).toBe('ew-resize')
+  const before = await historyLen(page)
+  const c0 = await layerOf(page, 'C')
+  await dragBy(page, (await grip.boundingBox())!, 0.4 * scale)
+  const c = await layerOf(page, 'C')
+  expect(c).toMatchObject({ startSec: c0.startSec, endSec: c0.endSec })
+  expect((c.transitionIn as { kind: string; sec: number }).kind).toBe('fade')
+  expect((c.transitionIn as { sec: number }).sec).toBeCloseTo(1, 1)
+  expect(await historyLen(page)).toBe(before + 1)
+  // A pair's grip grows it LEFT (the incoming clip slides in).
+  await dragBy(page, (await page.getByTestId('transition-grip-in-B').boundingBox())!, -0.25 * scale)
+  expect(((await layerOf(page, 'B')).transitionIn as { sec: number }).sec).toBeCloseTo(0.75, 1)
+  expect(await historyLen(page)).toBe(before + 2)
 })
 
 test('a fade at a clip’s end: the Inspector field, and the tile’s top corner (one undo step); the preview fades', async ({
