@@ -50,11 +50,15 @@ export function insertGraphics(): void {
  * and places the template (`dropTemplate`) — ONE undo step for both. `library`
  * gives the library's source lengths and frame rates (a whole-source audio
  * clip needs a length to be cut; the held frame is cut by frame rate).
- * Resolves whether its clip effect found no clip under the playhead.
+ * Resolves whether its clip effect found no clip under the playhead, and the
+ * names of any LUTs main had to leave out (missing or unreadable).
  */
-export async function insertTemplate(id: string, library: DropMedia): Promise<{ effectSkipped: boolean }> {
+export async function insertTemplate(
+  id: string,
+  library: DropMedia
+): Promise<{ effectSkipped: boolean; lutsLeftOut: string[] }> {
   const at = usePlayback.getState().time
-  const { template, assets } = await instantiateTemplate(id)
+  const { template, assets, lutsLeftOut } = await instantiateTemplate(id)
   await idle() // the copy can finish mid-drag
   const store = useProject.getState()
   const fresh = new Map(assets.map((a) => [a.id, a]))
@@ -66,7 +70,7 @@ export async function insertTemplate(id: string, library: DropMedia): Promise<{ 
   store.beginGesture()
   try {
     if (assets.length) store.addMedia(assets.map((a) => a.id))
-    return store.dropTemplate(template, at, media)
+    return { ...store.dropTemplate(template, at, media), lutsLeftOut }
   } finally {
     store.endGesture()
   }

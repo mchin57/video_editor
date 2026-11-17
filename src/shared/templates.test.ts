@@ -15,6 +15,8 @@ import {
   templateAllFiles,
   templateFiles,
   templateLutFiles,
+  templateLutNames,
+  templateLutRefs,
   templatePreviewTime,
   templateSummary,
   type ReelTemplate
@@ -116,6 +118,15 @@ describe('LUTs in a template (#55)', () => {
     expect(templateFiles(withLuts)).toEqual(['logo.png', 'sting.mp3'])
     expect(templateLutFiles(withLuts)).toEqual(['warm.cube', 'cool.cube'])
     expect(templateAllFiles(withLuts)).toEqual(['logo.png', 'sting.mp3', 'warm.cube', 'cool.cube'])
+  })
+
+  it('names a LUT file by the names its references show (for the left-out notice)', () => {
+    expect(templateLutRefs(withLuts).map((r) => r.file)).toEqual(['warm.cube', 'cool.cube'])
+    expect(templateLutNames(withLuts, 'cool.cube')).toEqual(['Warm'])
+    const renamed = mapTemplateLuts(withLuts, () => 'same.cube')
+    expect(templateLutFiles(renamed)).toEqual(['same.cube'])
+    expect(templateLutNames(renamed, 'same.cube')).toEqual(['Warm'])
+    expect(templateLutNames(withLuts, 'other.cube')).toEqual([])
   })
 
   it('maps LUT files on their own; a null drops that LUT and keeps the rest of the look', () => {

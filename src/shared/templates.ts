@@ -130,16 +130,31 @@ export function templateFiles(t: ReelTemplate): string[] {
   return out
 }
 
-/** Every `.cube` LUT the template refers to (the clip effect's, a picture's), deduped. */
-export function templateLutFiles(t: ReelTemplate): string[] {
-  const out: string[] = []
-  const add = (f: string | undefined): void => {
-    if (f && !out.includes(f)) out.push(f)
-  }
-  add(t.clipEffect?.lut?.file)
-  for (const l of t.layers) if (l.content.kind === 'image') add(l.content.lut?.file)
+/** Every LUT reference in the template (the clip effect's, then each picture's), in order. */
+export function templateLutRefs(t: ReelTemplate): LutRef[] {
+  const out: LutRef[] = []
+  if (t.clipEffect?.lut) out.push(t.clipEffect.lut)
+  for (const l of t.layers) if (l.content.kind === 'image' && l.content.lut) out.push(l.content.lut)
   return out
 }
+
+/** Every `.cube` LUT file the template refers to (the clip effect's, a picture's), deduped. */
+export const templateLutFiles = (t: ReelTemplate): string[] => [
+  ...new Set(
+    templateLutRefs(t)
+      .map((r) => r.file)
+      .filter(Boolean)
+  )
+]
+
+/** The names (as the Inspector shows them) the template gives LUT file `file`, deduped. */
+export const templateLutNames = (t: ReelTemplate, file: string): string[] => [
+  ...new Set(
+    templateLutRefs(t)
+      .filter((r) => r.file === file)
+      .map((r) => r.name)
+  )
+]
 
 /** Every file the template's folder must hold: its media, then its LUTs. */
 export const templateAllFiles = (t: ReelTemplate): string[] => [

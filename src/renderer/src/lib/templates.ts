@@ -263,6 +263,30 @@ export function applyTemplate(
   return { comp: c, added, effectSkipped }
 }
 
+/**
+ * What the template gallery says after dropping template `name` (null = nothing
+ * to say, the gallery closes): no clip under the playhead for its effect, and
+ * each LUT that couldn't be taken (missing or damaged — main left it out and
+ * placed the rest), by the name the Inspector shows, never its stored file.
+ */
+export function templateDropNote(
+  name: string,
+  { effectSkipped, lutsLeftOut }: { effectSkipped: boolean; lutsLeftOut: string[] }
+): string | null {
+  const notes: string[] = []
+  if (effectSkipped) {
+    notes.push('There was no clip under the playhead, so only its overlays and sounds were added — no freeze.')
+  }
+  if (lutsLeftOut.length) {
+    const names = lutsLeftOut.map((n) => `“${n}”`).join(', ')
+    const one = lutsLeftOut.length === 1
+    notes.push(
+      `Its LUT${one ? '' : 's'} ${names} ${one ? 'is' : 'are'} missing or can’t be read, so ${one ? 'it was' : 'they were'} left out; the rest of the look was kept.`
+    )
+  }
+  return notes.length ? `Added “${name}”. ${notes.join(' ')}` : null
+}
+
 // --- Save as template --------------------------------------------------------
 
 export interface TemplateCapture {

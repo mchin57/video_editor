@@ -27,18 +27,24 @@ export type { ImportedLut }
 export const lutFileFor = (bytes: Buffer): string =>
   `${createHash('sha1').update(bytes).digest('hex').slice(0, 16)}.cube`
 
+/** Check a table's bytes are one we can use; throws a readable error that calls it `label`. */
+export function parseLutBytes(bytes: Buffer, label: string): CubeTable {
+  if (bytes.length > MAX_LUT_BYTES) throw new Error(`“${label}” is too large to be a LUT.`)
+  try {
+    return parseCube(bytes.toString('latin1'))
+  } catch (error) {
+    if (error instanceof CubeError) throw new Error(`“${label}” isn’t a LUT we can use: ${error.message}`)
+    throw error
+  }
+}
+
 /** Read a candidate file and check it is a table we can use; throws a readable error. */
 export async function readLutFile(path: string): Promise<{ bytes: Buffer; table: CubeTable }> {
   const stat = await fsp.stat(path).catch(() => null)
   if (!stat?.isFile()) throw new Error(`“${basename(path)}” could not be found.`)
   if (stat.size > MAX_LUT_BYTES) throw new Error(`“${basename(path)}” is too large to be a LUT.`)
   const bytes = await fsp.readFile(path)
-  try {
-    return { bytes, table: parseCube(bytes.toString('latin1')) }
-  } catch (error) {
-    if (error instanceof CubeError) throw new Error(`“${basename(path)}” isn’t a LUT we can use: ${error.message}`)
-    throw error
-  }
+  return { bytes, table: parseLutBytes(bytes, basename(path)) }
 }
 
 /**

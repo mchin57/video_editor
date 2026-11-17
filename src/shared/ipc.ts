@@ -344,8 +344,9 @@ export interface IpcInvoke {
   exportTemplateDialog: Fn<[id: string], string | null>
   importTemplateDialog: Fn<[], TemplateEntry[] | null>
   /** The template ready to drop: its media adopted into the open project's
-   *  library (copies), references swapped for their media ids. */
-  instantiateTemplate: Fn<[id: string], { template: ReelTemplate; assets: MediaAsset[] }>
+   *  library (copies), references swapped for their media ids. `lutsLeftOut`
+   *  names (as the Inspector does) each LUT that couldn't be taken and was dropped. */
+  instantiateTemplate: Fn<[id: string], { template: ReelTemplate; assets: MediaAsset[]; lutsLeftOut: string[] }>
 
   // Shared library — editor-wide, under <data>/shared (shared/sharedLibrary.ts).
   // Every change returns the updated list; a dialog canceled returns null.

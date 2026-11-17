@@ -23,6 +23,7 @@ import {
   HELD_SOURCE_FRAMES,
   applyTemplate,
   clipUnder,
+  templateDropNote,
   templateFromSelection,
   textPieceFromSelection,
   type DropMedia
@@ -467,5 +468,20 @@ describe('textPieceFromSelection', () => {
       error: 'Select one or more text layers on the timeline first.'
     })
     expect(textPieceFromSelection(comp, [])).toHaveProperty('error')
+  })
+})
+
+describe('templateDropNote', () => {
+  it('says nothing for a clean drop (the gallery closes)', () => {
+    expect(templateDropNote('Sting', { effectSkipped: false, lutsLeftOut: [] })).toBeNull()
+  })
+
+  it('names each LUT that was left out by its Inspector name, alone or with the no-clip note', () => {
+    expect(templateDropNote('Warm look', { effectSkipped: false, lutsLeftOut: ['Warm'] })).toBe(
+      'Added “Warm look”. Its LUT “Warm” is missing or can’t be read, so it was left out; the rest of the look was kept.'
+    )
+    const both = templateDropNote('Warm look', { effectSkipped: true, lutsLeftOut: ['Warm', 'Teal'] })!
+    expect(both).toContain('no clip under the playhead')
+    expect(both).toContain('Its LUTs “Warm”, “Teal” are missing or can’t be read, so they were left out')
   })
 })
