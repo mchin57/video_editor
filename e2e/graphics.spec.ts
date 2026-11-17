@@ -613,3 +613,39 @@ test('Convert to keyframes keeps the drawing and clears the presets — one undo
   expect(back.exit).toEqual({ kind: 'shrink', sec: 0.3 })
   expect(back.keyframes).toBeUndefined()
 })
+
+test('Sparkles on a shape: the Inspector adds sparkle paths that twinkle with time; off removes them', async ({
+  appPage: page
+}) => {
+  await arrangeRect(page, {}, 2)
+  const sparks = page.getByTestId('graphics-layer').locator('[data-mark-id="M"] [data-mark-sparkle]')
+  await expect(sparks).toHaveCount(0)
+  await expect(page.getByTestId('mark-sparkle-color')).toHaveCount(0)
+
+  await page.getByTestId('mark-sparkle').check()
+  expect((await animMarks(page))[0] as unknown as { sparkle: unknown }).toMatchObject({
+    sparkle: { density: 4, color: '#ffe08a' }
+  })
+  await expect(page.getByLabel('Sparkle density')).toBeVisible()
+  await page.getByLabel('Sparkle density').fill('10')
+  await page.getByTestId('mark-sparkle-color').fill('#00ff88')
+  expect((await animMarks(page))[0] as unknown as { sparkle: unknown }).toMatchObject({
+    sparkle: { density: 10, color: '#00ff88' }
+  })
+
+  const snapshot = (t: number): Promise<string> =>
+    page
+      .evaluate((t) => window.__reelStores.usePlayback.getState().setTime(t), t)
+      .then(() => page.getByTestId('graphics-layer').locator('[data-mark-id="M"]').innerHTML())
+  const a = await snapshot(2)
+  const b = await snapshot(2.3)
+  expect(a).toContain('data-mark-sparkle')
+  expect(a).toContain('fill="#00ff88"')
+  expect(b).toContain('data-mark-sparkle')
+  expect(a).not.toBe(b)
+
+  await page.getByTestId('mark-sparkle').uncheck()
+  await expect(sparks).toHaveCount(0)
+  await expect(page.getByTestId('mark-sparkle-color')).toHaveCount(0)
+  expect((await animMarks(page))[0] as unknown as { sparkle: unknown }).toMatchObject({ sparkle: null })
+})

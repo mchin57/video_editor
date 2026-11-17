@@ -17,6 +17,7 @@
 import { FRAME } from './frame'
 import { DEFAULT_FONT_ID, fontCssFamily } from './fonts'
 import type { MarkKeyframe } from './markAnim'
+import type { SparkleEffect } from './sparkle'
 import type { EntrancePreset, ExitPreset, LoopPreset } from './markPresets'
 
 export interface Pt {
@@ -68,6 +69,8 @@ export interface GraphicMark {
   exit?: ExitPreset
   /** A motion that repeats between the entrance and the exit (absent = none). */
   loop?: LoopPreset
+  /** Twinkling sparkles around the shape (shared/sparkle.ts), riding along with its pose and presets; absent/null = none. */
+  sparkle?: SparkleEffect | null
   /**
    * Keyframed animation of this one shape (shared/markAnim.ts), kept sorted by
    * `tSec` is seconds after the LAYER's start — the same clock as

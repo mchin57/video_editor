@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, type CSSProperties, type JSX, type PointerEven
 import type { TextStyleBase } from '@shared/project'
 import { textBoxCss, textFillCss, textPillCss, type TextDeco } from '@shared/textStyle'
 import { KARAOKE_DIM_OPACITY } from '@shared/textAnim'
-import { sparkleStateAt, type Sparkle } from '@shared/sparkle'
+import { SPARKLE_SVG_PATH, sparkleStateAt, type Sparkle } from '@shared/sparkle'
 import { useProject } from '@/state/projectStore'
 import { cqw, cqh } from './frame'
 
@@ -190,9 +190,6 @@ export function InlineTextEditor({
     />
   )
 }
-/** The same four-point star the ASS burn draws (`SPARKLE_PATH`), as SVG. Both
- *  are a radius-10 unit star, so preview and export show the same shape. */
-const SPARKLE_SVG_PATH = 'M0,-10 L2,-2 L10,0 L2,2 L0,10 L-2,2 L-10,0 L-2,-2 Z'
 /**
  * The sparkle layer of a text overlay, drawn ABOVE the glyphs (matching the
  * burn, which puts sparkles on ASS Layer 1). Positions come from the shared

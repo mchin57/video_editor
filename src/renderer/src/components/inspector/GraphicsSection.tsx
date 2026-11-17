@@ -12,6 +12,7 @@ import {
   withLockAspect,
   type GraphicMark
 } from '@shared/graphics'
+import { DEFAULT_SPARKLE, SPARKLE_DENSITY_RANGE } from '@shared/sparkle'
 import { editPoseAt, markPoseAt, withFillOff, type MarkPose } from '@shared/markAnim'
 import { updateById } from '@/lib/arrays'
 import { getAlpha, hex6, withAlpha } from '@/lib/color'
@@ -248,6 +249,39 @@ function MarkFields({
             </Check>
           )}
         </>
+      )}
+      <label className="mb-2 flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          data-testid="mark-sparkle"
+          checked={!!mark.sparkle}
+          onChange={(e) => onPatch((m) => ({ ...m, sparkle: e.target.checked ? { ...DEFAULT_SPARKLE } : null }))}
+        />
+        ✧ Sparkles
+      </label>
+      {mark.sparkle && (
+        <div className="flex gap-2">
+          <Field label="Sparkle color">
+            <input
+              type="color"
+              data-testid="mark-sparkle-color"
+              value={hex6(mark.sparkle.color)}
+              onChange={(e) =>
+                onPatch((m) => (m.sparkle ? { ...m, sparkle: { ...m.sparkle, color: e.target.value } } : m))
+              }
+              className={colorCls}
+            />
+          </Field>
+          <Field label={`Sparkle amount · ${mark.sparkle.density}`}>
+            <Slider
+              ariaLabel="Sparkle density"
+              min={SPARKLE_DENSITY_RANGE.min}
+              max={SPARKLE_DENSITY_RANGE.max}
+              value={mark.sparkle.density}
+              onChange={(v) => onPatch((m) => (m.sparkle ? { ...m, sparkle: { ...m.sparkle, density: v } } : m))}
+            />
+          </Field>
+        </div>
       )}
       {mark.tool === 'teardrop' && (
         <Field label={`Width · ${Math.round((mark.dropWidth ?? DEFAULT_DROP_WIDTH) * 100)}%`}>

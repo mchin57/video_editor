@@ -11,6 +11,8 @@ import {
   hasLivePresets,
   loopStops,
   markArtSvg,
+  markSparkles,
+  sparkleBox,
   presetDeltaAt,
   presetTiming,
   stopsValueAt,
@@ -271,5 +273,48 @@ describe('convertPresetsToKeyframes', () => {
   it('does nothing for a mark with no presets', () => {
     const m = rect()
     expect(convertPresetsToKeyframes(m, L)).toBe(m)
+  })
+})
+
+describe('mark sparkles', () => {
+  const sp = (extra: Partial<GraphicMark> = {}): GraphicMark =>
+    rect({ sparkle: { density: 10, color: '#00ff88' }, ...extra })
+  const count = (svg: string): number => (svg.match(/data-mark-sparkle/g) ?? []).length
+
+  it('draws sparkle paths only when on', () => {
+    const times = [0.6, 1, 1.4, 1.8, 2.2]
+    expect(times.some((t) => count(markArtSvg(sp(), t, L)) > 0)).toBe(true)
+    expect(markArtSvg(sp(), 1, L)).toContain('fill="#00ff88"')
+    for (const t of times) {
+      expect(count(markArtSvg(rect(), t, L))).toBe(0)
+      expect(count(markArtSvg(rect({ sparkle: null }), t, L))).toBe(0)
+    }
+  })
+
+  it('twinkles over time and is deterministic', () => {
+    expect(markArtSvg(sp(), 1, L)).toBe(markArtSvg(sp(), 1, L))
+    expect(markArtSvg(sp(), 1, L)).not.toBe(markArtSvg(sp(), 1.3, L))
+  })
+
+  it('places sparkles inside the mark group, so they take the pose and its opacity', () => {
+    const svg = markArtSvg(sp({ rotationDeg: 30, opacity: 0.5 }), 1, L)
+    expect(svg).toMatch(/^<g transform="[^"]*rotate\(30\)[^"]*" opacity="0.5">/)
+    expect(svg.indexOf('data-mark-sparkle')).toBeGreaterThan(svg.indexOf('<path '))
+    expect(svg.endsWith('/></g>')).toBe(true)
+    expect(svg.match(/<g/g)).toHaveLength(1)
+  })
+
+  it('scatters over the padded mark bounds within [max(atSec,0), layer end]', () => {
+    const m = sp({ atSec: -1 })
+    const box = sparkleBox(m)
+    const list = markSparkles(m, L)
+    expect(list.length).toBeGreaterThan(0)
+    for (const s of list) {
+      expect(Math.abs(s.x - box.cx)).toBeLessThanOrEqual(box.w / 2)
+      expect(Math.abs(s.y - box.cy)).toBeLessThanOrEqual(box.h / 2)
+      expect(s.tSec).toBeLessThanOrEqual(L)
+    }
+    expect(markSparkles(rect(), L)).toEqual([])
+    expect(markSparkles(sp({ atSec: L }), L)).toEqual([])
   })
 })

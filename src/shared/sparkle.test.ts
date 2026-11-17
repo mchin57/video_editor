@@ -7,7 +7,10 @@ import {
   MAX_CONCURRENT_SPARKLES,
   MAX_SPARKLES,
   sparkleStateAt,
+  SPARKLE_LIFE_SEC,
+  SPARKLE_SVG_PATH,
   sparklesFor,
+  sparklesInBox,
   type SparkleLayout
 } from './sparkle'
 
@@ -197,5 +200,61 @@ describe('sparklesFor — how many are actually on screen', () => {
     for (let t = 0; t <= 6; t += 0.25) {
       expect(aliveAt(list, t)).toBeLessThanOrEqual(MAX_CONCURRENT_SPARKLES * 1.4)
     }
+  })
+})
+
+describe('sparklesInBox', () => {
+  const box = { cx: 500, cy: 800, w: 300, h: 200 }
+  const lay = { effect: DEFAULT_SPARKLE, seed: 'mark-1', box, durSec: 3 }
+
+  it('is deterministic per seed and reshuffles with another seed', () => {
+    expect(sparklesInBox(lay)).toEqual(sparklesInBox(lay))
+    expect(sparklesInBox({ ...lay, seed: 'mark-2' })).not.toEqual(sparklesInBox(lay))
+  })
+
+  it('count scales with density and respects the caps', () => {
+    const n = (density: number, durSec = 3): number =>
+      sparklesInBox({ ...lay, effect: { ...DEFAULT_SPARKLE, density }, durSec }).length
+    expect(n(1)).toBeLessThan(n(5))
+    expect(n(5)).toBeLessThan(n(10))
+    expect(n(10, 3)).toBe(Math.round((MAX_CONCURRENT_SPARKLES * 3) / SPARKLE_LIFE_SEC))
+    expect(n(10, 1000)).toBe(MAX_SPARKLES)
+  })
+
+  it('keeps every sparkle inside the box and the window', () => {
+    for (const s of sparklesInBox({ ...lay, effect: { ...DEFAULT_SPARKLE, density: 10 } })) {
+      expect(s.x).toBeGreaterThanOrEqual(box.cx - box.w / 2)
+      expect(s.x).toBeLessThanOrEqual(box.cx + box.w / 2)
+      expect(s.y).toBeGreaterThanOrEqual(box.cy - box.h / 2)
+      expect(s.y).toBeLessThanOrEqual(box.cy + box.h / 2)
+      expect(s.tSec).toBeGreaterThanOrEqual(0)
+      expect(s.tSec).toBeLessThanOrEqual(3)
+    }
+  })
+
+  it('exposes one star path', () => {
+    expect(SPARKLE_SVG_PATH.startsWith('M0,-10')).toBe(true)
+  })
+})
+
+describe('sparklesFor — golden', () => {
+  // Pins text sparkles exactly (values verified identical on main before the shape-sparkle refactor).
+  it('matches the recorded output for a fixed layout', () => {
+    const r = (n: number): number => Math.round(n * 1000) / 1000
+    const out = sparklesFor({
+      effect: { density: 4, color: '#ffe08a' },
+      text: 'HELLO\nWORLD',
+      fontSizePx: 76,
+      durSec: 0.1
+    }).map((s) => [s.tSec, s.lifeSec, s.x, s.y, s.sizePx, s.rotDeg].map(r))
+    expect(out).toEqual([
+      [0.002, 0.521, 96.255, -86.229, 9.501, 40.664],
+      [0.028, 0.522, -117.034, -38.394, 9.773, 62.377],
+      [0.032, 0.582, 51.225, 19.412, 15.083, 12.862],
+      [0.053, 0.691, 15.124, 90.446, 13.81, 0.453],
+      [0.065, 0.632, -99.971, 15.732, 9.509, 46.166],
+      [0.075, 0.391, -118.564, 29.679, 14.36, 37.825],
+      [0.09, 0.504, 94.641, -50.165, 10.04, 86.77]
+    ])
   })
 })

@@ -16,7 +16,8 @@
  * would sit. Any other mark stays a still (or fade/draw-on sequence) drawn at its
  * constant pose, so a static rotation/size/opacity or a single keyframe shows too.
  * A mark with an exit, a loop or an entrance other than Instant / Fade in / Draw on
- * (`hasLivePresets`) takes the animated path as well.
+ * (`hasLivePresets`) takes the animated path as well, and so does a mark with Sparkles
+ * (they twinkle): its union box also holds the pose-carried sparkle scatter area.
  */
 
 import type { GraphicsContent, Layer } from '@shared/project'
@@ -40,9 +41,10 @@ import {
   markPoseSvg,
   posedBounds,
   posedMark,
+  posedRect,
   type MarkPose
 } from '@shared/markAnim'
-import { framePoseAt, hasLivePresets, markArtSvg, presetTiming } from '@shared/markPresets'
+import { framePoseAt, hasLivePresets, markArtSvg, markSparkle, presetTiming, sparkleExtent } from '@shared/markPresets'
 import type { ExportImage, ExportKeyframe, ExportVideo } from './exporterArgs'
 import type { CompositionRender } from './exportRender'
 
@@ -54,7 +56,7 @@ const FPS = 30
 export async function exportGraphicsLayer(pass: CompositionRender, l: Layer, c: GraphicsContent): Promise<void> {
   for (const mark of c.marks) {
     // Keyframes, an exit, a loop or an entrance beyond fade / draw-on need a frame per output frame.
-    if (isMarkAnimated(mark) || hasLivePresets(mark)) {
+    if (isMarkAnimated(mark) || hasLivePresets(mark) || markSparkle(mark)) {
       const video = await exportAnimatedMark(pass, l, mark)
       if (video) pass.visuals.push({ kind: 'video', video })
       continue
@@ -90,6 +92,32 @@ function rasterSize(pass: CompositionRender, l: Layer, box: Box): { pxW: number;
   return { pxW: Math.max(1, Math.floor(box.w * k)), pxH: Math.max(1, Math.floor(box.h * k)) }
 }
 
+/**
+ * One fixed frame holding the mark at every pose it takes over `count` output frames from
+ * mark-local `first` (presets included: a pop-in’s overshoot, a slide, a shake), plus every
+ * sparkle star at its largest, so nothing is cropped.
+ */
+export function animatedMarkBox(mark: GraphicMark, layerLen: number, first: number, count: number): Box {
+  const sparkleArea = markSparkle(mark) ? sparkleExtent(mark) : null
+  const boundsAt = (i: number): Box => {
+    const pose = framePoseAt(mark, first + i / FPS, layerLen)
+    const b = posedBounds(mark, pose)
+    if (!sparkleArea) return b
+    const s = posedRect(mark, pose, sparkleArea)
+    const x = Math.min(b.x, s.x)
+    const y = Math.min(b.y, s.y)
+    return { x, y, w: Math.max(b.x + b.w, s.x + s.w) - x, h: Math.max(b.y + b.h, s.y + s.h) - y }
+  }
+  let box = boundsAt(0)
+  for (let i = 1; i < count; i++) {
+    const b = boundsAt(i)
+    const x = Math.min(box.x, b.x)
+    const y = Math.min(box.y, b.y)
+    box = { x, y, w: Math.max(box.x + box.w, b.x + b.w) - x, h: Math.max(box.y + box.h, b.y + b.h) - y }
+  }
+  return box
+}
+
 /** An animated mark: one frame per output frame from its moment to the layer's end, as an alpha video. */
 async function exportAnimatedMark(pass: CompositionRender, l: Layer, mark: GraphicMark): Promise<ExportVideo | null> {
   const first = Math.max(0, mark.atSec)
@@ -98,15 +126,7 @@ async function exportAnimatedMark(pass: CompositionRender, l: Layer, mark: Graph
   const count = Math.max(1, Math.ceil((l.endSec - startSec) * FPS - 1e-9))
   const layerLen = l.endSec - l.startSec
   const localAt = (i: number): number => first + i / FPS
-  // One fixed frame holding the mark at every pose it takes (presets included:
-  // a pop-in's overshoot, a slide, a shake), so nothing is cropped.
-  let box = posedBounds(mark, framePoseAt(mark, localAt(0), layerLen))
-  for (let i = 1; i < count; i++) {
-    const b = posedBounds(mark, framePoseAt(mark, localAt(i), layerLen))
-    const x = Math.min(box.x, b.x)
-    const y = Math.min(box.y, b.y)
-    box = { x, y, w: Math.max(box.x + box.w, b.x + b.w) - x, h: Math.max(box.y + box.h, b.y + b.h) - y }
-  }
+  const box = animatedMarkBox(mark, layerLen, first, count)
   const { pxW, pxH } = rasterSize(pass, l, box)
   // A stills render (render_frame) only shows a few frames: draw just those
   // (±1 for the output's frame rounding); the rest are one blank picture.

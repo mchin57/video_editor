@@ -318,7 +318,8 @@ const validMark = (m: unknown): boolean =>
   (m.pivot === undefined || validPoint(m.pivot)) &&
   (m.rotationDeg === undefined || isNum(m.rotationDeg)) &&
   (m.scale === undefined || isNum(m.scale)) &&
-  (m.opacity === undefined || isNum(m.opacity))
+  (m.opacity === undefined || isNum(m.opacity)) &&
+  isOptObj(m.sparkle, (sp) => isNum(sp.density) && isStr(sp.color))
 
 /** Every field the preview and the export read off a text layer, typed. */
 function validText(c: Record<string, unknown>): boolean {

@@ -909,4 +909,19 @@ describe('migrateProject — mark entrance presets (v37)', () => {
     const p = migrateProject({ ...createEmptyProject('p', 'P'), layers: [g] })
     expect(p.layers[0]).toEqual(g)
   })
+
+  it('v38: leaves a v37 mark without sparkles untouched and keeps one that has them', () => {
+    const { reveal: _r, ...base } = mk('a', 'x')
+    void _r
+    const plain = { ...base, entrance: { kind: 'instant', sec: 0.4 } }
+    const sparked = { ...plain, id: 'b', sparkle: { density: 6, color: '#ffffff' } }
+    const g = layer('G', { kind: 'graphics', marks: [plain, sparked] })
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 37, layers: [g] })
+    expect(p.version).toBe(PROJECT_VERSION)
+    expect(PROJECT_VERSION).toBe(38)
+    expect(p.layers[0]).toEqual(g)
+    const marks = (p.layers[0].content as unknown as { marks: Record<string, unknown>[] }).marks
+    expect('sparkle' in marks[0]).toBe(false)
+    expect(marks[1].sparkle).toEqual({ density: 6, color: '#ffffff' })
+  })
 })

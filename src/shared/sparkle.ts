@@ -164,19 +164,62 @@ export interface SparkleLayout {
   typewriterSec?: number
 }
 
+/** What the shared generator needs to scatter sparkles over a window. */
+interface ScatterSpec {
+  density: number
+  /** Length of the window, seconds (already floored above 0). */
+  dur: number
+  /** The PRNG seed string — RESOLUTION-INDEPENDENT inputs only. */
+  seed: string
+  /** Sparkle radius is this × a random SPARKLE_MIN_SCALE..SPARKLE_MAX_SCALE. */
+  sizeBasePx: number
+  /** Where a sparkle born at `tSec` sits (draws from `rand` as it likes). */
+  place: (tSec: number, rand: () => number) => { x: number; y: number }
+}
+
+const clampDensity = (d: number): number => Math.max(SPARKLE_DENSITY_RANGE.min, Math.min(SPARKLE_DENSITY_RANGE.max, d))
+
+/**
+ * The timing / RNG core shared by text and shapes: how many sparkles, when each
+ * is born and how long it lives, its size and spin. Only WHERE a sparkle sits is
+ * the caller's `place`. The draw order from the RNG is part of the contract —
+ * text sparkles must not change.
+ */
+function scatter(o: ScatterSpec): Sparkle[] {
+  const { dur } = o
+  // Work back from "how many are on screen at once" to how many to spawn: each
+  // lives ~SPARKLE_LIFE_SEC, so holding `concurrent` alive across `dur` needs
+  // that many lifetimes' worth of births.
+  const concurrent = Math.min(MAX_CONCURRENT_SPARKLES, o.density * CONCURRENT_PER_DENSITY)
+  const count = Math.min(MAX_SPARKLES, Math.max(1, Math.round((concurrent * dur) / SPARKLE_LIFE_SEC)))
+  const rand = mulberry32(hashSeed(o.seed))
+  const out: Sparkle[] = []
+  for (let i = 0; i < count; i++) {
+    // Spread births evenly across the window with jitter, so the twinkle is
+    // continuous rather than clumped.
+    const tSec = Math.min(dur, ((i + rand()) / count) * dur)
+    const life = SPARKLE_LIFE_SEC * (0.7 + rand() * 0.6)
+    const { x, y } = o.place(tSec, rand)
+    out.push({
+      tSec,
+      lifeSec: life,
+      x,
+      y,
+      sizePx: o.sizeBasePx * (SPARKLE_MIN_SCALE + rand() * (SPARKLE_MAX_SCALE - SPARKLE_MIN_SCALE)),
+      rotDeg: rand() * 90
+    })
+  }
+  return out
+}
+
 /**
  * Every sparkle for one text overlay, ordered by birth time. Pure and
  * deterministic — the same inputs always give the same sparkles, which is what
  * lets the preview and the ASS burn agree without sharing any state.
  */
 export function sparklesFor(o: SparkleLayout): Sparkle[] {
-  const density = Math.max(SPARKLE_DENSITY_RANGE.min, Math.min(SPARKLE_DENSITY_RANGE.max, o.effect.density))
+  const density = clampDensity(o.effect.density)
   const dur = Math.max(0.01, o.durSec)
-  // Work back from "how many are on screen at once" to how many to spawn: each
-  // lives ~SPARKLE_LIFE_SEC, so holding `concurrent` alive across `dur` needs
-  // that many lifetimes' worth of births.
-  const concurrent = Math.min(MAX_CONCURRENT_SPARKLES, density * CONCURRENT_PER_DENSITY)
-  const count = Math.min(MAX_SPARKLES, Math.max(1, Math.round((concurrent * dur) / SPARKLE_LIFE_SEC)))
   const box = estimateTextBox(o.text, o.fontSizePx)
   const typeSec = o.typewriterSec ?? 0
   // Sparkles ride slightly outside the text block so they frame the glyphs
@@ -188,36 +231,69 @@ export function sparklesFor(o: SparkleLayout): Sparkle[] {
   // so seeding on it would hand the two sides different sparkles at any preset
   // that is not 1080x1920. Everything the seed omits still varies the layout,
   // because every offset below is a multiple of `fontSizePx`.
-  const rand = mulberry32(hashSeed(`${o.text}|${density}|${dur.toFixed(2)}`))
-
-  const out: Sparkle[] = []
-  for (let i = 0; i < count; i++) {
-    // Spread births evenly across the window with jitter, so the twinkle is
-    // continuous rather than clumped.
-    const tSec = Math.min(dur, ((i + rand()) / count) * dur)
-    const life = SPARKLE_LIFE_SEC * (0.7 + rand() * 0.6)
-    let x: number
-    let y: number
-    if (typeSec > 0 && tSec < typeSec) {
-      // Follow the reveal frontier: sparkle at the character being typed.
-      const frac = tSec / typeSec
-      const anchor = charAnchor(o.text, Math.floor(frac * o.text.length), o.fontSizePx)
-      x = anchor.x + (rand() - 0.5) * o.fontSizePx * 0.8
-      y = anchor.y + (rand() - 0.5) * o.fontSizePx * 0.9
-    } else {
-      x = (rand() - 0.5) * (box.width + padX * 2)
-      y = (rand() - 0.5) * (box.height + padY * 2)
+  return scatter({
+    density,
+    dur,
+    seed: `${o.text}|${density}|${dur.toFixed(2)}`,
+    sizeBasePx: o.fontSizePx,
+    place: (tSec, rand) => {
+      if (typeSec > 0 && tSec < typeSec) {
+        // Follow the reveal frontier: sparkle at the character being typed.
+        const frac = tSec / typeSec
+        const anchor = charAnchor(o.text, Math.floor(frac * o.text.length), o.fontSizePx)
+        return {
+          x: anchor.x + (rand() - 0.5) * o.fontSizePx * 0.8,
+          y: anchor.y + (rand() - 0.5) * o.fontSizePx * 0.9
+        }
+      }
+      return { x: (rand() - 0.5) * (box.width + padX * 2), y: (rand() - 0.5) * (box.height + padY * 2) }
     }
-    out.push({
-      tSec,
-      lifeSec: life,
-      x,
-      y,
-      sizePx: o.fontSizePx * (SPARKLE_MIN_SCALE + rand() * (SPARKLE_MAX_SCALE - SPARKLE_MIN_SCALE)),
-      rotDeg: rand() * 90
+  })
+}
+
+/** A plain box (centre + size) to scatter sparkles over — a shape's bounds, not text. */
+export interface SparkleBox {
+  cx: number
+  cy: number
+  w: number
+  h: number
+}
+
+export interface BoxSparkleLayout {
+  effect: SparkleEffect
+  /** Stable identity the scatter is seeded from (a mark id), so it never reshuffles. */
+  seed: string
+  /** The area sparkle CENTRES fall in (already padded by the caller). */
+  box: SparkleBox
+  /** Length of the window, seconds; births are in [0, durSec] from its start. */
+  durSec: number
+}
+
+/** Sparkle radius range for a box: scales with its size, clamped so a thin or huge shape still glints. */
+export function boxSparkleBase(box: SparkleBox): number {
+  return Math.max(40, Math.min(160, Math.sqrt(Math.max(0, box.w * box.h)) / 2))
+}
+/** The largest radius a box's sparkles reach (what the area they cover extends by). */
+export const boxSparkleMaxRadius = (box: SparkleBox): number => boxSparkleBase(box) * SPARKLE_MAX_SCALE
+
+/**
+ * Sparkles scattered uniformly over a plain box in a time window — the shape
+ * counterpart of `sparklesFor`, with the same count / timing / size rules.
+ * Offsets are absolute (the box centre is included), `tSec` is from the window's start.
+ */
+export function sparklesInBox(o: BoxSparkleLayout): Sparkle[] {
+  const density = clampDensity(o.effect.density)
+  const dur = Math.max(0.01, o.durSec)
+  return scatter({
+    density,
+    dur,
+    seed: `${o.seed}|${density}|${dur.toFixed(2)}`,
+    sizeBasePx: boxSparkleBase(o.box),
+    place: (_t, rand) => ({
+      x: o.box.cx + (rand() - 0.5) * o.box.w,
+      y: o.box.cy + (rand() - 0.5) * o.box.h
     })
-  }
-  return out
+  })
 }
 
 /**
@@ -234,6 +310,10 @@ export function sparkleStateAt(s: Sparkle, t: number): { opacity: number; scale:
   const frac = up ? local / half : 1 - (local - half) / half
   return { opacity: frac, scale: 0.4 + 0.6 * frac }
 }
+
+/** The four-point star every sparkle is drawn as: a radius-10 unit star, used by the preview's text sparkles and by
+ *  shape sparkles (`markSparklesSvg`). The ASS burn draws the same shape separately, as its own `\p1` path. */
+export const SPARKLE_SVG_PATH = 'M0,-10 L2,-2 L10,0 L2,2 L0,10 L-2,2 L-10,0 L-2,-2 Z'
 
 /** Whether an overlay actually draws sparkles. */
 export function activeSparkle(effects: TextEffects | null | undefined): SparkleEffect | null {
