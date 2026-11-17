@@ -2,10 +2,11 @@
  * TRANSITIONS (#64) — cross dissolve, dip to black / white, and a plain fade at
  * a clip's end, for video and image tiles. THE preview/export parity point for
  * them: the preview's layer box takes its opacity from `layerOpacityAt` and its
- * dip plates from `transitionPlates`; the export drives the same opacity through
+ * dip cards from `transitionPlates`; the export drives the same opacity through
  * its keyframed-opacity path (`layerOpacityPoints` → sendcmd → colorchannelmixer
- * `aa`) and paints the same plates as a full-frame `drawbox`. Verified against
- * the real binary — docs/FFMPEG-NOTES.md "Transitions".
+ * `aa`) and paints the same cards as colour sources placed like the clips they
+ * lie behind. Verified against the real binary — docs/FFMPEG-NOTES.md
+ * "Transitions".
  *
  * The model (`Layer.transitionIn` / `transitionOut`, shared/project.ts): each
  * tile carries its own edges. A transition between two clips is a PAIR — the
@@ -21,9 +22,11 @@
  *   (a dissolve OUT is no ramp at all — fading it too would darken the middle).
  * - fade OUT: 1 → 0 over the window, onto whatever is underneath.
  * - dip OUT: 1 → 0 over the first half, then hidden; dip IN: hidden for the
- *   first half, then 0 → 1. Under them, a full-frame colour PLATE for the
- *   window: one plate under the lower tile of a pair (so whatever lies under the
- *   pair is hidden while the picture dips), or under a lone side's own tile.
+ *   first half, then 0 → 1. Under them, a colour CARD for the window, behind
+ *   the clips' boxes only (`TransitionPlate`): one card under the lower tile of
+ *   a pair, covering both clips' boxes (so what lies under the pair is hidden
+ *   there while the picture dips, and shows everywhere else), or under a lone
+ *   side's own tile, covering its own box.
  */
 
 import type { Layer, LayerTransition, TransitionKind } from './project'
@@ -234,21 +237,38 @@ export function pairOf(layers: Layer[], id: string, side: TransitionSide): Trans
   return transitionPairs(layers).find((p) => (side === 'in' ? p.inId : p.outId) === id) ?? null
 }
 
-/** A full-frame colour plate painted directly UNDER layer `belowId` for
- *  [startSec, endSec] — what a dip shows while neither picture does. */
+/**
+ * A dip's colour CARD — what a dip shows while neither picture does: `color`,
+ * painted directly UNDER layer `belowId` over the half-open window
+ * [startSec, endSec), covering the UNION of the boxes of the tiles `coverIds`
+ * (owner decision 5: the card sits only behind the clips, so a
+ * picture-in-picture dip doesn't blank the main video and a letterboxed clip's
+ * bars keep what is under them).
+ *
+ * THE parity definition: each side draws one box per covered tile with the
+ * very geometry it draws that tile's own picture with — the preview's
+ * `mediaBox` at the tile's keyframed transform (`dipPlatesUnder`), the
+ * export's `layerBox` through the clip's own placement steps (`platesByLayer`,
+ * `plateChains`) — so the card follows the clips' position, scale, stretch,
+ * crop, rotation and position keyframes exactly.
+ */
 export interface TransitionPlate {
   color: string
   startSec: number
   endSec: number
   belowId: string
+  /** The tiles whose boxes the card covers: a pair's two clips, or a lone
+   *  dip side's own tile. */
+  coverIds: string[]
 }
 
 /**
- * The dip plates of a stack (`layers` back → front). A pair gets ONE plate under
- * whichever of its two tiles is lower in the stack, for the whole window; a lone
- * dip side (its partner gone) gets one under its own tile for its own window.
- * Hidden tiles contribute nothing (a pair with a hidden member counts as the
- * visible side alone).
+ * The dip cards of a stack (`layers` back → front). A pair gets ONE card,
+ * behind both clips' boxes, under whichever of its two tiles is lower in the
+ * stack, for the whole window; a lone dip side (its partner gone) gets one
+ * behind its own box, under its own tile, for its own window. Hidden tiles
+ * contribute nothing (a pair with a hidden member counts as the visible side
+ * alone).
  */
 export function transitionPlates(layers: Layer[]): TransitionPlate[] {
   const shown = layers.filter((l) => !l.hidden && takesTransitions(l))
@@ -261,7 +281,13 @@ export function transitionPlates(layers: Layer[]): TransitionPlate[] {
     if (!color) continue
     const b = shown.find((l) => l.id === p.inId)!
     const lower = (index.get(p.outId) ?? 0) < (index.get(p.inId) ?? 0) ? p.outId : p.inId
-    plates.push({ color, startSec: b.startSec, endSec: b.startSec + p.sec, belowId: lower })
+    plates.push({
+      color,
+      startSec: b.startSec,
+      endSec: b.startSec + p.sec,
+      belowId: lower,
+      coverIds: [p.outId, p.inId]
+    })
   }
   for (const l of shown) {
     const tin = transitionOf(l, 'in')
@@ -269,10 +295,16 @@ export function transitionPlates(layers: Layer[]): TransitionPlate[] {
     const inColor = tin ? TRANSITION_KINDS[tin.kind].plate : null
     const outColor = tout ? TRANSITION_KINDS[tout.kind].plate : null
     if (tin && inColor && !paired.has(`in:${l.id}`)) {
-      plates.push({ color: inColor, startSec: l.startSec, endSec: l.startSec + tin.sec, belowId: l.id })
+      plates.push({
+        color: inColor,
+        startSec: l.startSec,
+        endSec: l.startSec + tin.sec,
+        belowId: l.id,
+        coverIds: [l.id]
+      })
     }
     if (tout && outColor && !paired.has(`out:${l.id}`)) {
-      plates.push({ color: outColor, startSec: l.endSec - tout.sec, endSec: l.endSec, belowId: l.id })
+      plates.push({ color: outColor, startSec: l.endSec - tout.sec, endSec: l.endSec, belowId: l.id, coverIds: [l.id] })
     }
   }
   return plates

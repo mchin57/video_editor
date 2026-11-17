@@ -25,7 +25,7 @@ import { compositionDuration, MAX_COMP_DEPTH } from '@shared/compositions'
 import { cellSpan, FULL_CELL, layoutCellRect } from '@shared/layouts'
 import { type MediaAsset } from '@shared/media'
 import { textWrapWidth } from '@shared/textStyle'
-import { effectiveImageAspect, isFrozenAt, layersAtTime, videoSourceTime, type FrameRect } from '@shared/layers'
+import { isFrozenAt, layersAtTime, videoSourceTime, type FrameRect } from '@shared/layers'
 import { assertNever } from '@shared/layerKinds'
 import { layerOpacityAt, transitionPlates } from '@shared/transitions'
 import { clampAnimWindows, effectiveTextAnimation, textAnimStateAt } from '@shared/textAnim'
@@ -43,7 +43,7 @@ import {
   layerRotation,
   flipTransform,
   videoFillStyle,
-  mediaAspect,
+  mediaLayerAspect,
   TintFilter
 } from './geometry'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
@@ -411,7 +411,7 @@ function StackVideo({
 }: KindViewProps<VideoContent>): JSX.Element {
   const asset = assetById.get(content.mediaId)
   const box = {
-    ...mediaBox(layer, mediaAspect(asset, content)),
+    ...mediaBox(layer, mediaLayerAspect(layer, asset)),
     zIndex: z,
     ...keyframedOpacity(rawLayer, time)
   }
@@ -455,9 +455,8 @@ function StackImage({
 }: KindViewProps<ImageContent>): JSX.Element {
   const asset = assetById.get(content.mediaId)
   // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
-  const base = mediaAspect(asset, {})
   const cr = content.crop
-  const aspect = effectiveImageAspect(base, cr, content.rotateQuarters)
+  const aspect = mediaLayerAspect(layer, asset)
   const q = (((content.rotateQuarters ?? 0) % 4) + 4) % 4
   const odd = q === 1 || q === 3
   const box = {
@@ -704,7 +703,7 @@ export function CompFill({
             muted and extracted to its audio lane would play silent. */}
         {!muted && <CompAudioTrack clips={comp.audioClips} assetById={assetById} time={time} playing={playing} />}
         {active.map((l, i) => [
-          ...dipPlatesUnder(plates, l.id, time, 10 + i, frame),
+          ...dipPlatesUnder(plates, comp.layers, l.id, time, 10 + i, assetById),
           <StackLayer
             key={l.id}
             rawLayer={l}

@@ -292,7 +292,7 @@ export function PreviewStage(): JSX.Element {
 
             {/* The composited layer stack, back (index 0) → front. */}
             {activeLayers.map((rawLayer, i) => [
-              ...dipPlatesUnder(plates, rawLayer.id, time, 10 + i, frame),
+              ...dipPlatesUnder(plates, previewLayers, rawLayer.id, time, 10 + i, assetById),
               <StackLayer
                 key={rawLayer.id}
                 rawLayer={rawLayer}

@@ -58,7 +58,7 @@ import {
 import { buildAss, type AssOverlay } from './assBuilder'
 import { createTextRenderer, type TextImageSpec, type TextRenderer } from './textImage'
 import type { LaidOutLine } from './textLayout'
-import { exportLayer } from './exportLayers'
+import { exportLayer, mediaLayerBox } from './exportLayers'
 import { platesByLayer } from './exportTransitions'
 import { audioItemPlayedSec } from './audio'
 import { addCaptions, fullFrameImage } from './exportText'
@@ -204,8 +204,9 @@ export class CompositionRender {
     this.tmpDir = join(ctx.tmpRoot, `r${ctx.n.v++}`)
     await fsp.mkdir(this.tmpDir, { recursive: true })
 
-    // A dip's colour plate goes in just under the layer it belongs beneath.
-    const plates = platesByLayer(comp.layers)
+    // A dip's colour card goes in just under the layer it belongs beneath,
+    // one box per clip it lies behind, placed as that clip is.
+    const plates = await platesByLayer(comp.layers, (l) => mediaLayerBox(this, l))
     for (const l of comp.layers) {
       if (l.hidden) continue
       this.visuals.push(...(plates.get(l.id) ?? []))

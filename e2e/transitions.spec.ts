@@ -312,17 +312,42 @@ test('a fade at a clip’s end: the Inspector field, and the tile’s top corner
   expect(late).toBeCloseTo(0.5, 1)
 })
 
-test('a dip shows its colour plate in the preview while neither clip does', async ({ appPage: page }) => {
+test('a dip shows its colour card in the preview while neither clip does — behind the two clips’ boxes only', async ({
+  appPage: page
+}) => {
   await arrangeThree(page)
   await page.evaluate(() => {
     const L = (id: string) => ({ kind: 'layer' as const, id })
     const s = window.__reelStores.useProject.getState()
+    // Two picture-in-picture clips in different places (B also rotated).
+    s.updateLayer('A', { x: 300, y: 400, scale: 0.3 })
+    s.updateLayer('B', { x: 700, y: 1400, scale: 0.3, rotationDeg: 20 })
     s.applyTransition([L('A'), L('B')], 'dipWhite')
     window.__reelStores.usePlayback.getState().setTime(3.75) // the middle of the 3.5–4 window
   })
   const plate = page.getByTestId('dip-plate')
   await expect(plate).toHaveCount(1)
-  expect(await plate.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 255, 255)')
+  const boxes = page.getByTestId('dip-plate-box')
+  await expect(boxes).toHaveCount(2)
+  for (const id of ['A', 'B']) {
+    const card = page.locator(`[data-testid="dip-plate-box"][data-cover="${id}"]`)
+    expect(await card.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 255, 255)')
+    // The card's box IS the clip's box (select the clip to tag its preview box).
+    await page.evaluate((i) => {
+      const ref = { kind: 'layer' as const, id: i }
+      window.__reelStores.useUi.getState().selectItems([ref], ref)
+    }, id)
+    const clip = (await page.locator('[data-resizebox]').boundingBox())!
+    const c = (await card.boundingBox())!
+    for (const k of ['x', 'y', 'width', 'height'] as const)
+      expect(Math.abs(c[k] - clip[k]), `${id} ${k}`).toBeLessThan(1)
+  }
+  // Not a full-frame plate: each box is a small part of the stage.
+  const stage = (await page.getByTestId('preview-stage').boundingBox())!
+  for (const b of await boxes.all()) {
+    const r = (await b.boundingBox())!
+    expect(r.width * r.height).toBeLessThan(0.2 * stage.width * stage.height)
+  }
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(4.5))
   await expect(plate).toHaveCount(0)
 })

@@ -190,19 +190,25 @@ describe('pairs and plates', () => {
     ).toEqual([])
   })
 
-  it('a dip pair puts ONE plate under the lower tile, for the whole window', () => {
+  it('a dip pair puts ONE card under the lower tile, behind BOTH clips’ boxes, for the whole window', () => {
     const [a, b] = pairOfKind('dipWhite')
-    expect(transitionPlates([a, b])).toEqual([{ color: '#ffffff', startSec: 3.5, endSec: 4, belowId: 'A' }])
+    expect(transitionPlates([a, b])).toEqual([
+      { color: '#ffffff', startSec: 3.5, endSec: 4, belowId: 'A', coverIds: ['A', 'B'] }
+    ])
     // Reversed stack: under B, which is now the lower one.
-    expect(transitionPlates([b, a])).toEqual([{ color: '#ffffff', startSec: 3.5, endSec: 4, belowId: 'B' }])
+    expect(transitionPlates([b, a])).toEqual([
+      { color: '#ffffff', startSec: 3.5, endSec: 4, belowId: 'B', coverIds: ['A', 'B'] }
+    ])
     expect(transitionPlates(pairOfKind('dissolve'))).toEqual([])
   })
 
-  it('a lone dip side keeps a plate under its own tile; a hidden tile gives none', () => {
+  it('a lone dip side keeps a card under (and behind) its own tile only; a hidden tile gives none', () => {
     const [a, b] = pairOfKind('dipBlack')
-    expect(transitionPlates([a])).toEqual([{ color: '#000000', startSec: 3.5, endSec: 4, belowId: 'A' }])
+    expect(transitionPlates([a])).toEqual([
+      { color: '#000000', startSec: 3.5, endSec: 4, belowId: 'A', coverIds: ['A'] }
+    ])
     expect(transitionPlates([a, { ...b, hidden: true }])).toEqual([
-      { color: '#000000', startSec: 3.5, endSec: 4, belowId: 'A' }
+      { color: '#000000', startSec: 3.5, endSec: 4, belowId: 'A', coverIds: ['A'] }
     ])
     expect(
       transitionPlates([

@@ -24,8 +24,8 @@ import { FFMPEG } from './bin'
 const W = 1080
 const H = 1920
 
-/** Mean RGB of the centre 200×200 of the frame shown at `t`. */
-function centreRgb(file: string, t: number): number[] {
+/** Mean RGB of the `w`×`h` region at (`x`, `y`) of the frame shown at `t`. */
+function regionRgb(file: string, t: number, x: number, y: number, w: number, h: number): number[] {
   const buf = execFileSync(
     FFMPEG,
     [
@@ -38,19 +38,22 @@ function centreRgb(file: string, t: number): number[] {
       '-frames:v',
       '1',
       '-vf',
-      `crop=200:200:${W / 2 - 100}:${H / 2 - 100}`,
+      `crop=${w}:${h}:${x}:${y}`,
       '-f',
       'rawvideo',
       '-pix_fmt',
       'rgb24',
       '-'
     ],
-    { maxBuffer: 200 * 200 * 3 + 1024 }
+    { maxBuffer: w * h * 3 + 1024 }
   )
   const sum = [0, 0, 0]
   for (let i = 0; i < buf.length; i += 3) for (let k = 0; k < 3; k++) sum[k] += buf[i + k]
   return sum.map((v) => v / (buf.length / 3))
 }
+
+/** Mean RGB of the centre 200×200 of the frame shown at `t`. */
+const centreRgb = (file: string, t: number): number[] => regionRgb(file, t, W / 2 - 100, H / 2 - 100, 200, 200)
 
 /** RMS level (dBFS) of the export's sound over [t0, t1). */
 function rmsDb(samples: Float32Array, t0: number, t1: number): number {
@@ -70,8 +73,8 @@ function monoSamples(file: string): Float32Array {
   return new Float32Array(raw.buffer, raw.byteOffset, raw.length / 4)
 }
 
-/** A 3 s 270×480 clip of one colour with a tone. */
-function clip(dir: string, name: string, color: string, hz: number): string {
+/** A 3 s clip of one colour with a tone (270×480 unless `size` says otherwise). */
+function clip(dir: string, name: string, color: string, hz: number, size = '270x480', sec = 3): string {
   const out = join(dir, name)
   execFileSync(FFMPEG, [
     '-y',
@@ -80,11 +83,11 @@ function clip(dir: string, name: string, color: string, hz: number): string {
     '-f',
     'lavfi',
     '-i',
-    `color=c=${color}:s=270x480:r=30:d=3`,
+    `color=c=${color}:s=${size}:r=30:d=${sec}`,
     '-f',
     'lavfi',
     '-i',
-    `sine=frequency=${hz}:sample_rate=48000:duration=3`,
+    `sine=frequency=${hz}:sample_rate=48000:duration=${sec}`,
     '-pix_fmt',
     'yuv420p',
     '-c:v',
@@ -184,5 +187,83 @@ test('a cross dissolve and a dip export as the preview draws them; the sound cro
     `[transitionExport] before ${before.map(Math.round)} mid ${mid.map(Math.round)} after ${after.map(Math.round)}; ` +
       `dip black ${dark.map(Math.round)}; dip white ${centreRgb(white, 2.75).map(Math.round)}; ` +
       `crossfade middle ${(rmsDb(samples, 2.7, 2.8) - alone).toFixed(2)} dB`
+  )
+})
+
+test('a dip’s colour card sits only behind the clips: letterbox bars and the main video under a picture-in-picture stay', async ({
+  appPage: page,
+  electronApp
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(240_000)
+
+  const dir = mkdtempSync(join(tmpdir(), 'reel-dipcard-'))
+  const green = clip(dir, 'green.mp4', '0x20C020', 330, '270x480', 6)
+  const red = clip(dir, 'red.mp4', '0xC82828', 440, '480x270')
+  const blue = clip(dir, 'blue.mp4', '0x2828C8', 660, '480x270')
+
+  // A full-frame green backdrop G under two 16:9 clips at scale 1 — letterboxed
+  // to a 1080×608 band across the middle — joined by a dip to white.
+  const ok = await page.evaluate(
+    async ({ green, red, blue }) => {
+      const { useProject } = window.__reelStores
+      const [g, r, b] = await window.api.importPaths([green, red, blue])
+      const s = useProject.getState()
+      s.addMedia([g.id, r.id, b.id])
+      s.addVideoLayer('G', g.id, 0, 6, false, 270 / 480)
+      s.addVideoLayer('R', r.id, 0, 3, false)
+      s.addVideoLayer('B', b.id, 3, 3, false)
+      const L = (id: string) => ({ kind: 'layer' as const, id })
+      return useProject.getState().applyTransition([L('R'), L('B')], 'dipWhite')
+    },
+    { green, red, blue }
+  )
+  expect(ok).toEqual({ ok: true })
+
+  // Regions (output px): above and below the band, inside it, and the band's
+  // centre — at the dip's midpoint (2.75 s) and before it (1.5 s).
+  const TOP = [440, 200, 200, 200] as const
+  const BOTTOM = [440, 1500, 200, 200] as const
+  const MIDDLE = [440, 860, 200, 200] as const
+  const at = (f: string, t: number, r: readonly [number, number, number, number]): number[] => regionRgb(f, t, ...r)
+  const same = (a: number[], b: number[], what: string): void => {
+    for (let k = 0; k < 3; k++) expect(Math.abs(a[k] - b[k]), `${what} channel ${k}`).toBeLessThan(12)
+  }
+
+  const letterbox = join(dir, 'letterbox.mp4')
+  await exportTo(page, electronApp, letterbox)
+  for (const [name, r] of [
+    ['above the band', TOP],
+    ['below the band', BOTTOM]
+  ] as const) {
+    const before = at(letterbox, 1.5, r)
+    expect(before[1], `${name} is the green backdrop`).toBeGreaterThan(150)
+    same(at(letterbox, 2.75, r), before, `${name} unchanged mid-dip`)
+  }
+  expect(Math.min(...at(letterbox, 2.75, MIDDLE)), 'the card inside the band').toBeGreaterThan(225)
+
+  // The same two clips as a picture-in-picture (scale 0.4, top right: a
+  // 432×243 box around (756, 480)) dipping to black over G as the main video.
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.updateLayer('R', { x: 756, y: 480, scale: 0.4 })
+    s.updateLayer('B', { x: 756, y: 480, scale: 0.4 })
+    s.setTransitionKind('B', 'in', 'dipBlack')
+  })
+  const pip = join(dir, 'pip.mp4')
+  await exportTo(page, electronApp, pip)
+  expect(Math.max(...at(pip, 2.75, [706, 430, 100, 100])), 'the card inside the PiP box').toBeLessThan(30)
+  for (const [name, r] of [
+    ['the main video mid-frame', MIDDLE],
+    ['the main video above the PiP', [656, 200, 200, 100] as const],
+    ['the main video below', BOTTOM]
+  ] as const) {
+    const before = at(pip, 1.5, r)
+    expect(before[1], `${name} is green`).toBeGreaterThan(150)
+    same(at(pip, 2.75, r), before, `${name} unchanged mid-dip`)
+  }
+  console.log(
+    `[transitionExport] card: letterbox band ${at(letterbox, 2.75, MIDDLE).map(Math.round)} bars ${at(letterbox, 2.75, TOP).map(Math.round)}; ` +
+      `PiP box ${at(pip, 2.75, [706, 430, 100, 100]).map(Math.round)} main ${at(pip, 2.75, MIDDLE).map(Math.round)}`
   )
 })

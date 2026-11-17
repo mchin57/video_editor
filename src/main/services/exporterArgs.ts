@@ -22,7 +22,6 @@ import { clipGain, type GainContext } from '@shared/volumeLevels'
 import { clipLinePoints, type LinePoint } from '@shared/audioEnvelope'
 import { audioExportHolds, audioSpeed } from '@shared/audioTiming'
 import { clampInt } from '@shared/math'
-import { plateFilter } from './exportTransitions'
 
 /**
  * Per-frame opacity animation for a visual: `sendcmd` (reading `cmdFile`,
@@ -98,6 +97,75 @@ const kfPosExprs = (kfs: ExportKeyframe[]): { x: string; y: string } => ({
   x: `(${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k.cx })))})-overlay_w/2`,
   y: `(${piecewiseLinearExpr(kfs.map((k) => ({ t: k.t, v: k.cy })))})-overlay_h/2`
 })
+
+// ── Placing a box: shared by a video's picture and a dip's card ────────────
+
+/** A box's keyframes, or null when it has none (a static box). */
+const boxKfs = (b: ExportBox): ExportKeyframe[] | null => (b.keyframes && b.keyframes.length > 0 ? b.keyframes : null)
+
+/** The size the picture is scaled to BEFORE the time shift: the box itself,
+ *  or — rotated AND keyframed — its largest keyframe box (`maxKfBox`); null for
+ *  an unrotated keyframed box, which is scaled per frame after the shift. */
+function preShiftSize(b: ExportBox): { w: number; h: number } | null {
+  const kfs = boxKfs(b)
+  if (!kfs) return { w: b.boxW, h: b.boxH }
+  return layerRot(b.rotationDeg) ? maxKfBox(kfs) : null
+}
+
+/** The placement steps AFTER the time shift (so `t` is output time): the
+ *  rotation (the picture must carry alpha by then), then the per-frame
+ *  keyframe scale — to the rotated keyframe bounds when rotated. */
+function postShiftSteps(b: ExportBox): string[] {
+  const kfs = boxKfs(b)
+  const rot = layerRot(b.rotationDeg)
+  const steps: string[] = []
+  if (rot) steps.push(rotateFilter(rot))
+  if (kfs) {
+    const sk = rot ? rotatedKfs(kfs, rot) : kfs
+    steps.push(`scale=w='${kfDimExpr(sk, 'w')}':h='${kfDimExpr(sk, 'h')}':eval=frame:flags=bicubic`)
+  }
+  return steps
+}
+
+/** The overlay position: per-frame keyframe expressions, a rotated box's
+ *  centred position, or the static top-left. */
+function overlayXY(b: ExportBox): string {
+  const kfs = boxKfs(b)
+  if (kfs) {
+    const pos = kfPosExprs(kfs)
+    return `x='${pos.x}':y='${pos.y}'`
+  }
+  return layerRot(b.rotationDeg) ? centredPos(b.x, b.y, b.boxW, b.boxH) : `${r(b.x)}:${r(b.y)}`
+}
+
+/** `#rrggbb` → ffmpeg's `0xRRGGBB`. */
+const ffColor = (c: string): string => `0x${c.replace(/^#/, '').slice(0, 6).toUpperCase()}`
+
+/**
+ * One box of a dip's card as filter chains: a solid colour source the size
+ * the clip's picture has before its shift, shifted to the card's start and
+ * then placed exactly as the clip is (`postShiftSteps`, `overlayXY`) —
+ * rotation and keyframes included — over the running composite `[prev]`. The
+ * window is HALF-OPEN, `[start, end)`, like the preview's `platesUnderAt`.
+ * Verified against the real binary (docs/FFMPEG-NOTES.md "Transitions").
+ */
+function plateChains(p: ExportPlate, label: string, prev: string, out: string): string[] {
+  const b = p.box
+  // An unrotated keyframed box is scaled per frame anyway: any start size will do.
+  const size = preShiftSize(b) ?? maxKfBox(boxKfs(b)!)
+  const rot = layerRot(b.rotationDeg)
+  const src = [
+    `color=c=${ffColor(p.color)}:s=${Math.max(1, r(size.w))}x${Math.max(1, r(size.h))}:r=30:d=${f3(Math.max(1 / 30, p.endSec - p.startSec))}`,
+    'setsar=1',
+    rot ? 'format=yuva420p' : 'format=yuv420p',
+    `setpts=PTS-STARTPTS+${f3(p.startSec)}/TB`,
+    ...postShiftSteps(b)
+  ]
+  return [
+    `${src.join(',')}[${label}]`,
+    `[${prev}][${label}]overlay=${overlayXY(b)}:enable='gte(t,${f3(p.startSec)})*lt(t,${f3(p.endSec)})'[${out}]`
+  ]
+}
 
 export interface Target {
   width: number
@@ -202,13 +270,24 @@ export interface ExportImage {
   fadeIn?: { startSec: number; durSec: number }
 }
 
-/** A dip's full-frame colour plate (transitions, `exportTransitions.ts`): painted
- *  over the composite so far, for its window. */
+/**
+ * Where a picture is placed (output px): its display box, top-left, rotation
+ * and keyframes. A video carries it; a dip's card copies it from the clip it
+ * lies behind (`exportTransitions.ts`), and both go through the same placement
+ * steps (`preShiftSize` / `postShiftSteps` / `overlayXY`), so the card lands
+ * exactly where the clip does — rotated and keyframed boxes included.
+ */
+export type ExportBox = Pick<ExportVideo, 'boxW' | 'boxH' | 'x' | 'y' | 'rotationDeg' | 'keyframes'>
+
+/** One box of a dip's colour CARD (transitions, `exportTransitions.ts`): a
+ *  solid `color` filling one clip's box, placed as that clip is, on screen
+ *  over the half-open window [startSec, endSec). */
 export interface ExportPlate {
   /** `#rrggbb` */
   color: string
   startSec: number
   endSec: number
+  box: ExportBox
 }
 
 /** A visual layer, in back→front order. Text is burned via its own ASS file. */
@@ -561,7 +640,6 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
     if (vis.kind === 'video') {
       const v = vis.video
       const i = videoIdx.get(v)!
-      const kfs = v.keyframes && v.keyframes.length > 0 ? v.keyframes : null
       const pre: string[] = []
       if (v.hdrChain) pre.push(v.hdrChain)
       if (v.crop) pre.push(cropFilter(v.crop))
@@ -572,11 +650,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       // expressions see output-timeline t); static layers keep the one-shot
       // scale here (exact strings pinned by tests). A rotated keyframed layer
       // is pre-scaled to its largest keyframe box instead (see `maxKfBox`).
-      if (!kfs) pre.push(`scale=${r(v.boxW)}:${r(v.boxH)}:flags=bicubic`)
-      else if (rot) {
-        const mb = maxKfBox(kfs)
-        pre.push(`scale=${r(mb.w)}:${r(mb.h)}:flags=bicubic`)
-      }
+      const size = preShiftSize(v)
+      if (size) pre.push(`scale=${r(size.w)}:${r(size.h)}:flags=bicubic`)
       if (v.colorEq) pre.push(v.colorEq)
       // Freeze holds stretch PTS: each pushes all frames at/after its source point
       // forward by holdSec, so the held frame repeats (under -fps_mode cfr) instead
@@ -607,11 +682,7 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
           : `setpts=${elapsed}+${f3(v.startSec)}/TB`
       }
       pre.push('setsar=1', v.hasAlpha || rot ? 'format=yuva420p' : 'format=yuv420p', setpts)
-      if (rot) pre.push(rotateFilter(rot))
-      if (kfs) {
-        const sk = rot ? rotatedKfs(kfs, rot) : kfs
-        pre.push(`scale=w='${kfDimExpr(sk, 'w')}':h='${kfDimExpr(sk, 'h')}':eval=frame:flags=bicubic`)
-      }
+      pre.push(...postShiftSteps(v))
       if (v.opacity) {
         // Keyframed opacity: sendcmd sits AFTER the setpts shift so its
         // interval times see absolute output-timeline pts; colorchannelmixer's
@@ -621,7 +692,6 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
         pre.push(`colorchannelmixer@${v.opacity.id}=aa=${f3(v.opacity.initial)}`)
       }
       chains.push(`[${i}:v]${pre.join(',')}[pv${i}]`)
-      const pos = kfs ? kfPosExprs(kfs) : null
       // `eof_action=repeat` HOLDS the layer's last frame once its (`-t`-limited)
       // input runs out, until `enable` closes the window at endSec. That is what
       // makes a freeze hold sitting at the clip's END work: such a hold shifts no
@@ -629,9 +699,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
       // only the repeat keeps the held frame on screen — `eof_action=pass` punched
       // the base canvas (black) through instead. It also matches the preview,
       // whose `videoSourceTime` clamps to `outSec` past the end of the footage.
-      const vxy = pos ? `x='${pos.x}':y='${pos.y}'` : rot ? centredPos(v.x, v.y, v.boxW, v.boxH) : `${r(v.x)}:${r(v.y)}`
       chains.push(
-        `[${prev}][pv${i}]overlay=${vxy}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
+        `[${prev}][pv${i}]overlay=${overlayXY(v)}:enable='between(t,${f3(v.startSec)},${f3(v.endSec)})':eof_action=repeat[${out}]`
       )
     } else if (vis.kind === 'image') {
       const im = vis.image
@@ -699,7 +768,8 @@ export function buildExportArgs(plan: ExportPlan, output: string): string[] {
           : `${r(im.x)}:${r(im.y)}`
       chains.push(`[${prev}][pi${i}]overlay=${ixy}:enable='between(t,${f3(im.startSec)},${f3(im.endSec)})'[${out}]`)
     } else if (vis.kind === 'plate') {
-      chains.push(`[${prev}]${plateFilter(vis.plate)}[${out}]`)
+      // The card's own source label carries its step's number (`v3` → `pp3`).
+      chains.push(...plateChains(vis.plate, `pp${out.slice(1)}`, prev, out))
     } else {
       chains.push(`[${prev}]ass=${vis.assFile}${assOpts}[${out}]`)
     }
