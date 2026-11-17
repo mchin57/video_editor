@@ -139,8 +139,8 @@ test('marks drag whole and by their point handles, one undo step each; Escape di
   await drag(page, { x: 200, y: 960 }, { x: 800, y: 960 })
   const [line] = await marks(page)
 
-  // Grab the middle of the line and move it.
-  await drag(page, { x: 500, y: 960 }, { x: 600, y: 1060 })
+  // Grab the line off its middle (the selected mark's pivot handle sits there) and move it.
+  await drag(page, { x: 350, y: 960 }, { x: 450, y: 1060 })
   let [moved] = await marks(page)
   expectNear(moved.points[0], { x: line.points[0].x + 100, y: line.points[0].y + 100 }, tol)
   expectNear(moved.points[1], { x: line.points[1].x + 100, y: line.points[1].y + 100 }, tol)
@@ -383,4 +383,175 @@ test("a filled shape's border can go to 0; turning the fill off restores a visib
   await page.getByLabel('Fill', { exact: true }).uncheck()
   await expect(page.getByText('Border · 8px')).toBeVisible()
   await expect(path).not.toHaveAttribute('stroke', 'none')
+})
+
+// --- Per-mark animation (keyframes, pivot) ---------------------------------------
+
+interface AnimMark extends Mark {
+  color: string
+  keyframes?: {
+    tSec: number
+    dx: number
+    dy: number
+    rotationDeg: number
+    scale: number
+    color: string
+    easing: string
+  }[]
+  pivot?: Pt
+}
+const animMarks = (page: Page): Promise<AnimMark[]> => marks(page) as unknown as Promise<AnimMark[]>
+const kf = (tSec: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  tSec,
+  dx: 0,
+  dy: 0,
+  scale: 1,
+  rotationDeg: 0,
+  opacity: 1,
+  drawn: 1,
+  color: '#ffd60a',
+  widthPx: 8,
+  easing: 'linear',
+  ...extra
+})
+
+/** Tile G over 1..6s holding one rectangle M (200,600)–(600,1000), selected, playhead at `time`. */
+async function arrangeRect(page: Page, extra: Record<string, unknown>, time: number): Promise<void> {
+  await arrange(page)
+  await page.evaluate(
+    ({ extra, time }) => {
+      const { useProject, useUi, usePlayback } = window.__reelStores
+      useProject.getState().updateGraphicsMarks('G', () => [
+        {
+          id: 'M',
+          tool: 'rect',
+          points: [
+            { x: 200, y: 600 },
+            { x: 600, y: 1000 }
+          ],
+          color: '#ffd60a',
+          widthPx: 8,
+          atSec: 0,
+          reveal: 'pop',
+          ...extra
+        } as never
+      ])
+      useUi.getState().selectMark('M')
+      usePlayback.getState().setTime(time)
+    },
+    { extra, time }
+  )
+}
+const markGroupTransform = (page: Page): Promise<string | null> =>
+  page.getByTestId('graphics-layer').locator('[data-mark-id="M"] > g').getAttribute('transform')
+
+test('keyframes added in the Inspector animate the shape: the preview eases between them', async ({
+  appPage: page
+}) => {
+  await arrangeRect(page, {}, 1)
+  // A keyframe at the tile start (as drawn), then rotate 90° and double the size 2s later.
+  await page.getByTestId('mark-add-keyframe').click()
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(3))
+  await page.getByLabel('Mark rotation').fill('90')
+  await page.getByLabel('Mark rotation').press('Enter')
+  await page.getByLabel('Mark size %').fill('200')
+  await page.getByLabel('Mark size %').press('Enter')
+  const ks = (await animMarks(page))[0].keyframes!
+  expect(ks).toHaveLength(2)
+  expect(ks[0].tSec).toBeCloseTo(0)
+  expect(ks[1].tSec).toBeCloseTo(2)
+  expect(ks[1].rotationDeg).toBe(90)
+  expect(ks[1].scale).toBeCloseTo(2)
+
+  // At the start it is as drawn; at the end turned and doubled.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1))
+  expect(await markGroupTransform(page)).toBeNull()
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(3))
+  expect(await markGroupTransform(page)).toContain('rotate(90) scale(2)')
+  // Halfway (ease-in-out → 0.5): 45° and 150%.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(2))
+  expect(await markGroupTransform(page)).toContain('rotate(45) scale(1.5)')
+  // A quarter of the way the ease has barely moved: 90 × 0.0625.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1.5))
+  expect(await markGroupTransform(page)).toContain('rotate(5.63)')
+  // The fields follow the playhead.
+  await expect(page.getByLabel('Mark rotation')).toHaveValue('6')
+  // The easing is editable per keyframe.
+  await page.getByTestId('mark-kf-easing-0').selectOption('linear')
+  expect((await animMarks(page))[0].keyframes![0].easing).toBe('linear')
+})
+
+test('with keyframes, dragging the shape writes a keyframe at the playhead — one undo step', async ({
+  appPage: page
+}) => {
+  const tol = await slop(page)
+  await arrangeRect(page, { keyframes: [kf(0), kf(2, { dx: 200 })] }, 2) // local 1: 100px along
+  const before = (await animMarks(page))[0]
+  // At local 1 the rectangle's left edge is at x = 300. Grab it there, well off the pivot.
+  await drag(page, { x: 300, y: 800 }, { x: 300, y: 900 })
+  const after = (await animMarks(page))[0]
+  expect(after.points).toEqual(before.points)
+  expect(after.keyframes).toHaveLength(3)
+  const mid = after.keyframes![1]
+  expect(mid.tSec).toBeCloseTo(1)
+  expect(Math.abs(mid.dx - 100)).toBeLessThanOrEqual(tol)
+  expect(Math.abs(mid.dy - 100)).toBeLessThanOrEqual(tol)
+  await page.keyboard.press('Control+z')
+  expect((await animMarks(page))[0].keyframes).toEqual(before.keyframes)
+})
+
+test('the pivot handle drags and sets the mark’s pivot — one undo step; Centre pivot clears it', async ({
+  appPage: page
+}) => {
+  const tol = await slop(page)
+  await arrangeRect(page, {}, 1)
+  const pivot = page.getByTestId('mark-pivot')
+  await expect(pivot).toBeVisible()
+  // It sits at the centre of the rectangle: (400, 800).
+  const c = await screen(page, { x: 400, y: 800 })
+  const b = (await pivot.boundingBox())!
+  expect(Math.abs(b.x + b.width / 2 - c.x)).toBeLessThan(3)
+  expect(Math.abs(b.y + b.height / 2 - c.y)).toBeLessThan(3)
+  await drag(page, { x: 400, y: 800 }, { x: 250, y: 650 })
+  expectNear((await animMarks(page))[0].pivot!, { x: 250, y: 650 }, tol)
+  await page.keyboard.press('Control+z')
+  expect((await animMarks(page))[0].pivot).toBeUndefined()
+
+  // On a mark with a static rotation, moving the pivot must not move the drawing.
+  await page.getByLabel('Mark rotation').fill('90')
+  await page.getByLabel('Mark rotation').press('Enter')
+  const drawnPts = async (): Promise<Pt[]> => {
+    const m = (await animMarks(page))[0] as AnimMark & { rotationDeg?: number; points: Pt[] }
+    const p = m.pivot ?? { x: 400, y: 800 }
+    const r = ((m.rotationDeg ?? 0) * Math.PI) / 180
+    return m.points.map((q) => ({
+      x: p.x + (q.x - p.x) * Math.cos(r) - (q.y - p.y) * Math.sin(r),
+      y: p.y + (q.x - p.x) * Math.sin(r) + (q.y - p.y) * Math.cos(r)
+    }))
+  }
+  const drawnBefore = await drawnPts()
+  await drag(page, { x: 400, y: 800 }, { x: 250, y: 650 })
+  expectNear((await animMarks(page))[0].pivot!, { x: 250, y: 650 }, tol)
+  const drawnAfter = await drawnPts()
+  expectNear(drawnAfter[0], drawnBefore[0], tol)
+  expectNear(drawnAfter[1], drawnBefore[1], tol)
+  await page.keyboard.press('Control+z')
+  expect((await animMarks(page))[0].pivot).toBeUndefined()
+  await drag(page, { x: 400, y: 800 }, { x: 250, y: 650 })
+  await page.getByTestId('mark-centre-pivot').click()
+  expect((await animMarks(page))[0].pivot).toBeUndefined()
+})
+
+test('editing Border color on a keyframed shape writes the keyframe, not the base', async ({ appPage: page }) => {
+  await arrangeRect(page, { keyframes: [kf(0), kf(2, { dx: 200 })] }, 3) // local 2: on the last keyframe
+  await page.getByTestId('mark-color').fill('#ff0000')
+  const m = (await animMarks(page))[0]
+  expect(m.color).toBe('#ffd60a')
+  expect(m.keyframes).toHaveLength(2)
+  expect(m.keyframes![1].color).toBe('#ff0000')
+  expect(m.keyframes![0].color).toBe('#ffd60a')
+  // Between keyframes a colour edit adds one there.
+  await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(2))
+  await page.getByTestId('mark-color').fill('#00ff00')
+  expect((await animMarks(page))[0].keyframes).toHaveLength(3)
 })

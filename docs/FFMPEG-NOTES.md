@@ -444,6 +444,19 @@ bar growing 15px per frame) composited the compositor's way (base canvas +
 - The whole path, Chromium raster included, is pinned on real pixels by
   `e2e/graphicsExport.spec.ts` (pop / fade / draw-on / layer motion / angle label).
 
+### Animated marks (a mark with its own keyframes)
+
+A mark whose keyframes change (`isMarkAnimated`) uses NO new ffmpeg mechanism: it is
+the pose overlay path below. `exportGraphics.ts` streams one `markArtSvg` frame per
+output frame (30 fps, from the mark's moment to the layer's end) through
+`renderOverlayVideo` into the lossless alpha intermediate, in ONE fixed box (the union
+of `posedBounds` over every frame, so nothing is cropped), and pushes it as a
+`hasAlpha` video placed by `placedBox` with the layer's keyframes and opacity exactly
+as the still would be. The reveal (fade / draw-on) is baked into the frames. Marks
+that are not animated stay stills, drawn at their constant pose (static rotation,
+size, opacity or a lone keyframe). Pinned on real pixels by
+`e2e/graphicsExport.spec.ts` (a rectangle moving across 1s; a statically rotated line).
+
 ## Pose overlay intermediate — piped frames → qtrle ARGB (verified ffmpeg 8.1.1, 2026-10-23)
 
 A clip's pose skeleton changes every frame, so the export renders it as an

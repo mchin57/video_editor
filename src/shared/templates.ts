@@ -23,6 +23,7 @@ import type { Tint } from './tint'
 import { isNeutralTint } from './tint'
 import { PROJECT_VERSION, createEmptyProject, isNeutralColor, migrateProject } from './project'
 import { GRAPHIC_TOOLS } from './graphics'
+import { EASINGS } from './markAnim'
 import { audioPlayedSec } from './audioTiming'
 import { TRANSITION_KINDS } from './transitions'
 import { FORBIDDEN_NAME_CHARS, RESERVED_DEVICE_NAME } from './fileName'
@@ -222,6 +223,13 @@ const validKeyframe = (k: unknown): boolean =>
 
 const validPoint = (p: unknown): boolean => isObj(p) && isNum(p.x) && isNum(p.y)
 
+const validMarkKeyframe = (k: unknown): boolean =>
+  isObj(k) &&
+  [k.tSec, k.dx, k.dy, k.scale, k.rotationDeg, k.opacity, k.drawn, k.widthPx].every(isNum) &&
+  isStr(k.color) &&
+  (k.fill === undefined || isStr(k.fill)) &&
+  (EASINGS as { id: unknown }[]).some((e) => e.id === k.easing)
+
 const validMark = (m: unknown): boolean =>
   isObj(m) &&
   isStr(m.id) &&
@@ -235,7 +243,12 @@ const validMark = (m: unknown): boolean =>
   isStr(m.reveal) &&
   (m.fill === undefined || m.fill === null || isStr(m.fill)) &&
   (m.radiusPx === undefined || isNum(m.radiusPx)) &&
-  (m.dropWidth === undefined || isNum(m.dropWidth))
+  (m.dropWidth === undefined || isNum(m.dropWidth)) &&
+  (m.keyframes === undefined || (Array.isArray(m.keyframes) && m.keyframes.every(validMarkKeyframe))) &&
+  (m.pivot === undefined || validPoint(m.pivot)) &&
+  (m.rotationDeg === undefined || isNum(m.rotationDeg)) &&
+  (m.scale === undefined || isNum(m.scale)) &&
+  (m.opacity === undefined || isNum(m.opacity))
 
 /** Every field the preview and the export read off a text layer, typed. */
 function validText(c: Record<string, unknown>): boolean {
