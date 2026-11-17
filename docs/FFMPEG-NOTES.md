@@ -1469,12 +1469,16 @@ is why the table has 65 points. The error is interpolation across the clamps
 exported frame, 8 patches of the BT.709 clip, tolerance 12 as in "Clip grade"):
 temperature +0.7 / −0.7: 8 / 10; tint +0.7 / −0.7: 8 / 7; vibrance +0.8 / −0.8:
 8 / 8; everything at once (old sliders, new controls, a wash): 9; a 17-point LUT
-at 100 / 40 %: 7 / 7, at 60 % after a grade: 8 (each case moved the picture by
-14–59 levels). A graded picture (an RGB PNG, the image chain with the table
+at 100 / 40 %: 7 / 7, at 60 % after a grade: 8 (each case moved the preview by
+14–59 levels and the export, against an ungraded export of the same frame, by
+13–61; the weakest is tint +0.7 at 13, which the spec requires to be above the
+tolerance). A graded picture (an RGB PNG, the image chain with the table
 after `scale`, before `format=rgba`): 2; its CSS / `lutrgb` path: 4. The canvas
 drawn over a cropped, mirrored, rotated, keyframed clip and a VP9-alpha matte
 matched the plain elements' screenshot to a mean of 0.7 levels over a 13 × 23
-grid, paused and after a second of playback.
+grid, paused and after a second of playback; inside the moved clip's own box
+(where its keyframed opacity is 0.9) 0.5 / 0.8 — a canvas ignoring that opacity
+read 8.0 there and only 3.2 over the whole frame.
 
 **Not measured:** 10-bit sources through `lut3d` (it would work in
 `gbrp10le` while the preview's upload is 8-bit); a GPU without float-texture

@@ -171,6 +171,8 @@ test('a clip graded through the colour table exports with the colours the previe
   const dir = mkdtempSync(join(tmpdir(), 'reel-colortable-'))
   const report: string[] = []
   const ungraded = await previewPatches(page, electronApp)
+  // The same frame exported with no look: each case's export must move away from it.
+  const ungradedExport = await exportPatches(page, electronApp, join(dir, 'ungraded.mp4'))
   for (const [n, c] of CASES.entries()) {
     await setLook(page, 'V', c.look)
     // The table path is in use: the canvas is drawn and the plain <video> hidden.
@@ -179,12 +181,18 @@ test('a clip graded through the colour table exports with the colours the previe
     const preview = await previewPatches(page, electronApp)
     const exported = await exportPatches(page, electronApp, join(dir, `case${n}.mp4`))
     const worst = worstDiff(preview, exported)
-    report.push(`${c.name}: worst ${worst} (moved ${worstDiff(preview, ungraded)} from ungraded)`)
+    const exportMoved = worstDiff(exported, ungradedExport)
+    report.push(
+      `${c.name}: worst ${worst} (preview moved ${worstDiff(preview, ungraded)}, export moved ${exportMoved})`
+    )
     expect
       .soft(worst, `${c.name}: preview ${JSON.stringify(preview)} vs export ${JSON.stringify(exported)}`)
       .toBeLessThanOrEqual(TOLERANCE)
     // And the look really changed the picture (not a pass by doing nothing).
     expect.soft(worstDiff(preview, ungraded), `${c.name} changed nothing`).toBeGreaterThan(8)
+    // On BOTH sides: an export that ignored the control would still sit within
+    // the tolerance of a preview that moved little; it must move by more.
+    expect.soft(exportMoved, `${c.name}: the export did not move`).toBeGreaterThan(TOLERANCE)
   }
   console.log(`[colorTable] preview vs export per case (tolerance ${TOLERANCE}):\n  ${report.join('\n  ')}`)
 })
@@ -238,15 +246,23 @@ test('a graded picture exports with the colours the preview shows', async ({
       look: { color: { ...neutral, temperature: 0.5, vibrance: 0.5 }, lut: { ...lut, strength: 0.7 } }
     }
   ]
+  const ungraded = await previewPatches(page, electronApp)
+  const ungradedExport = await exportPatches(page, electronApp, join(dir, 'ungraded.mp4'))
   for (const [n, c] of cases.entries()) {
     await setLook(page, layerId, c.look)
     const preview = await previewPatches(page, electronApp)
     const exported = await exportPatches(page, electronApp, join(dir, `img${n}.mp4`))
     const worst = worstDiff(preview, exported)
-    console.log(`[colorTable] picture, ${c.name}: worst ${worst}`)
+    const exportMoved = worstDiff(exported, ungradedExport)
+    console.log(
+      `[colorTable] picture, ${c.name}: worst ${worst} (preview moved ${worstDiff(preview, ungraded)}, export moved ${exportMoved})`
+    )
     expect
       .soft(worst, `${c.name}: preview ${JSON.stringify(preview)} vs export ${JSON.stringify(exported)}`)
       .toBeLessThanOrEqual(TOLERANCE)
+    // Both sides moved, by more than the tolerance (a side ignoring the look fails).
+    expect.soft(worstDiff(preview, ungraded), `${c.name}: the preview did not move`).toBeGreaterThan(TOLERANCE)
+    expect.soft(exportMoved, `${c.name}: the export did not move`).toBeGreaterThan(TOLERANCE)
   }
 })
 
@@ -268,6 +284,42 @@ function gridDiff(a: number[][], b: number[][]): { mean: number; worst: number }
     })
   )
   return { mean: sum / (a.length * 3), worst }
+}
+
+/**
+ * Frame fractions of an n × n grid over the middle of layer `id`'s box, along
+ * its own (rotated) axes, `inset` in from each side — points that are always
+ * inside that clip, wherever its keyframes have moved it.
+ */
+async function pointsInLayer(page: Page, id: string, n = 7, inset = 0.2): Promise<{ fx: number; fy: number }[]> {
+  return page.evaluate(
+    ({ id, n, inset }) => {
+      const el = document.querySelector(`[data-layer-id="${id}"]`) as HTMLElement
+      const stage = document.querySelector('[data-testid="preview-canvas"]') as HTMLElement
+      const sr = stage.getBoundingClientRect()
+      const er = el.getBoundingClientRect()
+      const k = sr.width / stage.offsetWidth
+      const t = getComputedStyle(el).transform
+      const m = t && t !== 'none' ? new DOMMatrixReadOnly(t) : new DOMMatrixReadOnly()
+      const s = Math.hypot(m.a, m.b) || 1
+      const ang = Math.atan2(m.b, m.a)
+      const w = el.offsetWidth * s * k
+      const h = el.offsetHeight * s * k
+      const cx = er.left + er.width / 2
+      const cy = er.top + er.height / 2
+      const out: { fx: number; fy: number }[] = []
+      for (let i = 0; i < n; i++)
+        for (let j = 0; j < n; j++) {
+          const u = (inset + ((1 - 2 * inset) * (i + 0.5)) / n - 0.5) * w
+          const v = (inset + ((1 - 2 * inset) * (j + 0.5)) / n - 0.5) * h
+          const x = cx + u * Math.cos(ang) - v * Math.sin(ang)
+          const y = cy + u * Math.sin(ang) + v * Math.cos(ang)
+          out.push({ fx: (x - sr.left) / sr.width, fy: (y - sr.top) / sr.height })
+        }
+      return out
+    },
+    { id, n, inset }
+  )
 }
 
 /** An almost-neutral look that still goes through the colour table. */
@@ -374,6 +426,10 @@ test('a table-graded clip draws exactly where the plain clip does: crop, flip, r
   await page.waitForTimeout(400)
 
   const plain = await previewPixels(page, electronApp, GRID)
+  // Inside the moved clip's own box too: a whole-frame mean is mostly backdrop, so
+  // a canvas that ignored the keyframed opacity (0.9 here) would hide in it.
+  const inV = await pointsInLayer(page, 'V')
+  const plainV = await previewPixels(page, electronApp, inV)
   await setLook(page, 'V', NEAR_NEUTRAL)
   await setLook(page, 'A', NEAR_NEUTRAL)
   await expect(page.locator('[data-testid="grade-canvas"]')).toHaveCount(2)
@@ -384,6 +440,9 @@ test('a table-graded clip draws exactly where the plain clip does: crop, flip, r
   console.log(`[colorTable] placement, paused: mean ${still.mean.toFixed(2)}, worst ${still.worst}`)
   // A canvas that missed the crop, the flip or the rotation would put other parts of the picture here.
   expect(still.mean, 'graded picture sits where the plain one did').toBeLessThan(2.5)
+  const box = gridDiff(plainV, await previewPixels(page, electronApp, inV))
+  console.log(`[colorTable] placement, paused, inside the moved clip: mean ${box.mean.toFixed(2)}, worst ${box.worst}`)
+  expect(box.mean, 'inside the moved clip (crop, flip, rotation, keyframed opacity)').toBeLessThan(2.5)
   // The matte's see-through half still shows the blue backdrop.
   const left = await previewPixels(page, electronApp, [{ fx: 0.35, fy: 0.3 }])
   expect(left[0][2], `backdrop shows through the matte: ${JSON.stringify(left)}`).toBeGreaterThan(150)
@@ -398,6 +457,8 @@ test('a table-graded clip draws exactly where the plain clip does: crop, flip, r
   expect(gridDiff(before, during).mean, 'the graded clip moves while playing').toBeGreaterThan(3)
   await page.waitForTimeout(500)
   const gradedAfter = await previewPixels(page, electronApp, GRID)
+  const inVAfter = await pointsInLayer(page, 'V')
+  const gradedAfterV = await previewPixels(page, electronApp, inVAfter)
   await setLook(page, 'V', {})
   await setLook(page, 'A', {})
   await page.waitForTimeout(400)
@@ -405,6 +466,11 @@ test('a table-graded clip draws exactly where the plain clip does: crop, flip, r
   const played = gridDiff(plainAfter, gradedAfter)
   console.log(`[colorTable] placement, after playing: mean ${played.mean.toFixed(2)}, worst ${played.worst}`)
   expect(played.mean, 'after playing, the graded frame is the plain clip’s frame').toBeLessThan(2.5)
+  const playedBox = gridDiff(await previewPixels(page, electronApp, inVAfter), gradedAfterV)
+  console.log(
+    `[colorTable] placement, after playing, inside the moved clip: mean ${playedBox.mean.toFixed(2)}, worst ${playedBox.worst}`
+  )
+  expect(playedBox.mean, 'after playing, inside the moved clip').toBeLessThan(2.5)
 })
 
 test('with WebGL gone the clip shows ungraded, with a notice', async ({ appPage: page, projectsDir }) => {
@@ -431,6 +497,37 @@ test('with WebGL gone the clip shows ungraded, with a notice', async ({ appPage:
     .evaluate((c) => (c as HTMLCanvasElement).getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext())
   await expect(page.getByTestId('grade-warning')).toContainText('WebGL unavailable')
   expect(await video.evaluate((v) => getComputedStyle(v).opacity)).toBe('1')
+})
+
+test('with no WebGL2 at all the clip shows ungraded, with a notice', async ({ appPage: page, projectsDir }) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  const clip = join(projectsDir, 'E2E', 'patches.mp4')
+  makePatchClip(clip)
+  const id = await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    window.__reelStores.useProject.getState().addMedia([asset.id])
+    return asset.id
+  }, clip)
+  await waitForProxy(page, id)
+  // A machine whose browser offers no WebGL2 context.
+  await page.evaluate(() => {
+    const orig = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, kind: string, ...rest: unknown[]) {
+      return kind === 'webgl2' ? null : (orig as (...a: unknown[]) => unknown).call(this, kind, ...rest)
+    } as typeof orig
+  })
+  await page.evaluate((id) => {
+    window.__reelStores.useProject.getState().addVideoLayer('V', id, 0, 2, false, 540 / 960)
+    window.__reelStores.usePlayback.getState().setTime(1)
+  }, id)
+  await page.waitForFunction(
+    () => (document.querySelector('[data-layer-id="V"] video') as HTMLVideoElement)?.readyState >= 2
+  )
+  await setLook(page, 'V', { color: { ...neutral, temperature: 0.5 } })
+  await expect(page.locator('[data-layer-id="V"] [data-testid="grade-warning"]')).toContainText('WebGL unavailable')
+  const video = page.locator('[data-layer-id="V"] video')
+  expect(await video.evaluate((v) => getComputedStyle(v).opacity)).toBe('1')
+  await expect(page.locator('[data-layer-id="V"] [data-testid="grade-canvas"]')).not.toHaveAttribute('data-drawn')
 })
 
 test('graded clips coming and going give their WebGL contexts back: a long graded picture keeps drawing', async ({

@@ -14,6 +14,10 @@
  * Chromium's vs ffmpeg's YUV decode (an UNGRADED clip is checked first so that
  * baseline is visible) — the old `eq` chain missed by 20–60 levels.
  *
+ * These looks (the three sliders and the wash) keep the CSS path in the preview
+ * — no colour-table canvas — and the `lutrgb` / `colorchannelmixer` export;
+ * newer controls and LUTs are e2e/colorTable.spec.ts.
+ *
  * ARRANGE via store, ACT via the real export IPC (native Save dialog stubbed),
  * ASSERT on pixels. Skipped without the bundled ffmpeg.
  */
@@ -93,6 +97,12 @@ test('a graded clip exports with the colours the preview shows (exposure, contra
     )
     // Two animation frames: the CSS filter has been applied and painted.
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    // These looks take the CSS path (shared/grade.ts `needsGradeTable`), never the
+    // colour table: no WebGL canvas, the CSS filter on the <video> itself.
+    await expect(page.locator('[data-testid="grade-canvas"]')).toHaveCount(0)
+    const filter = await page.locator('[data-layer-id="V"] video').evaluate((v) => (v as HTMLVideoElement).style.filter)
+    if (c.color || c.tint) expect(filter, `${c.name}: CSS filter`).toContain(c.color ? 'brightness(' : 'url(')
+    else expect(filter).toBe('')
     const preview = await previewPatches(page, electronApp)
 
     const out = join(dir, `case${n}.mp4`)

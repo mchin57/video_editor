@@ -242,3 +242,40 @@ describe('when WebGL cannot read the media', () => {
     expect(warns[0].error).toBeInstanceOf(DOMException)
   })
 })
+
+describe('the notices', () => {
+  const notice = (): string | null => document.querySelector('[data-testid="grade-warning"]')?.textContent ?? null
+
+  it('no WebGL2 at all: the plain clip shows ungraded, with the notice', () => {
+    gl.available = false
+    show({ color: { ...neutral, temperature: 0.5 } })
+    expect(notice()).toContain('WebGL unavailable')
+    frameReady('seeked')
+    expect(visible(plain())).toBe(true)
+    expect(gl.draws).toBe(0)
+  })
+
+  it('a LUT that cannot be read: the notice names it, and the canvas draws the rest of the look', async () => {
+    api.readLut = () => Promise.reject(new Error('The LUT file 0123456789abcdef.cube is missing'))
+    show({ color: { ...neutral, temperature: 0.5 }, lut: { file: '0123456789abcdef.cube', name: 'Warm', strength: 1 } })
+    await vi.waitFor(() => expect(notice()).toBe('LUT “Warm” is missing — shown without it'))
+    gl.drawOk = true
+    frameReady('seeked')
+    expect(visible(plain()), 'the canvas covers it with the rest of the look').toBe(false)
+  })
+
+  it('a LUT that reads: no notice', async () => {
+    api.readLut = async () => ({
+      kind: '1d',
+      size: 2,
+      data: new Float32Array([0, 0, 0, 1, 1, 1]),
+      domainMin: [0, 0, 0],
+      domainMax: [1, 1, 1]
+    })
+    show({ lut: { file: '0123456789abcdef.cube', name: 'Warm', strength: 1 } })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(notice()).toBeNull()
+  })
+})
