@@ -14,20 +14,32 @@ import {
   finishPolyline,
   fromCanvas,
   graphicsSvgTransform,
-  LABEL_FONT_FAMILY,
   markShapes,
   markStateAt,
   movedMark,
   newMark,
   polylineMark,
-  shapeSvg,
   toCanvas,
-  withMarkPoint,
   type GraphicMark,
   type GraphicTool,
   type GraphicsTransform,
   type Pt
 } from '@shared/graphics'
+import {
+  editPoseAt,
+  isPosed,
+  markArtSvg,
+  markPivot,
+  markPoseAt,
+  markPoseSvg,
+  posePoint,
+  posedMark,
+  poseTransform,
+  staticPose,
+  withPivotAt,
+  withPosedMarkPoint,
+  type MarkPose
+} from '@shared/markAnim'
 import { layerTransformAt } from '@shared/layers'
 import { newId } from '@shared/ids'
 import { LOGICAL } from '@/lib/coords'
@@ -35,6 +47,7 @@ import { updateById } from '@/lib/arrays'
 import { startDragWithUndo, startPointerDrag } from '@/lib/pointerDrag'
 import { getActiveComp, useProject } from '@/state/projectStore'
 import { mapGraphicsMarks } from '@/state/project/core'
+import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { pct } from './frame'
 
@@ -45,19 +58,32 @@ const hitWidth = (m: GraphicMark): number => Math.max(28, m.widthPx + 20)
 /** Marks not on screen yet, shown faintly while their layer is being edited. */
 const GHOST_OPACITY = 0.3
 
-/** The same SVG markup the export rasterises (`shapeSvg`), so the two draw identical pixels. */
-function MarkArt({ mark, progress, opacity }: { mark: GraphicMark; progress: number; opacity: number }): JSX.Element {
-  const html = markShapes(mark, progress)
-    .map((s) => shapeSvg(s, LABEL_FONT_FAMILY))
-    .join('')
+/** A mark's drawing — the same markup the export rasterises (`markArtSvg` / `markPoseSvg`), so the two draw identical pixels. */
+function MarkArt({ mark, html, opacity = 1 }: { mark: GraphicMark; html: string; opacity?: number }): JSX.Element {
   return <g data-mark-id={mark.id} opacity={opacity} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-/** An invisible fat copy of a mark's strokes (and fill) that takes the pointer. */
-function MarkHit({ mark, onDown }: { mark: GraphicMark; onDown: (e: ReactPointerEvent) => void }): JSX.Element {
+/** A mark as it is, un-posed and fully drawn (the half-drawn mark under the pen). */
+const plainSvg = (mark: GraphicMark): string => markPoseSvg(mark, staticPose(mark), 1, 1)
+
+/** An invisible fat copy of a mark's strokes (and fill) that takes the pointer, where the mark is drawn at `pose`. */
+function MarkHit({
+  mark,
+  pose,
+  onDown
+}: {
+  mark: GraphicMark
+  pose: MarkPose
+  onDown: (e: ReactPointerEvent) => void
+}): JSX.Element {
   return (
-    <g data-mark-hit={mark.id} onPointerDown={onDown} style={{ cursor: 'move' }}>
-      {markShapes(mark, 1).map((s, i) =>
+    <g
+      data-mark-hit={mark.id}
+      onPointerDown={onDown}
+      style={{ cursor: 'move' }}
+      transform={isPosed(pose) ? poseTransform(pose, markPivot(mark)) : undefined}
+    >
+      {markShapes(posedMark(mark, pose), 1).map((s, i) =>
         s.kind === 'path' ? (
           <path
             key={i}
@@ -134,15 +160,22 @@ export function StackGraphics({
           {/* The layer's keyframed opacity applies per MARK, like the export,
               which composites each mark as its own overlay. */}
           {content.marks.map((m) => {
-            const st = markStateAt(m, local)
-            if (st) return <MarkArt key={m.id} mark={m} progress={st.progress} opacity={st.opacity * opacity} />
-            return editing ? <MarkArt key={m.id} mark={m} progress={1} opacity={GHOST_OPACITY} /> : null
+            if (markStateAt(m, local))
+              return <MarkArt key={m.id} mark={m} html={markArtSvg(m, local)} opacity={opacity} />
+            return editing ? (
+              <MarkArt key={m.id} mark={m} html={markPoseSvg(m, markPoseAt(m, local), 1, GHOST_OPACITY)} />
+            ) : null
           })}
           {editable &&
             !selected &&
             content.marks.map((m) =>
               markStateAt(m, local) ? (
-                <MarkHit key={m.id} mark={m} onDown={(e) => startMarkMove(e, layer, m, t)} />
+                <MarkHit
+                  key={m.id}
+                  mark={m}
+                  pose={markPoseAt(m, local)}
+                  onDown={(e) => startMarkMove(e, layer, m, t)}
+                />
               ) : null
             )}
         </g>
@@ -164,10 +197,18 @@ function startMarkMove(e: ReactPointerEvent, layer: Layer, m: GraphicMark, t: Gr
   const svg = (e.currentTarget as SVGElement).ownerSVGElement
   if (!svg) return
   const start = canvasPoint(svg, e)
+  // A keyframed mark is dragged by editing its offset at the playhead (its
+  // dx/dy sit outermost in the pose, so no rotation correction is needed);
+  // any other moves its points.
+  const local = Math.max(0, usePlayback.getState().time - layer.startSec)
+  const from = markPoseAt(m, local)
+  const keyframed = !!m.keyframes && m.keyframes.length > 0
   startDragWithUndo((ev) => {
     const p = canvasPoint(svg, ev)
     const s = t.scale || 1
-    const moved = movedMark(m, (p.x - start.x) / s, (p.y - start.y) / s)
+    const ddx = (p.x - start.x) / s
+    const ddy = (p.y - start.y) / s
+    const moved = keyframed ? editPoseAt(m, local, { dx: from.dx + ddx, dy: from.dy + ddy }) : movedMark(m, ddx, ddy)
     useProject.getState().liveUpdate((c) => mapGraphicsMarks(c, layer.id, (ms) => updateById(ms, m.id, () => moved)))
   })
 }
@@ -206,7 +247,8 @@ function GraphicsEditor({
   const polyRef = useRef<Pt[]>([])
   const svgRef = useRef<SVGSVGElement>(null)
 
-  const atSec = Math.max(0, time - layer.startSec)
+  const local = time - layer.startSec
+  const atSec = Math.max(0, local)
   const commit = (mark: GraphicMark): void => {
     useProject.getState().updateGraphicsMarks(layer.id, (ms) => [...ms, mark])
     const ui = useUi.getState()
@@ -277,7 +319,19 @@ function GraphicsEditor({
     const svg = svgRef.current
     if (!svg) return
     startDragWithUndo((ev) => {
-      const next = withMarkPoint(m, i, fromCanvas(t, canvasPoint(svg, ev)))
+      const next = withPosedMarkPoint(m, i, fromCanvas(t, canvasPoint(svg, ev)), local)
+      useProject.getState().liveUpdate((c) => mapGraphicsMarks(c, layer.id, (ms) => updateById(ms, m.id, () => next)))
+    })
+  }
+
+  /** Drag the pivot: it lands on the mark-space point drawn under the pointer (measured through the pose as it was at the press). */
+  const onPivotDown = (e: ReactPointerEvent, m: GraphicMark): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    const svg = svgRef.current
+    if (!svg) return
+    startDragWithUndo((ev) => {
+      const next = withPivotAt(m, local, fromCanvas(t, canvasPoint(svg, ev)))
       useProject.getState().liveUpdate((c) => mapGraphicsMarks(c, layer.id, (ms) => updateById(ms, m.id, () => next)))
     })
   }
@@ -285,6 +339,7 @@ function GraphicsEditor({
   const polyPreview =
     tool === 'polyline' && polyPts.length > 0 ? polylineMark('preview', hover ? [...polyPts, hover] : polyPts, 0) : null
   const selectedMark = !tool ? content.marks.find((m) => m.id === selectedMarkId) : undefined
+  const selectedPose = selectedMark ? markPoseAt(selectedMark, local) : null
   const anglePreview =
     tool === 'angle' && anglePts.length > 0
       ? angleMark('preview', anglePts[0], anglePts[1] ?? hover ?? anglePts[0], anglePts[2] ?? hover ?? anglePts[0], 0)
@@ -324,14 +379,20 @@ function GraphicsEditor({
         ) : null}
         <g transform={graphicsSvgTransform(t)} pointerEvents={tool ? 'none' : undefined}>
           {!tool &&
-            content.marks.map((m) => <MarkHit key={m.id} mark={m} onDown={(e) => startMarkMove(e, layer, m, t)} />)}
-          {draft && <MarkArt mark={draft} progress={1} opacity={1} />}
-          {polyPreview && polyPreview.points.length >= 2 && <MarkArt mark={polyPreview} progress={1} opacity={0.8} />}
-          {anglePreview && anglePts.length >= 2 && <MarkArt mark={anglePreview} progress={1} opacity={0.8} />}
+            content.marks.map((m) => (
+              <MarkHit key={m.id} mark={m} pose={markPoseAt(m, local)} onDown={(e) => startMarkMove(e, layer, m, t)} />
+            ))}
+          {draft && <MarkArt mark={draft} html={plainSvg(draft)} />}
+          {polyPreview && polyPreview.points.length >= 2 && (
+            <MarkArt mark={polyPreview} html={plainSvg(polyPreview)} opacity={0.8} />
+          )}
+          {anglePreview && anglePts.length >= 2 && (
+            <MarkArt mark={anglePreview} html={plainSvg(anglePreview)} opacity={0.8} />
+          )}
           {anglePreview && anglePts.length === 1 && hover && (
             <MarkArt
-              mark={{ ...anglePreview, tool: 'line', points: [anglePts[0], hover] }}
-              progress={1}
+              mark={anglePreview}
+              html={plainSvg({ ...anglePreview, tool: 'line', points: [anglePts[0], hover] })}
               opacity={0.8}
             />
           )}
@@ -339,7 +400,7 @@ function GraphicsEditor({
       </svg>
       {/* Point handles: HTML so they keep one on-screen size at any zoom. */}
       {(selectedMark?.points ?? []).map((p, i) => {
-        const c = toCanvas(t, p)
+        const c = toCanvas(t, posePoint(selectedPose!, markPivot(selectedMark!), p))
         return (
           <div
             key={i}
@@ -350,6 +411,9 @@ function GraphicsEditor({
           />
         )
       })}
+      {selectedMark && selectedPose && (
+        <PivotHandle mark={selectedMark} pose={selectedPose} t={t} onDown={(e) => onPivotDown(e, selectedMark)} />
+      )}
       {(tool === 'angle' ? anglePts : tool === 'polyline' ? polyPts : []).map((p, i) => {
         const c = toCanvas(t, p)
         return (
@@ -361,5 +425,33 @@ function GraphicsEditor({
         )
       })}
     </>
+  )
+}
+
+/** The selected mark's pivot: a crosshair (distinct from the round point handles) where the pivot is drawn. */
+function PivotHandle({
+  mark,
+  pose,
+  t,
+  onDown
+}: {
+  mark: GraphicMark
+  pose: MarkPose
+  t: GraphicsTransform
+  onDown: (e: ReactPointerEvent) => void
+}): JSX.Element {
+  const pivot = markPivot(mark)
+  const c = toCanvas(t, posePoint(pose, pivot, pivot))
+  return (
+    <div
+      data-testid="mark-pivot"
+      title="Pivot: rotation and size turn about this point. Drag to move it."
+      onPointerDown={onDown}
+      className="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full border border-amber-300 bg-black/20"
+      style={{ left: pct(c.x, LOGICAL.width), top: pct(c.y, LOGICAL.height), zIndex: EDIT_Z + 2 }}
+    >
+      <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-amber-300" />
+      <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-amber-300" />
+    </div>
   )
 }
