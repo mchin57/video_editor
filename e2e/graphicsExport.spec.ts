@@ -430,3 +430,92 @@ test('a Pop in shape is absent at its start and full size later in the exported 
   expect(green(full(540, 960)), 'full size centre').toBe(true)
   expect(green(full(300, 960)), 'not past the box').toBe(false)
 })
+
+test('a shape with Sparkles exports sparkle-coloured pixels around it, which twinkle', async ({
+  appPage: page,
+  electronApp
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(180_000)
+
+  const dir = mkdtempSync(join(tmpdir(), 'reel-sparkleshape-'))
+  const bg = join(dir, 'black.mp4')
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=1080x1920:r=30:d=3',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    bg
+  ])
+
+  await page.evaluate(async (bg) => {
+    const { useProject } = window.__reelStores
+    const [bgA] = await window.api.importPaths([bg])
+    const s = useProject.getState()
+    s.addMedia([bgA.id])
+    s.addVideoLayer('BG', bgA.id, 0, 3, false)
+    s.addLayer({
+      id: 'S',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'graphics' as const,
+        marks: [
+          {
+            id: 'box',
+            tool: 'rect',
+            points: [
+              { x: 340, y: 760 },
+              { x: 740, y: 1160 }
+            ],
+            // A dark border, so the only bright-green pixels are sparkles.
+            color: '#202020',
+            widthPx: 8,
+            atSec: 0,
+            entrance: { kind: 'instant', sec: 0.4 },
+            sparkle: { density: 10, color: '#00ff00' }
+          }
+        ]
+      }
+    } as never)
+  }, bg)
+
+  const out = join(dir, 'out.mp4')
+  await electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
+  }, out)
+  await page.evaluate(async () => {
+    const p = window.__reelStores.useProject.getState().project!
+    await window.api.exportProject(p, { preset: p.preset, preferNvenc: true })
+  })
+
+  const green = (p: number[]): boolean => p[1] > 150 && p[0] < 90 && p[2] < 90
+  // Sparkle-coloured pixels in the scatter area (the box padded by ~50px each way).
+  const greenCount = (t: number): number => {
+    const px = frameAt(out, t)
+    let n = 0
+    for (let y = 700; y <= 1220; y += 4) for (let x = 280; x <= 800; x += 4) if (green(px(x, y))) n++
+    return n
+  }
+  const counts = [0.5, 1.0, 1.5, 2.0, 2.5].map(greenCount)
+  expect(Math.max(...counts), `green pixels per sampled frame ${counts}`).toBeGreaterThan(5)
+  expect(new Set(counts).size, 'they twinkle').toBeGreaterThan(1)
+  // Nothing far from the shape.
+  const far = frameAt(out, 1.5)
+  let farGreen = 0
+  for (let y = 100; y <= 500; y += 8) for (let x = 100; x <= 980; x += 8) if (green(far(x, y))) farGreen++
+  expect(farGreen).toBe(0)
+})

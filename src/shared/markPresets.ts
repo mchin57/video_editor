@@ -16,7 +16,7 @@
  * from the entrance's end to the exit's start, phase 0 at the entrance's end.
  */
 
-import { LABEL_FONT_FAMILY, markVisibleAt, type GraphicMark } from './graphics'
+import { f2, LABEL_FONT_FAMILY, markBounds, markVisibleAt, type GraphicMark } from './graphics'
 import {
   ease,
   keyframeFromPose,
@@ -26,6 +26,16 @@ import {
   type MarkKeyframe,
   type MarkPose
 } from './markAnim'
+import {
+  activeSparkle,
+  boxSparkleMaxRadius,
+  SPARKLE_SVG_PATH,
+  sparklesInBox,
+  sparkleStateAt,
+  type Sparkle,
+  type SparkleBox,
+  type SparkleEffect
+} from './sparkle'
 
 export type EntranceKind = 'instant' | 'popIn' | 'fadeIn' | 'drawOn' | 'slideIn' | 'grow'
 export type ExitKind = 'none' | 'popOut' | 'fadeOut' | 'shrink' | 'slideOut'
@@ -319,11 +329,75 @@ export function hasLivePresets(m: GraphicMark): boolean {
   return !(k === 'instant' || k === 'fadeIn' || k === 'drawOn') || hasExit(m) || hasLoop(m)
 }
 
+// --- Sparkles ---------------------------------------------------------------------
+
+/** The mark's sparkle effect when it draws any (on, with a positive density). */
+export const markSparkle = (m: GraphicMark): SparkleEffect | null => activeSparkle({ sparkle: m.sparkle })
+
+/**
+ * The area sparkle CENTRES scatter over, in mark space: the mark's own bounds
+ * (at its base thickness, so a keyframed width never reshuffles them), padded a
+ * little so the glints frame the shape instead of sitting only on it.
+ */
+export function sparkleBox(m: GraphicMark): SparkleBox {
+  const b = markBounds(m)
+  const pad = Math.max(16, Math.min(48, Math.max(b.w, b.h) * 0.12))
+  return { cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w + pad * 2, h: b.h + pad * 2 }
+}
+
+/** The rectangle (mark space) everything a mark's sparkles can paint lies in: the scatter box plus a star's reach. */
+export function sparkleExtent(m: GraphicMark): { x: number; y: number; w: number; h: number } {
+  const box = sparkleBox(m)
+  const r = boxSparkleMaxRadius(box)
+  return { x: box.cx - box.w / 2 - r, y: box.cy - box.h / 2 - r, w: box.w + r * 2, h: box.h + r * 2 }
+}
+
+/** Sparkle sets by their inputs: the animated export asks for one per output frame. */
+const sparkleCache = new Map<string, Sparkle[]>()
+
+/**
+ * Every sparkle of a mark over its on-screen window [max(atSec, 0), layer end];
+ * `tSec` is from the window's start (mark-local time = max(atSec, 0) + tSec).
+ * Seeded from the mark id, so it never reshuffles. Empty when sparkles are off.
+ */
+export function markSparkles(m: GraphicMark, layerLenSec: number): Sparkle[] {
+  const effect = markSparkle(m)
+  const dur = layerLenSec - Math.max(0, m.atSec)
+  if (!effect || dur <= 0) return []
+  const box = sparkleBox(m)
+  const key = [m.id, effect.density, dur.toFixed(3), box.cx, box.cy, box.w, box.h].join('|')
+  let out = sparkleCache.get(key)
+  if (!out) {
+    if (sparkleCache.size >= 32) sparkleCache.clear()
+    out = sparklesInBox({ effect, seed: m.id, box, durSec: dur })
+    sparkleCache.set(key, out)
+  }
+  return out
+}
+
+/** The live sparkles of a mark at `localSec` as SVG: small four-point stars in the effect colour. */
+export function markSparklesSvg(m: GraphicMark, localSec: number, layerLenSec: number): string {
+  const effect = markSparkle(m)
+  if (!effect) return ''
+  const t = localSec - Math.max(0, m.atSec)
+  const r3 = (n: number): number => Math.round(n * 1000) / 1000
+  let out = ''
+  for (const s of markSparkles(m, layerLenSec)) {
+    const st = sparkleStateAt(s, t)
+    if (st.opacity <= 0) continue
+    out +=
+      `<path data-mark-sparkle="" d="${SPARKLE_SVG_PATH}" fill="${effect.color}" opacity="${r3(st.opacity)}" ` +
+      `transform="translate(${f2(s.x)} ${f2(s.y)}) rotate(${f2(s.rotDeg)}) scale(${r3((s.sizePx * st.scale) / 10)})"/>`
+  }
+  return out
+}
+
 /**
  * THE drawing of a mark `localSec` after its layer's start, for the preview and
  * the export alike: '' before the mark appears, else its group at that moment's
  * pose (keyframes + presets; a draw-on's progress and a fade's opacity are the
- * pose's `drawn` / `opacity`).
+ * pose's `drawn` / `opacity`), with its sparkles INSIDE the same group so they
+ * follow the pose and fade with it.
  */
 export function markArtSvg(
   m: GraphicMark,
@@ -332,7 +406,8 @@ export function markArtSvg(
   fontFamily: string = LABEL_FONT_FAMILY
 ): string {
   if (!markVisibleAt(m, localSec)) return ''
-  return markPoseSvg(m, framePoseAt(m, localSec, layerLenSec), 1, 1, fontFamily)
+  const pose = framePoseAt(m, localSec, layerLenSec)
+  return markPoseSvg(m, pose, 1, 1, fontFamily, markSparklesSvg(m, localSec, layerLenSec))
 }
 
 // --- Convert to keyframes -------------------------------------------------------

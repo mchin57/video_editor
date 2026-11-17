@@ -915,7 +915,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 37
+export const PROJECT_VERSION = 38
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1308,6 +1308,8 @@ export function migrateProject(raw: unknown): Project {
   // v37 replaces the mark `reveal` with the `entrance` preset (and adds the
   // absence-tolerant `exit` / `loop`, shared/markPresets.ts): pop → instant,
   // fade → fadeIn, draw → drawOn, all 0.4 s as before.
+  // v38 adds the absence-tolerant `GraphicMark.sparkle` (shared/sparkle.ts) —
+  // absent means no sparkles, so nothing is rewritten.
   if (Array.isArray(p.layers)) p.layers = migrateMarkReveals(p.layers)
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed

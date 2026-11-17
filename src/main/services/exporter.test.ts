@@ -21,6 +21,9 @@ import type { MediaAsset, ProbeInfo, VideoStreamInfo } from '@shared/media'
 import { createEmptyComposition, createEmptyProject, type AudioClip, type Layer, type Project } from '@shared/project'
 import { makeGraphicsLayer, makeImageLayer, makeTextLayer, makeVideoLayer } from '@shared/layers'
 import { angleMark, newMark } from '@shared/graphics'
+import { framePoseAt, sparkleExtent } from '@shared/markPresets'
+import { posedRect } from '@shared/markAnim'
+import { animatedMarkBox } from './exportGraphics'
 import { makeLayoutLayer } from '@shared/layouts'
 import { openSession } from './projectSession'
 
@@ -45,6 +48,8 @@ const streamed: {
   distinct: number
   drawn: number[]
 }[] = []
+/** Every streamed overlay frame's SVG, per stream (parallel to `streamed`). */
+const streamedFrames: string[][] = []
 /** Overlay encodes: their args and how many frames reached the encoder. */
 const encodes: { args: string[]; frames: number }[] = []
 
@@ -156,6 +161,7 @@ vi.mock('./textImage', () => ({
       // captures a change), and which frames draw anything.
       const svgs = Array.from({ length: count }, (_, i) => svgAt(i))
       const drawn = svgs.flatMap((svg, i) => (svg.includes('<path') ? [i] : []))
+      streamedFrames.push(svgs)
       streamed.push({ width, height, count, mid: svgs[Math.floor(count / 2)], distinct: new Set(svgs).size, drawn })
       for (let i = 0; i < count; i++) await onPng(Buffer.from(`png${i}`), i)
     },
@@ -448,6 +454,7 @@ beforeEach(() => {
   laidOut.length = 0
   svgRendered.length = 0
   streamed.length = 0
+  streamedFrames.length = 0
   encodes.length = 0
 })
 
@@ -565,6 +572,63 @@ describe('exporter orchestration', () => {
     expect(streamed).toHaveLength(3)
     // 2s at 30 fps each, from the mark's moment to the layer's end.
     expect(streamed.map((x) => x.count)).toEqual([60, 60, 60])
+  })
+
+  it('a sparkled mark is streamed per frame (and its frames carry sparkles); a plain mark stays an image', async () => {
+    const p = createEmptyProject('p8s', 'Sparkled mark')
+    const g = makeGraphicsLayer('G', 1, 3)
+    const base = newMark('rect', 'R', { x: 300, y: 300 }, { x: 600, y: 500 }, 0)
+    g.content = {
+      kind: 'graphics',
+      marks: [
+        { ...base, id: 'sparked', sparkle: { density: 10, color: '#00ff88' } },
+        newMark('line', 'S', { x: 100, y: 900 }, { x: 900, y: 900 }, 0)
+      ]
+    }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'sparkmark.mp4'))
+    expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([1])
+    expect(streamed).toHaveLength(1)
+    expect(streamed[0].count).toBe(60)
+    // Frames inside the window carry the star paths; the same mark without sparkles has none.
+    const sparkleCount = (svg: string): number => (svg.match(/data-mark-sparkle/g) ?? []).length
+    expect(streamedFrames[0].some((svg) => sparkleCount(svg) > 0)).toBe(true)
+    const q = createEmptyProject('p8t', 'Plain mark')
+    const gp = makeGraphicsLayer('G', 1, 3)
+    // A live preset forces the streamed path without sparkles.
+    gp.content = { kind: 'graphics', marks: [{ ...base, id: 'sparked', entrance: { kind: 'popIn', sec: 0.35 } }] }
+    q.layers = [makeVideoLayer('V', 'vid', 0, 5), gp]
+    streamed.length = 0
+    streamedFrames.length = 0
+    await exportProject(q, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'plainmark.mp4'))
+    expect(streamedFrames).toHaveLength(1)
+    expect(streamedFrames[0].every((svg) => sparkleCount(svg) === 0)).toBe(true)
+  })
+
+  it('the animated box holds every sparkle star at max radius under a scaled, rotated, offset pose', () => {
+    const kf = { opacity: 1, drawn: 1, color: '#ffffff', widthPx: 4, easing: 'linear' as const }
+    const mark = {
+      ...newMark('rect', 'R', { x: 300, y: 300 }, { x: 600, y: 500 }, 0),
+      sparkle: { density: 10, color: '#00ff88' },
+      keyframes: [
+        { ...kf, tSec: 0, dx: 0, dy: 0, scale: 1, rotationDeg: 0 },
+        { ...kf, tSec: 2, dx: 150, dy: -90, scale: 1.6, rotationDeg: 40 }
+      ]
+    }
+    const count = 60
+    const box = animatedMarkBox(mark, 3, 0, count)
+    const extent = sparkleExtent(mark)
+    const eps = 1e-6
+    for (const i of [0, 15, 30, 59]) {
+      const r = posedRect(mark, framePoseAt(mark, i / 30, 3), extent)
+      expect(r.x).toBeGreaterThanOrEqual(box.x - eps)
+      expect(r.y).toBeGreaterThanOrEqual(box.y - eps)
+      expect(r.x + r.w).toBeLessThanOrEqual(box.x + box.w + eps)
+      expect(r.y + r.h).toBeLessThanOrEqual(box.y + box.h + eps)
+    }
+    // The pose really is non-identity, and the sparkle area makes the box bigger than the bare shape's.
+    expect(framePoseAt(mark, 59 / 30, 3).rotationDeg).toBeGreaterThan(30)
+    expect(box.w).toBeGreaterThan(animatedMarkBox({ ...mark, sparkle: null }, 3, 0, count).w)
   })
 
   it('a statically rotated mark is one image drawn rotated, with a box that holds it', async () => {

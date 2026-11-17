@@ -210,14 +210,16 @@ export function markPoseSvg(
   pose: MarkPose,
   progress: number,
   revealOpacity: number,
-  fontFamily: string = LABEL_FONT_FAMILY
+  fontFamily: string = LABEL_FONT_FAMILY,
+  /** Extra markup drawn inside the group after the shapes (sparkles), so it takes the pose and opacity too. */
+  extra = ''
 ): string {
   const shapes = markShapes(posedMark(m, pose), progress * pose.drawn)
   const opacity = revealOpacity * pose.opacity
   const attrs =
     (isIdentity(pose) ? '' : ` transform="${poseTransform(pose, markPivot(m))}"`) +
     (opacity === 1 ? '' : ` opacity="${Math.round(opacity * 1000) / 1000}"`)
-  return `<g${attrs}>${shapes.map((s) => shapeSvg(s, fontFamily)).join('')}</g>`
+  return `<g${attrs}>${shapes.map((s) => shapeSvg(s, fontFamily)).join('')}${extra}</g>`
 }
 
 /** Whether the mark actually changes over time: two or more keyframes whose values differ
@@ -235,7 +237,15 @@ export function isMarkAnimated(m: GraphicMark): boolean {
 
 /** The box holding the drawn mark under `pose` (mark space). */
 export function posedBounds(m: GraphicMark, pose: MarkPose): { x: number; y: number; w: number; h: number } {
-  const b = markBounds(posedMark(m, pose))
+  return posedRect(m, pose, markBounds(posedMark(m, pose)))
+}
+
+/** The box holding mark-space rectangle `b` carried by `pose` (about the mark's pivot). */
+export function posedRect(
+  m: GraphicMark,
+  pose: MarkPose,
+  b: { x: number; y: number; w: number; h: number }
+): { x: number; y: number; w: number; h: number } {
   const pivot = markPivot(m)
   const cs = [
     { x: b.x, y: b.y },

@@ -206,6 +206,11 @@ describe('sanitizeTemplate', () => {
     expect(sanitizeTemplate(badMark(okPresets))).not.toBeNull()
     expect(sanitizeTemplate(badMark({ ...okPresets, exit: { kind: 'explode', sec: 1 } }))).toBeNull()
     expect(sanitizeTemplate(badMark({ ...okPresets, loop: { kind: 'spin', cycleSec: 'x' } }))).toBeNull()
+    // Sparkles: absent / null / a well-formed effect pass; a malformed one does not.
+    expect(sanitizeTemplate(badMark({ ...okPresets, sparkle: null }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...okPresets, sparkle: { density: 4, color: '#fff' } }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...okPresets, sparkle: { density: '4', color: '#fff' } }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...okPresets, sparkle: { density: 4 } }))).toBeNull()
     // Per-mark animation fields.
     const kf = {
       tSec: 0,

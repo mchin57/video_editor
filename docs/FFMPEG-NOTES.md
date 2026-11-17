@@ -455,7 +455,7 @@ output frame (30 fps, from the mark's moment to the layer's end) through
 `renderOverlayVideo` into the lossless alpha intermediate, in ONE fixed box (the union
 of `posedBounds` of `framePoseAt` over every frame, so a pop-in's overshoot, a slide or a shake isn't cropped), and pushes it as a
 `hasAlpha` video placed by `placedBox` with the layer's keyframes and opacity exactly
-as the still would be. The entrance (fade / draw-on included) is baked into the frames. Marks
+as the still would be. The entrance (fade / draw-on included) is baked into the frames. A mark with Sparkles (`GraphicMark.sparkle`) takes this path too, since they twinkle: its union box also holds the pose-carried sparkle scatter area (`sparkleExtent`). Marks
 that are not animated stay stills, drawn at their constant pose (static rotation,
 size, opacity or a lone keyframe). Pinned on real pixels by
 `e2e/graphicsExport.spec.ts` (a rectangle moving across 1s; a statically rotated line).
