@@ -72,6 +72,7 @@ import { spanOf, packAudioRows, snapTargetsFor } from './timeline/geometry'
 import { FreezeOverlay, PoseBadge, TileThumb } from './timeline/parts'
 import { TileDescription } from './timeline/TileDescription'
 import { TransitionWedges, transitionMenu } from './timeline/transitions'
+import { MarkKeyframeDiamonds } from './timeline/MarkKeyframes'
 import { VolumeLineOverlay } from './timeline/VolumeLine'
 import { MIN_VOLUME_LINE_ROW_H } from '@/lib/volumeLine'
 import { TimelineToolbar } from './timeline/TimelineToolbar'
@@ -472,6 +473,7 @@ export function Timeline(): JSX.Element {
             onDown={(e, side) => startTransitionDrag(e, l, side)}
           />
         )}
+        {selected && l.content.kind === 'graphics' && <MarkKeyframeDiamonds layer={l} pxPerSec={pxPerSec} />}
         {/* The trim handles sit above everything else on the tile (a wedge's
             grip included): the outermost 6 px of an edge always trims. */}
         <div

@@ -28,6 +28,9 @@ import { useDragDepth } from '@/lib/dragDepth'
 import { interactionOpen } from '@/lib/interaction'
 import { refetchFresh } from '@/lib/refetchFresh'
 import { pickedFreezeIndex } from '@/lib/links'
+import { pickedKeyframeIndex } from '@/lib/markKeyframes'
+import { updateById } from '@/lib/arrays'
+import { removeMarkKeyframe } from '@shared/markAnim'
 import { pickedVolumePointIndex } from '@/lib/volumeLine'
 import { removeVolumeKeyframe, sortedVolumeKeyframes } from '@shared/audioEnvelope'
 import {
@@ -248,13 +251,30 @@ export default function App(): JSX.Element {
         // Delete the whole selection (one tile, or every tile of a link group) —
         // or, with a graphics mark or a freeze picked, just that one. A stale
         // pick (undone, trimmed away, clip since linked) falls through to the clip.
-        const { selection, selectedLayerId, selectedMarkId, selectedFreeze, selectedVolumePoint } = useUi.getState()
+        const {
+          selection,
+          selectedLayerId,
+          selectedMarkId,
+          selectedFreeze,
+          selectedVolumePoint,
+          selectedMarkKeyframe
+        } = useUi.getState()
         const comp = getActiveComp()
         const freezeIndex =
           comp && selectedLayerId && selectedFreeze ? pickedFreezeIndex(comp, selectedLayerId, selectedFreeze) : -1
         // A volume-line point picked on an audio tile: just that point.
         const volumeIndex = comp && selectedVolumePoint ? pickedVolumePointIndex(comp, selectedVolumePoint) : -1
-        if (comp && selectedVolumePoint && volumeIndex >= 0) {
+        // A mark keyframe picked on a graphics tile: just that keyframe.
+        const markKfIndex = comp && selectedMarkKeyframe ? pickedKeyframeIndex(comp, selectedMarkKeyframe) : -1
+        if (comp && selectedMarkKeyframe && markKfIndex >= 0) {
+          e.preventDefault()
+          const { layerId, markId } = selectedMarkKeyframe
+          const local = usePlayback.getState().time - (comp.layers.find((l) => l.id === layerId)?.startSec ?? 0)
+          project.updateGraphicsMarks(layerId, (ms) =>
+            updateById(ms, markId, (m) => removeMarkKeyframe(m, markKfIndex, local))
+          )
+          useUi.getState().selectMarkKeyframe(null)
+        } else if (comp && selectedVolumePoint && volumeIndex >= 0) {
           e.preventDefault()
           const clip = comp.audioClips.find((a) => a.id === selectedVolumePoint.clipId)!
           project.setVolumeKeyframes(clip.id, removeVolumeKeyframe(sortedVolumeKeyframes(clip), volumeIndex))
@@ -298,6 +318,11 @@ export default function App(): JSX.Element {
         insertText()
       } else if (e.key === 'Escape') {
         const ui = useUi.getState()
+        // A picked mark keyframe is dropped first; the selection stays.
+        if (ui.selectedMarkKeyframe) {
+          ui.selectMarkKeyframe(null)
+          return
+        }
         // An armed drawing tool is disarmed first; the selection stays.
         if (ui.graphicsTool) {
           ui.setGraphicsTool(null)

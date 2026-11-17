@@ -4,6 +4,7 @@ import type { ImportSkip } from '@shared/media'
 import type { GraphicTool } from '@shared/graphics'
 import type { SharedKind } from '@shared/sharedLibrary'
 import { expandGroup } from '@/lib/links'
+import type { PickedMarkKeyframe } from '@/lib/markKeyframes'
 import type { PickedVolumePoint } from '@/lib/volumeLine'
 
 /** What the volume-level dialog is doing. */
@@ -115,6 +116,12 @@ interface UiState {
    *  Cleared with the selection. */
   selectedVolumePoint: PickedVolumePoint | null
   selectVolumePoint: (p: PickedVolumePoint | null) => void
+  /** The mark keyframe picked on a selected graphics tile's diamonds (null =
+   *  none): Delete removes just it instead of the mark. Resolved with
+   *  `pickedKeyframeIndex` (lib/markKeyframes.ts), so a stale pick is none.
+   *  Cleared with the selection and when the selected mark changes. */
+  selectedMarkKeyframe: PickedMarkKeyframe | null
+  selectMarkKeyframe: (p: PickedMarkKeyframe | null) => void
   /** Clear every selection (clip/caption/audio). */
   clearSelection: () => void
 }
@@ -126,7 +133,8 @@ const NO_STAGE_EDIT = {
   selectedMarkId: null,
   posePickLayerId: null,
   selectedFreeze: null,
-  selectedVolumePoint: null
+  selectedVolumePoint: null,
+  selectedMarkKeyframe: null
 }
 
 /** The primary (last clicked) tile as a ref, or null when nothing is selected.
@@ -154,6 +162,7 @@ const single = (
   | 'posePickLayerId'
   | 'selectedFreeze'
   | 'selectedVolumePoint'
+  | 'selectedMarkKeyframe'
 > & {
   captionsGlobalSelected: boolean
 } => ({
@@ -228,7 +237,9 @@ export const useUi = create<UiState>((set) => ({
   graphicsTool: null,
   setGraphicsTool: (t) => set({ graphicsTool: t }),
   selectedMarkId: null,
-  selectMark: (id) => set({ selectedMarkId: id }),
+  selectMark: (id) => set({ selectedMarkId: id, selectedMarkKeyframe: null }),
+  selectedMarkKeyframe: null,
+  selectMarkKeyframe: (p) => set({ selectedMarkKeyframe: p }),
   posePickLayerId: null,
   setPosePickLayerId: (id) => set({ posePickLayerId: id }),
   selectedFreeze: null,
