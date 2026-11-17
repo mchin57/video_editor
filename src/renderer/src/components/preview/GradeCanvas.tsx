@@ -8,8 +8,10 @@
  * wrappers, so crop, flips, rotation, keyframed position / scale / opacity and
  * a picture's opacity apply to it exactly as they did to the element; the
  * element stays mounted underneath (playback, sync, audio and drift-resync are
- * unchanged) and is hidden only while the canvas draws. Video is drawn every
- * animation frame while it plays and on every seek / load while paused.
+ * unchanged) and is hidden only once the canvas has DRAWN its first frame
+ * (`useGradeView`), so the worst case is a frame ungraded, never a frame of
+ * nothing. Video is drawn every animation frame while it plays and on every
+ * seek / load while paused.
  *
  * Contexts are RELEASED: Chromium keeps at most 16 WebGL contexts and, past
  * that, takes the least recently used — a graded picture still on screen, after
@@ -58,6 +60,32 @@ export function useTablePath(look: ColorLook): boolean {
   return wanted || held
 }
 
+/** What a layer drawing `look` needs: whether it takes the table path, how the
+ *  canvas is doing, the callbacks to hand `GradeCanvas`, and whether the plain
+ *  element is hidden — only once the canvas has DRAWN (so the worst case is a
+ *  frame of the ungraded element, never a frame of nothing) and never while
+ *  the canvas can't draw. */
+export interface GradeView {
+  graded: boolean
+  status: GradeStatus
+  hideElement: boolean
+  onStatus: (s: GradeStatus) => void
+  onDrawn: (drawn: boolean) => void
+}
+
+export function useGradeView(look: ColorLook): GradeView {
+  const graded = useTablePath(look)
+  const [status, setStatus] = useState<GradeStatus>('ok')
+  const [drawn, setDrawn] = useState(false)
+  return {
+    graded,
+    status,
+    hideElement: graded && drawn && status !== 'unavailable',
+    onStatus: setStatus,
+    onDrawn: setDrawn
+  }
+}
+
 /** The fields of a look that change its table, as a stable string. */
 const lookKey = (look: ColorLook): string => JSON.stringify({ color: look.color, tint: look.tint, lut: look.lut })
 
@@ -69,7 +97,8 @@ export function GradeCanvas({
   video,
   imageSrc,
   style,
-  onStatus
+  onStatus,
+  onDrawn
 }: {
   look: ColorLook
   /** The clip's own `<video>` (already in the DOM, CORS-clean). */
@@ -79,6 +108,8 @@ export function GradeCanvas({
   /** The media element's own fill style (a CSS `filter` in it is not applied: the table is the whole look). */
   style: CSSProperties
   onStatus: (s: GradeStatus) => void
+  /** True once the canvas has drawn a picture; false again when it loses it (a lost context, the canvas gone). */
+  onDrawn: (drawn: boolean) => void
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   /** The current source's canvas (made by the source effect). */
@@ -91,6 +122,7 @@ export function GradeCanvas({
   /** Draws the current frame / picture (set by the source effect). */
   const redrawRef = useRef<() => void>(() => {})
   const status = useLatest(onStatus)
+  const drawnCb = useLatest(onDrawn)
   const key = lookKey(look)
   const lutFile = activeLut(look.lut)?.file ?? null
   const lut = useLutTable(lutFile)
@@ -124,8 +156,11 @@ export function GradeCanvas({
       if (source instanceof HTMLVideoElement && source.readyState < 2) return
       if (source instanceof HTMLImageElement && !source.complete) return
       const [w, h] = size()
-      // `data-drawn`: the canvas has a picture (a test seam).
-      if (gl.draw(source, w, h) && !canvas.dataset.drawn) canvas.dataset.drawn = '1'
+      // The first picture: now the layer may hide its plain element (`data-drawn` is a test seam).
+      if (gl.draw(source, w, h) && !canvas.dataset.drawn) {
+        canvas.dataset.drawn = '1'
+        drawnCb.current(true)
+      }
     }
     const init = (): void => {
       glRef.current = createGradeGl(canvas)
@@ -144,9 +179,15 @@ export function GradeCanvas({
       // Its textures and program went with it; a restore makes new ones.
       glRef.current = null
       delete canvas.dataset.drawn
+      drawnCb.current(false)
       status.current('unavailable')
     }
     const onRestored = (): void => init()
+    /** The canvas is dropped, its picture with it: the layer shows its element until the next canvas draws. */
+    const gone = (): void => {
+      drawnCb.current(false)
+      status.current('ok')
+    }
     canvas.addEventListener('webglcontextlost', onLost)
     canvas.addEventListener('webglcontextrestored', onRestored)
 
@@ -196,8 +237,9 @@ export function GradeCanvas({
       glRef.current = null
       canvas.remove()
       if (canvasRef.current === canvas) canvasRef.current = null
+      gone()
     }
-  }, [video, imageSrc, status, lutMissingNow])
+  }, [video, imageSrc, status, drawnCb, lutMissingNow])
 
   // The table: baked when the look or its LUT changes — at most once a frame
   // while a slider drags (each change cancels the bake still waiting).

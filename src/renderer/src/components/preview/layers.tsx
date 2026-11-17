@@ -53,7 +53,7 @@ import {
   mediaAspect,
   TintFilter
 } from './geometry'
-import { GradeCanvas, GradeNotice, useTablePath, type GradeStatus } from './GradeCanvas'
+import { GradeCanvas, GradeNotice, useGradeView } from './GradeCanvas'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
@@ -93,8 +93,7 @@ function VideoLayerView({
   const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
   // A look the CSS filters can't draw goes through the colour table (GradeCanvas).
-  const graded = useTablePath(content)
-  const [grade, setGrade] = useState<GradeStatus>('ok')
+  const grade = useGradeView(content)
 
   // Clip speed: the element plays at the same rate the shared time mapping
   // advances, so the drift-resync stays quiet. Constant speed sets the rate
@@ -150,7 +149,7 @@ function VideoLayerView({
           src={videoProxyUrl(asset)}
           muted={silenced}
           playsInline
-          style={graded && grade !== 'unavailable' ? { ...fill, opacity: 0 } : fill}
+          style={grade.hideElement ? { ...fill, opacity: 0 } : fill}
           onLoadedMetadata={() => {
             const v = ref.current
             if (v) {
@@ -159,9 +158,11 @@ function VideoLayerView({
             }
           }}
         />
-        {graded && <GradeCanvas look={content} video={ref} style={fill} onStatus={setGrade} />}
+        {grade.graded && (
+          <GradeCanvas look={content} video={ref} style={fill} onStatus={grade.onStatus} onDrawn={grade.onDrawn} />
+        )}
       </div>
-      {graded && <GradeNotice status={grade} lutName={content.lut?.name} />}
+      {grade.graded && <GradeNotice status={grade.status} lutName={content.lut?.name} />}
       {/* Outside the flip wrapper: the overlay mirrors its points itself, so
           angle labels never read backwards. */}
       <PoseOverlay layer={layer} content={content} asset={asset} time={time} editable={editable} />
@@ -467,7 +468,7 @@ function StackImage({
   onMoveDown
 }: KindViewProps<ImageContent>): JSX.Element {
   const asset = assetById.get(content.mediaId)
-  const [grade, setGrade] = useState<GradeStatus>('ok')
+  const grade = useGradeView(content)
   // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
   const base = mediaAspect(asset, {})
   const cr = content.crop
@@ -484,7 +485,6 @@ function StackImage({
   // box, so swap its width/height (cqw/cqh resolve to the box via its
   // container context) for odd quarter-turns.
   const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
-  const graded = useTablePath(content)
   const filter = lookCssFilter(content)
   const imgStyle: CSSProperties = cr
     ? {
@@ -516,7 +516,7 @@ function StackImage({
       data-layer-id={layer.id}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
-      {graded && <GradeNotice status={grade} lutName={content.lut?.name} />}
+      {grade.graded && <GradeNotice status={grade.status} lutName={content.lut?.name} />}
       {/* Always, like the clip's: the element keeps its CSS look while a canvas hasn't drawn. */}
       <TintFilter tint={content.tint} />
       <div
@@ -530,13 +530,16 @@ function StackImage({
           overflow: 'hidden'
         }}
       >
-        <img
-          src={src}
-          alt=""
-          draggable={false}
-          style={graded && grade !== 'unavailable' ? { ...imgStyle, opacity: 0 } : imgStyle}
-        />
-        {graded && <GradeCanvas look={content} imageSrc={src} style={imgStyle} onStatus={setGrade} />}
+        <img src={src} alt="" draggable={false} style={grade.hideElement ? { ...imgStyle, opacity: 0 } : imgStyle} />
+        {grade.graded && (
+          <GradeCanvas
+            look={content}
+            imageSrc={src}
+            style={imgStyle}
+            onStatus={grade.onStatus}
+            onDrawn={grade.onDrawn}
+          />
+        )}
       </div>
     </div>
   )
