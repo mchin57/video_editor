@@ -141,7 +141,7 @@ function rampCorners(layer: Layer): number[] {
   return out
 }
 
-/** The export's frame step: where both factors change at once the product is
+/** The export's frame step: where two factors change at once the product is
  *  quadratic, so it is sampled at least this often (FFMPEG-NOTES "Transitions"). */
 const SAMPLE_SEC = 1 / 30
 
@@ -151,9 +151,13 @@ const SAMPLE_SEC = 1 / 30
  * drops below full opacity — the plain opaque pipeline then stays. A layer with
  * no transition gets exactly `opacityKeyframePoints`, so its export is
  * byte-identical to one made before transitions existed. With one, the points
- * are every corner of either factor across the tile's window, plus a sample
- * every 1/30 s wherever both factors move at once (the product is quadratic
- * there; frame-step sampling matched the real render to 2.75 code values).
+ * are every corner of any factor across the tile's window, plus a sample every
+ * 1/30 s wherever TWO OR MORE of the three factors (keyframed opacity, the in
+ * ramp, the out ramp) move at once — the product is quadratic there: keyframes
+ * under a ramp, or a tile shorter than its two ramps (trimmed after they were
+ * set), whose in and out ramps overlap. Each factor is linear between the
+ * corners, so a stretch's ends say whether it moves. Frame-step sampling
+ * matched the real render to 2.75 code values.
  */
 export function layerOpacityPoints(layer: Layer): { t: number; o: number }[] | null {
   const corners = rampCorners(layer)
@@ -162,16 +166,21 @@ export function layerOpacityPoints(layer: Layer): { t: number; o: number }[] | n
   const hi = layer.endSec
   const kfTimes = (layer.keyframes ?? []).map((k) => layer.startSec + k.tSec)
   const times = [...new Set([lo, hi, ...corners, ...kfTimes].map((t) => clamp(t, lo, hi)))].sort((a, b) => a - b)
-  const kfAt = (t: number): number => layerTransformAt(layer, t).opacity
+  const tin = transitionOf(layer, 'in')
+  const tout = transitionOf(layer, 'out')
+  const factors: ((t: number) => number)[] = [
+    (t) => layerTransformAt(layer, t).opacity,
+    (t) => (tin ? inRampAt(tin, layer.startSec, t) : 1),
+    (t) => (tout ? outRampAt(tout, layer.endSec, t) : 1)
+  ]
   const pts: { t: number; o: number }[] = []
   for (let i = 0; i < times.length; i++) {
     const t0 = times[i]
     pts.push({ t: t0, o: layerOpacityAt(layer, t0) })
     const t1 = times[i + 1]
     if (t1 === undefined || t1 - t0 <= 1e-6) continue
-    const bothMove =
-      Math.abs(kfAt(t0) - kfAt(t1)) > 1e-6 && Math.abs(transitionGainAt(layer, t0) - transitionGainAt(layer, t1)) > 1e-6
-    if (!bothMove) continue
+    const moving = factors.filter((f) => Math.abs(f(t0) - f(t1)) > 1e-6).length
+    if (moving < 2) continue
     const n = Math.ceil((t1 - t0) / SAMPLE_SEC - 1e-9)
     for (let k = 1; k < n; k++) {
       const t = t0 + ((t1 - t0) * k) / n

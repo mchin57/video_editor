@@ -148,6 +148,20 @@ describe('layerOpacityPoints — what the export interpolates', () => {
       expect(Math.abs(lerpPoints(pts, t) - layerOpacityAt(l, t))).toBeLessThan(0.002)
     }
   })
+
+  it('samples where the tile’s own in and out ramps overlap (a clip trimmed shorter than its fades)', () => {
+    // A 2 s clip with a 1 s fade in and a 1 s fade out, its end trimmed by
+    // 0.5 s (a trim leaves the transitions as they are): the ramps overlap
+    // over [0.5, 1], where the product is quadratic.
+    const full = video('a', 0, 2, { transitionIn: tr('fade', 1), transitionOut: tr('fade', 1) })
+    const l = { ...full, endSec: full.endSec - 0.5 }
+    expect(layerOpacityAt(l, 0.75)).toBeCloseTo(0.5625, 9) // the preview: 0.75 × 0.75
+    const pts = layerOpacityPoints(l)!
+    expect(Math.abs(lerpPoints(pts, 0.75) - 0.5625)).toBeLessThan(0.002) // the export
+    for (let t = 0; t <= 1.5; t += 0.01) {
+      expect(Math.abs(lerpPoints(pts, t) - layerOpacityAt(l, t))).toBeLessThan(0.002)
+    }
+  })
 })
 
 describe('pairs and plates', () => {
