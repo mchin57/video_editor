@@ -1,5 +1,5 @@
 /**
- * Graphics marks reach the EXPORT the way the preview draws and reveals them:
+ * Graphics marks reach the EXPORT the way the preview draws and brings them on:
  * pixels of a real ffmpeg export of marks the export's Chromium rasterised.
  *
  *  1. A POP line is there from its time, where it was drawn, and nowhere else.
@@ -34,7 +34,7 @@ function frameAt(file: string, t: number): (x: number, y: number) => number[] {
   }
 }
 
-test('graphics marks export where the preview draws them, with their reveals and the layer motion', async ({
+test('graphics marks export where the preview draws them, with their entrances and the layer motion', async ({
   appPage: page,
   electronApp
 }) => {
@@ -66,7 +66,7 @@ test('graphics marks export where the preview draws them, with their reveals and
     const s = useProject.getState()
     s.addMedia([bgA.id])
     s.addVideoLayer('BG', bgA.id, 0, 4, false)
-    const line = (id: string, y: number, color: string, atSec: number, reveal: string) => ({
+    const line = (id: string, y: number, color: string, atSec: number, kind: string) => ({
       id,
       tool: 'line',
       points: [
@@ -76,7 +76,7 @@ test('graphics marks export where the preview draws them, with their reveals and
       color,
       widthPx: 20,
       atSec,
-      reveal
+      entrance: { kind, sec: 0.4 }
     })
     const layer = (id: string, marks: unknown[], extra: Record<string, unknown> = {}) => ({
       id,
@@ -91,9 +91,9 @@ test('graphics marks export where the preview draws them, with their reveals and
     })
     s.addLayer(
       layer('G', [
-        line('pop', 300, '#ff0000', 0, 'pop'),
-        line('fade', 600, '#00ff00', 1, 'fade'),
-        line('draw', 900, '#0000ff', 2, 'draw'),
+        line('pop', 300, '#ff0000', 0, 'instant'),
+        line('fade', 600, '#00ff00', 1, 'fadeIn'),
+        line('draw', 900, '#0000ff', 2, 'drawOn'),
         {
           id: 'ang',
           tool: 'angle',
@@ -105,7 +105,7 @@ test('graphics marks export where the preview draws them, with their reveals and
           color: '#ffff00',
           widthPx: 12,
           atSec: 0,
-          reveal: 'pop'
+          entrance: { kind: 'instant', sec: 0.4 }
         },
         {
           id: 'drop',
@@ -118,7 +118,7 @@ test('graphics marks export where the preview draws them, with their reveals and
           fill: '#00ffff',
           widthPx: 10,
           atSec: 0,
-          reveal: 'pop'
+          entrance: { kind: 'instant', sec: 0.4 }
         },
         {
           id: 'poly',
@@ -131,7 +131,7 @@ test('graphics marks export where the preview draws them, with their reveals and
           color: '#ff8000',
           widthPx: 20,
           atSec: 0,
-          reveal: 'pop'
+          entrance: { kind: 'instant', sec: 0.4 }
         }
       ]) as never
     )
@@ -150,7 +150,7 @@ test('graphics marks export where the preview draws them, with their reveals and
             color: '#ffffff',
             widthPx: 16,
             atSec: 0,
-            reveal: 'pop'
+            entrance: { kind: 'instant', sec: 0.4 }
           }
         ],
         {
@@ -296,7 +296,7 @@ test('an animated mark exports frame by frame where the preview draws it; a stat
             fill: '#00ff00',
             widthPx: 8,
             atSec: 0,
-            reveal: 'pop',
+            entrance: { kind: 'instant', sec: 0.4 },
             keyframes: [kf(0, 0), kf(1, 600)]
           },
           // A horizontal white line turned a quarter about its centre: vertical at x = 300.
@@ -310,7 +310,7 @@ test('an animated mark exports frame by frame where the preview draws it; a stat
             color: '#ffffff',
             widthPx: 20,
             atSec: 0,
-            reveal: 'pop',
+            entrance: { kind: 'instant', sec: 0.4 },
             rotationDeg: 90
           }
         ]
@@ -346,4 +346,87 @@ test('an animated mark exports frame by frame where the preview draws it; a stat
   expect(white(f(300, 850)), 'rotated line top').toBe(true)
   expect(white(f(300, 1150)), 'rotated line bottom').toBe(true)
   expect(white(f(150, 1000)), 'not where it was drawn').toBe(false)
+})
+
+test('a Pop in shape is absent at its start and full size later in the exported video', async ({
+  appPage: page,
+  electronApp
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(180_000)
+
+  const dir = mkdtempSync(join(tmpdir(), 'reel-popin-'))
+  const bg = join(dir, 'black.mp4')
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=1080x1920:r=30:d=3',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    bg
+  ])
+
+  await page.evaluate(async (bg) => {
+    const { useProject } = window.__reelStores
+    const [bgA] = await window.api.importPaths([bg])
+    const s = useProject.getState()
+    s.addMedia([bgA.id])
+    s.addVideoLayer('BG', bgA.id, 0, 3, false)
+    s.addLayer({
+      id: 'P',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'graphics' as const,
+        marks: [
+          {
+            id: 'box',
+            tool: 'rect',
+            points: [
+              { x: 340, y: 760 },
+              { x: 740, y: 1160 }
+            ],
+            color: '#00ff00',
+            fill: '#00ff00',
+            widthPx: 8,
+            atSec: 1,
+            entrance: { kind: 'popIn', sec: 0.4 }
+          }
+        ]
+      }
+    } as never)
+  }, bg)
+
+  const out = join(dir, 'out.mp4')
+  await electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
+  }, out)
+  await page.evaluate(async () => {
+    const p = window.__reelStores.useProject.getState().project!
+    await window.api.exportProject(p, { preset: p.preset, preferNvenc: true })
+  })
+
+  const green = (p: number[]): boolean => p[1] > 180 && p[0] < 70 && p[2] < 70
+  // Before it, and at its first frame (scale 0): nothing, not even near the box's corner.
+  expect(green(frameAt(out, 0.5)(360, 780)), 'not there before its moment').toBe(false)
+  expect(green(frameAt(out, 1.0)(360, 780)), 'absent at the start of the pop').toBe(false)
+  // Part way (0.1s in) the box is still small: its corner is not yet covered.
+  expect(green(frameAt(out, 1.1)(540, 960)), 'growing: centre covered').toBe(true)
+  // Later it is full size: corner and centre green, nothing past the box.
+  const full = frameAt(out, 2)
+  expect(green(full(360, 780)), 'full size corner').toBe(true)
+  expect(green(full(540, 960)), 'full size centre').toBe(true)
+  expect(green(full(300, 960)), 'not past the box').toBe(false)
 })

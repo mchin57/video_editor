@@ -19,7 +19,7 @@ import { DEFAULT_PRESET_ID, isPresetId, type PresetId } from './formats'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { FRAME } from './layers'
 import type { AudioFx } from './audioFx'
-import type { GraphicMark } from './graphics'
+import { REVEAL_SEC, type GraphicMark } from './graphics'
 import type { WorkoutContentFields } from './workoutOverlay'
 import type { PoseSettings } from './pose'
 import type { TextEffects } from './sparkle'
@@ -915,7 +915,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 36
+export const PROJECT_VERSION = 37
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -936,6 +936,40 @@ export function createEmptyProject(id: string, name: string): Project {
 }
 
 // --- Migration --------------------------------------------------------------
+
+/** v37: a graphics mark's `reveal` ('pop' | 'fade' | 'draw', 0.4 s) became its
+ *  `entrance` preset. Walks every composition (compound layers, layout cells);
+ *  untouched layers keep their identity. */
+function migrateMarkReveals(layers: Layer[]): Layer[] {
+  const entranceKind = (r: unknown): 'instant' | 'fadeIn' | 'drawOn' =>
+    r === 'fade' ? 'fadeIn' : r === 'draw' ? 'drawOn' : 'instant'
+  return layers.map((l): Layer => {
+    const c = l.content
+    if (c.kind === 'graphics') {
+      if (!c.marks.some((m) => !(m as { entrance?: unknown }).entrance)) return l
+      const marks = c.marks.map((m) => {
+        if ((m as { entrance?: unknown }).entrance) return m
+        const { reveal, ...rest } = m as GraphicMark & { reveal?: unknown }
+        return { ...rest, entrance: { kind: entranceKind(reveal), sec: REVEAL_SEC } } as GraphicMark
+      })
+      return { ...l, content: { ...c, marks } }
+    }
+    if (c.kind === 'compound')
+      return { ...l, content: { ...c, comp: { ...c.comp, layers: migrateMarkReveals(c.comp.layers) } } }
+    if (c.kind === 'layout') {
+      return {
+        ...l,
+        content: {
+          ...c,
+          cells: c.cells.map((cell) =>
+            cell.comp ? { ...cell, comp: { ...cell.comp, layers: migrateMarkReveals(cell.comp.layers) } } : cell
+          )
+        }
+      }
+    }
+    return l
+  })
+}
 
 // Old (pre-v4) shapes, read defensively from raw JSON for migration only.
 interface OldClip {
@@ -1271,6 +1305,10 @@ export function migrateProject(raw: unknown): Project {
   // absence-tolerant `VideoContent.lut` and `ImageContent.color` / `tint` /
   // `lut` (shared/grade.ts). Absent means neutral — a clip graded before this
   // keeps its CSS / `lutrgb` look and export exactly — so nothing is rewritten.
+  // v37 replaces the mark `reveal` with the `entrance` preset (and adds the
+  // absence-tolerant `exit` / `loop`, shared/markPresets.ts): pop → instant,
+  // fade → fadeIn, draw → drawOn, all 0.4 s as before.
+  if (Array.isArray(p.layers)) p.layers = migrateMarkReveals(p.layers)
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

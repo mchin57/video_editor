@@ -5,9 +5,9 @@
  * composited where the layer transform puts that box — following the layer's
  * position/scale/opacity keyframes like any image layer. Each mark is gated to
  * `[layer start + max(0, atSec), layer end)` — a mark whose moment fell before
- * the tile's start (a trim) shows from the start, mid-reveal; a fade adds an
- * alpha fade-in from the mark's own moment, a draw-on
- * becomes a short PNG sequence sampled from the preview's own reveal timing.
+ * the tile's start (a trim) shows from the start, mid-entrance; a Fade in entrance adds
+ * an alpha fade-in from the mark's own moment, a Draw on becomes a short PNG sequence
+ * sampled from the preview's own timing (both over the entrance's length).
  *
  * A mark with its own keyframes (`shared/markAnim.ts`) that actually change is
  * ANIMATED: it is rendered frame by frame like the pose overlay
@@ -15,12 +15,13 @@
  * drawing, reveal included) and composited as an alpha video where the still
  * would sit. Any other mark stays a still (or fade/draw-on sequence) drawn at its
  * constant pose, so a static rotation/size/opacity or a single keyframe shows too.
+ * A mark with an exit, a loop or an entrance other than Instant / Fade in / Draw on
+ * (`hasLivePresets`) takes the animated path as well.
  */
 
 import type { GraphicsContent, Layer } from '@shared/project'
 import {
   drawOnFrameCount,
-  REVEAL_SEC,
   drawOnProgress,
   LABEL_FONT_FAMILY,
   revealLead,
@@ -35,13 +36,13 @@ import {
 import {
   isMarkAnimated,
   isPosed,
-  markArtSvg,
   markPoseAt,
   markPoseSvg,
   posedBounds,
   posedMark,
   type MarkPose
 } from '@shared/markAnim'
+import { framePoseAt, hasLivePresets, markArtSvg, presetTiming } from '@shared/markPresets'
 import type { ExportImage, ExportKeyframe, ExportVideo } from './exporterArgs'
 import type { CompositionRender } from './exportRender'
 
@@ -52,7 +53,8 @@ const FPS = 30
 
 export async function exportGraphicsLayer(pass: CompositionRender, l: Layer, c: GraphicsContent): Promise<void> {
   for (const mark of c.marks) {
-    if (isMarkAnimated(mark)) {
+    // Keyframes, an exit, a loop or an entrance beyond fade / draw-on need a frame per output frame.
+    if (isMarkAnimated(mark) || hasLivePresets(mark)) {
       const video = await exportAnimatedMark(pass, l, mark)
       if (video) pass.visuals.push({ kind: 'video', video })
       continue
@@ -94,11 +96,13 @@ async function exportAnimatedMark(pass: CompositionRender, l: Layer, mark: Graph
   const startSec = l.startSec + first
   if (startSec >= l.endSec || markShapes(mark, 1).length === 0) return null
   const count = Math.max(1, Math.ceil((l.endSec - startSec) * FPS - 1e-9))
+  const layerLen = l.endSec - l.startSec
   const localAt = (i: number): number => first + i / FPS
-  // One fixed frame holding the mark at every pose it takes, so nothing is cropped.
-  let box = posedBounds(mark, markPoseAt(mark, localAt(0)))
+  // One fixed frame holding the mark at every pose it takes (presets included:
+  // a pop-in's overshoot, a slide, a shake), so nothing is cropped.
+  let box = posedBounds(mark, framePoseAt(mark, localAt(0), layerLen))
   for (let i = 1; i < count; i++) {
-    const b = posedBounds(mark, markPoseAt(mark, localAt(i)))
+    const b = posedBounds(mark, framePoseAt(mark, localAt(i), layerLen))
     const x = Math.min(box.x, b.x)
     const y = Math.min(box.y, b.y)
     box = { x, y, w: Math.max(box.x + box.w, b.x + b.w) - x, h: Math.max(box.y + box.h, b.y + b.h) - y }
@@ -115,7 +119,7 @@ async function exportAnimatedMark(pass: CompositionRender, l: Layer, mark: Graph
       )
     : null
   const svgAt = (i: number): string =>
-    svgWrap(wanted && !wanted.has(i) ? '' : markArtSvg(mark, localAt(i), LABEL_FONT_FAMILY), box, pxW, pxH)
+    svgWrap(wanted && !wanted.has(i) ? '' : markArtSvg(mark, localAt(i), layerLen, LABEL_FONT_FAMILY), box, pxW, pxH)
   const path = await pass.renderOverlayVideo(count, svgAt, pxW, pxH).catch((error: unknown) => {
     throw new Error(`Couldn't draw a graphics mark (${markTitle(mark)}) for the export: ${(error as Error).message}`)
   })
@@ -157,11 +161,12 @@ async function exportMark(pass: CompositionRender, l: Layer, mark: GraphicMark):
   // A mark whose moment fell before the tile's start (a trim or split — negative
   // `atSec`) shows from the start with whatever is left of its reveal.
   const lead = revealLead(mark)
-  const frames = mark.reveal === 'draw' ? drawOnFrameCount(mark) : 1
+  const sec = presetTiming(mark, l.endSec - l.startSec).e
+  const frames = mark.entrance.kind === 'drawOn' ? drawOnFrameCount(mark, sec) : 1
   const draw = frames > 1
-  const fade = mark.reveal === 'fade' && lead < REVEAL_SEC
+  const fade = mark.entrance.kind === 'fadeIn' && lead < sec
   const svgs = Array.from({ length: frames }, (_, i) => {
-    const progress = draw ? drawOnProgress(mark, i) : 1
+    const progress = draw ? drawOnProgress(mark, i, sec) : 1
     return posed
       ? posedSvg(mark, pose, progress, box, pxW, pxH)
       : markSvg(drawn, progress, box, pxW, pxH, LABEL_FONT_FAMILY)
@@ -181,6 +186,6 @@ async function exportMark(pass: CompositionRender, l: Layer, mark: GraphicMark):
     opacityAnim: await pass.opacityAnim(l),
     ...(draw ? { sequence: { frames } } : {}),
     // The fade runs from the mark's own moment, which may be before it shows.
-    ...(fade ? { fadeIn: { startSec: l.startSec + mark.atSec, durSec: REVEAL_SEC } } : {})
+    ...(fade ? { fadeIn: { startSec: l.startSec + mark.atSec, durSec: sec } } : {})
   }
 }

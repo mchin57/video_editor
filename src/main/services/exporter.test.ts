@@ -487,8 +487,11 @@ describe('exporter orchestration', () => {
       kind: 'graphics',
       marks: [
         newMark('arrow', 'A', { x: 200, y: 1400 }, { x: 500, y: 1100 }, 0),
-        { ...box, fill: '#ffd60a66', radiusPx: 20, reveal: 'fade' },
-        { ...angleMark('N', { x: 540, y: 900 }, { x: 800, y: 900 }, { x: 540, y: 600 }, 1), reveal: 'draw' },
+        { ...box, fill: '#ffd60a66', radiusPx: 20, entrance: { kind: 'fadeIn', sec: 0.4 } },
+        {
+          ...angleMark('N', { x: 540, y: 900 }, { x: 800, y: 900 }, { x: 540, y: 600 }, 1),
+          entrance: { kind: 'drawOn', sec: 0.4 }
+        },
         // Appears after the layer ends: never on screen, so not exported.
         newMark('line', 'X', { x: 0, y: 0 }, { x: 100, y: 0 }, 5)
       ]
@@ -542,6 +545,26 @@ describe('exporter orchestration', () => {
     // The rectangle's overlay is an alpha video gated to its window.
     expect(graph).toMatch(/format=yuva420p,setpts=PTS-STARTPTS\+1\.000\/TB/)
     expect(graph).toContain("enable='between(t,1.000,3.000)'")
+  })
+
+  it('a mark with a live preset (pop in) is streamed per frame, not a still; an exit or loop does too', async () => {
+    const p = createEmptyProject('p8', 'Preset marks')
+    const g = makeGraphicsLayer('G', 1, 3)
+    const base = (id: string) => newMark('rect', id, { x: 300, y: 300 }, { x: 600, y: 500 }, 0)
+    g.content = {
+      kind: 'graphics',
+      marks: [
+        { ...base('pop'), entrance: { kind: 'popIn', sec: 0.35 } },
+        { ...base('out'), exit: { kind: 'fadeOut', sec: 0.3 } },
+        { ...base('spin'), loop: { kind: 'spin', cycleSec: 1 } }
+      ]
+    }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'presets.mp4'))
+    expect(svgRendered).toHaveLength(0)
+    expect(streamed).toHaveLength(3)
+    // 2s at 30 fps each, from the mark's moment to the layer's end.
+    expect(streamed.map((x) => x.count)).toEqual([60, 60, 60])
   })
 
   it('a statically rotated mark is one image drawn rotated, with a box that holds it', async () => {
@@ -616,13 +639,13 @@ describe('exporter orchestration', () => {
   it('a graphics mark whose moment is before its tile’s start shows from the start, mid-reveal', async () => {
     const p = createEmptyProject('p6', 'Trimmed marks')
     const g = makeGraphicsLayer('G', 2, 5)
-    const line = (id: string, atSec: number, reveal: 'pop' | 'fade' | 'draw') => ({
+    const line = (id: string, atSec: number, kind: 'instant' | 'fadeIn' | 'drawOn') => ({
       ...newMark('line', id, { x: 100, y: 500 }, { x: 900, y: 500 }, atSec),
-      reveal
+      entrance: { kind, sec: 0.4 }
     })
     g.content = {
       kind: 'graphics',
-      marks: [line('D', -0.2, 'draw'), line('F', -0.1, 'fade'), line('P', -3, 'draw')]
+      marks: [line('D', -0.2, 'drawOn'), line('F', -0.1, 'fadeIn'), line('P', -3, 'drawOn')]
     }
     p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
     await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'trimmed.mp4'))
@@ -635,6 +658,22 @@ describe('exporter orchestration', () => {
     expect(graph.match(/enable='between\(t,2\.000,5\.000\)'/g)?.length).toBeGreaterThanOrEqual(3)
     expect(graph).toContain('fade=t=in:st=1.900:d=0.400:alpha=1')
     expect(graph).toContain('tpad=stop_mode=clone:stop_duration=2.767,setpts=PTS-STARTPTS+2.000/TB')
+  })
+
+  it('an old fade / draw mark near the layer end keeps its full 0.4 s entrance (cut off by the end, not shortened)', async () => {
+    const p = createEmptyProject('p7', 'Late marks')
+    const g = makeGraphicsLayer('G', 1, 4) // 3 s long: atSec 2.8 is 0.2 s before the end
+    const line = (id: string, kind: 'fadeIn' | 'drawOn') => ({
+      ...newMark('line', id, { x: 100, y: 500 }, { x: 900, y: 500 }, 2.8),
+      entrance: { kind, sec: 0.4 }
+    })
+    g.content = { kind: 'graphics', marks: [line('D', 'drawOn'), line('F', 'fadeIn')] }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'late.mp4'))
+    // The draw-on's frame count is the full 0.4 s one (13), not a shortened one.
+    expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([13, 1])
+    const graph = runs[runs.length - 1].files['graph.txt']
+    expect(graph).toContain('fade=t=in:st=3.800:d=0.400:alpha=1')
   })
 
   it('refuses a timeline with no picture', async () => {

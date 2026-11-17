@@ -7,12 +7,10 @@ import {
   DEFAULT_DROP_WIDTH,
   GRAPHIC_TOOLS,
   MARK_DEFAULTS,
-  MARK_REVEALS,
   markTitle,
   TOOL_INFO,
   withLockAspect,
-  type GraphicMark,
-  type MarkReveal
+  type GraphicMark
 } from '@shared/graphics'
 import { editPoseAt, markPoseAt, withFillOff, type MarkPose } from '@shared/markAnim'
 import { updateById } from '@/lib/arrays'
@@ -22,7 +20,7 @@ import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { CollapsibleSection } from '../CollapsibleSection'
 import { MarkAnimation } from './MarkAnimation'
-import { Check, Field, NumberInput, Slider, colorCls, inputCls, subtleBtnCls, toggleCls } from '../ui'
+import { Check, Field, NumberInput, Slider, colorCls, subtleBtnCls, toggleCls } from '../ui'
 
 /** A fill switched on starts as the stroke colour, see-through (alpha byte). */
 const DEFAULT_FILL_ALPHA = 102
@@ -295,20 +293,6 @@ function MarkFields({
           At playhead
         </button>
       </div>
-      <Field label="Reveal">
-        <select
-          data-testid="mark-reveal"
-          value={mark.reveal}
-          onChange={(e) => onPatch((m) => ({ ...m, reveal: e.target.value as MarkReveal }))}
-          className={inputCls}
-        >
-          {MARK_REVEALS.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </Field>
     </div>
   )
 }

@@ -546,17 +546,22 @@ describe('edge trims report what they achieved', () => {
     const g = makeGraphicsLayer('G', 2, 8)
     g.content = {
       kind: 'graphics',
-      marks: [{ ...newMark('arrow', 'a', { x: 0, y: 0 }, { x: 200, y: 0 }, 3), reveal: 'draw' }]
+      marks: [
+        {
+          ...newMark('arrow', 'a', { x: 0, y: 0 }, { x: 200, y: 0 }, 3),
+          entrance: { kind: 'drawOn' as const, sec: 0.4 }
+        }
+      ]
     }
     const marksOf = (l: Layer): GraphicMark[] => (l.content as GraphicsContent).marks
     // Start 1s later: the arrow still appears at 5s, now 2s into the tile.
-    expect(marksOf(trimLayerEdge(g, 'start', 1).tile)[0]).toMatchObject({ atSec: 2, reveal: 'draw' })
+    expect(marksOf(trimLayerEdge(g, 'start', 1).tile)[0]).toMatchObject({ atSec: 2, entrance: { kind: 'drawOn' } })
     // Start 1.5s earlier: 4.5s into the tile, still at 5s.
     expect(marksOf(trimLayerEdge(g, 'start', -1.5).tile)[0].atSec).toBeCloseTo(4.5)
     // Trimmed past it: its moment is kept as a negative time (on screen from
     // the new start), so trimming back out restores it exactly.
     const past = trimLayerEdge(g, 'start', 4).tile
-    expect(marksOf(past)[0]).toMatchObject({ atSec: -1, reveal: 'draw' })
+    expect(marksOf(past)[0]).toMatchObject({ atSec: -1, entrance: { kind: 'drawOn' } })
     expect(marksOf(trimLayerEdge(past, 'start', -4).tile)[0].atSec).toBeCloseTo(3)
     // The end edge leaves the marks alone.
     expect(marksOf(trimLayerEdge(g, 'end', -2).tile)).toBe(marksOf(g))
@@ -622,18 +627,21 @@ describe('splitStaticLayer', () => {
 
   it('splits a graphics tile so every mark keeps its moment: left before the cut, right re-based', () => {
     const g = makeGraphicsLayer('G', 2, 10)
-    const mark = (id: string, atSec: number, reveal: GraphicMark['reveal'] = 'fade'): GraphicMark => ({
+    const mark = (id: string, atSec: number, kind: GraphicMark['entrance']['kind'] = 'fadeIn'): GraphicMark => ({
       ...newMark('line', id, { x: 0, y: 0 }, { x: 100, y: 0 }, atSec),
-      reveal
+      entrance: { kind, sec: 0.4 },
+      exit: { kind: 'fadeOut', sec: 0.3 }
     })
-    g.content = { kind: 'graphics', marks: [mark('early', 1), mark('late', 5, 'draw')] }
+    g.content = { kind: 'graphics', marks: [mark('early', 1), mark('late', 5, 'drawOn')] }
     const [left, right] = splitStaticLayer(g, 5, makeId)! // cut 3s into the tile
     expect((left.content as GraphicsContent).marks.map((m) => m.id)).toEqual(['early'])
+    // The cut must not play an exit: the left half loses it, the right keeps it (end-anchored).
+    expect((left.content as GraphicsContent).marks[0].exit).toBeUndefined()
     const r = (right.content as GraphicsContent).marks
     // Already on screen at the cut: its moment is kept (before the right half's start).
-    expect(r[0]).toMatchObject({ atSec: -2, reveal: 'fade' })
+    expect(r[0]).toMatchObject({ atSec: -2, entrance: { kind: 'fadeIn' }, exit: { kind: 'fadeOut' } })
     // Still to come: same absolute time (2 + 5 = 7 = 5 + 2).
-    expect(r[1]).toMatchObject({ atSec: 2, reveal: 'draw' })
+    expect(r[1]).toMatchObject({ atSec: 2, entrance: { kind: 'drawOn' }, exit: { kind: 'fadeOut' } })
     // The right half's marks are its own (fresh ids).
     expect(r.map((m) => m.id)).toEqual(['new', 'new'])
   })

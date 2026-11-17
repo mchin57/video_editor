@@ -422,7 +422,8 @@ after the round trip), centre 100×100 mean RGB of every output frame:
 ## Graphics marks — draw-on sequences & alpha fade-in (verified ffmpeg 8.1.1, 2026-10-21)
 
 Each graphics mark is an ordinary image overlay (`exportGraphics.ts`); its
-two reveals add two input shapes. Verified with synthesized RGBA PNGs (a red
+two entrances (Fade in, Draw on; each over `entrance.sec`, 0.4 s for marks
+migrated from the old reveals) add two input shapes. Verified with synthesized RGBA PNGs (a red
 bar growing 15px per frame) composited the compositor's way (base canvas +
 `overlay enable` + `-r 30 -fps_mode cfr`), counting red pixels per frame:
 
@@ -446,13 +447,15 @@ bar growing 15px per frame) composited the compositor's way (base canvas +
 
 ### Animated marks (a mark with its own keyframes)
 
-A mark whose keyframes change (`isMarkAnimated`) uses NO new ffmpeg mechanism: it is
-the pose overlay path below. `exportGraphics.ts` streams one `markArtSvg` frame per
+A mark whose keyframes change (`isMarkAnimated`) or that has a live preset the stills
+can't draw (`hasLivePresets`: an exit, a loop, or an entrance other than Instant /
+Fade in / Draw on) uses NO new ffmpeg mechanism: it is
+the pose overlay path below. `exportGraphics.ts` streams one `markArtSvg(mark, local, layerLen)` frame per
 output frame (30 fps, from the mark's moment to the layer's end) through
 `renderOverlayVideo` into the lossless alpha intermediate, in ONE fixed box (the union
-of `posedBounds` over every frame, so nothing is cropped), and pushes it as a
+of `posedBounds` of `framePoseAt` over every frame, so a pop-in's overshoot, a slide or a shake isn't cropped), and pushes it as a
 `hasAlpha` video placed by `placedBox` with the layer's keyframes and opacity exactly
-as the still would be. The reveal (fade / draw-on) is baked into the frames. Marks
+as the still would be. The entrance (fade / draw-on included) is baked into the frames. Marks
 that are not animated stay stills, drawn at their constant pose (static rotation,
 size, opacity or a lone keyframe). Pinned on real pixels by
 `e2e/graphicsExport.spec.ts` (a rectangle moving across 1s; a statically rotated line).

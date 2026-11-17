@@ -15,7 +15,7 @@ import {
   fromCanvas,
   graphicsSvgTransform,
   markShapes,
-  markStateAt,
+  markVisibleAt,
   movedMark,
   newMark,
   polylineMark,
@@ -28,7 +28,6 @@ import {
 import {
   editPoseAt,
   isPosed,
-  markArtSvg,
   markPivot,
   markPoseAt,
   markPoseSvg,
@@ -40,6 +39,7 @@ import {
   withPosedMarkPoint,
   type MarkPose
 } from '@shared/markAnim'
+import { framePoseAt, markArtSvg } from '@shared/markPresets'
 import { layerTransformAt } from '@shared/layers'
 import { newId } from '@shared/ids'
 import { LOGICAL } from '@/lib/coords'
@@ -119,8 +119,8 @@ const canvasSvgStyle = (zIndex: number): CSSProperties => ({
 })
 
 /**
- * A graphics layer: every mark on screen at `time`, revealed through the shared
- * `markStateAt` (the export samples the same function). On the editable stage
+ * A graphics layer: every mark on screen at `time`, drawn through the shared
+ * `markArtSvg` (the export draws the same markup). On the editable stage
  * an unselected layer's marks are clickable (selecting the layer and the mark);
  * the selected layer gets `GraphicsEditor` on top.
  */
@@ -144,6 +144,7 @@ export function StackGraphics({
 }): JSX.Element {
   const t: GraphicsTransform = { x: layer.x, y: layer.y, scale: layer.scale }
   const local = time - layer.startSec
+  const len = layer.endSec - layer.startSec
   const editing = editable && selected
   const opacity = layerTransformAt(rawLayer, time).opacity
   const tool = useUi((s) => s.graphicsTool)
@@ -160,8 +161,8 @@ export function StackGraphics({
           {/* The layer's keyframed opacity applies per MARK, like the export,
               which composites each mark as its own overlay. */}
           {content.marks.map((m) => {
-            if (markStateAt(m, local))
-              return <MarkArt key={m.id} mark={m} html={markArtSvg(m, local)} opacity={opacity} />
+            if (markVisibleAt(m, local))
+              return <MarkArt key={m.id} mark={m} html={markArtSvg(m, local, len)} opacity={opacity} />
             return editing ? (
               <MarkArt key={m.id} mark={m} html={markPoseSvg(m, markPoseAt(m, local), 1, GHOST_OPACITY)} />
             ) : null
@@ -169,11 +170,11 @@ export function StackGraphics({
           {editable &&
             !selected &&
             content.marks.map((m) =>
-              markStateAt(m, local) ? (
+              markVisibleAt(m, local) ? (
                 <MarkHit
                   key={m.id}
                   mark={m}
-                  pose={markPoseAt(m, local)}
+                  pose={framePoseAt(m, local, len)}
                   onDown={(e) => startMarkMove(e, layer, m, t)}
                 />
               ) : null
@@ -248,6 +249,7 @@ function GraphicsEditor({
   const svgRef = useRef<SVGSVGElement>(null)
 
   const local = time - layer.startSec
+  const len = layer.endSec - layer.startSec
   const atSec = Math.max(0, local)
   const commit = (mark: GraphicMark): void => {
     useProject.getState().updateGraphicsMarks(layer.id, (ms) => [...ms, mark])
@@ -318,8 +320,10 @@ function GraphicsEditor({
     e.preventDefault()
     const svg = svgRef.current
     if (!svg) return
+    // Grabbed where it is DRAWN: keyframes and presets both.
+    const pose = framePoseAt(m, local, len)
     startDragWithUndo((ev) => {
-      const next = withPosedMarkPoint(m, i, fromCanvas(t, canvasPoint(svg, ev)), local)
+      const next = withPosedMarkPoint(m, i, fromCanvas(t, canvasPoint(svg, ev)), local, pose)
       useProject.getState().liveUpdate((c) => mapGraphicsMarks(c, layer.id, (ms) => updateById(ms, m.id, () => next)))
     })
   }
@@ -340,6 +344,7 @@ function GraphicsEditor({
     tool === 'polyline' && polyPts.length > 0 ? polylineMark('preview', hover ? [...polyPts, hover] : polyPts, 0) : null
   const selectedMark = !tool ? content.marks.find((m) => m.id === selectedMarkId) : undefined
   const selectedPose = selectedMark ? markPoseAt(selectedMark, local) : null
+  const selectedDrawn = selectedMark ? framePoseAt(selectedMark, local, len) : null
   const anglePreview =
     tool === 'angle' && anglePts.length > 0
       ? angleMark('preview', anglePts[0], anglePts[1] ?? hover ?? anglePts[0], anglePts[2] ?? hover ?? anglePts[0], 0)
@@ -380,7 +385,12 @@ function GraphicsEditor({
         <g transform={graphicsSvgTransform(t)} pointerEvents={tool ? 'none' : undefined}>
           {!tool &&
             content.marks.map((m) => (
-              <MarkHit key={m.id} mark={m} pose={markPoseAt(m, local)} onDown={(e) => startMarkMove(e, layer, m, t)} />
+              <MarkHit
+                key={m.id}
+                mark={m}
+                pose={framePoseAt(m, local, len)}
+                onDown={(e) => startMarkMove(e, layer, m, t)}
+              />
             ))}
           {draft && <MarkArt mark={draft} html={plainSvg(draft)} />}
           {polyPreview && polyPreview.points.length >= 2 && (
@@ -400,7 +410,7 @@ function GraphicsEditor({
       </svg>
       {/* Point handles: HTML so they keep one on-screen size at any zoom. */}
       {(selectedMark?.points ?? []).map((p, i) => {
-        const c = toCanvas(t, posePoint(selectedPose!, markPivot(selectedMark!), p))
+        const c = toCanvas(t, posePoint(selectedDrawn!, markPivot(selectedMark!), p))
         return (
           <div
             key={i}

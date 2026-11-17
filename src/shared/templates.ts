@@ -24,6 +24,7 @@ import { isNeutralTint } from './tint'
 import { PROJECT_VERSION, createEmptyProject, isNeutralColor, migrateProject } from './project'
 import { GRAPHIC_TOOLS } from './graphics'
 import { EASINGS } from './markAnim'
+import { ENTRANCES, EXITS, LOOPS } from './markPresets'
 import { audioPlayedSec } from './audioTiming'
 import { TRANSITION_KINDS } from './transitions'
 import { FORBIDDEN_NAME_CHARS, RESERVED_DEVICE_NAME } from './fileName'
@@ -286,6 +287,19 @@ const validMarkKeyframe = (k: unknown): boolean =>
   (k.fill === undefined || isStr(k.fill)) &&
   (EASINGS as { id: unknown }[]).some((e) => e.id === k.easing)
 
+/** A mark's presets. Validation runs BEFORE `migrateTemplate`, so a template saved
+ *  before v37 (a `reveal`, no `entrance`) still passes; the migration converts it. */
+const validMarkPresets = (m: Record<string, unknown>): boolean => {
+  const kindOk = (list: { id: string }[], o: unknown, len: string): boolean =>
+    isObj(o) && list.some((e) => e.id === o.kind) && isNum(o[len])
+  const entranceOk = m.entrance === undefined ? isStr(m.reveal) : kindOk(ENTRANCES, m.entrance, 'sec')
+  return (
+    entranceOk &&
+    (m.exit === undefined || kindOk(EXITS, m.exit, 'sec')) &&
+    (m.loop === undefined || kindOk(LOOPS, m.loop, 'cycleSec'))
+  )
+}
+
 const validMark = (m: unknown): boolean =>
   isObj(m) &&
   isStr(m.id) &&
@@ -296,7 +310,7 @@ const validMark = (m: unknown): boolean =>
   isStr(m.color) &&
   isNum(m.widthPx) &&
   isNum(m.atSec) &&
-  isStr(m.reveal) &&
+  validMarkPresets(m) &&
   (m.fill === undefined || m.fill === null || isStr(m.fill)) &&
   (m.radiusPx === undefined || isNum(m.radiusPx)) &&
   (m.dropWidth === undefined || isNum(m.dropWidth)) &&

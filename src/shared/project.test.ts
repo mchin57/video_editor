@@ -515,7 +515,7 @@ describe('migrateProject — graphics layers (v27)', () => {
         color: '#ffd60a',
         widthPx: 8,
         atSec: 0.5,
-        reveal: 'draw'
+        entrance: { kind: 'drawOn', sec: 0.4 }
       }
     ]
     const graphics = {
@@ -536,7 +536,7 @@ describe('migrateProject — graphics layers (v27)', () => {
 
 describe('migrateProject — connected lines and teardrops (v33)', () => {
   it('stamps a v32 document current; connected-line and teardrop marks load as saved', () => {
-    const mark = { color: '#ffd60a', widthPx: 8, atSec: 0, reveal: 'pop' }
+    const mark = { color: '#ffd60a', widthPx: 8, atSec: 0, entrance: { kind: 'instant', sec: 0.4 } }
     const marks = [
       {
         ...mark,
@@ -580,7 +580,7 @@ describe('migrateProject — connected lines and teardrops (v33)', () => {
 
 describe('migrateProject — per-mark animation (v34)', () => {
   it('stamps a v33 document current; mark keyframes, pivot and static pose load as saved, and an old mark has none', () => {
-    const base = { color: '#ffd60a', widthPx: 8, atSec: 0, reveal: 'pop' }
+    const base = { color: '#ffd60a', widthPx: 8, atSec: 0, entrance: { kind: 'instant', sec: 0.4 } }
     const pts = [
       { x: 1, y: 2 },
       { x: 30, y: 40 }
@@ -825,5 +825,88 @@ describe('migrateProject — colour table controls and LUTs (v36)', () => {
     }
     const p = migrateProject({ ...createEmptyProject('p', 'P'), version: PROJECT_VERSION, layers: [l] })
     expect(p.layers[0]).toEqual(l)
+  })
+})
+
+describe('migrateProject — mark entrance presets (v37)', () => {
+  const mk = (id: string, reveal: string) => ({
+    id,
+    tool: 'line',
+    points: [
+      { x: 1, y: 2 },
+      { x: 3, y: 4 }
+    ],
+    color: '#ffd60a',
+    widthPx: 8,
+    atSec: 0,
+    reveal
+  })
+  const layer = (id: string, content: unknown) => ({
+    id,
+    hidden: false,
+    startSec: 0,
+    endSec: 3,
+    x: 540,
+    y: 960,
+    scale: 1,
+    content
+  })
+
+  it('turns every reveal (root and inside a compound clip) into a 0.4 s entrance', () => {
+    const inner = layer('GI', { kind: 'graphics', marks: [mk('c', 'draw')] })
+    const compound = layer('C', {
+      kind: 'compound',
+      comp: { layers: [inner], audioClips: [], captions: { enabled: false, segments: [] } }
+    })
+    const root = layer('G', { kind: 'graphics', marks: [mk('a', 'pop'), mk('b', 'fade')] })
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 36, layers: [root, compound] })
+    expect(p.version).toBe(PROJECT_VERSION)
+    const marks = (p.layers[0].content as unknown as { marks: Record<string, unknown>[] }).marks
+    expect(marks.map((m) => m.entrance)).toEqual([
+      { kind: 'instant', sec: 0.4 },
+      { kind: 'fadeIn', sec: 0.4 }
+    ])
+    expect(marks.every((m) => !('reveal' in m))).toBe(true)
+    const comp = (
+      p.layers[1].content as unknown as { comp: { layers: { content: { marks: Record<string, unknown>[] } }[] } }
+    ).comp
+    expect(comp.layers[0].content.marks[0]).toMatchObject({ entrance: { kind: 'drawOn', sec: 0.4 } })
+    expect('reveal' in comp.layers[0].content.marks[0]).toBe(false)
+  })
+
+  it('also converts the marks of a comp inside a layout cell', () => {
+    const inner = layer('GI', { kind: 'graphics', marks: [mk('a', 'draw'), mk('b', 'pop')] })
+    const cell = (comp: unknown) => ({
+      mediaId: null,
+      inSec: 0,
+      outSec: 3,
+      mute: false,
+      rect: { x: 0, y: 0, w: 540, h: 960 },
+      comp
+    })
+    const lay = layer('L', {
+      kind: 'layout',
+      presetId: 'split-v',
+      cells: [cell({ layers: [inner], audioClips: [], captions: { enabled: false, segments: [] } }), cell(null)]
+    })
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 36, layers: [lay] })
+    const cells = (p.layers[0].content as unknown as { cells: { comp: unknown }[] }).cells
+    const marks = (cells[0].comp as { layers: { content: { marks: Record<string, unknown>[] } }[] }).layers[0].content
+      .marks
+    expect(marks.map((m) => m.entrance)).toEqual([
+      { kind: 'drawOn', sec: 0.4 },
+      { kind: 'instant', sec: 0.4 }
+    ])
+    expect(marks.every((m) => !('reveal' in m))).toBe(true)
+    expect(cells[1].comp).toBeNull()
+  })
+
+  it('leaves a v37 document untouched', () => {
+    const { reveal: _r, ...base } = mk('a', 'x')
+    void _r
+    const marks = [{ ...base, entrance: { kind: 'popIn', sec: 0.7 }, exit: { kind: 'fadeOut', sec: 0.3 } }]
+    const g = layer('G', { kind: 'graphics', marks })
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), layers: [g] })
+    expect(p.layers[0]).toEqual(g)
   })
 })

@@ -2,7 +2,7 @@
  * One graphics mark's own animation: keyframed offset, size, rotation (about a
  * pivot), opacity, colours, thickness and how much is drawn, with easing per
  * keyframe. Pure — the preview and the export both draw a mark through
- * `markArtSvg`, so a frame looks the same on both sides. The mark's keyframes
+ * `markArtSvg` (shared/markPresets.ts, which adds the live presets), so a frame looks the same on both sides. The mark's keyframes
  * run on its LAYER's clock (seconds after the layer's start, like `atSec`); the
  * layer's own Motion keyframes still apply on top (`toCanvas`).
  */
@@ -13,7 +13,6 @@ import {
   LABEL_FONT_FAMILY,
   markBounds,
   markShapes,
-  markStateAt,
   MARK_DEFAULTS,
   movedMark,
   shapeSvg,
@@ -221,17 +220,6 @@ export function markPoseSvg(
   return `<g${attrs}>${shapes.map((s) => shapeSvg(s, fontFamily)).join('')}</g>`
 }
 
-/**
- * THE drawing of a mark `localSec` after its layer's start, for the preview and
- * the export alike: '' before the mark appears, else its group at that moment's
- * pose, with the reveal (fade opacity, draw-on progress) folded in.
- */
-export function markArtSvg(m: GraphicMark, localSec: number, fontFamily: string = LABEL_FONT_FAMILY): string {
-  const st = markStateAt(m, localSec)
-  if (!st) return ''
-  return markPoseSvg(m, markPoseAt(m, localSec), st.progress, st.opacity, fontFamily)
-}
-
 /** Whether the mark actually changes over time: two or more keyframes whose values differ
  *  (a fill left to the shape's own counts as that fill). One keyframe is a constant pose. */
 export function isMarkAnimated(m: GraphicMark): boolean {
@@ -387,10 +375,16 @@ export function withFillOff(m: GraphicMark): GraphicMark {
 /**
  * Point `i` dragged to where the pointer is DRAWN (`drawnPt`, mark space) at `localSec`.
  * A posed mark's pivot defaults to the points' box centre, which this drag would move
- * and swing the shape, so the pivot is pinned first.
+ * and swing the shape, so the pivot is pinned first. `pose` is what the mark is drawn at
+ * (default: its keyframe pose; the preview passes the frame pose, presets included).
  */
-export function withPosedMarkPoint(m: GraphicMark, i: number, drawnPt: Pt, localSec: number): GraphicMark {
-  const pose = markPoseAt(m, localSec)
+export function withPosedMarkPoint(
+  m: GraphicMark,
+  i: number,
+  drawnPt: Pt,
+  localSec: number,
+  pose: MarkPose = markPoseAt(m, localSec)
+): GraphicMark {
   const pivot = markPivot(m)
   const pinned = (m.keyframes && m.keyframes.length > 0) || isPosed(pose) ? { ...m, pivot } : m
   return withMarkPoint(pinned, i, unposePoint(pose, pivot, drawnPt))

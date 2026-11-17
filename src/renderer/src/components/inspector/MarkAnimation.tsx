@@ -13,6 +13,21 @@ import {
   type Easing,
   type MarkPose
 } from '@shared/markAnim'
+import {
+  canConvertPresets,
+  convertPresetsToKeyframes,
+  DEFAULT_ENTRANCE_SEC,
+  DEFAULT_EXIT_SEC,
+  DEFAULT_LOOP_SEC,
+  ENTRANCES,
+  EXITS,
+  hasLivePresets,
+  LOOPS,
+  MIN_PRESET_SEC,
+  type EntranceKind,
+  type ExitKind,
+  type LoopKind
+} from '@shared/markPresets'
 import { usePlayback } from '@/state/playback'
 import { Field, NumberInput, inputCls, subtleBtnCls } from '../ui'
 
@@ -42,6 +57,7 @@ export function MarkAnimation({
   onPatch: (fn: (m: GraphicMark) => GraphicMark) => void
 }): JSX.Element {
   const pose = markPoseAt(mark, localSec)
+  const convertCheck = canConvertPresets(mark, layerDurSec)
   const kfs = mark.keyframes ?? []
   const keyframed = kfs.length > 0
   const edit = (patch: Partial<MarkPose>): void => onPatch((m) => editPoseAt(m, localNow(), patch))
@@ -50,6 +66,126 @@ export function MarkAnimation({
   return (
     <div data-testid="mark-animation" className="mt-2 border-t border-white/10 pt-2">
       <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Animation</div>
+      <div className="flex items-end gap-2">
+        <Field label="Entrance">
+          <select
+            data-testid="mark-entrance"
+            value={mark.entrance.kind}
+            onChange={(e) => {
+              const kind = e.target.value as EntranceKind
+              onPatch((m) => ({ ...m, entrance: { kind, sec: DEFAULT_ENTRANCE_SEC[kind] } }))
+            }}
+            className={inputCls}
+          >
+            {ENTRANCES.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {mark.entrance.kind !== 'instant' && (
+          <Field label="Length (s)">
+            <NumberInput
+              ariaLabel="Entrance length"
+              step="0.05"
+              min={MIN_PRESET_SEC}
+              value={mark.entrance.sec}
+              format={(v) => v.toFixed(2)}
+              onCommit={(v) =>
+                onPatch((m) => ({ ...m, entrance: { ...m.entrance, sec: Math.max(MIN_PRESET_SEC, v) } }))
+              }
+            />
+          </Field>
+        )}
+      </div>
+      <div className="flex items-end gap-2">
+        <Field label="Exit">
+          <select
+            data-testid="mark-exit"
+            value={mark.exit?.kind ?? 'none'}
+            onChange={(e) => {
+              const kind = e.target.value as ExitKind
+              onPatch((m) => {
+                const { exit: _gone, ...rest } = m
+                void _gone
+                return kind === 'none' ? rest : { ...rest, exit: { kind, sec: DEFAULT_EXIT_SEC } }
+              })
+            }}
+            className={inputCls}
+          >
+            {EXITS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {mark.exit && (
+          <Field label="Length (s)">
+            <NumberInput
+              ariaLabel="Exit length"
+              step="0.05"
+              min={MIN_PRESET_SEC}
+              value={mark.exit.sec}
+              format={(v) => v.toFixed(2)}
+              onCommit={(v) =>
+                onPatch((m) => (m.exit ? { ...m, exit: { ...m.exit, sec: Math.max(MIN_PRESET_SEC, v) } } : m))
+              }
+            />
+          </Field>
+        )}
+      </div>
+      <div className="flex items-end gap-2">
+        <Field label="Loop">
+          <select
+            data-testid="mark-loop"
+            value={mark.loop?.kind ?? 'none'}
+            onChange={(e) => {
+              const kind = e.target.value as LoopKind
+              onPatch((m) => {
+                const { loop: _gone, ...rest } = m
+                void _gone
+                return kind === 'none' ? rest : { ...rest, loop: { kind, cycleSec: DEFAULT_LOOP_SEC[kind] } }
+              })
+            }}
+            className={inputCls}
+          >
+            {LOOPS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {mark.loop && (
+          <Field label="Cycle (s)">
+            <NumberInput
+              ariaLabel="Loop cycle length"
+              step="0.05"
+              min={MIN_PRESET_SEC}
+              value={mark.loop.cycleSec}
+              format={(v) => v.toFixed(2)}
+              onCommit={(v) =>
+                onPatch((m) => (m.loop ? { ...m, loop: { ...m.loop, cycleSec: Math.max(MIN_PRESET_SEC, v) } } : m))
+              }
+            />
+          </Field>
+        )}
+      </div>
+      <button
+        type="button"
+        data-testid="mark-convert-presets"
+        className={`${subtleBtnCls} mb-1 w-full`}
+        disabled={(!hasLivePresets(mark) && mark.entrance.kind === 'instant') || !convertCheck.ok}
+        title={convertCheck.reason ?? 'Turn the entrance, exit and loop into keyframes you can edit'}
+        onClick={() => onPatch((m) => convertPresetsToKeyframes(m, layerDurSec))}
+      >
+        Convert to keyframes
+      </button>
+      <p className="mb-2 text-[10px] leading-snug text-zinc-500">
+        Presets play on top of the keyframes below. Convert turns them into editable keyframes.
+      </p>
       <div className="flex gap-2">
         <Field label="Size %">
           <NumberInput

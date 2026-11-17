@@ -184,8 +184,8 @@ export function splitWorkoutLayer(layer: Layer, atSec: number, makeId: () => str
  *   transition IN, the right half the transition OUT (`splitTransitions`);
  * - graphics marks (start-relative `atSec`): the left half keeps those that
  *   appear before the cut, the right half all of them re-based to its start
- *   (`shiftMarks` — one already on screen keeps its moment as a negative
- *   `atSec`, so it carries on mid-reveal and a later re-join restores it).
+ *   (`shiftMarks` — the left half's marks also lose their exit, for good: a re-join does not bring it back; one
+ *   already on screen keeps its moment as a negative `atSec`, so it carries on mid-entrance).
  */
 export function splitStaticLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
   const kind = layer.content.kind
@@ -197,7 +197,16 @@ export function splitStaticLayer(layer: Layer, atSec: number, makeId: () => stri
   if (layer.content.kind === 'graphics') {
     const cut = atSec - layer.startSec
     const marks = layer.content.marks
-    left.content = { ...layer.content, marks: marks.filter((m) => m.atSec < cut) }
+    // The left half loses each mark's exit: it would play at the cut, not at the end.
+    left.content = {
+      ...layer.content,
+      marks: marks
+        .filter((m) => m.atSec < cut)
+        .map(({ exit: _exit, ...m }) => {
+          void _exit
+          return m
+        })
+    }
     // Fresh ids: the two halves are separate tiles with their own marks.
     right.content = { ...layer.content, marks: shiftMarks(marks, cut).map((m) => ({ ...m, id: makeId() })) }
   }
