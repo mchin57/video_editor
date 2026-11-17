@@ -15,6 +15,7 @@
 
 import { FRAME } from './frame'
 import { DEFAULT_FONT_ID, fontCssFamily } from './fonts'
+import type { MarkKeyframe } from './markAnim'
 
 export interface Pt {
   x: number
@@ -68,6 +69,22 @@ export interface GraphicMark {
   /** Seconds after the layer's start the mark appears (≥ 0). */
   atSec: number
   reveal: MarkReveal
+  /**
+   * Keyframed animation of this one shape (shared/markAnim.ts), kept sorted by
+   * `tSec` is seconds after the LAYER's start — the same clock as
+   * `atSec`. Absent/empty = not animated; one keyframe = a constant pose.
+   */
+  keyframes?: MarkKeyframe[]
+  /** The point (mark space) that rotation and size scale about; absent = the
+   *  centre of the bounding box of `points`. */
+  pivot?: Pt
+  /** Static rotation, clockwise degrees about the pivot (absent = 0). Ignored
+   *  once the mark has keyframes. */
+  rotationDeg?: number
+  /** Static size multiplier about the pivot (absent = 1). Ignored once keyframed. */
+  scale?: number
+  /** Static opacity 0..1 (absent = 1). Ignored once keyframed. */
+  opacity?: number
 }
 
 /** Seconds a fade or a draw-on takes. */
@@ -315,7 +332,8 @@ export type MarkShape =
       tabular?: boolean
     }
 
-const f2 = (n: number): string => (Math.round(n * 100) / 100).toString()
+/** A number as the SVG markup writes it: rounded to 2 decimals, no trailing zeros. */
+export const f2 = (n: number): string => (Math.round(n * 100) / 100).toString()
 /** An SVG path through `pts` (closed with `close`). */
 export const pathD = (pts: Pt[], close = false): string =>
   pts.map((p, i) => `${i ? 'L' : 'M'}${f2(p.x)} ${f2(p.y)}`).join(' ') + (close ? ' Z' : '')
@@ -483,7 +501,17 @@ export function shapesSvg(
   pxH: number,
   fontFamily: string
 ): string {
-  const body = shapes.map((s) => shapeSvg(s, fontFamily)).join('')
+  return svgWrap(shapes.map((s) => shapeSvg(s, fontFamily)).join(''), box, pxW, pxH)
+}
+
+/** An SVG page of ready-made `body` markup framing `box` at `pxW`×`pxH` (`shapesSvg`, and
+ *  the export's posed marks, whose body is a transformed group). */
+export function svgWrap(
+  body: string,
+  box: { x: number; y: number; w: number; h: number },
+  pxW: number,
+  pxH: number
+): string {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${pxH}" ` +
     `viewBox="${f2(box.x)} ${f2(box.y)} ${f2(box.w)} ${f2(box.h)}" preserveAspectRatio="none">${body}</svg>`
@@ -595,12 +623,21 @@ export function finishPolyline(points: Pt[]): Pt[] | null {
  */
 export function shiftMarks(marks: GraphicMark[], shiftSec: number): GraphicMark[] {
   if (shiftSec === 0) return marks
-  return marks.map((m) => ({ ...m, atSec: m.atSec - shiftSec }))
+  // Keyframes share the mark's clock, so they shift with it.
+  return marks.map((m) => ({
+    ...m,
+    atSec: m.atSec - shiftSec,
+    ...(m.keyframes ? { keyframes: m.keyframes.map((k) => ({ ...k, tSec: k.tSec - shiftSec })) } : {})
+  }))
 }
 
-/** The mark moved by (dx, dy) in mark space. */
+/** The mark moved by (dx, dy) in mark space (its pivot, if set, moves with it). */
 export function movedMark(m: GraphicMark, dx: number, dy: number): GraphicMark {
-  return { ...m, points: m.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+  return {
+    ...m,
+    points: m.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+    ...(m.pivot ? { pivot: { x: m.pivot.x + dx, y: m.pivot.y + dy } } : {})
+  }
 }
 
 /**
