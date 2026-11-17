@@ -190,6 +190,22 @@ describe('sanitizeTemplate', () => {
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'teardrop', points: two, dropWidth: 0.5 }))).not.toBeNull()
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'polyline', points: [...two, { x: 3, y: 3 }] }))).not.toBeNull()
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'teardrop', points: two, dropWidth: 'wide' }))).toBeNull()
+    // Presets: the new shape, the pre-v37 `reveal` (validation runs before the migration), neither.
+    const { entrance: _e, ...bare } = mark
+    void _e
+    expect(sanitizeTemplate(badMark({ ...bare, reveal: 'fade' }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...bare, entrance: { kind: 'popIn', sec: 0.3 } }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark(bare))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...bare, entrance: { kind: 'zoom', sec: 0.3 } }))).toBeNull()
+    const okPresets = {
+      ...bare,
+      entrance: { kind: 'grow', sec: 0.3 },
+      exit: { kind: 'shrink', sec: 0.3 },
+      loop: { kind: 'spin', cycleSec: 2 }
+    }
+    expect(sanitizeTemplate(badMark(okPresets))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...okPresets, exit: { kind: 'explode', sec: 1 } }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...okPresets, loop: { kind: 'spin', cycleSec: 'x' } }))).toBeNull()
     // Per-mark animation fields.
     const kf = {
       tSec: 0,

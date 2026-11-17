@@ -8,7 +8,6 @@ import {
   editPoseAt,
   isMarkAnimated,
   keyframeFromPose,
-  markArtSvg,
   markPivot,
   markPoseAt,
   posePoint,
@@ -168,25 +167,6 @@ describe('isMarkAnimated', () => {
     expect(isMarkAnimated(rect({ keyframes: [kf(0), kf(1, { easing: 'easeIn' })] }))).toBe(false)
     expect(isMarkAnimated(rect({ keyframes: [kf(0), kf(1, { dx: 5 })] }))).toBe(true)
     expect(isMarkAnimated(rect({ keyframes: [kf(0), kf(1, { color: '#000000' })] }))).toBe(true)
-  })
-})
-
-describe('markArtSvg', () => {
-  it('is empty before the mark appears', () => {
-    expect(markArtSvg(rect({ atSec: 2 }), 1)).toBe('')
-  })
-  it('carries the transform when rotated, and no attributes when plain', () => {
-    expect(markArtSvg(rect(), 0)).toMatch(/^<g><path /)
-    const svg = markArtSvg(rect({ rotationDeg: 45 }), 0)
-    expect(svg).toContain('transform="translate(0 0) translate(200 300) rotate(45) scale(1) translate(-200 -300)"')
-  })
-  it('folds the reveal fade and the pose opacity into one opacity', () => {
-    const m = rect({ reveal: 'fade', opacity: 0.5 })
-    expect(markArtSvg(m, 0.2)).toContain('opacity="0.25"')
-  })
-  it('draws a keyframed shape at its pose at that moment', () => {
-    const m = rect({ keyframes: [kf(0), kf(1, { dx: 100 })] })
-    expect(markArtSvg(m, 0.5)).toContain('translate(50 0)')
   })
 })
 

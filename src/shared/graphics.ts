@@ -4,9 +4,10 @@
  * implementation of how a mark looks — `markShapes` turns a mark into SVG
  * paths + a label, and both the
  * preview (React SVG) and the export (the same SVG, rasterised by the export's
- * Chromium, `services/textImage.ts`) draw exactly those. Timing (`markStateAt`)
- * is shared the same way: the export samples it for its draw-on frames and
- * mirrors its linear fade, so a reveal looks the same on both sides.
+ * Chromium, `services/textImage.ts`) draw exactly those. Timing (the entrance / exit / loop
+ * presets, shared/markPresets.ts) is shared the same way: the export samples it
+ * for its draw-on frames and mirrors its linear fade, so an entrance looks the
+ * same on both sides.
  *
  * Marks live in the canonical 1080×1920 space BEFORE the layer transform: the
  * graphics layer's x/y/scale move/zoom the whole drawing about the frame centre
@@ -16,6 +17,7 @@
 import { FRAME } from './frame'
 import { DEFAULT_FONT_ID, fontCssFamily } from './fonts'
 import type { MarkKeyframe } from './markAnim'
+import type { EntrancePreset, ExitPreset, LoopPreset } from './markPresets'
 
 export interface Pt {
   x: number
@@ -33,15 +35,6 @@ export const canFill = (tool: GraphicTool): boolean => (FILLABLE_TOOLS as readon
 
 /** A teardrop's default widest width, as a fraction of its tip→base length. */
 export const DEFAULT_DROP_WIDTH = 0.6
-
-/** How a mark comes on screen at its `atSec`: at once, fading in, or drawn in
- *  stroke-first over `REVEAL_SEC`. */
-export type MarkReveal = 'pop' | 'fade' | 'draw'
-export const MARK_REVEALS: { id: MarkReveal; label: string }[] = [
-  { id: 'pop', label: 'Pop' },
-  { id: 'fade', label: 'Fade in' },
-  { id: 'draw', label: 'Draw on' }
-]
 
 /** One mark of a graphics layer. */
 export interface GraphicMark {
@@ -68,7 +61,13 @@ export interface GraphicMark {
   dropWidth?: number
   /** Seconds after the layer's start the mark appears (≥ 0). */
   atSec: number
-  reveal: MarkReveal
+  /** How the mark comes on screen from `atSec` (shared/markPresets.ts). A live
+   *  preset: it plays on top of the mark's own keyframes / static pose. */
+  entrance: EntrancePreset
+  /** How it leaves, ending at the layer's end (absent = it just stays). */
+  exit?: ExitPreset
+  /** A motion that repeats between the entrance and the exit (absent = none). */
+  loop?: LoopPreset
   /**
    * Keyframed animation of this one shape (shared/markAnim.ts), kept sorted by
    * `tSec` is seconds after the LAYER's start — the same clock as
@@ -87,7 +86,8 @@ export interface GraphicMark {
   opacity?: number
 }
 
-/** Seconds a fade or a draw-on takes. */
+/** Seconds a fade or a draw-on takes by default (and the length every
+ *  pre-presets reveal migrated with). */
 export const REVEAL_SEC = 0.4
 export const MARK_DEFAULTS = { color: '#FFD60A', widthPx: 8 } as const
 /** A new graphics tile's length on the timeline. */
@@ -147,24 +147,9 @@ export function graphicsSvgTransform(t: GraphicsTransform): string {
 
 // --- Timing ------------------------------------------------------------------------
 
-/**
- * How a mark looks `localSec` seconds after its layer's start: null before it
- * appears, else its opacity (a fade's linear ramp) and how much of it is drawn
- * (a draw-on's linear 0→1). Both run over `REVEAL_SEC` from `atSec`.
- */
-export function markStateAt(m: Pick<GraphicMark, 'atSec' | 'reveal'>, localSec: number): MarkState | null {
-  const t = localSec - m.atSec
-  if (t < 0) return null
-  const f = Math.min(1, t / REVEAL_SEC)
-  if (m.reveal === 'fade') return { opacity: f, progress: 1 }
-  if (m.reveal === 'draw') return { opacity: 1, progress: f }
-  return { opacity: 1, progress: 1 }
-}
-
-export interface MarkState {
-  opacity: number
-  progress: number
-}
+/** Whether a mark is on screen `localSec` seconds after its layer's start
+ *  (from its `atSec` to the layer's end). */
+export const markVisibleAt = (m: Pick<GraphicMark, 'atSec'>, localSec: number): boolean => localSec >= m.atSec
 
 /** The export's frame rate (`exporterArgs`: `-r 30`), which a draw-on is sampled at. */
 const EXPORT_FPS = 30
@@ -172,23 +157,23 @@ const EXPORT_FPS = 30
  *  reveal, then the finished mark (held to the layer's end). */
 export const DRAW_ON_FRAMES = Math.round(REVEAL_SEC * EXPORT_FPS) + 1
 
-/** Seconds of a mark's reveal already past at its tile's start — non-zero only
+/** Seconds of a mark's entrance already past at its tile's start — non-zero only
  *  for a mark whose moment fell before the start (a negative `atSec`). */
 export const revealLead = (m: Pick<GraphicMark, 'atSec'>): number => Math.max(0, -m.atSec)
 
-/** How many frames a draw-on export renders: the rest of the reveal from where
- *  the mark first shows (all of it, unless the tile starts mid-reveal), then
- *  the finished mark. 1 = nothing left to draw: a still. */
-export function drawOnFrameCount(m: Pick<GraphicMark, 'atSec'>): number {
-  const left = REVEAL_SEC - revealLead(m)
+/** How many frames a draw-on export renders: the rest of the entrance (`sec`
+ *  long) from where the mark first shows (all of it, unless the tile starts
+ *  mid-entrance), then the finished mark. 1 = nothing left to draw: a still. */
+export function drawOnFrameCount(m: Pick<GraphicMark, 'atSec'>, sec: number = REVEAL_SEC): number {
+  const left = sec - revealLead(m)
   return left > 0 ? Math.ceil(left * EXPORT_FPS - 1e-9) + 1 : 1
 }
 
 /** How much of a draw-on mark export frame `i` shows, counted from when the
- *  mark first shows in its tile — the preview's `markStateAt` at that same
- *  instant, so the two trace in step. */
-export function drawOnProgress(m: Pick<GraphicMark, 'atSec' | 'reveal'>, i: number): number {
-  return markStateAt(m, Math.max(0, m.atSec) + i / EXPORT_FPS)?.progress ?? 0
+ *  mark first shows in its tile — the linear 0→1 the preview's draw-on entrance
+ *  (`presetDeltaAt`) is at that same instant, so the two trace in step. */
+export function drawOnProgress(m: Pick<GraphicMark, 'atSec'>, i: number, sec: number = REVEAL_SEC): number {
+  return Math.min(1, Math.max(0, (Math.max(0, m.atSec) + i / EXPORT_FPS - m.atSec) / sec))
 }
 
 // --- Geometry ----------------------------------------------------------------------
@@ -520,6 +505,9 @@ export function svgWrap(
 
 // --- Making and editing marks ------------------------------------------------------
 
+/** A new mark's entrance: it just appears (the length matters once another kind is picked). */
+const defaultEntrance = (): EntrancePreset => ({ kind: 'instant', sec: REVEAL_SEC })
+
 /** Below this drag distance (logical px) a press is a click: drop a default-sized mark. */
 export const CLICK_SLOP = 12
 
@@ -535,7 +523,14 @@ export function newMark(
   b: Pt,
   atSec: number
 ): GraphicMark {
-  const base = { id, tool, color: MARK_DEFAULTS.color, widthPx: MARK_DEFAULTS.widthPx, atSec, reveal: 'pop' as const }
+  const base = {
+    id,
+    tool,
+    color: MARK_DEFAULTS.color,
+    widthPx: MARK_DEFAULTS.widthPx,
+    atSec,
+    entrance: defaultEntrance()
+  }
   if (dist(a, b) >= CLICK_SLOP) return { ...base, points: [a, b] }
   switch (tool) {
     case 'arrow':
@@ -584,7 +579,7 @@ export function angleMark(id: string, vertex: Pt, armA: Pt, armB: Pt, atSec: num
     color: MARK_DEFAULTS.color,
     widthPx: MARK_DEFAULTS.widthPx,
     atSec,
-    reveal: 'pop'
+    entrance: defaultEntrance()
   }
 }
 
@@ -597,7 +592,7 @@ export function polylineMark(id: string, points: Pt[], atSec: number): GraphicMa
     color: MARK_DEFAULTS.color,
     widthPx: MARK_DEFAULTS.widthPx,
     atSec,
-    reveal: 'pop'
+    entrance: defaultEntrance()
   }
 }
 
@@ -617,8 +612,8 @@ export function finishPolyline(points: Pt[]): Pt[] | null {
  * trim inward, the right half of a split; earlier < 0: a trim outward). Each
  * mark keeps its moment in ABSOLUTE time, so it stays on the frame of the clip
  * it was drawn over. A mark whose moment falls before the new start keeps it as
- * a NEGATIVE `atSec`: it is on screen from the tile's start — mid-reveal if the
- * cut lands inside its fade/draw-on (`markStateAt` continues it) — and
+ * a NEGATIVE `atSec`: it is on screen from the tile's start — mid-entrance if the
+ * cut lands inside it (the shared timing continues it) — and
  * extending the tile back out later puts it exactly where it was.
  */
 export function shiftMarks(marks: GraphicMark[], shiftSec: number): GraphicMark[] {

@@ -127,7 +127,7 @@ export const BUILT_IN_TEMPLATES: readonly ReelTemplate[] = [
               color: '#ffffff',
               widthPx: 14,
               atSec: 0,
-              reveal: 'draw'
+              entrance: { kind: 'drawOn', sec: 0.4 }
             }
           ]
         }

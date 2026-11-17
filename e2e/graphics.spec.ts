@@ -4,7 +4,7 @@
  * angle = three clicks), then disarms; marks drag as a whole and by their
  * point handles (one undo step each); Escape disarms without deselecting; a
  * mark on an UNselected tile can be grabbed straight from the stage; a draw-on
- * traces in the preview over the reveal.
+ * traces in the preview over its entrance.
  *
  * ARRANGE via the stores, ACT via real pointer/keyboard events on the preview
  * canvas, ASSERT on store + DOM.
@@ -21,7 +21,9 @@ interface Mark {
   tool: string
   points: Pt[]
   atSec: number
-  reveal: string
+  entrance: { kind: string; sec: number }
+  exit?: { kind: string; sec: number }
+  loop?: { kind: string; cycleSec: number }
 }
 
 /** Logical canvas px → a screen point on the preview canvas. */
@@ -182,22 +184,22 @@ test('a mark on an unselected tile is grabbed straight from the stage', async ({
   expect(s.mark).toBe((await marks(page))[0].id)
 })
 
-test('a draw-on traces in over the reveal; the Inspector deletes a mark', async ({ appPage: page }) => {
+test('a draw-on entrance traces in; the Inspector deletes a mark', async ({ appPage: page }) => {
   await arrange(page)
   await page.getByTestId('graphics-tool-line').click()
   await drag(page, { x: 100, y: 960 }, { x: 900, y: 960 })
-  await page.getByTestId('mark-reveal').selectOption('draw')
+  await page.getByTestId('mark-entrance').selectOption('drawOn')
   const [m] = await marks(page)
-  expect(m.reveal).toBe('draw')
+  expect(m.entrance).toEqual({ kind: 'drawOn', sec: 0.4 })
   const d = (): Promise<string | null> =>
     page.getByTestId('graphics-layer').locator(`[data-mark-id="${m.id}"] path`).getAttribute('d')
-  // Halfway through the 0.4s reveal the line reaches its middle…
+  // Halfway through the 0.4s entrance the line reaches its middle…
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(1.2))
   const half = (await d())!
   const tipX = Number(half.split('L')[1].trim().split(' ')[0])
   expect(tipX).toBeGreaterThan(m.points[0].x + (m.points[1].x - m.points[0].x) * 0.45)
   expect(tipX).toBeLessThan(m.points[0].x + (m.points[1].x - m.points[0].x) * 0.55)
-  // …and it's whole once the reveal is over.
+  // …and it's whole once the entrance is over.
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(2))
   expect(Number((await d())!.split('L')[1].trim().split(' ')[0])).toBeCloseTo(m.points[1].x, 0)
 
@@ -432,7 +434,7 @@ async function arrangeRect(page: Page, extra: Record<string, unknown>, time: num
           color: '#ffd60a',
           widthPx: 8,
           atSec: 0,
-          reveal: 'pop',
+          entrance: { kind: 'instant', sec: 0.4 },
           ...extra
         } as never
       ])
@@ -554,4 +556,60 @@ test('editing Border color on a keyframed shape writes the keyframe, not the bas
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(2))
   await page.getByTestId('mark-color').fill('#00ff00')
   expect((await animMarks(page))[0].keyframes).toHaveLength(3)
+})
+
+/** The drawn mark's `<g>` attribute (transform / opacity) at the playhead, null when absent. */
+const markAttr = (page: Page, name: string): Promise<string | null> =>
+  page.getByTestId('graphics-layer').locator('[data-mark-id="M"] > g').getAttribute(name)
+const at = (page: Page, t: number): Promise<void> =>
+  page.evaluate((t) => window.__reelStores.usePlayback.getState().setTime(t), t)
+const num = (s: string | null, re: RegExp): number => Number(re.exec(s ?? '')?.[1] ?? NaN)
+
+test('Entrance Pop in: the shape starts small and is full size after the entrance', async ({ appPage: page }) => {
+  await arrangeRect(page, {}, 1.02) // the tile starts at 1s; the mark appears at once
+  await page.getByTestId('mark-entrance').selectOption('popIn')
+  expect((await animMarks(page))[0].entrance).toEqual({ kind: 'popIn', sec: 0.35 })
+  expect(num(await markAttr(page, 'transform'), /scale\(([\d.]+)\)/)).toBeLessThan(1)
+  await at(page, 2)
+  expect(await markAttr(page, 'transform')).toBeNull()
+})
+
+test('Exit Fade out lowers the opacity near the tile end', async ({ appPage: page }) => {
+  await arrangeRect(page, {}, 3)
+  await page.getByTestId('mark-exit').selectOption('fadeOut')
+  expect((await animMarks(page))[0].exit).toEqual({ kind: 'fadeOut', sec: 0.3 })
+  expect(await markAttr(page, 'opacity')).toBeNull()
+  await at(page, 5.9) // the tile ends at 6s
+  expect(num(await markAttr(page, 'opacity'), /^([\d.]+)$/)).toBeLessThan(0.6)
+})
+
+test('Loop Spin turns the shape over time', async ({ appPage: page }) => {
+  await arrangeRect(page, {}, 1)
+  await page.getByTestId('mark-loop').selectOption('spin')
+  expect((await animMarks(page))[0].loop).toEqual({ kind: 'spin', cycleSec: 2 })
+  await at(page, 2) // half a cycle in
+  expect(num(await markAttr(page, 'transform'), /rotate\(([\d.]+)\)/)).toBeCloseTo(180, 0)
+  await at(page, 4) // local 3s: a cycle and a half
+  expect(num(await markAttr(page, 'transform'), /rotate\(([\d.]+)\)/)).toBeCloseTo(540, 0)
+})
+
+test('Convert to keyframes keeps the drawing and clears the presets — one undo step', async ({ appPage: page }) => {
+  await arrangeRect(page, {}, 1.1)
+  await page.getByTestId('mark-entrance').selectOption('popIn')
+  await page.getByTestId('mark-exit').selectOption('shrink')
+  const html = (): Promise<string> => page.getByTestId('graphics-layer').locator('[data-mark-id="M"]').innerHTML()
+  const live = await html()
+  expect(live).toContain('transform=')
+  await page.getByTestId('mark-convert-presets').click()
+  const m = (await animMarks(page))[0]
+  expect(m.entrance.kind).toBe('instant')
+  expect(m.exit).toBeUndefined()
+  expect(m.keyframes!.length).toBeGreaterThanOrEqual(3)
+  expect(await html()).toBe(live)
+  await expect(page.getByTestId('mark-convert-presets')).toBeDisabled()
+  await page.keyboard.press('Control+z')
+  const back = (await animMarks(page))[0]
+  expect(back.entrance.kind).toBe('popIn')
+  expect(back.exit).toEqual({ kind: 'shrink', sec: 0.3 })
+  expect(back.keyframes).toBeUndefined()
 })

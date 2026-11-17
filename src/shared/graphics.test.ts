@@ -8,7 +8,6 @@ import {
   polylineMark,
   teardropOutline,
   drawOnFrameCount,
-  REVEAL_SEC,
   angleDeg,
   angleMark,
   drawOnProgress,
@@ -16,8 +15,8 @@ import {
   graphicsSvgTransform,
   markBounds,
   markShapes,
-  markStateAt,
   markSvg,
+  markVisibleAt,
   markTitle,
   movedMark,
   newMark,
@@ -33,6 +32,7 @@ import {
   type Pt
 } from './graphics'
 import { makeGraphicsLayer } from './layers'
+import { framePoseAt } from './markPresets'
 
 const mark = (over: Partial<GraphicMark>): GraphicMark => ({
   id: 'm',
@@ -44,7 +44,7 @@ const mark = (over: Partial<GraphicMark>): GraphicMark => ({
   color: '#ff0000',
   widthPx: 8,
   atSec: 0,
-  reveal: 'pop',
+  entrance: { kind: 'instant', sec: 0.4 },
   ...over
 })
 const paths = (shapes: MarkShape[]): Extract<MarkShape, { kind: 'path' }>[] =>
@@ -53,22 +53,16 @@ const paths = (shapes: MarkShape[]): Extract<MarkShape, { kind: 'path' }>[] =>
 const pointsOf = (d: string): Pt[] =>
   [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
 
-describe('markStateAt', () => {
-  it('hides a mark before its time, then pops / fades / draws it in over REVEAL_SEC', () => {
-    expect(markStateAt({ atSec: 1, reveal: 'pop' }, 0.99)).toBeNull()
-    expect(markStateAt({ atSec: 1, reveal: 'pop' }, 1)).toEqual({ opacity: 1, progress: 1 })
-    const fading = markStateAt({ atSec: 1, reveal: 'fade' }, 1 + REVEAL_SEC / 2)!
-    expect(fading.opacity).toBeCloseTo(0.5)
-    expect(fading.progress).toBe(1)
-    const drawing = markStateAt({ atSec: 1, reveal: 'draw' }, 1 + REVEAL_SEC / 4)!
-    expect(drawing.opacity).toBe(1)
-    expect(drawing.progress).toBeCloseTo(0.25)
-    expect(markStateAt({ atSec: 1, reveal: 'draw' }, 9)).toEqual({ opacity: 1, progress: 1 })
+describe('markVisibleAt', () => {
+  it('shows a mark from its moment on', () => {
+    expect(markVisibleAt({ atSec: 1 }, 0.99)).toBe(false)
+    expect(markVisibleAt({ atSec: 1 }, 1)).toBe(true)
+    expect(markVisibleAt({ atSec: -1 }, 0)).toBe(true)
   })
 
   it('samples the draw-on export frames from the same timing (one per 30fps frame, then the finished mark)', () => {
     expect(DRAW_ON_FRAMES).toBe(13)
-    const m = { atSec: 0.5, reveal: 'draw' as const }
+    const m = { atSec: 0.5 }
     expect(drawOnProgress(m, 0)).toBe(0)
     expect(drawOnProgress(m, 6)).toBeCloseTo(0.5)
     expect(drawOnProgress(m, DRAW_ON_FRAMES - 1)).toBe(1)
@@ -77,7 +71,7 @@ describe('markStateAt', () => {
 
   it('a tile that starts mid-reveal exports only the rest of the draw-on, from where it shows', () => {
     // The mark's moment is 0.2s before the tile's start: half drawn at frame 0.
-    const m = { atSec: -0.2, reveal: 'draw' as const }
+    const m = { atSec: -0.2 }
     expect(drawOnProgress(m, 0)).toBeCloseTo(0.5)
     expect(drawOnFrameCount(m)).toBe(7) // 6 frames to finish + the finished mark
     expect(drawOnProgress(m, drawOnFrameCount(m) - 1)).toBe(1)
@@ -267,7 +261,10 @@ describe('SVG markup', () => {
 })
 
 describe('shiftMarks', () => {
-  const ms = [mark({ id: 'a', atSec: 0.5, reveal: 'fade' }), mark({ id: 'b', atSec: 3, reveal: 'draw' })]
+  const ms = [
+    mark({ id: 'a', atSec: 0.5, entrance: { kind: 'fadeIn', sec: 0.4 } }),
+    mark({ id: 'b', atSec: 3, entrance: { kind: 'drawOn', sec: 0.4 } })
+  ]
 
   it('keeps each mark at its absolute moment when the start moves later or earlier', () => {
     // A mark whose moment is now before the start keeps it (negative): on
@@ -275,8 +272,8 @@ describe('shiftMarks', () => {
     const shifted = shiftMarks(ms, 0.7)
     expect(shifted[0].atSec).toBeCloseTo(-0.2)
     expect(shifted[1].atSec).toBeCloseTo(2.3)
-    expect(shifted.map((m) => m.reveal)).toEqual(['fade', 'draw'])
-    expect(markStateAt(shiftMarks(ms, 0.7)[0], 0)!.opacity).toBeCloseTo(0.5)
+    expect(shifted.map((m) => m.entrance.kind)).toEqual(['fadeIn', 'drawOn'])
+    expect(framePoseAt(shiftMarks(ms, 0.7)[0], 0, 5).opacity).toBeCloseTo(0.5)
     expect(shiftMarks(ms, -1).map((m) => m.atSec)).toEqual([1.5, 4])
     expect(shiftMarks(ms, 0)).toBe(ms)
   })
