@@ -28,9 +28,11 @@ const video = (id: string, start: number, dur: number, gid?: string): Layer => (
   ...makeVideoLayer(id, `m-${id}`, start, dur, { mute: !!gid }),
   ...(gid ? { linkGroupId: gid } : {})
 })
-const audio = (id: string, start: number, dur: number, gid?: string): AudioClip => ({
+/** An audio clip; `src` is its source (a clip's extracted sound shares the
+ *  picture's: `audio('a', …, 'm-A')`). */
+const audio = (id: string, start: number, dur: number, gid?: string, src = `m-${id}`): AudioClip => ({
   id,
-  mediaId: `m-${id}`,
+  mediaId: src,
   startSec: start,
   inSec: 0,
   outSec: dur,
@@ -49,11 +51,12 @@ const comp = (layers: Layer[], audioClips: AudioClip[] = []): Composition => ({
 const get = (c: Composition, id: string): Layer => c.layers.find((l) => l.id === id)!
 const getA = (c: Composition, id: string): AudioClip => c.audioClips.find((a) => a.id === id)!
 
-/** A (0–4) | B (4–8) | C (8–12), each with linked audio, a title over C. */
+/** A (0–4) | B (4–8) | C (8–12), each with its own sound extracted and linked,
+ *  a title over C. */
 function reel(): Composition {
   return comp(
     [video('A', 0, 4, 'ga'), video('B', 4, 4, 'gb'), video('C', 8, 4, 'gc'), makeTextLayer('T', 8.5, 10)],
-    [audio('a', 0, 4, 'ga'), audio('b', 4, 4, 'gb'), audio('c', 8, 4, 'gc')]
+    [audio('a', 0, 4, 'ga', 'm-A'), audio('b', 4, 4, 'gb', 'm-B'), audio('c', 8, 4, 'gc', 'm-C')]
   )
 }
 const AB: TimelineItemRef[] = [L('A'), { kind: 'audio', id: 'a' }, L('B'), { kind: 'audio', id: 'b' }]
@@ -125,6 +128,55 @@ describe('applyTransition', () => {
     expect(getA(c, 'b').fadeInSec).toBe(0.5)
     expect(getA(c, 'a').fadeInSec).toBe(0)
     expect(getA(c, 'c')).toMatchObject({ fadeInSec: 0, fadeOutSec: 0 })
+  })
+
+  it('crossfades ONLY the sound that meets at the cut: a linked effect, music or an earlier piece is left alone', () => {
+    const base = reel()
+    const c0: Composition = {
+      ...base,
+      audioClips: [
+        // A's own sound in two pieces (split at 2 s): only the piece ending at the cut fades out.
+        audio('a1', 0, 2, 'ga', 'm-A'),
+        { ...audio('a2', 2, 2, 'ga', 'm-A'), inSec: 2, outSec: 4 },
+        // A sound effect linked to A, mid-clip (another source).
+        audio('sfx', 1, 1, 'ga'),
+        // A music bed linked to A that happens to end at the cut (another source).
+        audio('music', 0, 4, 'ga'),
+        // B's own sound, and a whoosh linked to B a second in.
+        audio('b', 4, 4, 'gb', 'm-B'),
+        audio('whoosh', 5, 0.5, 'gb'),
+        // B's sound at 2× (4 s of source in 2 s), starting with B: it fades in.
+        { ...audio('b2', 4, 4, 'gb', 'm-B'), speed: 2 }
+      ]
+    }
+    const c = applyTransition(c0, [L('A'), L('B')], 'dissolve')
+    const fades = (id: string): [number, number] => [getA(c, id).fadeInSec, getA(c, id).fadeOutSec]
+    expect(fades('a1')).toEqual([0, 0])
+    expect(fades('a2')).toEqual([0, 0.5])
+    expect(fades('sfx')).toEqual([0, 0])
+    expect(fades('music')).toEqual([0, 0])
+    expect(fades('b')).toEqual([0.5, 0])
+    expect(fades('whoosh')).toEqual([0, 0])
+    expect(fades('b2')).toEqual([0.5, 0])
+    // A resize carries the same clips (and only them) along.
+    const r = setTransitionLength(c, 'B', 'in', 1)
+    expect(getA(r, 'a2').fadeOutSec).toBe(1)
+    expect(getA(r, 'b').fadeInSec).toBe(1)
+    expect(getA(r, 'whoosh').fadeInSec).toBe(0)
+    expect(getA(r, 'sfx').fadeOutSec).toBe(0)
+  })
+
+  it('an A sound re-timed by a freeze ends where the clip does through the shared timing, so it fades', () => {
+    // A 0–5: 4 s of source plus a 1 s hold; its extracted sound carries the
+    // same hold (silence), so it ends at 5 too — not at start + (out − in) = 4.
+    const a = { ...video('A', 0, 5, 'ga') }
+    const held = comp(
+      [a, video('B', 5, 4, 'gb')],
+      [{ ...audio('a', 0, 4, 'ga', 'm-A'), freezes: [{ atSec: 2, holdSec: 1 }] }, audio('b', 5, 4, 'gb', 'm-B')]
+    )
+    const c = applyTransition(held, [L('A'), L('B')], 'dissolve')
+    expect(getA(c, 'a').fadeOutSec).toBe(0.5)
+    expect(getA(c, 'b').fadeInSec).toBe(0.5)
   })
 
   it('puts the incoming clip above the outgoing one when it was below', () => {

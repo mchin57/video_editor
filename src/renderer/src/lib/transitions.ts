@@ -14,10 +14,13 @@
  *   transition removed earlier) take the overlap as the length instead.
  * - **The incoming clip ends up above the outgoing one** in the stack (a
  *   dissolve is the incoming clip fading in OVER the outgoing one).
- * - **Their linked sound crossfades** over the same window: the outgoing
- *   group's audio clips fade out and the incoming group's fade in by the
- *   transition's length (ordinary fade fields, editable afterwards). A length
- *   change carries a fade along only while it still equals the old length.
+ * - **Their linked sound crossfades** over the same window — only the sound
+ *   that meets at the cut (`setCutFades`): the outgoing clip's own sound that
+ *   ends where it ends fades out, the incoming clip's own sound that starts
+ *   where it starts fades in, by the transition's length (ordinary fade fields,
+ *   editable afterwards). A linked sound effect or music bed is left alone. A
+ *   length change carries a fade along only while it still equals the old
+ *   length.
  * - **Resizing a pair slides the incoming side again** by the change, so the
  *   overlap always equals the length — the incoming clip, its link group and
  *   the tiles after the CUT (the outgoing clip's end, i.e. the incoming
@@ -30,6 +33,8 @@
  */
 
 import type { AudioClip, Composition, Layer, LayerTransition, TimelineItemRef, TransitionKind } from '@shared/project'
+import { effectiveOut } from '@shared/project'
+import { audioPlayedSec } from '@shared/audioTiming'
 import {
   clampTransitionSec,
   maxTransitionSec,
@@ -43,7 +48,7 @@ import {
   type TransitionPair,
   type TransitionSide
 } from '@shared/transitions'
-import { expandGroup, timelineTiles, type SourceDuration } from './links'
+import { expandGroup, type SourceDuration } from './links'
 import { roomBefore, SEAM_GAP_SEC, shiftFrom, tilesFrom } from './ripple'
 
 const EPS = 1e-6
@@ -130,12 +135,28 @@ function mapLayer<C extends Composition>(c: C, id: string, fn: (l: Layer) => Lay
   return { ...c, layers: c.layers.map((l) => (l.id === id ? fn(l) : l)) }
 }
 
+/** Audio clip `a`'s timeline window through the shared timing (its source
+ *  window played at its speed, holds included — shared/audioTiming.ts), or
+ *  null when its source length is not known. */
+function audioWindow(a: AudioClip, srcDur: SourceDuration): { startSec: number; endSec: number } | null {
+  const dur = srcDur(a.mediaId)
+  const out = dur > 0 ? effectiveOut(a, dur) : a.outSec
+  if (!(out > a.inSec)) return null
+  return { startSec: a.startSec, endSec: a.startSec + audioPlayedSec(a, out) }
+}
+
 /**
- * Set the fades of the audio in layer `id`'s link group: `field` to `sec`
- * (held to each clip's own length). `onlyIf` limits it to clips whose fade is
- * still that value (a length change carries along only untouched fades).
+ * The fades a crossfade sets: in layer `id`'s link group, ONLY the audio clips
+ * that meet the pair at the cut — clips of the picture's own source (its
+ * extracted sound, same `mediaId`) whose timeline END is the layer's end
+ * (`fadeOutSec`, the outgoing clip) or whose START is its start (`fadeInSec`,
+ * the incoming clip), within a seam's gap. A linked sound effect or music, a
+ * piece of the clip's sound that stops before the cut, and an image (no sound
+ * of its own) get nothing. `field` goes to `sec`, held to each clip's own
+ * length; `onlyIf` limits it to clips whose fade is still that value (a length
+ * change carries along only untouched fades).
  */
-function setGroupFades<C extends Composition>(
+function setCutFades<C extends Composition>(
   c: C,
   id: string,
   field: 'fadeInSec' | 'fadeOutSec',
@@ -143,21 +164,25 @@ function setGroupFades<C extends Composition>(
   srcDur: SourceDuration,
   onlyIf?: number
 ): C {
-  const gid = c.layers.find((l) => l.id === id)?.linkGroupId
-  if (!gid) return c
-  const ends = new Map(
-    timelineTiles(c, srcDur)
-      .filter((t) => t.ref.kind === 'audio')
-      .map((t) => [t.ref.id, t.endSec - t.startSec])
-  )
+  const l = c.layers.find((x) => x.id === id)
+  if (!l?.linkGroupId || l.content.kind !== 'video') return c
+  const { linkGroupId: gid } = l
+  const src = l.content.mediaId
+  let changed = false
   const audioClips = c.audioClips.map((a): AudioClip => {
-    if (a.linkGroupId !== gid) return a
+    if (a.linkGroupId !== gid || a.mediaId !== src) return a
+    const w = audioWindow(a, srcDur)
+    const meets =
+      w !== null &&
+      (field === 'fadeOutSec'
+        ? Math.abs(w.endSec - l.endSec) <= SEAM_GAP_SEC
+        : Math.abs(w.startSec - l.startSec) <= SEAM_GAP_SEC)
+    if (!w || !meets) return a
     if (onlyIf !== undefined && Math.abs(a[field] - onlyIf) > 1e-3) return a
-    const len = ends.get(a.id)
-    const v = len !== undefined && Number.isFinite(len) && len > 0 ? Math.min(sec, len) : sec
-    return { ...a, [field]: Math.round(v * 1000) / 1000 }
+    changed = true
+    return { ...a, [field]: ms(Math.min(sec, w.endSec - w.startSec)) }
   })
-  return { ...c, audioClips }
+  return changed ? { ...c, audioClips } : c
 }
 
 /**
@@ -180,8 +205,8 @@ export function applyTransition<C extends Composition>(
   const tr: LayerTransition = { kind, sec: check.sec }
   next = mapLayer(next, check.outId, (l) => withTransition(l, 'out', tr))
   next = mapLayer(next, check.inId, (l) => withTransition(l, 'in', tr))
-  next = setGroupFades(next, check.outId, 'fadeOutSec', check.sec, srcDur)
-  return setGroupFades(next, check.inId, 'fadeInSec', check.sec, srcDur)
+  next = setCutFades(next, check.outId, 'fadeOutSec', check.sec, srcDur)
+  return setCutFades(next, check.inId, 'fadeInSec', check.sec, srcDur)
 }
 
 /**
@@ -238,8 +263,8 @@ export function setTransitionLength<C extends Composition>(
   const resized: LayerTransition = { kind: pair.kind, sec: next }
   out = mapLayer(out, pair.outId, (x) => withTransition(x, 'out', resized))
   out = mapLayer(out, pair.inId, (x) => withTransition(x, 'in', resized))
-  out = setGroupFades(out, pair.outId, 'fadeOutSec', next, srcDur, pair.sec)
-  return setGroupFades(out, pair.inId, 'fadeInSec', next, srcDur, pair.sec)
+  out = setCutFades(out, pair.outId, 'fadeOutSec', next, srcDur, pair.sec)
+  return setCutFades(out, pair.inId, 'fadeInSec', next, srcDur, pair.sec)
 }
 
 /** Remove layer `id`'s transition on `side` — both sides of a pair. Nothing
