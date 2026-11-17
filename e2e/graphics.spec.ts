@@ -276,3 +276,111 @@ test('trimming the tile start and splitting it keep every mark at its moment', a
   expect(halves[1].marks[0].atSec).toBeCloseTo(-1)
   expect(halves[1].marks[0].id).not.toBe(halves[0].marks[0].id)
 })
+
+test('a connected line is a click per point, finished by a double-click or Enter; Escape drops it', async ({
+  appPage: page
+}) => {
+  await arrange(page)
+  const tol = await slop(page)
+  const pts = [
+    { x: 200, y: 600 },
+    { x: 500, y: 900 },
+    { x: 300, y: 1200 },
+    { x: 800, y: 1300 }
+  ]
+
+  // Three clicks, then a double-click on the fourth point: one mark, no duplicate.
+  await page.getByTestId('graphics-tool-polyline').click()
+  for (const p of pts.slice(0, 3)) await click(page, p)
+  expect(await marks(page)).toHaveLength(0) // still placing
+  const last = await screen(page, pts[3])
+  await page.mouse.dblclick(last.x, last.y)
+  let ms = await marks(page)
+  expect(ms).toHaveLength(1)
+  expect(ms[0].tool).toBe('polyline')
+  expect(ms[0].points).toHaveLength(4)
+  ms[0].points.forEach((p, i) => expectNear(p, pts[i], tol))
+  expect(await ui(page)).toEqual({ tool: null, mark: ms[0].id, layer: 'G' })
+  for (let i = 0; i < 4; i++) await expect(page.getByTestId(`mark-point-${i}`)).toBeVisible()
+  await expect(page.getByTestId('mark-point-4')).toHaveCount(0)
+
+  // Two clicks and Enter: a two-point mark.
+  await page.getByTestId('graphics-tool-polyline').click()
+  await click(page, { x: 100, y: 300 })
+  await click(page, { x: 600, y: 300 })
+  await page.keyboard.press('Enter')
+  ms = await marks(page)
+  expect(ms).toHaveLength(2)
+  expect(ms[1].points).toHaveLength(2)
+  expect((await ui(page)).tool).toBeNull()
+
+  // Escape mid-line drops what was placed.
+  await page.getByTestId('graphics-tool-polyline').click()
+  await click(page, { x: 100, y: 400 })
+  await click(page, { x: 600, y: 400 })
+  await page.keyboard.press('Escape')
+  expect(await ui(page)).toMatchObject({ tool: null, layer: 'G' })
+  expect(await marks(page)).toHaveLength(2)
+  // Re-arming starts clean: one new point and Enter is still too few to finish
+  // (leftover points from before the Escape would make it a line).
+  await page.getByTestId('graphics-tool-polyline').click()
+  await click(page, { x: 100, y: 500 })
+  await page.keyboard.press('Enter')
+  expect(await marks(page)).toHaveLength(2)
+  expect((await ui(page)).tool).toBe('polyline')
+})
+
+test('a teardrop is dragged tip to round end; its fill and width are in the Inspector', async ({ appPage: page }) => {
+  await arrange(page)
+  const tol = await slop(page)
+  await page.getByTestId('graphics-tool-teardrop').click()
+  await drag(page, { x: 540, y: 500 }, { x: 540, y: 1000 })
+  const [m] = await marks(page)
+  expect(m.tool).toBe('teardrop')
+  expect(m.points).toHaveLength(2)
+  expectNear(m.points[0], { x: 540, y: 500 }, tol)
+  expectNear(m.points[1], { x: 540, y: 1000 }, tol)
+
+  const path = page.getByTestId('graphics-layer').locator(`[data-mark-id="${m.id}"] path`)
+  await expect(path).toHaveAttribute('fill', 'none')
+  await page.getByLabel('Fill', { exact: true }).check()
+  await expect(path).not.toHaveAttribute('fill', 'none')
+
+  await page.getByLabel('Drop width').fill('90')
+  const dropWidth = await page.evaluate(() => {
+    const l = window.__reelStores.useProject.getState().project!.layers.find((x) => x.id === 'G')!
+    return (l.content as unknown as { marks: { dropWidth?: number }[] }).marks[0].dropWidth
+  })
+  expect(dropWidth).toBeCloseTo(0.9)
+})
+
+test("a filled shape's border can go to 0; turning the fill off restores a visible border", async ({
+  appPage: page
+}) => {
+  await arrange(page)
+  await page.getByTestId('graphics-tool-rect').click()
+  await drag(page, { x: 200, y: 600 }, { x: 700, y: 1000 })
+  const [m] = await marks(page)
+  const path = page.getByTestId('graphics-layer').locator(`[data-mark-id="${m.id}"] path`)
+
+  await expect(page.getByText('Border · 8px')).toBeVisible()
+  // Without a fill the border can't go below 2.
+  await expect(page.getByLabel('Border width')).toHaveAttribute('min', '2')
+  await page.getByLabel('Fill', { exact: true }).check()
+  await expect(page.getByLabel('Border width')).toHaveAttribute('min', '0')
+  await page.getByLabel('Border width').fill('0')
+  await expect(page.getByText('Border · 0px')).toBeVisible()
+  await expect(path).toHaveAttribute('stroke', 'none')
+
+  // A fully see-through fill can't go borderless either: the border comes back.
+  await page.getByLabel('Fill opacity').fill('0')
+  await expect(page.getByText('Border · 8px')).toBeVisible()
+  await expect(page.getByLabel('Border width')).toHaveAttribute('min', '2')
+  await page.getByLabel('Fill opacity').fill('40')
+  await page.getByLabel('Border width').fill('0')
+  await expect(page.getByText('Border · 0px')).toBeVisible()
+
+  await page.getByLabel('Fill', { exact: true }).uncheck()
+  await expect(page.getByText('Border · 8px')).toBeVisible()
+  await expect(path).not.toHaveAttribute('stroke', 'none')
+})

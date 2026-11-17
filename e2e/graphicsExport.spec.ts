@@ -7,6 +7,7 @@
  *  3. A DRAW-ON line reaches about its middle halfway through, then is whole.
  *  4. The layer's position keyframes carry its marks (a line moves with it).
  *  5. An angle mark's arms and its degree label are burned.
+ *  6. A filled teardrop shows its fill inside; a connected line follows its segments.
  *
  * ARRANGE via store, ACT via the real export IPC (Save dialog stubbed), ASSERT
  * on output pixels. Skipped without the bundled ffmpeg, like rotationExport.
@@ -105,6 +106,32 @@ test('graphics marks export where the preview draws them, with their reveals and
           widthPx: 12,
           atSec: 0,
           reveal: 'pop'
+        },
+        {
+          id: 'drop',
+          tool: 'teardrop',
+          points: [
+            { x: 850, y: 1100 },
+            { x: 850, y: 1500 }
+          ],
+          color: '#ff00ff',
+          fill: '#00ffff',
+          widthPx: 10,
+          atSec: 0,
+          reveal: 'pop'
+        },
+        {
+          id: 'poly',
+          tool: 'polyline',
+          points: [
+            { x: 100, y: 1550 },
+            { x: 400, y: 1550 },
+            { x: 400, y: 1850 }
+          ],
+          color: '#ff8000',
+          widthPx: 20,
+          atSec: 0,
+          reveal: 'pop'
         }
       ]) as never
     )
@@ -148,6 +175,8 @@ test('graphics marks export where the preview draws them, with their reveals and
   const red = (p: number[]): boolean => p[0] > 180 && p[1] < 70 && p[2] < 70
   const blue = (p: number[]): boolean => p[2] > 180 && p[0] < 70 && p[1] < 70
   const white = (p: number[]): boolean => p[0] > 200 && p[1] > 200 && p[2] > 200
+  const cyan = (p: number[]): boolean => p[0] < 70 && p[1] > 180 && p[2] > 180
+  const orange = (p: number[]): boolean => p[0] > 200 && p[1] > 80 && p[1] < 180 && p[2] < 70
   const yellow = (p: number[]): boolean => p[0] > 180 && p[1] > 180 && p[2] < 90
 
   // 1. Pop: on from 0, where drawn (the stroke's round caps reach 10px past each end).
@@ -191,4 +220,11 @@ test('graphics marks export where the preview draws them, with their reveals and
     }
   }
   expect(labelInk, 'degree label burned').toBeGreaterThan(40)
+
+  // 6. Teardrop: its fill inside, nothing outside it; connected line: both segments, not the corner's inside.
+  expect(cyan(f05(850, 1300)), 'teardrop filled').toBe(true)
+  expect(cyan(f05(1040, 1300)), 'nothing outside the drop').toBe(false)
+  expect(orange(f05(250, 1550)), 'first segment').toBe(true)
+  expect(orange(f05(400, 1700)), 'second segment').toBe(true)
+  expect(orange(f05(250, 1700)), 'not inside the corner').toBe(false)
 })

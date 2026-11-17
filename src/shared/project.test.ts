@@ -534,6 +534,50 @@ describe('migrateProject — graphics layers (v27)', () => {
   })
 })
 
+describe('migrateProject — connected lines and teardrops (v33)', () => {
+  it('stamps a v32 document current; connected-line and teardrop marks load as saved', () => {
+    const mark = { color: '#ffd60a', widthPx: 8, atSec: 0, reveal: 'pop' }
+    const marks = [
+      {
+        ...mark,
+        id: 'line',
+        tool: 'polyline',
+        points: [
+          { x: 1, y: 2 },
+          { x: 3, y: 4 },
+          { x: 5, y: 6 },
+          { x: 7, y: 8 }
+        ]
+      },
+      {
+        ...mark,
+        id: 'drop',
+        tool: 'teardrop',
+        points: [
+          { x: 10, y: 20 },
+          { x: 10, y: 80 }
+        ],
+        fill: '#3388ff80',
+        dropWidth: 0.8
+      }
+    ]
+    const graphics = {
+      id: 'G',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'graphics', marks }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 32, layers: [graphics] })
+    expect(p.version).toBe(PROJECT_VERSION)
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(33)
+    expect(p.layers[0]).toEqual(graphics)
+  })
+})
+
 describe('migrateProject — pose overlay (v28)', () => {
   it('stamps a v27 document current; a clip’s pose settings load as saved, and an old clip has none', () => {
     const pose = { show: true, people: [{ tracks: [1, 3], color: '#FFD60A' }], angles: ['leftKnee'], widthPx: 6 }
@@ -619,7 +663,8 @@ describe('migrateProject — audio volume lines (v31)', () => {
 })
 
 describe('migrateProject — audio re-timing (v32)', () => {
-  it('stamps a v31 document as current; clips with and without speed or holds load as saved', () => {
+  it('stamps a v31 document as v32; clips with and without speed or holds load as saved', () => {
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(32)
     const plain = {
       id: 'A',
       mediaId: 'm',
@@ -643,9 +688,9 @@ describe('migrateProject — audio re-timing (v32)', () => {
   })
 })
 
-describe('migrateProject — colour table controls and LUTs (v33)', () => {
-  it('stamps a v32 document as v33; graded clips and images load as saved, nothing is added', () => {
-    expect(PROJECT_VERSION).toBe(33)
+describe('migrateProject — colour table controls and LUTs (v34)', () => {
+  it('stamps an older document current; graded clips and images load as saved, nothing is added', () => {
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(34)
     const base = { hidden: false, startSec: 0, endSec: 2, x: 540, y: 960, scale: 1 }
     const graded = {
       ...base,
@@ -662,8 +707,8 @@ describe('migrateProject — colour table controls and LUTs (v33)', () => {
       }
     }
     const image = { ...base, id: 'I', content: { kind: 'image', mediaId: 'i', opacity: 1 } }
-    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 32, layers: [graded, image] })
-    expect(p.version).toBe(33)
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 33, layers: [graded, image] })
+    expect(p.version).toBe(PROJECT_VERSION)
     // Absent = neutral: an old grade keeps exactly its fields (so its CSS / lutrgb look).
     expect(p.layers[0]).toEqual(graded)
     expect(p.layers[1]).toEqual(image)
@@ -686,7 +731,7 @@ describe('migrateProject — colour table controls and LUTs (v33)', () => {
       scale: 1,
       content: { kind: 'image', mediaId: 'i', opacity: 1, ...look }
     }
-    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 33, layers: [l] })
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: PROJECT_VERSION, layers: [l] })
     expect(p.layers[0]).toEqual(l)
   })
 })
