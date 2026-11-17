@@ -22,9 +22,11 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 import { FFMPEG } from './bin'
 import {
+  PATCHES,
   exportedPatches,
   frameAt,
   makePatchClip,
+  patchCentre,
   patchGraph,
   previewPatches,
   previewPixels,
@@ -429,6 +431,128 @@ test('with WebGL gone the clip shows ungraded, with a notice', async ({ appPage:
     .evaluate((c) => (c as HTMLCanvasElement).getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext())
   await expect(page.getByTestId('grade-warning')).toContainText('WebGL unavailable')
   expect(await video.evaluate((v) => getComputedStyle(v).opacity)).toBe('1')
+})
+
+test('graded clips coming and going give their WebGL contexts back: a long graded picture keeps drawing', async ({
+  appPage: page,
+  electronApp,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(240_000)
+  const clip = join(projectsDir, 'E2E', 'patches.mp4')
+  makePatchClip(clip)
+  const png = join(projectsDir, 'patches.png')
+  execFileSync(FFMPEG, ['-y', '-v', 'error', '-f', 'lavfi', '-i', patchGraph(540, 960, 1), '-frames:v', '1', png])
+  const [clipId, picId] = await page.evaluate(
+    async (paths) => {
+      const assets = await window.api.importPaths(paths)
+      window.__reelStores.useProject.getState().addMedia(assets.map((a) => a.id))
+      return assets.map((a) => a.id)
+    },
+    [clip, png]
+  )
+  await waitForProxy(page, clipId)
+  // Chromium keeps 16 live WebGL contexts: 20 graded clips, one after another,
+  // under a graded picture that stays on screen the whole time.
+  const N = 20
+  await page.evaluate(
+    ({ clipId, picId, n }) => {
+      const { useProject, usePlayback } = window.__reelStores
+      const s = useProject.getState()
+      const at = { hidden: false, x: 540, scale: 0.5 }
+      s.addLayer({
+        ...at,
+        id: 'P',
+        startSec: 0,
+        endSec: n + 1,
+        y: 480,
+        content: { kind: 'image', mediaId: picId, opacity: 1 }
+      })
+      for (let i = 0; i < n; i++) {
+        s.addLayer({
+          ...at,
+          id: `C${i}`,
+          startSec: i,
+          endSec: i + 1,
+          y: 1440,
+          content: {
+            kind: 'video',
+            mediaId: clipId,
+            inSec: 0,
+            outSec: 1,
+            mute: true,
+            gainDb: 0,
+            color: { brightness: 0, contrast: 1, saturation: 1, temperature: 0.5 }
+          }
+        })
+      }
+      usePlayback.getState().setTime(0.5)
+    },
+    { clipId, picId, n: N }
+  )
+  await page.addStyleTag({ content: '[data-testid="safe-zone"] { display: none !important }' })
+  // The picture sits in the top half of the frame, at half size.
+  const PIC = PATCHES.map((_, i) => {
+    const { fx, fy } = patchCentre(i)
+    return { fx: 0.25 + fx * 0.5, fy: fy * 0.5 }
+  })
+  await expect
+    .poll(async () => (await previewPixels(page, electronApp, PIC))[1][0], { timeout: 15_000 })
+    .toBeGreaterThan(110)
+  const plain = await previewPixels(page, electronApp, PIC)
+  await setLook(page, 'P', { color: { ...neutral, temperature: 0.6 } })
+  const picCanvas = page.locator('[data-layer-id="P"] [data-testid="grade-canvas"]')
+  await expect(picCanvas).toHaveAttribute('data-drawn', '1')
+  const graded = await previewPixels(page, electronApp, PIC)
+  expect(worstDiff(graded, plain), 'the picture is graded').toBeGreaterThan(8)
+  await picCanvas.evaluate((c) => {
+    const w = window as unknown as { __picLost: number }
+    w.__picLost = 0
+    c.addEventListener('webglcontextlost', () => w.__picLost++)
+  })
+  // Keep every graded canvas that comes and goes, as a garbage collector that
+  // hasn't run yet would: then only an explicit release frees its context (a
+  // collected canvas frees it too, but whenever the GC gets round to it).
+  await page.evaluate(() => {
+    const w = window as unknown as { __kept: HTMLCanvasElement[] }
+    w.__kept = []
+    new MutationObserver((records) => {
+      for (const r of records)
+        for (const n of r.addedNodes)
+          if (n instanceof HTMLCanvasElement && n.dataset.testid === 'grade-canvas') w.__kept.push(n)
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+
+  for (let i = 0; i < N; i++) {
+    await page.evaluate((t) => window.__reelStores.usePlayback.getState().setTime(t), i + 0.5)
+    // Each clip's canvas really drew (so its context is fresher than the picture's).
+    await expect(page.locator(`[data-layer-id="C${i}"] [data-testid="grade-canvas"]`)).toHaveAttribute(
+      'data-drawn',
+      '1',
+      { timeout: 15_000 }
+    )
+  }
+  await expect(page.locator('[data-testid="grade-canvas"]')).toHaveCount(2)
+  // The picture never lost its context, shows no notice and still draws graded.
+  expect(
+    await page.evaluate(() => (window as unknown as { __picLost: number }).__picLost),
+    'picture context lost'
+  ).toBe(0)
+  await expect(page.locator('[data-layer-id="P"] [data-testid="grade-warning"]')).toHaveCount(0)
+  const after = await previewPixels(page, electronApp, PIC)
+  expect(
+    worstDiff(after, graded),
+    `still graded: ${JSON.stringify(after)} vs ${JSON.stringify(graded)}`
+  ).toBeLessThanOrEqual(2)
+  // Because every clip canvas that left the page gave its context back.
+  const kept = await page.evaluate(() => {
+    const w = window as unknown as { __kept: HTMLCanvasElement[] }
+    const gone = w.__kept.filter((c) => !c.isConnected)
+    return { gone: gone.length, released: gone.filter((c) => c.getContext('webgl2')?.isContextLost()).length }
+  })
+  expect(kept.gone).toBeGreaterThanOrEqual(N - 2)
+  expect(kept.released, 'unmounted canvases released their contexts').toBe(kept.gone)
 })
 
 test('a LUT missing from the project shows a notice until the same file is imported again, then draws', async ({

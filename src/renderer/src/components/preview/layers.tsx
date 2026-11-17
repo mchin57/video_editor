@@ -53,8 +53,7 @@ import {
   mediaAspect,
   TintFilter
 } from './geometry'
-import { GradeCanvas, GradeNotice, type GradeStatus } from './GradeCanvas'
-import { needsGradeTable } from '@shared/grade'
+import { GradeCanvas, GradeNotice, useTablePath, type GradeStatus } from './GradeCanvas'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
@@ -94,7 +93,7 @@ function VideoLayerView({
   const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
   // A look the CSS filters can't draw goes through the colour table (GradeCanvas).
-  const graded = needsGradeTable(content)
+  const graded = useTablePath(content)
   const [grade, setGrade] = useState<GradeStatus>('ok')
 
   // Clip speed: the element plays at the same rate the shared time mapping
@@ -485,7 +484,7 @@ function StackImage({
   // box, so swap its width/height (cqw/cqh resolve to the box via its
   // container context) for odd quarter-turns.
   const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
-  const graded = needsGradeTable(content)
+  const graded = useTablePath(content)
   const filter = lookCssFilter(content)
   const imgStyle: CSSProperties = cr
     ? {
@@ -517,7 +516,9 @@ function StackImage({
       data-layer-id={layer.id}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
-      {graded ? <GradeNotice status={grade} lutName={content.lut?.name} /> : <TintFilter tint={content.tint} />}
+      {graded && <GradeNotice status={grade} lutName={content.lut?.name} />}
+      {/* Always, like the clip's: the element keeps its CSS look while a canvas hasn't drawn. */}
+      <TintFilter tint={content.tint} />
       <div
         style={{
           position: 'absolute',

@@ -68,6 +68,7 @@ export interface GradeGl {
   draw(source: GradeSource, width: number, height: number): boolean
   /** The context is gone (lost, or never made). */
   readonly lost: boolean
+  /** Free everything and RELEASE the context (`WEBGL_lose_context`); the canvas can't be drawn on again. */
   dispose(): void
 }
 
@@ -163,6 +164,10 @@ export function createGradeGl(canvas: HTMLCanvasElement): GradeGl | null {
       gl.deleteProgram(prog)
       gl.deleteShader(vs)
       gl.deleteShader(fs)
+      // Give the context itself back now: Chromium keeps at most 16 and, past
+      // that, takes the least recently used one, which may still be on screen.
+      // The canvas can't draw again after this (GradeCanvas drops it).
+      gl.getExtension('WEBGL_lose_context')?.loseContext()
     }
   }
 }

@@ -1446,6 +1446,14 @@ there): a tetrahedral lookup written exactly like `vf_lut3d.c`'s, on a
 - Straight alpha comes through the upload with `UNPACK_PREMULTIPLY_ALPHA_WEBGL`
   false (VP9-alpha video and rgba PNG: alpha 127 / 63, colour within 1–2 of
   `lut3d` after un-premultiplying).
+- **Context count** (2026-11-17): 20 table-graded clips mounted and unmounted in
+  turn under a table-graded picture that stays on screen. With the unmounted
+  canvases still referenced (not yet garbage collected) and their contexts NOT
+  released, Chromium logged "Too many active WebGL contexts. Oldest context will
+  be lost." and took the picture's (the least recently drawn); when the GC had
+  collected the canvases first, nothing was lost — so without a release it is
+  down to GC timing. `dispose` releasing each context (`WEBGL_lose_context`)
+  keeps the picture's in every case (`e2e/colorTable.spec.ts`).
 
 **The old three sliders through the table** (65 points, tetrahedral, floored),
 every 24-bit colour sampled every 7th pixel, against today's two paths — the
