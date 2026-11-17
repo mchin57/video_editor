@@ -12,6 +12,7 @@ import {
   platesUnderAt,
   splitTransitions,
   transitionGainAt,
+  transitionOverrunSec,
   transitionPairs,
   transitionPlates,
   TRANSITION_MAX_SEC,
@@ -228,6 +229,34 @@ describe('pairs and plates', () => {
     expect(layerOpacityAt(a, 3.75)).toBe(0)
     expect(layerOpacityAt(b, 3.75)).toBe(0)
     expect(layerOpacityAt(b, 4)).toBe(1)
+  })
+})
+
+describe('transitionOverrunSec — a clip too short to reach full opacity (owner decision 6)', () => {
+  /** The highest the ramps reach over the tile (sampled every ms). */
+  const peak = (l: Layer): number => {
+    let m = 0
+    for (let t = l.startSec; t <= l.endSec + 1e-9; t += 0.001) m = Math.max(m, transitionGainAt(l, t))
+    return m
+  }
+
+  it('is 0 while the ramps fit and the overrun once they do not — exactly when the clip never reaches full', () => {
+    const cases: [Partial<Layer>, number][] = [
+      [{ transitionIn: tr('fade', 1), transitionOut: tr('fade', 1) }, 0], // 2 s of ramps in 2 s
+      [{ transitionIn: tr('fade', 1), transitionOut: tr('fade', 1), endSec: 1.5 }, 0.5], // trimmed by 0.5 s
+      [{ transitionIn: tr('dipBlack', 1.5), transitionOut: tr('fade', 1) }, 0.5],
+      [{ transitionIn: tr('dissolve', 2) }, 0],
+      [{ transitionIn: tr('dissolve', 2), endSec: 1 }, 1], // a dissolve in longer than the clip
+      [{ transitionIn: tr('fade', 1.5), transitionOut: tr('dissolve', 1.5) }, 0] // a dissolve out has no ramp
+    ]
+    for (const [patch, over] of cases) {
+      const l = video('a', 0, 2, patch)
+      expect(transitionOverrunSec(l)).toBeCloseTo(over, 9)
+      expect(peak(l) < 1 - 1e-9, JSON.stringify(patch)).toBe(over > 0)
+    }
+    expect(transitionOverrunSec(video('b', 0, 2))).toBe(0)
+    // Text takes no transitions, so it never warns.
+    expect(transitionOverrunSec({ ...makeTextLayer('t', 0, 1), transitionIn: tr('fade', 2) })).toBe(0)
   })
 })
 

@@ -186,6 +186,26 @@ describe('length, kind, removal and fades', () => {
     expect(maxSideSec(applied(), 'B', 'in')).toBe(2)
   })
 
+  it('a side a trim left longer than the usual maximum is kept, and edits shorten it from where it is (decision 6)', () => {
+    // C (4 s) fades in and out over 1 s each; then its end is trimmed so it is
+    // 1.5 s long (half of it, the usual maximum, is 0.75 s). Nothing is clamped.
+    const f = setFade(setFade(reel(), 'C', 'in', 1), 'C', 'out', 1)
+    const c = { ...f, layers: f.layers.map((l) => (l.id === 'C' ? { ...l, endSec: l.startSec + 1.5 } : l)) }
+    expect(maxSideSec(c, 'C', 'in')).toBe(1)
+    expect(get(setFade(c, 'C', 'in', 0.9), 'C').transitionIn).toEqual(tr('fade', 0.9)) // above 0.75, accepted
+    expect(get(setFade(c, 'C', 'in', 1.4), 'C').transitionIn).toEqual(tr('fade', 1)) // never longer than it is
+    expect(get(setTransitionLength(c, 'C', 'out', 0.8), 'C').transitionOut).toEqual(tr('fade', 0.8))
+    // A pair whose incoming clip was trimmed to 1 s under a 2 s dissolve.
+    const p0 = setTransitionLength(applied(), 'B', 'in', 2)
+    const p = { ...p0, layers: p0.layers.map((l) => (l.id === 'B' ? { ...l, endSec: 3 } : l)) }
+    expect(pairOf(p.layers, 'B', 'in')?.sec).toBe(2)
+    expect(maxSideSec(p, 'B', 'in')).toBe(2)
+    const shorter = setTransitionLength(p, 'B', 'in', 1.5)
+    expect(get(shorter, 'B')).toMatchObject({ startSec: 2.5, transitionIn: tr('dissolve', 1.5) })
+    expect(pairOf(shorter.layers, 'B', 'in')?.sec).toBe(1.5)
+    expect(setTransitionLength(p, 'B', 'in', 3)).toBe(p) // held at its current 2 s: no change
+  })
+
   it('removal takes both sides off and leaves the overlap', () => {
     const c = removeTransition(applied(), 'B', 'in')
     expect('transitionOut' in get(c, 'A')).toBe(false)

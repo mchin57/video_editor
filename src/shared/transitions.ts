@@ -118,6 +118,23 @@ export function outRampAt(tr: LayerTransition, endSec: number, t: number): numbe
   return clamp01(left / tr.sec)
 }
 
+/**
+ * How many seconds a tile's transitions overrun it: above 0 when its in ramp
+ * has not reached full strength by the time its out ramp starts falling, so the
+ * clip never shows at full opacity — a trim, speed change or freeze left it
+ * shorter than its transitions. Owner decision 6: nothing is clamped, the
+ * Inspector warns. Every in ramp is full `sec` after the start; a fade or dip
+ * out starts falling `sec` before the end; a dissolve out has no ramp and takes
+ * no room. 0 when they fit (or the tile takes no transitions).
+ */
+export function transitionOverrunSec(layer: Layer): number {
+  const tin = transitionOf(layer, 'in')
+  const tout = transitionOf(layer, 'out')
+  const need = (tin?.sec ?? 0) + (tout && tout.kind !== 'dissolve' ? tout.sec : 0)
+  const over = need - (layer.endSec - layer.startSec)
+  return over > 1e-6 ? over : 0
+}
+
 /** The product of a layer's transition ramps at `t` (1 = none). */
 export function transitionGainAt(layer: Layer, t: number): number {
   const tin = transitionOf(layer, 'in')

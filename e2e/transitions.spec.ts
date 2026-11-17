@@ -351,3 +351,46 @@ test('a dip shows its colour card in the preview while neither clip does — beh
   await page.evaluate(() => window.__reelStores.usePlayback.getState().setTime(4.5))
   await expect(plate).toHaveCount(0)
 })
+
+test('a clip trimmed shorter than its fades keeps them; the Inspector warns and the field takes a length above its usual max', async ({
+  appPage: page
+}) => {
+  await arrangeThree(page)
+  await page.evaluate(() => {
+    const s = window.__reelStores.useProject.getState()
+    s.setLayerFade('C', 'in', 1)
+    s.setLayerFade('C', 'out', 1)
+  })
+  const scale = await pps(page)
+  await page.getByTestId('tile-layer-C').click({ position: { x: 90, y: 14 } })
+  const warning = page.getByTestId('transition-too-short')
+  await expect(page.getByTestId('transition-section')).toBeVisible()
+  await expect(warning).toHaveCount(0)
+
+  // Trim C's end 2.5 s in with the real handle: 1.5 s left for 2 s of fades.
+  await dragBy(page, (await trimHandle(page, 'C', 'end').boundingBox())!, -2.5 * scale)
+  const c = await layerOf(page, 'C')
+  expect(c.endSec - c.startSec).toBeCloseTo(1.5, 1)
+  expect(c.transitionIn).toEqual({ kind: 'fade', sec: 1 })
+  expect(c.transitionOut).toEqual({ kind: 'fade', sec: 1 })
+  await expect(warning).toBeVisible()
+  await expect(warning).toContainText('never reaches full opacity')
+
+  // The fields hold the stored lengths as valid values, above the usual
+  // maximum (half the clip, 0.75 s) — and accept an edit that stays above it.
+  for (const side of ['in', 'out']) {
+    const f = page.getByLabel(`Fade ${side} seconds`)
+    await expect(f).toHaveValue('1.00')
+    expect(await f.evaluate((el) => (el as HTMLInputElement).validity.valid)).toBe(true)
+  }
+  const fadeIn = page.getByLabel('Fade in seconds')
+  await fadeIn.fill('0.9')
+  await fadeIn.press('Enter')
+  expect((await layerOf(page, 'C')).transitionIn).toEqual({ kind: 'fade', sec: 0.9 })
+  await expect(warning).toBeVisible() // 1.9 s of fades in 1.5 s
+  // Shortened until they fit, the warning goes.
+  const fadeOut = page.getByLabel('Fade out seconds')
+  await fadeOut.fill('0.5')
+  await fadeOut.press('Enter')
+  await expect(warning).toHaveCount(0)
+})

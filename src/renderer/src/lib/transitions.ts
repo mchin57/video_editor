@@ -184,16 +184,27 @@ export function applyTransition<C extends Composition>(
   return setGroupFades(next, check.inId, 'fadeInSec', check.sec, srcDur)
 }
 
-/** The longest a side can be: half its tile (and, in a pair, half the shorter
- *  tile), and in a pair no longer than the room the incoming side has to slide. */
+/**
+ * The longest an edit may make a side: half its tile (and, in a pair, half the
+ * shorter tile), and in a pair no longer than the room the incoming side has
+ * to slide — but never below the side's CURRENT length. A transition a trim
+ * left longer than that (owner decision 6: nothing is clamped; the Inspector
+ * warns, `transitionOverrunSec`) can be kept or shortened from where it is;
+ * its first edit never snaps it down to the usual maximum.
+ */
 export function maxSideSec(c: Composition, id: string, side: TransitionSide): number {
   const l = c.layers.find((x) => x.id === id)
   if (!l) return 0
+  const current = transitionOf(l, side)?.sec ?? 0
   const pair = pairOf(c.layers, id, side)
-  if (!pair) return maxTransitionSec(tileLen(l))
+  if (!pair) return Math.max(current, maxTransitionSec(tileLen(l)))
   const a = c.layers.find((x) => x.id === pair.outId)!
   const b = c.layers.find((x) => x.id === pair.inId)!
-  return Math.min(maxTransitionSec(tileLen(a), tileLen(b)), pair.sec + roomBefore(c, movers(c, b, cutOf(c, pair))))
+  const usual = Math.min(
+    maxTransitionSec(tileLen(a), tileLen(b)),
+    pair.sec + roomBefore(c, movers(c, b, cutOf(c, pair)))
+  )
+  return Math.max(current, usual)
 }
 
 /**
@@ -265,14 +276,15 @@ export function setTransitionKind<C extends Composition>(
 
 /**
  * A plain FADE at layer `id`'s `side` (a fade in from, or out to, whatever is
- * underneath): `sec` held to [0.1 s, half the tile]; 0 or less removes it. A
+ * underneath): `sec` held to [0.1 s, `maxSideSec`: half the tile, or the
+ * fade's current length when a trim left it longer]; 0 or less removes it. A
  * side that is part of a pair is left alone (change it through the pair).
  */
 export function setFade<C extends Composition>(c: C, id: string, side: TransitionSide, sec: number): C {
   const l = c.layers.find((x) => x.id === id)
   if (!l || !takesTransitions(l) || pairOf(c.layers, id, side)) return c
   if (!(sec > 0)) return transitionOf(l, side) ? mapLayer(c, id, (x) => withTransition(x, side, null)) : c
-  const s = ms(clampTransitionSec(sec, maxTransitionSec(tileLen(l))))
+  const s = ms(clampTransitionSec(sec, maxSideSec(c, id, side)))
   return mapLayer(c, id, (x) => withTransition(x, side, { kind: 'fade', sec: s }))
 }
 

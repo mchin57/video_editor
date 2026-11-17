@@ -10,12 +10,12 @@ import { useMemo, type JSX } from 'react'
 import type { Layer, TransitionKind } from '@shared/project'
 import { layerLabel } from '@shared/layers'
 import {
-  maxTransitionSec,
   pairOf,
   PAIR_KINDS,
   TRANSITION_KINDS,
   TRANSITION_MIN_SEC,
   transitionOf,
+  transitionOverrunSec,
   type TransitionSide
 } from '@shared/transitions'
 import { maxSideSec, transitionCandidate } from '@/lib/transitions'
@@ -60,12 +60,33 @@ export function TransitionSection({ layer }: { layer: Layer }): JSX.Element | nu
       )}
       <SideControls layer={layer} side="in" srcDur={srcDur} />
       <SideControls layer={layer} side="out" srcDur={srcDur} />
+      <TooShortWarning layer={layer} />
       <p className="mt-1 text-[10px] leading-snug text-zinc-500">
         Select two clips that meet (Ctrl-click) to join them with a cross dissolve or a dip; their linked sound
         crossfades (edit it with the audio clips&apos; fades). Drag a wedge on the timeline to change a length, or a
         tile&apos;s top corner to fade it.
       </p>
     </div>
+  )
+}
+
+/**
+ * The warning for a clip shorter than its transitions (a trim, speed change or
+ * freeze shortened it after they were set): it never reaches full opacity.
+ * Owner decision 6 — the lengths are kept as they are, nothing is clamped.
+ */
+function TooShortWarning({ layer }: { layer: Layer }): JSX.Element | null {
+  const over = transitionOverrunSec(layer)
+  if (over <= 0) return null
+  return (
+    <p
+      role="alert"
+      data-testid="transition-too-short"
+      className="mb-2 rounded bg-amber-500/15 px-2 py-1 text-[10px] leading-snug text-amber-200"
+    >
+      This clip is {over.toFixed(2)} s too short for its transitions, so it never reaches full opacity. Lengthen the
+      clip or shorten a transition.
+    </p>
   )
 }
 
@@ -84,7 +105,9 @@ function SideControls({
   const pair = tr ? pairOf(comp.layers, layer.id, side) : null
   const partner = pair ? comp.layers.find((l) => l.id === (side === 'in' ? pair.outId : pair.inId)) : undefined
   const store = useProject.getState()
-  const len = layer.endSec - layer.startSec
+  // The edit bound: the usual maximum, or the side's current length when a trim
+  // left it longer — so the field holds that length as a valid value.
+  const max = maxSideSec(comp, layer.id, side)
   if (!tr || tr.kind === 'fade') {
     // A plain fade at this edge: 0 = none.
     return (
@@ -92,7 +115,7 @@ function SideControls({
         <NumberInput
           step="0.1"
           min={0}
-          max={maxTransitionSec(len)}
+          max={max}
           value={tr?.sec ?? 0}
           format={(v) => v.toFixed(2)}
           ariaLabel={`Fade ${side} seconds`}
@@ -102,7 +125,6 @@ function SideControls({
       </Field>
     )
   }
-  const max = maxSideSec(comp, layer.id, side)
   return (
     <div className="mb-2" data-testid={`transition-${side}`}>
       <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">
