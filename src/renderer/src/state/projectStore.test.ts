@@ -10,6 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { createEmptyComposition, createEmptyProject, type AudioClip, type Layer, type Project } from '@shared/project'
 import { makeTextLayer, makeVideoLayer, playedVideoDuration } from '@shared/layers'
 import { makeLayoutLayer } from '@shared/layouts'
+import { pairOf } from '@shared/transitions'
 import type { LoadedProject } from '@shared/ipc'
 
 const api = {
@@ -542,5 +543,19 @@ describe('transitions (#64)', () => {
     s().setLayerFade('V3', 'out', 1)
     expect(layer('V3').transitionOut).toEqual({ kind: 'fade', sec: 1 })
     expect(s().past).toHaveLength(5)
+  })
+
+  it('a speed change or a freeze on the outgoing clip moves its end and breaks the pair; the sides stay', () => {
+    for (const edit of [() => s().setVideoSpeed('V1', 2), () => s().addFreeze('V1', 1, 0.5)]) {
+      reel()
+      s().applyTransition(refs, 'dissolve')
+      expect(pairOf(activeComp(s())!.layers, 'V1', 'out')).not.toBeNull()
+      const end = layer('V1').endSec
+      edit()
+      expect(layer('V1').endSec).not.toBeCloseTo(end, 3)
+      expect(pairOf(activeComp(s())!.layers, 'V1', 'out')).toBeNull()
+      expect(layer('V1').transitionOut).toEqual({ kind: 'dissolve', sec: 0.5 })
+      expect(layer('V2').transitionIn).toEqual({ kind: 'dissolve', sec: 0.5 })
+    }
   })
 })

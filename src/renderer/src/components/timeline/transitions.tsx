@@ -6,7 +6,7 @@
  * right-click menu's "Add transition ▸". The edits are in `lib/transitions.ts`.
  *
  * Who gets a press near a tile edge (docs/TIMELINE.md "Transitions"): the trim
- * handle always wins in the outermost TRIM_HANDLE_PX (it sits above
+ * handle always wins in the outermost `TRIM_HANDLE_PX` (constants.tsx; it sits above
  * everything here); the wedge itself is only a picture — a press on it falls
  * through to the tile and moves it like the rest of the tile; only the grip
  * changes the length.
@@ -26,6 +26,7 @@ import { transitionCandidate } from '@/lib/transitions'
 import type { SourceDuration } from '@/lib/links'
 import { useProject } from '@/state/projectStore'
 import { MENU_SEPARATOR, type ContextMenuEntry } from '@/components/ui'
+import { GRIP_PX, gripOffsetPx } from './constants'
 
 /** Fill colour of a wedge per kind (the triangle is the part still hidden). */
 const WEDGE_FILL: Record<keyof typeof TRANSITION_KINDS, string> = {
@@ -35,21 +36,7 @@ const WEDGE_FILL: Record<keyof typeof TRANSITION_KINDS, string> = {
   fade: 'rgba(252,211,77,0.5)'
 }
 
-/** Width (px) of a tile's trim handles (`w-1.5` in Timeline.tsx): the band at
- *  each edge where a press always trims. */
-export const TRIM_HANDLE_PX = 6
-/** Hit width (px) of a wedge's length grip. */
-const GRIP_PX = 6
-
 const sideName = (side: TransitionSide): string => (side === 'in' ? 'in' : 'out')
-
-/**
- * Where a side's grip sits: its offset (px) from the tile edge on that side —
- * centred on the wedge's inner tip (`wedgePx` in from the edge), but never
- * inside the trim handle's band, so a very short wedge's grip stays reachable
- * beside the handle instead of under it.
- */
-export const gripOffsetPx = (wedgePx: number): number => Math.max(TRIM_HANDLE_PX, wedgePx - GRIP_PX / 2)
 
 /**
  * The wedges on one tile: for each side with a transition, a triangle over its

@@ -75,11 +75,11 @@ item, move it into the guarded table below.
 | **Shift-click** on the Library's ＋ Playhead / ♪ Playhead, and on the shared library's Insert (sound / graphic / video), inserts at the playhead the same way; a plain click places on top | `e2e/insertBetween.spec.ts`, `e2e/sharedLibrary.spec.ts` |
 | Insert between, existing tile: **Shift-drag** shows the caret on the seam under the pointer; released there, the dragged set (its link group) is lifted out, the hole it left closes and it lands at the seam, with the script lines pinned on it — one undo step. A Shift-drag released away from a seam, and a plain drag onto one, are the ordinary move (`moveToSeam`) | `e2e/shiftDragInsert.spec.ts`, `lib/ripple.test.ts` |
 | The assistant's `place_sequence` `mode: "insert"` makes the same room at `atSec` (required), one undo step | `e2e/assistant.spec.ts`, `lib/sequence.test.ts`, `mcp/tools.test.ts` |
-| Transition maths (#64) — the ramp per kind (fade / dissolve in, fade out, a dissolve out holds, a dip out over the first half and in over the second), keyframed opacity × ramps, the export's points equal the keyframe points without a transition and track the product within 1/30 s sampling with one, pairs found from where the tiles sit (same kind and length, overlapping by it), ONE dip plate under the lower tile of a pair, a lone dip side's plate under its own tile, none for a hidden tile | `shared/transitions.test.ts`, `main/services/exportTransitions.test.ts` |
+| Transition maths (#64) — the ramp per kind (fade / dissolve in, fade out, a dissolve out holds, a dip out over the first half and in over the second), keyframed opacity × ramps, the export's points equal the keyframe points without a transition and track the product within 1/30 s sampling with one (also where a tile's own in and out ramps overlap after a trim), pairs found from where the tiles sit (same kind and length, overlapping by it), ONE dip card under the lower tile of a pair covering both clips' boxes (`coverIds`), a lone dip side's card under and behind its own tile only, none for a hidden tile; a clip too short for its transitions (`transitionOverrunSec` > 0 exactly when the ramps never reach full); the card's export chain runs the clip's own placement steps (rotation, keyframe scale, position) over a half-open window | `shared/transitions.test.ts`, `main/services/exportTransitions.test.ts` |
 | Transitions through edits — a split keeps the transition IN on the left half and OUT on the right (video and image); a trim leaves a tile's transitions as they are | `lib/timeline.test.ts`, `shared/transitions.test.ts` |
-| Add transition rules — two video / image clips that meet (or already overlap by no more than the longest they can take), not linked to each other; the incoming clip, its link group and everything after it (every lane, ripple rules, pinned script lines) slide left by the length, it goes above the outgoing clip, both sides stored, their linked audio crossfades (fade out / fade in = the length); a pair resizes together (the incoming side slides again, an untouched fade follows); a fade breaks a pair; removal takes both sides and leaves the overlap and fades; a fade at a clip's end held to half the clip, removed with 0; 0.5 s default, 0.1–2 s, never more than half the shorter clip; each one undo step | `lib/transitions.test.ts`, `state/projectStore.test.ts` |
-| Transitions on the real timeline — Ctrl-select two clips that meet, right-click ▸ **Add transition ▸ Cross dissolve**: the second tile overlaps the first by the length, later tiles moved left, a wedge on each edge, Ctrl+Z undoes it whole; the row is greyed with the reason for one clip; dragging a pair's wedge LEFT lengthens it (the incoming clip follows the pointer), one undo step; a fade from the Inspector's Fade out field and from dragging a tile's top-left corner (one undo step), the preview box fading with it; a dip's plate in the preview while neither clip shows | `e2e/transitions.spec.ts` |
-| Transitions in the export — a dissolve's middle frame holds both clips, a dip to black is dark at its midpoint and a dip to white white, the sound through the crossfade never drops more than 6 dB (about −3 dB mid-way) | `e2e/transitionExport.spec.ts` |
+| Add transition rules — two video / image clips that meet (or already overlap by no more than the longest they can take), not linked to each other; the incoming clip, its link group and everything after it (every lane, ripple rules, pinned script lines) slide left by the length, it goes above the outgoing clip, both sides stored, the sound that meets at the cut crossfades (the outgoing clip's own sound ending at its end fades out, the incoming clip's own sound starting at its start fades in, by the length; a linked effect, music or an earlier piece is left alone); a pair resizes together (the incoming clip, its group and the tiles after the CUT slide again — a tile starting inside the overlap stays, however often it is resized — and an untouched fade follows); a side a trim left longer than its usual maximum is kept and edits shorten it from where it is; a fade breaks a pair; removal takes both sides and leaves the overlap and fades; a fade at a clip's end held to half the clip, removed with 0; 0.5 s default, 0.1–2 s, never more than half the shorter clip; each one undo step | `lib/transitions.test.ts`, `state/projectStore.test.ts` |
+| Transitions on the real timeline — Ctrl-select two clips that meet, right-click ▸ **Add transition ▸ Cross dissolve**: the second tile overlaps the first by the length, later tiles moved left, a wedge on each edge, Ctrl+Z undoes it whole; the row is greyed with the reason for one clip; the trim handle wins at the edge under a wedge (dissolve and fade: the window changes, the transition stays), pressing the wedge body moves the tile, dragging the GRIP on the wedge's inner tip changes the length (a pair's LEFT lengthens it, a fade in's right), one undo step each; a right-press on a grip or corner handle keeps the selection (Add transition works on a Ctrl-selected pair) and never drags, Ctrl-click on one toggles the tile; a fade from the Inspector's Fade out field and from dragging a tile's top-left corner (one undo step), the preview box fading with it; a dip's card in the preview while neither clip shows, its boxes exactly the two clips' boxes (PiP, rotated); a clip trimmed shorter than its fades keeps them, the Inspector warns and its fields take the over-long length | `e2e/transitions.spec.ts` |
+| Transitions in the export — a dissolve's middle frame holds both clips, a dip to black / white turns the midpoint the card's colour over a green backdrop (so the card, not the black canvas, does it), the sound through the crossfade never drops more than 6 dB nor rises 1 dB over the clips alone (about −3 dB mid-way: a missing crossfade reads +3.7 dB); a letterboxed and a picture-in-picture dip leave every pixel outside the clips' boxes as it was | `e2e/transitionExport.spec.ts` |
 | The assistant's `set_transition` joins a clip to its neighbour (one call, one undo step), `get_timeline` reports both sides with the joined clip's id; no neighbour is refused, changing nothing | `e2e/assistant.spec.ts`, `lib/transitions.test.ts`, `mcp/tools.test.ts`, `shared/assistant/timelineSummary.test.ts` |
 
 If you change any of the above, the math change should show up as a test diff —
@@ -128,33 +128,79 @@ the assistant's `set_transition`) MAKES that overlap, and that is what moves:
   as the length instead; nothing slides.
 - **The incoming clip goes above the outgoing one** in the stack: a dissolve is it
   fading in OVER the other.
-- **Their linked sound crossfades** over the same window (fade fields on the
-  audio clips, editable afterwards). Linear fades dip about 3 dB in the middle
-  between two different shots (FFMPEG-NOTES "Transitions"). A clip whose sound is
-  its OWN (not extracted to a linked audio clip) gets no crossfade.
-- **Changing the length slides the incoming side again** by the change; a fade
-  the user changed is left alone.
+- **The sound that meets at the cut crossfades** over the same window (fade
+  fields on the audio clips, editable afterwards): in the outgoing clip's link
+  group, its OWN sound (same source) that ends where the clip ends fades out; in
+  the incoming clip's group, its own sound that starts where the clip starts
+  fades in (times through `shared/audioTiming.ts`, so speed and holds count). A
+  linked sound effect or music bed, or an earlier piece of the clip's sound, is
+  left alone. Linear fades dip about 3 dB in the middle between two different
+  shots (FFMPEG-NOTES "Transitions"). A clip whose sound is its OWN (not
+  extracted to a linked audio clip) gets no crossfade.
+- **Changing the length slides the incoming clip again** by the change, with its
+  link group and the tiles that start at or after the CUT — the outgoing clip's
+  end, which is where the incoming clip started before the overlap. No resize
+  moves the outgoing clip, so the cut is the same point however often the pair
+  is resized. A tile that starts INSIDE the overlap (an unlinked caption over
+  the outgoing clip's last words) stays with the outgoing clip. The flip side:
+  an unlinked tile that started less than the length after the cut was carried
+  into the overlap when the transition was made (or grown), and from then on it
+  counts as inside the overlap and stays when the length changes — link it to
+  the incoming clip to keep it with that clip. A fade the user changed is left
+  alone.
 - **Removing leaves the overlap** (and the fades): nothing slides back.
-- **Trims, moves and deletes do not touch transitions.** A trim under a
-  transition, moving one clip of a pair on its own, or deleting one, breaks the
-  pair; each side then plays
-  alone — a dissolve in is a fade in, a dissolve out a cut, a dip side a fade to
-  or from its colour (`layerOpacityAt`, `transitionPlates`). Re-apply, or remove
-  it, from the Inspector.
+- **Trims, moves, deletes, speed changes and freezes do not touch transitions.**
+  Anything that moves the outgoing clip's END or the incoming clip's START
+  breaks the pair: a trim under the transition, moving one clip of a pair on
+  its own, deleting one, and also a speed change or a freeze (hold) on the
+  outgoing clip, which lengthens or shortens it at its end. Each side then
+  plays alone — a dissolve in is a fade in, a dissolve out a cut, a dip side a
+  fade to or from its colour (`layerOpacityAt`, `transitionPlates`). Re-apply,
+  or remove it, from the Inspector.
+- **A clip shorter than its transitions keeps them** (owner decision 6): a trim,
+  speed change or freeze can leave it too short for its ramps to reach full
+  strength (`transitionOverrunSec`); nothing is clamped, and the Inspector warns
+  that the clip never reaches full opacity. Its length fields hold the
+  over-long length as a valid value, and an edit shortens it from there
+  (`maxSideSec` is never below the current length).
 - **Splits** keep the transition in on the left half and the transition out on
-  the right. A cut INSIDE a transition's window cuts the ramp short: the right
-  half has no transition in, so it shows at full strength from the cut.
+  the right. Known limitation — a cut INSIDE a ramp's window makes the picture
+  jump at the cut: inside a fade (or dip) OUT, the left half loses its out ramp
+  (it plays at full strength up to the cut) and the right half starts mid-ramp,
+  already partly faded; inside a fade IN, the left half ends mid-ramp and the
+  right half has no in ramp, so it shows at full strength from the cut.
+- **A dip's colour card sits only behind the clips** (owner decision 5): one
+  card for the pair, under the lower of the two tiles, covering the union of
+  the two clips' boxes — their position, scale, stretch, crop, rotation and
+  position keyframes, exactly as each clip is drawn — over the window
+  [start, end) (a lone dip side: behind its own box). So a picture-in-picture
+  dip leaves the main video underneath, and a letterboxed clip's bars keep what
+  is under them.
 - **Only video and image tiles** take transitions; text keeps its own entrance
   and exit animations; layouts, compound clips, graphics and workouts have none.
 - **A clip that does not fill the frame, or has a removed background**, fades
   over whatever is underneath it — correct, but not a blend of two full pictures.
 
+**On the tile.** A transition shows as a WEDGE over its window on the tile's
+edge. The wedge is only a picture: pressing it moves the tile like any other
+part of the tile. Its length changes by dragging the GRIP on the wedge's inner
+tip (the end farthest from the tile edge; resize cursor, tooltip): a pair's
+grip grows the transition to the LEFT (the incoming clip slides in with the
+pointer), a fade's grip follows the pointer away from its edge. The outermost
+6 px of each edge always belong to the trim handle, above the wedge and its
+grip (a very short wedge's grip sits just inside that band). A side without a
+transition has a small corner handle at the top that drags a fade out of the
+edge. A right-press on a grip or corner handle only selects, like on the tile
+(keeping a selection the tile is already in), and Ctrl/Cmd-click toggles the
+tile in the selection. Each drag is one undo step.
+
 ## Manual — smoke-test in `npm run dev`
 
 - **Transition wedges on overlapping rows:** after Add transition the two tiles
-  stack on two rows of the Clips lane; check the wedges read clearly there and
-  that a tile's top-corner fade handle appears on hover and does not get in the
-  way of the edge trim handles.
+  stack on two rows of the Clips lane; check the wedges and their grips read
+  clearly there and that a tile's top-corner fade handle appears on hover.
+  (That the trim handle, the wedge body and the grip each do their own job is
+  pinned by `e2e/transitions.spec.ts`.)
 - **Transitions with real footage:** play a cross dissolve and a dip between two
   real clips in the preview and in an export, and listen to the crossfade — the
   e2e suite checks flat colours and tones only.
