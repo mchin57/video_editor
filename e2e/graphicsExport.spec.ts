@@ -228,3 +228,122 @@ test('graphics marks export where the preview draws them, with their reveals and
   expect(orange(f05(400, 1700)), 'second segment').toBe(true)
   expect(orange(f05(250, 1700)), 'not inside the corner').toBe(false)
 })
+
+test('an animated mark exports frame by frame where the preview draws it; a static rotation lands too', async ({
+  appPage: page,
+  electronApp
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(180_000)
+
+  const dir = mkdtempSync(join(tmpdir(), 'reel-markanim-'))
+  const bg = join(dir, 'black.mp4')
+  execFileSync(FFMPEG, [
+    '-y',
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=1080x1920:r=30:d=3',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    bg
+  ])
+
+  await page.evaluate(async (bg) => {
+    const { useProject } = window.__reelStores
+    const [bgA] = await window.api.importPaths([bg])
+    const s = useProject.getState()
+    s.addMedia([bgA.id])
+    s.addVideoLayer('BG', bgA.id, 0, 3, false)
+    const kf = (tSec: number, dx: number) => ({
+      tSec,
+      dx,
+      dy: 0,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      drawn: 1,
+      color: '#00ff00',
+      widthPx: 8,
+      easing: 'linear'
+    })
+    s.addLayer({
+      id: 'A',
+      hidden: false,
+      startSec: 0,
+      endSec: 3,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: {
+        kind: 'graphics' as const,
+        marks: [
+          // A filled green box moving 600px right over the first second.
+          {
+            id: 'box',
+            tool: 'rect',
+            points: [
+              { x: 100, y: 300 },
+              { x: 260, y: 460 }
+            ],
+            color: '#00ff00',
+            fill: '#00ff00',
+            widthPx: 8,
+            atSec: 0,
+            reveal: 'pop',
+            keyframes: [kf(0, 0), kf(1, 600)]
+          },
+          // A horizontal white line turned a quarter about its centre: vertical at x = 300.
+          {
+            id: 'rot',
+            tool: 'line',
+            points: [
+              { x: 100, y: 1000 },
+              { x: 500, y: 1000 }
+            ],
+            color: '#ffffff',
+            widthPx: 20,
+            atSec: 0,
+            reveal: 'pop',
+            rotationDeg: 90
+          }
+        ]
+      }
+    } as never)
+  }, bg)
+
+  const out = join(dir, 'out.mp4')
+  await electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = (async () => ({ canceled: false, filePath })) as typeof dialog.showSaveDialog
+  }, out)
+  await page.evaluate(async () => {
+    const p = window.__reelStores.useProject.getState().project!
+    await window.api.exportProject(p, { preset: p.preset, preferNvenc: true })
+  })
+
+  const green = (p: number[]): boolean => p[1] > 180 && p[0] < 70 && p[2] < 70
+  const white = (p: number[]): boolean => p[0] > 200 && p[1] > 200 && p[2] > 200
+
+  // The box at the start of its move (0.1s: 60px along), halfway (0.5s: 300px) and after it (held at 600px).
+  const start = frameAt(out, 0.1)
+  expect(green(start(240, 380)), 'box near its start').toBe(true)
+  expect(green(start(780, 380)), 'not at the end yet').toBe(false)
+  const mid = frameAt(out, 0.5)
+  expect(green(mid(480, 380)), 'box halfway').toBe(true)
+  expect(green(mid(180, 380)), 'left its start').toBe(false)
+  const end = frameAt(out, 1.5)
+  expect(green(end(780, 380)), 'box at its end').toBe(true)
+  expect(green(end(240, 380)), 'nothing left behind').toBe(false)
+
+  // The statically rotated line is vertical through x = 300 and gone from where it was drawn.
+  const f = frameAt(out, 0.5)
+  expect(white(f(300, 850)), 'rotated line top').toBe(true)
+  expect(white(f(300, 1150)), 'rotated line bottom').toBe(true)
+  expect(white(f(150, 1000)), 'not where it was drawn').toBe(false)
+})

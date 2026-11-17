@@ -504,6 +504,63 @@ describe('exporter orchestration', () => {
     expect(normalise({ runs, svgRendered })).toMatchSnapshot()
   })
 
+  it('an animated graphics mark is rendered per frame as an alpha video; an un-animated one stays an image', async () => {
+    const p = createEmptyProject('p7', 'Animated marks')
+    const g = makeGraphicsLayer('G', 1, 3)
+    const kf = {
+      tSec: 0,
+      dx: 0,
+      dy: 0,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      drawn: 1,
+      color: '#ffd60a',
+      widthPx: 8,
+      easing: 'linear' as const
+    }
+    const base = newMark('rect', 'R', { x: 300, y: 300 }, { x: 600, y: 500 }, 0)
+    g.content = {
+      kind: 'graphics',
+      marks: [
+        { ...base, id: 'moving', keyframes: [kf, { ...kf, tSec: 1, dx: 200 }] },
+        newMark('line', 'S', { x: 100, y: 900 }, { x: 900, y: 900 }, 0)
+      ]
+    }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'animmark.mp4'))
+    // The still line is one PNG; the moving rectangle is 60 streamed frames (2s at 30 fps).
+    expect(svgRendered.map((r) => (r as { count: number }).count)).toEqual([1])
+    expect(streamed).toHaveLength(1)
+    expect(streamed[0].count).toBe(60)
+    expect(streamed[0].mid).toContain('<g transform="translate(')
+    expect(encodes).toHaveLength(1)
+    expect(encodes[0].frames).toBe(60)
+    const last = runs[runs.length - 1]
+    const graph = last.files['graph.txt']
+    expect(last.args.join(' ')).toMatch(/-i \S+overlay_\d+\.mov/)
+    // The rectangle's overlay is an alpha video gated to its window.
+    expect(graph).toMatch(/format=yuva420p,setpts=PTS-STARTPTS\+1\.000\/TB/)
+    expect(graph).toContain("enable='between(t,1.000,3.000)'")
+  })
+
+  it('a statically rotated mark is one image drawn rotated, with a box that holds it', async () => {
+    const p = createEmptyProject('p8', 'Rotated mark')
+    const g = makeGraphicsLayer('G', 0, 3)
+    g.content = {
+      kind: 'graphics',
+      marks: [{ ...newMark('line', 'L', { x: 100, y: 500 }, { x: 500, y: 500 }, 0), rotationDeg: 90 }]
+    }
+    p.layers = [makeVideoLayer('V', 'vid', 0, 5), g]
+    await exportProject(p, { preset: 'reel', preferNvenc: true }, join(scratch, 'out', 'rotmark.mp4'))
+    expect(streamed).toHaveLength(0)
+    expect(svgRendered).toHaveLength(1)
+    const r = svgRendered[0] as { width: number; height: number; last: string }
+    expect(r.last).toContain('rotate(90)')
+    // A horizontal line turned a quarter: taller than wide.
+    expect(r.height).toBeGreaterThan(r.width)
+  })
+
   it('exports a pose overlay: one frame per output frame, composited with the clip’s box', async () => {
     const p = createEmptyProject('p4', 'Pose')
     const v = makeVideoLayer('V', 'vid', 0, 4)

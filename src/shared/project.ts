@@ -856,7 +856,7 @@ export function createEmptyComposition(): Composition {
 }
 
 /** Current document schema version (bump + add a `migrateProject` step). */
-export const PROJECT_VERSION = 33
+export const PROJECT_VERSION = 34
 
 export function createEmptyProject(id: string, name: string): Project {
   const now = new Date().toISOString()
@@ -1201,6 +1201,9 @@ export function migrateProject(raw: unknown): Project {
   // v33 adds the 'polyline' (connected line) and 'teardrop' mark tools and the
   // absence-tolerant `GraphicMark.dropWidth` (shared/graphics.ts) — purely
   // additive, so nothing is rewritten.
+  // v34 adds the absence-tolerant per-mark `GraphicMark.keyframes` / `pivot` /
+  // `rotationDeg` / `scale` / `opacity` (shared/markAnim.ts) — absent means a
+  // static, un-rotated, full-size, opaque mark, so nothing is rewritten.
   if (typeof p.version !== 'number' || p.version < PROJECT_VERSION) p.version = PROJECT_VERSION
   // Projects saved before the library was project-scoped have no mediaIds; seed
   // the list from whatever media they already reference so their library isn't

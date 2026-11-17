@@ -280,6 +280,41 @@ describe('shiftMarks', () => {
     expect(shiftMarks(ms, -1).map((m) => m.atSec)).toEqual([1.5, 4])
     expect(shiftMarks(ms, 0)).toBe(ms)
   })
+
+  it('shifts a mark’s keyframes by the same amount (they share its clock)', () => {
+    const k = {
+      dx: 0,
+      dy: 0,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      drawn: 1,
+      color: '#fff',
+      widthPx: 8,
+      easing: 'linear' as const
+    }
+    const out = shiftMarks(
+      [
+        mark({
+          atSec: 1,
+          keyframes: [
+            { ...k, tSec: 1 },
+            { ...k, tSec: 2.5 }
+          ]
+        })
+      ],
+      0.5
+    )
+    expect(out[0].keyframes!.map((x) => x.tSec)).toEqual([0.5, 2])
+    expect(out[0].atSec).toBeCloseTo(0.5)
+  })
+})
+
+describe('movedMark pivot', () => {
+  it('moves the pivot with the points, only when set', () => {
+    expect(movedMark(mark({ pivot: { x: 5, y: 6 } }), 10, 20).pivot).toEqual({ x: 15, y: 26 })
+    expect('pivot' in movedMark(mark({}), 10, 20)).toBe(false)
+  })
 })
 
 describe('teardrop', () => {

@@ -127,6 +127,27 @@ describe('sanitizeTemplate', () => {
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'teardrop', points: two, dropWidth: 0.5 }))).not.toBeNull()
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'polyline', points: [...two, { x: 3, y: 3 }] }))).not.toBeNull()
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'teardrop', points: two, dropWidth: 'wide' }))).toBeNull()
+    // Per-mark animation fields.
+    const kf = {
+      tSec: 0,
+      dx: 0,
+      dy: 0,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      drawn: 1,
+      color: '#ffffff',
+      widthPx: 8,
+      easing: 'linear'
+    }
+    const anim = { ...mark, keyframes: [kf, { ...kf, tSec: 1, fill: '#00000080' }], pivot: { x: 1, y: 2 } }
+    expect(sanitizeTemplate(badMark({ ...anim, rotationDeg: 30, scale: 2, opacity: 0.5 }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...anim, keyframes: [{ ...kf, easing: 'bouncy' }] }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...anim, keyframes: [{ ...kf, dx: 'a' }] }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...anim, keyframes: [{ ...kf, fill: 3 }] }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...anim, keyframes: 'no' }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...anim, pivot: { x: 1 } }))).toBeNull()
+    expect(sanitizeTemplate(badMark({ ...anim, rotationDeg: 'x' }))).toBeNull()
     expect(
       sanitizeTemplate(
         badMark({

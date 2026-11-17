@@ -14,20 +14,22 @@ import {
   type GraphicMark,
   type MarkReveal
 } from '@shared/graphics'
+import { editPoseAt, markPoseAt, withFillOff, type MarkPose } from '@shared/markAnim'
 import { updateById } from '@/lib/arrays'
 import { getAlpha, hex6, withAlpha } from '@/lib/color'
 import { useProject } from '@/state/projectStore'
 import { usePlayback } from '@/state/playback'
 import { useUi } from '@/state/ui'
 import { CollapsibleSection } from '../CollapsibleSection'
+import { MarkAnimation } from './MarkAnimation'
 import { Check, Field, NumberInput, Slider, colorCls, inputCls, subtleBtnCls, toggleCls } from '../ui'
 
 /** A fill switched on starts as the stroke colour, see-through (alpha byte). */
 const DEFAULT_FILL_ALPHA = 102
 /** A fill's opacity as a whole percent. */
 const fillPct = (fill: string): number => Math.round((getAlpha(fill) / 255) * 100)
-/** Whether a mark's fill shows at all (on, and not fully see-through). */
-const hasVisibleFill = (m: GraphicMark): boolean => !!m.fill && getAlpha(m.fill) > 0
+/** Whether a fill shows at all (on, and not fully see-through). */
+const hasVisibleFill = (fill: string | null): boolean => !!fill && getAlpha(fill) > 0
 
 export function GraphicsSection({ layer, content }: { layer: Layer; content: GraphicsContent }): JSX.Element {
   const tool = useUi((s) => s.graphicsTool)
@@ -36,6 +38,10 @@ export function GraphicsSection({ layer, content }: { layer: Layer; content: Gra
   const marks = content.marks
   const selected = marks.find((m) => m.id === selectedMarkId) ?? null
   const dur = Math.max(0, layer.endSec - layer.startSec)
+  // Subscribed so the animated values below follow the playhead while scrubbing.
+  const time = usePlayback((s) => s.time)
+  const clampLocal = (t: number): number => Math.min(dur, Math.max(0, t))
+  const localNow = (): number => clampLocal(usePlayback.getState().time - layer.startSec)
 
   const patch = (id: string, fn: (m: GraphicMark) => GraphicMark): void =>
     update(layer.id, (ms) => updateById(ms, id, fn))
@@ -135,6 +141,18 @@ export function GraphicsSection({ layer, content }: { layer: Layer; content: Gra
           maxAtSec={dur}
           onPatch={(fn) => patch(selected.id, fn)}
           playheadAtSec={() => usePlayback.getState().time - layer.startSec}
+          localSec={clampLocal(time - layer.startSec)}
+          localNow={localNow}
+        />
+      )}
+      {selected && (
+        <MarkAnimation
+          layerStartSec={layer.startSec}
+          layerDurSec={dur}
+          mark={selected}
+          localSec={clampLocal(time - layer.startSec)}
+          localNow={localNow}
+          onPatch={(fn) => patch(selected.id, fn)}
         />
       )}
     </CollapsibleSection>
@@ -146,13 +164,21 @@ function MarkFields({
   mark,
   maxAtSec,
   onPatch,
-  playheadAtSec
+  playheadAtSec,
+  localSec,
+  localNow
 }: {
   mark: GraphicMark
   maxAtSec: number
   onPatch: (fn: (m: GraphicMark) => GraphicMark) => void
   playheadAtSec: () => number
+  /** The playhead in seconds after the layer's start: colours and thickness show the pose there. */
+  localSec: number
+  localNow: () => number
 }): JSX.Element {
+  const pose = markPoseAt(mark, localSec)
+  /** Colour, thickness and fill edit the pose at the playhead: a keyframe if the mark has any, else the base. */
+  const edit = (patch: Partial<MarkPose>): void => onPatch((m) => editPoseAt(m, localNow(), patch))
   const fillable = canFill(mark.tool)
   const lockable = mark.tool === 'rect' || mark.tool === 'ellipse'
   const clampAt = (v: number): number => Math.min(Math.max(0, maxAtSec - 0.05), Math.max(0, v))
@@ -163,19 +189,19 @@ function MarkFields({
           <input
             type="color"
             data-testid="mark-color"
-            value={hex6(mark.color)}
-            onChange={(e) => onPatch((m) => ({ ...m, color: e.target.value }))}
+            value={hex6(pose.color)}
+            onChange={(e) => edit({ color: e.target.value })}
             className={colorCls}
           />
         </Field>
-        <Field label={`${fillable ? 'Border' : 'Stroke'} · ${mark.widthPx}px`}>
+        <Field label={`${fillable ? 'Border' : 'Stroke'} · ${Math.round(pose.widthPx)}px`}>
           <Slider
             ariaLabel={fillable ? 'Border width' : 'Stroke width'}
             // A shape with a visible fill may go borderless; otherwise it would vanish.
-            min={fillable && hasVisibleFill(mark) ? 0 : 2}
+            min={fillable && hasVisibleFill(pose.fill) ? 0 : 2}
             max={40}
-            value={mark.widthPx}
-            onChange={(v) => onPatch((m) => ({ ...m, widthPx: v }))}
+            value={pose.widthPx}
+            onChange={(v) => edit({ widthPx: v })}
           />
         </Field>
       </div>
@@ -185,39 +211,34 @@ function MarkFields({
           <Check
             checked={!!mark.fill}
             onChange={(on) =>
-              onPatch((m) => ({
-                ...m,
-                fill: on ? withAlpha(m.color, DEFAULT_FILL_ALPHA) : null,
-                // Fill off with no border left would leave nothing to see.
-                widthPx: !on && m.widthPx < 2 ? MARK_DEFAULTS.widthPx : m.widthPx
-              }))
+              // Fill off with no border left (base or any keyframe) would leave nothing to see.
+              onPatch((m) => (on ? { ...m, fill: withAlpha(m.color, DEFAULT_FILL_ALPHA) } : withFillOff(m)))
             }
           >
             Fill
           </Check>
-          {mark.fill && (
+          {pose.fill && (
             <div className="flex gap-2">
               <Field label="Fill color">
                 <input
                   type="color"
-                  value={hex6(mark.fill)}
-                  onChange={(e) => onPatch((m) => ({ ...m, fill: withAlpha(e.target.value, getAlpha(m.fill ?? '')) }))}
+                  value={hex6(pose.fill)}
+                  onChange={(e) => edit({ fill: withAlpha(e.target.value, getAlpha(pose.fill ?? '')) })}
                   className={colorCls}
                 />
               </Field>
-              <Field label={`Fill opacity · ${fillPct(mark.fill)}%`}>
+              <Field label={`Fill opacity · ${fillPct(pose.fill)}%`}>
                 <Slider
                   ariaLabel="Fill opacity"
                   min={0}
                   max={100}
-                  value={fillPct(mark.fill)}
+                  value={fillPct(pose.fill)}
                   onChange={(v) =>
-                    onPatch((m) => ({
-                      ...m,
-                      fill: withAlpha(m.fill ?? m.color, (v / 100) * 255),
+                    edit({
+                      fill: withAlpha(pose.fill ?? pose.color, (v / 100) * 255),
                       // A see-through fill with no border left would leave nothing to see.
-                      widthPx: v === 0 && m.widthPx < 2 ? MARK_DEFAULTS.widthPx : m.widthPx
-                    }))
+                      ...(v === 0 && pose.widthPx < 2 ? { widthPx: MARK_DEFAULTS.widthPx } : {})
+                    })
                   }
                 />
               </Field>
