@@ -1,14 +1,19 @@
 /**
  * Transitions reach the EXPORT the way the preview draws them (#64): a cross
  * dissolve is the incoming clip's opacity ramp over the outgoing one, a dip a
- * full-frame plate under the pair plus ramps, and the two clips' linked sound
+ * colour card behind the pair plus ramps, and the two clips' linked sound
  * crossfades. Pixels and samples of real ffmpeg exports of a red clip (440 Hz
- * tone) and a blue clip (660 Hz tone) that meet at 3 s:
+ * tone) and a blue clip (660 Hz tone) that meet at 3 s, over a silent green
+ * backdrop:
  *
  *  1. Cross dissolve: halfway through the overlap a frame holds BOTH colours;
  *     before it is red, after it blue. The sound through the crossfade never
- *     drops out (FFMPEG-NOTES "Transitions": linear fades dip ~3 dB mid-way).
- *  2. Dip to black on the same pair: the midpoint frame is dark.
+ *     drops out nor doubles up (FFMPEG-NOTES "Transitions": linear fades dip
+ *     ~3 dB mid-way).
+ *  2. Dip to black / white on the same pair: the midpoint frame is the card's
+ *     colour, not the backdrop's.
+ *  3. The card sits only behind the clips: a letterboxed and a
+ *     picture-in-picture dip leave the pixels outside the clips' boxes alone.
  *
  * ARRANGE via store actions, ACT via the real export IPC, ASSERT on output
  * pixels and samples. Skipped without the bundled ffmpeg.
@@ -73,9 +78,12 @@ function monoSamples(file: string): Float32Array {
   return new Float32Array(raw.buffer, raw.byteOffset, raw.length / 4)
 }
 
-/** A 3 s clip of one colour with a tone (270×480 unless `size` says otherwise). */
-function clip(dir: string, name: string, color: string, hz: number, size = '270x480', sec = 3): string {
+/** A 3 s clip of one colour with a tone (270×480 unless `size` says otherwise);
+ *  `hz` null makes it silent (no audio track). */
+function clip(dir: string, name: string, color: string, hz: number | null, size = '270x480', sec = 3): string {
   const out = join(dir, name)
+  const tone = hz === null ? [] : ['-f', 'lavfi', '-i', `sine=frequency=${hz}:sample_rate=48000:duration=${sec}`]
+  const audio = hz === null ? [] : ['-c:a', 'aac', '-shortest']
   execFileSync(FFMPEG, [
     '-y',
     '-v',
@@ -84,19 +92,14 @@ function clip(dir: string, name: string, color: string, hz: number, size = '270x
     'lavfi',
     '-i',
     `color=c=${color}:s=${size}:r=30:d=${sec}`,
-    '-f',
-    'lavfi',
-    '-i',
-    `sine=frequency=${hz}:sample_rate=48000:duration=${sec}`,
+    ...tone,
     '-pix_fmt',
     'yuv420p',
     '-c:v',
     'libx264',
     '-preset',
     'ultrafast',
-    '-c:a',
-    'aac',
-    '-shortest',
+    ...audio,
     out
   ])
   return out
@@ -122,25 +125,34 @@ test('a cross dissolve and a dip export as the preview draws them; the sound cro
   const dir = mkdtempSync(join(tmpdir(), 'reel-transition-'))
   const red = clip(dir, 'red.mp4', '0xC82828', 440)
   const blue = clip(dir, 'blue.mp4', '0x2828C8', 660)
+  // A bright, SILENT backdrop under the pair: neither black nor white, so only
+  // the dip's card can turn the midpoint black or white (the base canvas is
+  // black, which would pass a dip to black with no card at all).
+  const green = clip(dir, 'green.mp4', '0x20C020', null, '270x480', 6)
 
   const ok = await page.evaluate(
-    async ({ red, blue }) => {
+    async ({ red, blue, green }) => {
       const { useProject } = window.__reelStores
-      const [r, b] = await window.api.importPaths([red, blue])
+      const [r, b, g] = await window.api.importPaths([red, blue, green])
       const s = useProject.getState()
-      s.addMedia([r.id, b.id])
+      s.addMedia([r.id, b.id, g.id])
+      s.addVideoLayer('G', g.id, 0, 6, false, 270 / 480)
       s.addVideoLayer('R', r.id, 0, 3, true, 270 / 480)
       s.addVideoLayer('B', b.id, 3, 3, true, 270 / 480)
       const L = (id: string) => ({ kind: 'layer' as const, id })
       return useProject.getState().applyTransition([L('R'), L('B')], 'dissolve')
     },
-    { red, blue }
+    { red, blue, green }
   )
   expect(ok).toEqual({ ok: true })
-  // B now plays 2.5–5.5 over R's last half second.
+  // B now plays 2.5–5.5 over R's last half second; the backdrop stays at 0.
   expect(
-    await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.map((l) => l.startSec))
-  ).toEqual([0, 2.5])
+    await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers.map((l) => [l.id, l.startSec]))
+  ).toEqual([
+    ['G', 0],
+    ['R', 0],
+    ['B', 2.5]
+  ])
 
   // 1. Cross dissolve.
   const dissolve = join(dir, 'dissolve.mp4')
@@ -161,14 +173,23 @@ test('a cross dissolve and a dip export as the preview draws them; the sound cro
   }
 
   // The crossfade: no 20 ms stretch of the overlap drops more than 6 dB under
-  // the clips on their own (linear fades: about −3 dB in the middle).
+  // the clips on their own, nor rises over them; the middle 100 ms sits about
+  // 3 dB down (linear fades of two different tones, FFMPEG-NOTES
+  // "Transitions"). Without the fades both tones play in full there: about
+  // +3 dB, which both upper bounds refuse.
   const samples = monoSamples(dissolve)
   const alone = (rmsDb(samples, 1, 2) + rmsDb(samples, 3.5, 4.5)) / 2
   for (let t = 2.5; t < 3 - 0.02; t += 0.02) {
-    expect(rmsDb(samples, t, t + 0.02) - alone, `level at ${t.toFixed(2)} s`).toBeGreaterThan(-6)
+    const level = rmsDb(samples, t, t + 0.02) - alone
+    expect(level, `level at ${t.toFixed(2)} s`).toBeGreaterThan(-6)
+    expect(level, `level at ${t.toFixed(2)} s`).toBeLessThan(1)
   }
+  const middle = rmsDb(samples, 2.7, 2.8) - alone
+  expect(middle, 'the middle of the crossfade').toBeGreaterThan(-4.5)
+  expect(middle, 'the middle of the crossfade').toBeLessThan(-1.5)
 
-  // 2. The same pair as a dip to black: the midpoint is dark, the ends are not.
+  // 2. The same pair as a dip to black: the midpoint is dark (over the green
+  // backdrop, so only the card can make it so), the ends are not.
   await page.evaluate(() => window.__reelStores.useProject.getState().setTransitionKind('B', 'in', 'dipBlack'))
   const dip = join(dir, 'dip.mp4')
   await exportTo(page, electronApp, dip)
@@ -177,8 +198,8 @@ test('a cross dissolve and a dip export as the preview draws them; the sound cro
   expect(centreRgb(dip, 2.55)[0], 'red still fading out').toBeGreaterThan(60)
   expect(centreRgb(dip, 2.95)[2], 'blue already fading in').toBeGreaterThan(60)
 
-  // 3. Dip to white: the plate itself shows at the midpoint (the base canvas
-  // is black, so only the plate can make it white).
+  // 3. Dip to white: the card itself shows at the midpoint (over a black base
+  // canvas and a green backdrop, only the card can make it white).
   await page.evaluate(() => window.__reelStores.useProject.getState().setTransitionKind('B', 'in', 'dipWhite'))
   const white = join(dir, 'white.mp4')
   await exportTo(page, electronApp, white)
