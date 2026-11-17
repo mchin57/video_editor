@@ -15,7 +15,7 @@ import { basename, extname, join } from 'node:path'
 import { CubeError, parseCube, type CubeTable } from '@shared/cube'
 import type { ImportedLut } from '@shared/ipc'
 import { cleanTemplateName } from '@shared/templates'
-import { writeAtomically } from './atomicWrite'
+import { singleFlight, writeAtomically } from './atomicWrite'
 import { isLutFileName, lutPath, lutsRoot } from './projectLayout'
 
 /** Largest `.cube` taken (a 65-point table is about 8 MB of text; 256 points is ~400 MB). */
@@ -57,14 +57,22 @@ export async function importLut(root: string, path: string): Promise<ImportedLut
   return { file: await storeLut(root, bytes), name: lutDisplayName(path) }
 }
 
-/** Put a table's bytes (already checked) into `<root>/luts/`, once; its stored name. */
+/** In-flight stores, by destination (the project's `luts/` + the stored name). */
+const storeFlight = singleFlight<void>()
+
+/**
+ * Put a table's bytes (already checked) into `<root>/luts/`, once; its stored
+ * name. Racing stores of one table (two imports, a template drop) share ONE
+ * write: `writeAtomically`'s partial name is fixed, so they'd tear each other's.
+ */
 export async function storeLut(root: string, bytes: Buffer): Promise<string> {
   const file = lutFileFor(bytes)
   const dest = join(lutsRoot(root), file)
-  if (!existsSync(dest)) {
+  await storeFlight(dest, async () => {
+    if (existsSync(dest)) return
     await fsp.mkdir(lutsRoot(root), { recursive: true })
     await writeAtomically(dest, (part) => fsp.writeFile(part, bytes))
-  }
+  })
   return file
 }
 
