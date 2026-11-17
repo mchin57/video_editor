@@ -120,6 +120,13 @@ describe('sanitizeTemplate', () => {
     const mark = (g.content as unknown as { marks: Record<string, unknown>[] }).marks[0]
     expect(sanitizeTemplate(badMark(mark))).not.toBeNull()
     expect(sanitizeTemplate(badMark({ ...mark, tool: 'laser' }))).toBeNull()
+    const two = [
+      { x: 1, y: 1 },
+      { x: 2, y: 2 }
+    ]
+    expect(sanitizeTemplate(badMark({ ...mark, tool: 'teardrop', points: two, dropWidth: 0.5 }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...mark, tool: 'polyline', points: [...two, { x: 3, y: 3 }] }))).not.toBeNull()
+    expect(sanitizeTemplate(badMark({ ...mark, tool: 'teardrop', points: two, dropWidth: 'wide' }))).toBeNull()
     expect(
       sanitizeTemplate(
         badMark({

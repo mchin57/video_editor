@@ -3,7 +3,10 @@
 import { type JSX } from 'react'
 import type { GraphicsContent, Layer } from '@shared/project'
 import {
+  canFill,
+  DEFAULT_DROP_WIDTH,
   GRAPHIC_TOOLS,
+  MARK_DEFAULTS,
   MARK_REVEALS,
   markTitle,
   TOOL_INFO,
@@ -23,6 +26,8 @@ import { Check, Field, NumberInput, Slider, colorCls, inputCls, subtleBtnCls, to
 const DEFAULT_FILL_ALPHA = 102
 /** A fill's opacity as a whole percent. */
 const fillPct = (fill: string): number => Math.round((getAlpha(fill) / 255) * 100)
+/** Whether a mark's fill shows at all (on, and not fully see-through). */
+const hasVisibleFill = (m: GraphicMark): boolean => !!m.fill && getAlpha(m.fill) > 0
 
 export function GraphicsSection({ layer, content }: { layer: Layer; content: GraphicsContent }): JSX.Element {
   const tool = useUi((s) => s.graphicsTool)
@@ -148,12 +153,13 @@ function MarkFields({
   onPatch: (fn: (m: GraphicMark) => GraphicMark) => void
   playheadAtSec: () => number
 }): JSX.Element {
-  const box = mark.tool === 'rect' || mark.tool === 'ellipse'
+  const fillable = canFill(mark.tool)
+  const lockable = mark.tool === 'rect' || mark.tool === 'ellipse'
   const clampAt = (v: number): number => Math.min(Math.max(0, maxAtSec - 0.05), Math.max(0, v))
   return (
     <div data-testid="mark-fields">
       <div className="flex gap-2">
-        <Field label="Color">
+        <Field label={fillable ? 'Border color' : 'Color'}>
           <input
             type="color"
             data-testid="mark-color"
@@ -162,10 +168,11 @@ function MarkFields({
             className={colorCls}
           />
         </Field>
-        <Field label={`Stroke · ${mark.widthPx}px`}>
+        <Field label={`${fillable ? 'Border' : 'Stroke'} · ${mark.widthPx}px`}>
           <Slider
-            ariaLabel="Stroke width"
-            min={2}
+            ariaLabel={fillable ? 'Border width' : 'Stroke width'}
+            // A shape with a visible fill may go borderless; otherwise it would vanish.
+            min={fillable && hasVisibleFill(mark) ? 0 : 2}
             max={40}
             value={mark.widthPx}
             onChange={(v) => onPatch((m) => ({ ...m, widthPx: v }))}
@@ -173,11 +180,18 @@ function MarkFields({
         </Field>
       </div>
 
-      {box && (
+      {fillable && (
         <>
           <Check
             checked={!!mark.fill}
-            onChange={(on) => onPatch((m) => ({ ...m, fill: on ? withAlpha(m.color, DEFAULT_FILL_ALPHA) : null }))}
+            onChange={(on) =>
+              onPatch((m) => ({
+                ...m,
+                fill: on ? withAlpha(m.color, DEFAULT_FILL_ALPHA) : null,
+                // Fill off with no border left would leave nothing to see.
+                widthPx: !on && m.widthPx < 2 ? MARK_DEFAULTS.widthPx : m.widthPx
+              }))
+            }
           >
             Fill
           </Check>
@@ -197,15 +211,35 @@ function MarkFields({
                   min={0}
                   max={100}
                   value={fillPct(mark.fill)}
-                  onChange={(v) => onPatch((m) => ({ ...m, fill: withAlpha(m.fill ?? m.color, (v / 100) * 255) }))}
+                  onChange={(v) =>
+                    onPatch((m) => ({
+                      ...m,
+                      fill: withAlpha(m.fill ?? m.color, (v / 100) * 255),
+                      // A see-through fill with no border left would leave nothing to see.
+                      widthPx: v === 0 && m.widthPx < 2 ? MARK_DEFAULTS.widthPx : m.widthPx
+                    }))
+                  }
                 />
               </Field>
             </div>
           )}
-          <Check checked={!!mark.lockAspect} onChange={(on) => onPatch((m) => withLockAspect(m, on))}>
-            {mark.tool === 'rect' ? 'Square (lock aspect)' : 'Circle (lock aspect)'}
-          </Check>
+          {lockable && (
+            <Check checked={!!mark.lockAspect} onChange={(on) => onPatch((m) => withLockAspect(m, on))}>
+              {mark.tool === 'rect' ? 'Square (lock aspect)' : 'Circle (lock aspect)'}
+            </Check>
+          )}
         </>
+      )}
+      {mark.tool === 'teardrop' && (
+        <Field label={`Width · ${Math.round((mark.dropWidth ?? DEFAULT_DROP_WIDTH) * 100)}%`}>
+          <Slider
+            ariaLabel="Drop width"
+            min={30}
+            max={100}
+            value={Math.round((mark.dropWidth ?? DEFAULT_DROP_WIDTH) * 100)}
+            onChange={(v) => onPatch((m) => ({ ...m, dropWidth: v / 100 }))}
+          />
+        </Field>
       )}
       {mark.tool === 'rect' && (
         <Field label={`Corner radius · ${mark.radiusPx ?? 0}px`}>

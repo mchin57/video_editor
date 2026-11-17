@@ -1,7 +1,8 @@
 /**
- * Graphics layers: shapes and telestrator marks (arrow, line, rectangle,
- * ellipse, angle) drawn over the picture. ONE implementation of how a mark
- * looks — `markShapes` turns a mark into SVG paths + a label, and both the
+ * Graphics layers: shapes and telestrator marks (arrow, line, connected line,
+ * rectangle, ellipse, teardrop, angle) drawn over the picture. ONE
+ * implementation of how a mark looks — `markShapes` turns a mark into SVG
+ * paths + a label, and both the
  * preview (React SVG) and the export (the same SVG, rasterised by the export's
  * Chromium, `services/textImage.ts`) draw exactly those. Timing (`markStateAt`)
  * is shared the same way: the export samples it for its draw-on frames and
@@ -20,8 +21,17 @@ export interface Pt {
   y: number
 }
 
-export const GRAPHIC_TOOLS = ['arrow', 'line', 'rect', 'ellipse', 'angle'] as const
+/** The tools, in the Inspector's picker order. */
+export const GRAPHIC_TOOLS = ['arrow', 'line', 'polyline', 'rect', 'ellipse', 'teardrop', 'angle'] as const
 export type GraphicTool = (typeof GRAPHIC_TOOLS)[number]
+
+/** The closed shapes that can carry a fill (and so have a "border" rather than a stroke). */
+export const FILLABLE_TOOLS = ['rect', 'ellipse', 'teardrop'] as const
+/** Whether a tool's marks can have a fill. */
+export const canFill = (tool: GraphicTool): boolean => (FILLABLE_TOOLS as readonly GraphicTool[]).includes(tool)
+
+/** A teardrop's default widest width, as a fraction of its tip→base length. */
+export const DEFAULT_DROP_WIDTH = 0.6
 
 /** How a mark comes on screen at its `atSec`: at once, fading in, or drawn in
  *  stroke-first over `REVEAL_SEC`. */
@@ -38,19 +48,23 @@ export interface GraphicMark {
   tool: GraphicTool
   /**
    * Canonical logical px, before the layer transform. `arrow`/`line`: [tail,
-   * tip]; `rect`/`ellipse`: two opposite corners of the box; `angle`: [vertex,
-   * end of arm A, end of arm B].
+   * tip]; `rect`/`ellipse`: two opposite corners of the box; `teardrop`: [tip
+   * (the sharp point), base (the far end of the round part)]; `angle`: [vertex,
+   * end of arm A, end of arm B]; `polyline`: every vertex in order (at least 2).
    */
   points: Pt[]
   color: string
   /** Stroke width in logical px. */
   widthPx: number
-  /** Fill colour of a rectangle/ellipse (absent/null = outline only). */
+  /** Fill colour of a rectangle/ellipse/teardrop (absent/null = outline only). */
   fill?: string | null
   /** Rectangle corner radius in logical px (absent = square corners). */
   radiusPx?: number
   /** Rectangle/ellipse edits keep the box 1:1 (a square / a circle). */
   lockAspect?: boolean
+  /** A teardrop's widest width as a fraction of its tip→base length (absent =
+   *  `DEFAULT_DROP_WIDTH`). */
+  dropWidth?: number
   /** Seconds after the layer's start the mark appears (≥ 0). */
   atSec: number
   reveal: MarkReveal
@@ -65,8 +79,13 @@ export const GRAPHICS_DEFAULT_SEC = 3
 export const TOOL_INFO: Record<GraphicTool, { label: string; hint: string }> = {
   arrow: { label: 'Arrow', hint: 'Drag from the tail to the tip, or click where it should point' },
   line: { label: 'Line', hint: 'Drag from one end to the other, or click to drop one' },
+  polyline: {
+    label: 'Connected line',
+    hint: 'Click each point in turn; double-click the last one (or press Enter) to finish'
+  },
   rect: { label: 'Rectangle', hint: 'Drag corner to corner, or click to drop one' },
   ellipse: { label: 'Ellipse', hint: 'Drag corner to corner, or click to drop one' },
+  teardrop: { label: 'Teardrop', hint: 'Drag from the point to the round end, or click to drop one' },
   angle: { label: 'Angle', hint: 'Click the joint, then a point along each limb' }
 }
 
@@ -228,6 +247,33 @@ function ellipseOutline(m: GraphicMark): Pt[] {
   return out
 }
 
+/** The widest |y| of the classic teardrop curve (x = cos t, y = sin t · sin(t/2)): 4 / (3√3). */
+const DROP_CURVE_HALF_WIDTH = 4 / (3 * Math.sqrt(3))
+
+/**
+ * A teardrop's outline in mark space, starting at the TIP and going round (97
+ * points, the last equal to the first): the classic curve x = cos t, y = sin t ·
+ * sin(t/2) laid along the tip→base axis, widest `dropWidth` × length. Empty when
+ * the tip and base coincide.
+ */
+export function teardropOutline(m: Pick<GraphicMark, 'points' | 'dropWidth'>): Pt[] {
+  const [tip, base] = m.points
+  const len = dist(tip, base)
+  if (len === 0) return []
+  const mid = lerp(tip, base, 0.5)
+  const dir = { x: (tip.x - base.x) / len, y: (tip.y - base.y) / len }
+  const perp = { x: -dir.y, y: dir.x }
+  const k = (m.dropWidth ?? DEFAULT_DROP_WIDTH) / DROP_CURVE_HALF_WIDTH
+  const out: Pt[] = []
+  for (let i = 0; i <= 96; i++) {
+    const t = (2 * Math.PI * i) / 96
+    const x = (Math.cos(t) * len) / 2
+    const y = (Math.sin(t) * Math.sin(t / 2) * k * len) / 2
+    out.push({ x: mid.x + dir.x * x + perp.x * y, y: mid.y + dir.y * x + perp.y * y })
+  }
+  return out
+}
+
 /** The angle between an angle mark's two arms, in degrees (0..180). */
 export function angleDeg(m: Pick<GraphicMark, 'points'>): number {
   const [v, a, b] = m.points
@@ -282,10 +328,12 @@ export const pathD = (pts: Pt[], close = false): string =>
 export function markShapes(m: GraphicMark, progress = 1): MarkShape[] {
   const p = clamp(progress, 0, 1)
   if (p <= 0 || m.points.length < 2) return []
+  // A width of 0 means no border at all (a filled shape's option). A borderless
+  // shape's draw-on therefore shows nothing until its fill lands at the end.
   const stroke = (pts: Pt[], close = false, fill: string | null = null, width = m.widthPx): MarkShape => ({
     kind: 'path',
     d: pathD(pts, close),
-    stroke: m.color,
+    stroke: width > 0 ? m.color : null,
     strokeWidth: width,
     fill
   })
@@ -308,9 +356,13 @@ export function markShapes(m: GraphicMark, progress = 1): MarkShape[] {
       const shaftEnd = { x: tip.x - dir.x * head * 0.7, y: tip.y - dir.y * head * 0.7 }
       return [stroke([a, shaftEnd]), stroke([tip, wing(1), wing(-1)], true, m.color, Math.max(2, m.widthPx * 0.5))]
     }
+    case 'polyline':
+      return [stroke(polylinePrefix(m.points, p))]
     case 'rect':
-    case 'ellipse': {
-      const outline = m.tool === 'rect' ? rectOutline(m) : ellipseOutline(m)
+    case 'ellipse':
+    case 'teardrop': {
+      const outline = m.tool === 'rect' ? rectOutline(m) : m.tool === 'ellipse' ? ellipseOutline(m) : teardropOutline(m)
+      if (outline.length < 2) return []
       if (p < 1) return [stroke(polylinePrefix(outline, p))]
       return [stroke(outline, true, m.fill ?? null)]
     }
@@ -360,6 +412,8 @@ export function markShapes(m: GraphicMark, progress = 1): MarkShape[] {
  */
 export function markBounds(m: GraphicMark): { x: number; y: number; w: number; h: number } {
   const pts = [...m.points]
+  // The drop bulges sideways of its axis: its whole outline is what's drawn.
+  if (m.tool === 'teardrop') pts.push(...teardropOutline(m))
   if (m.tool === 'angle' && m.points.length >= 3) {
     const label = markShapes(m, 1).find((s) => s.kind === 'label')
     if (label && label.kind === 'label') {
@@ -446,7 +500,13 @@ export const CLICK_SLOP = 12
  * default-sized one: an arrow pointing AT the click, a line/box/circle centred
  * on it. (Angles are placed point by point — `angleMark`.)
  */
-export function newMark(tool: Exclude<GraphicTool, 'angle'>, id: string, a: Pt, b: Pt, atSec: number): GraphicMark {
+export function newMark(
+  tool: Exclude<GraphicTool, 'angle' | 'polyline'>,
+  id: string,
+  a: Pt,
+  b: Pt,
+  atSec: number
+): GraphicMark {
   const base = { id, tool, color: MARK_DEFAULTS.color, widthPx: MARK_DEFAULTS.widthPx, atSec, reveal: 'pop' as const }
   if (dist(a, b) >= CLICK_SLOP) return { ...base, points: [a, b] }
   switch (tool) {
@@ -476,6 +536,14 @@ export function newMark(tool: Exclude<GraphicTool, 'angle'>, id: string, a: Pt, 
           { x: a.x + 130, y: a.y + 130 }
         ]
       }
+    case 'teardrop':
+      return {
+        ...base,
+        points: [
+          { x: a.x, y: a.y - 110 },
+          { x: a.x, y: a.y + 110 }
+        ]
+      }
   }
 }
 
@@ -490,6 +558,30 @@ export function angleMark(id: string, vertex: Pt, armA: Pt, armB: Pt, atSec: num
     atSec,
     reveal: 'pop'
   }
+}
+
+/** A new connected-line mark through `points` (at least 2). */
+export function polylineMark(id: string, points: Pt[], atSec: number): GraphicMark {
+  return {
+    id,
+    tool: 'polyline',
+    points,
+    color: MARK_DEFAULTS.color,
+    widthPx: MARK_DEFAULTS.widthPx,
+    atSec,
+    reveal: 'pop'
+  }
+}
+
+/**
+ * The points a connected line is finished with: each point within `CLICK_SLOP`
+ * of the previous kept one is dropped (a double-click's two presses land on the
+ * same spot), and null if fewer than 2 remain (keep drawing).
+ */
+export function finishPolyline(points: Pt[]): Pt[] | null {
+  const kept: Pt[] = []
+  for (const p of points) if (kept.length === 0 || dist(kept[kept.length - 1], p) >= CLICK_SLOP) kept.push(p)
+  return kept.length >= 2 ? kept : null
 }
 
 /**

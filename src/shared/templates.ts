@@ -234,7 +234,8 @@ const validMark = (m: unknown): boolean =>
   isNum(m.atSec) &&
   isStr(m.reveal) &&
   (m.fill === undefined || m.fill === null || isStr(m.fill)) &&
-  (m.radiusPx === undefined || isNum(m.radiusPx))
+  (m.radiusPx === undefined || isNum(m.radiusPx)) &&
+  (m.dropWidth === undefined || isNum(m.dropWidth))
 
 /** Every field the preview and the export read off a text layer, typed. */
 function validText(c: Record<string, unknown>): boolean {
