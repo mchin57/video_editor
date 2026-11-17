@@ -20,6 +20,7 @@ import { DEFAULT_TINT, isNeutralTint } from '@shared/tint'
 import { describeSharedAdd } from '@shared/sharedLibrary'
 import { copySharedLut, importLutDialog, ipcErrorMessage, listShared, shareLut } from '@/ipc/client'
 import { idle } from '@/lib/interaction'
+import { invalidateLuts } from '@/hooks/useLut'
 import { useProject } from '@/state/projectStore'
 import { CollapsibleSection } from '../CollapsibleSection'
 import { SHARED_QUERY_KEY } from '../SharedDialog'
@@ -163,6 +164,8 @@ function LutControls({ layerId, lut }: { layerId: string; lut: LutRef | null }):
   }
   const apply = async (got: { file: string; name: string } | null): Promise<void> => {
     if (!got) return
+    // It is in the project's luts/ now: a preview that found it missing (the same file, so the same name) reads it again.
+    void invalidateLuts(qc, [got.file])
     await idle()
     updateContent(layerId, { lut: { file: got.file, name: got.name, strength: lut?.strength || 1 } })
   }

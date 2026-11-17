@@ -98,7 +98,7 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
     setBusy(true)
     setError(null)
     setNote(null)
-    insertTemplate(t.id, media).then(
+    insertTemplate(t.id, media, qc).then(
       (res) => {
         setBusy(false)
         const said = templateDropNote(t.name, res)

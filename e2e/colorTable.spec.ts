@@ -15,7 +15,7 @@
  * ASSERT on pixels. Skipped without the bundled ffmpeg.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
@@ -429,6 +429,65 @@ test('with WebGL gone the clip shows ungraded, with a notice', async ({ appPage:
     .evaluate((c) => (c as HTMLCanvasElement).getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext())
   await expect(page.getByTestId('grade-warning')).toContainText('WebGL unavailable')
   expect(await video.evaluate((v) => getComputedStyle(v).opacity)).toBe('1')
+})
+
+test('a LUT missing from the project shows a notice until the same file is imported again, then draws', async ({
+  appPage: page,
+  electronApp,
+  projectsDir
+}) => {
+  test.skip(!existsSync(FFMPEG), 'bundled ffmpeg not staged (run npm run collect-binaries)')
+  test.setTimeout(120_000)
+  const clip = join(projectsDir, 'E2E', 'patches.mp4')
+  makePatchClip(clip)
+  const cube = join(projectsDir, 'warm.cube')
+  writeFileSync(cube, warmCube())
+  const id = await page.evaluate(async (p) => {
+    const [asset] = await window.api.importPaths([p])
+    window.__reelStores.useProject.getState().addMedia([asset.id])
+    return asset.id
+  }, clip)
+  await waitForProxy(page, id)
+  await page.evaluate((id) => {
+    const { useProject, usePlayback, useUi } = window.__reelStores
+    useProject.getState().addVideoLayer('V', id, 0, 2, false, 540 / 960)
+    usePlayback.getState().setTime(1)
+    useUi.getState().selectLayer('V')
+  }, id)
+  await page.addStyleTag({ content: '[data-testid="safe-zone"] { display: none !important }' })
+  await expect
+    .poll(async () => (await previewPatches(page, electronApp))[1][0], { timeout: 15_000 })
+    .toBeGreaterThan(110)
+  const ungraded = await previewPatches(page, electronApp)
+
+  // The project's copy of the LUT goes missing (a folder copied without luts/).
+  const lut = await importLut(page, electronApp, cube)
+  rmSync(join(projectsDir, 'E2E', 'luts', lut.file))
+  await setLook(page, 'V', { lut: { ...lut, strength: 1 } })
+  const warning = page.locator('[data-layer-id="V"] [data-testid="grade-warning"]')
+  await expect(warning).toContainText('LUT “warm” is missing')
+
+  // A lost and restored WebGL context keeps saying so (it does not reset to fine).
+  await page.getByTestId('grade-canvas').evaluate((c) => {
+    const ext = (c as HTMLCanvasElement).getContext('webgl2')!.getExtension('WEBGL_lose_context')!
+    ;(window as unknown as { __lose: WEBGL_lose_context }).__lose = ext
+    ext.loseContext()
+  })
+  await expect(warning).toContainText('WebGL unavailable')
+  await page.evaluate(() => (window as unknown as { __lose: WEBGL_lose_context }).__lose.restoreContext())
+  await expect(warning).toContainText('LUT “warm” is missing')
+
+  // Importing the very same file again (same content, so the same stored name)
+  // through the Inspector clears the notice, and the table is drawn.
+  await electronApp.evaluate(({ dialog }, p) => {
+    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [p] })) as typeof dialog.showOpenDialog
+  }, cube)
+  await page.getByTestId('lut-import').click()
+  await expect(warning).toHaveCount(0)
+  expect(existsSync(join(projectsDir, 'E2E', 'luts', lut.file))).toBe(true)
+  await expect
+    .poll(async () => worstDiff(await previewPatches(page, electronApp), ungraded), { timeout: 10_000 })
+    .toBeGreaterThan(20)
 })
 
 test('the Inspector imports a LUT, sets its strength, shares it and picks it back; the newer controls reset', async ({

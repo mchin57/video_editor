@@ -17,31 +17,16 @@
  */
 
 import { useEffect, useRef, type CSSProperties, type JSX, type RefObject } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { activeLut, bakeGradeTable, GRADE_TABLE_SIZE, type ColorLook } from '@shared/grade'
-import type { CubeTable } from '@shared/cube'
 import { createLogger } from '@shared/log'
-import { readLut } from '@/ipc/client'
 import { useLatest } from '@/hooks/useLatest'
+import { useLutTable } from '@/hooks/useLut'
 import { createGradeGl, MAX_GRADED_IMAGE_SIDE, type GradeGl, type GradeSource } from './gradeGl'
 
 const log = createLogger('grade-preview')
 
 /** How the colour-table preview is doing. */
 export type GradeStatus = 'ok' | 'unavailable' | 'lut-missing'
-
-/** A LUT file's parsed table (content-named, so cached for good). */
-function useLutTable(file: string | null): { table: CubeTable | null; missing: boolean } {
-  const q = useQuery({
-    queryKey: ['lut', file],
-    queryFn: () => readLut(file!),
-    enabled: !!file,
-    staleTime: Infinity,
-    gcTime: 10 * 60_000,
-    retry: false
-  })
-  return { table: q.data ?? null, missing: !!file && q.isError }
-}
 
 /** The fields of a look that change its table, as a stable string. */
 const lookKey = (look: ColorLook): string => JSON.stringify({ color: look.color, tint: look.tint, lut: look.lut })
@@ -72,6 +57,8 @@ export function GradeCanvas({
   const key = lookKey(look)
   const lutFile = activeLut(look.lut)?.file ?? null
   const lut = useLutTable(lutFile)
+  /** Whether the look's LUT couldn't be read — what a (re)made context reports, not a blanket 'ok'. */
+  const lutMissingNow = useLatest(lut.missing)
 
   // The context and the source: made once per source, remade after a context loss.
   useEffect(() => {
@@ -103,7 +90,7 @@ export function GradeCanvas({
         return
       }
       if (tableRef.current) glRef.current.setTable(GRADE_TABLE_SIZE, tableRef.current)
-      status.current('ok')
+      status.current(lutMissingNow.current ? 'lut-missing' : 'ok')
       draw()
     }
     const onLost = (e: Event): void => {
@@ -159,7 +146,7 @@ export function GradeCanvas({
       glRef.current?.dispose()
       glRef.current = null
     }
-  }, [video, imageSrc, status])
+  }, [video, imageSrc, status, lutMissingNow])
 
   // The table: baked when the look or its LUT changes — at most once a frame
   // while a slider drags (each change cancels the bake still waiting).
