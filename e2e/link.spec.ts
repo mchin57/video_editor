@@ -90,7 +90,7 @@ async function dragEdge(page: Page, testId: string, which: 'left' | 'right', sec
   const scale = await pps(page)
   const tile = page.getByTestId(testId)
   await tile.scrollIntoViewIfNeeded()
-  const handles = tile.locator('div.cursor-ew-resize')
+  const handles = tile.locator('div.cursor-ew-resize:not([data-testid])')
   const handle = which === 'left' ? handles.first() : handles.last()
   const box = (await handle.boundingBox())!
   const x = box.x + box.width / 2
@@ -143,7 +143,7 @@ test('Ctrl-click + Link makes tiles move as one, keeping their offset', async ({
 
   // The edge handles stay — on a linked tile they trim the whole group (covered
   // by the "added LINKED" test above).
-  await expect(page.getByTestId('tile-layer-L1').locator('div.cursor-ew-resize')).toHaveCount(2)
+  await expect(page.getByTestId('tile-layer-L1').locator('div.cursor-ew-resize:not([data-testid])')).toHaveCount(2)
 
   // Drag the layer 3s right: the audio follows by the same delta (offset stays 2s)
   // and neither tile changes length.

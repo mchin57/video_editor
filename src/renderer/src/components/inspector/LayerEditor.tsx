@@ -18,6 +18,7 @@ import { TextAnimationFields, LayerTextInput, TextEffectsFields } from './TextFi
 import { VideoClipSections } from './VideoSections'
 import { GraphicsSection } from './GraphicsSection'
 import { WorkoutSection } from './WorkoutSection'
+import { TransitionSection } from './TransitionSection'
 
 export function LayerEditor(): JSX.Element | null {
   const selectedLayerId = useUi((s) => s.selectedLayerId)
@@ -219,6 +220,13 @@ export function LayerEditor(): JSX.Element | null {
       {kind.keyframes === 'transform' && (
         <CollapsibleSection id="keyframes" title="Keyframes">
           <KeyframesSection layer={layer} frame={frame} zoomBase={zoomBase} />
+        </CollapsibleSection>
+      )}
+
+      {/* Transitions (#64): video and image tiles. */}
+      {(c.kind === 'video' || c.kind === 'image') && (
+        <CollapsibleSection id="transitions" title="Transitions">
+          <TransitionSection layer={layer} />
         </CollapsibleSection>
       )}
 

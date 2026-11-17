@@ -18,6 +18,7 @@ import { videoTimingActions } from './project/videoTimingActions'
 import { timelineActions } from './project/timelineActions'
 import { captionActions } from './project/captionActions'
 import { audioActions } from './project/audioActions'
+import { transitionActions } from './project/transitionActions'
 
 export { activeComp, projectFormat }
 export type { ProjectState }
@@ -32,7 +33,8 @@ export const useProject = create<ProjectState>((set, get) => {
     ...videoTimingActions(doc),
     ...timelineActions(doc),
     ...captionActions(doc),
-    ...audioActions(doc)
+    ...audioActions(doc),
+    ...transitionActions(doc)
   }
 })
 

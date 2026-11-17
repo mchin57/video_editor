@@ -153,7 +153,7 @@ export function registerTools(server: McpServer, call: CallEditor): void {
     'get_timeline',
     {
       description:
-        'What is on the timeline now (the composition open in the editor): each layer with TIMELINE start/end and, for video, its SOURCE in/out; for a workout overlay, the stretch of the recording shown (inSec/outSec, seconds into the workout), its speed (workout seconds per video second) and the metrics it shows; audio clips (a clip with a volume line lists its points as volumeLine: TIMELINE atSec + dB over its normal volume, -60 = silence; the editor draws it, and it is not editable through these tools; a re-timed clip lists its speed, pitch kept, and its holds: TIMELINE atSec + holdSec of silence where its linked clip is frozen); total duration.'
+        'What is on the timeline now (the composition open in the editor): each layer with TIMELINE start/end and, for video, its SOURCE in/out; for a workout overlay, the stretch of the recording shown (inSec/outSec, seconds into the workout), its speed (workout seconds per video second) and the metrics it shows; a video or image layer with a transition lists transitionIn / transitionOut (kind dissolve, dipBlack, dipWhite or fade; sec; withId = the clip a dissolve or dip joins it to, which it overlaps by sec; set them with set_transition); audio clips (a clip with a volume line lists its points as volumeLine: TIMELINE atSec + dB over its normal volume, -60 = silence; the editor draws it, and it is not editable through these tools; a re-timed clip lists its speed, pitch kept, and its holds: TIMELINE atSec + holdSec of silence where its linked clip is frozen); total duration.'
     },
     async () => result(await call('get_timeline', {}))
   )
@@ -329,6 +329,21 @@ export function registerTools(server: McpServer, call: CallEditor): void {
       inputSchema: { timeSec: sec() }
     },
     async (args) => result(await call('set_playhead', args))
+  )
+
+  server.registerTool(
+    'set_transition',
+    {
+      description:
+        'Set how a video or image clip comes in (side "in", at its start) or goes out (side "out", at its end), as one undo step. kind "dissolve" (cross dissolve), "dipBlack" or "dipWhite" JOIN the clip to the clip that meets it on that side (ends where it starts, or starts where it ends): the later clip, its linked sound and EVERYTHING after it move left by the length so the two overlap by it (the reel gets that much shorter), the later clip goes above the earlier one, and their linked sound crossfades over the same window. On a side already joined, it switches the pair\'s kind (and length, with sec). "fade" is a plain fade from / to whatever is underneath (breaks a joined pair, without sliding anything). "none" removes it (both sides of a pair; the clips keep their overlap). sec: length in seconds, 0.5 when not given, 0.1–2 and never more than half the shorter clip. get_timeline lists each layer\'s transitionIn / transitionOut (kind, sec, withId = the joined clip). Returns the transition now on that side, the joined clip, and the timeline.',
+      inputSchema: {
+        id: z.string().describe('A video or image layer id from get_timeline'),
+        side: z.enum(['in', 'out']),
+        kind: z.enum(['dissolve', 'dipBlack', 'dipWhite', 'fade', 'none']),
+        sec: z.number().min(0.1).max(2).optional().describe('Length in seconds')
+      }
+    },
+    async (args) => result(await call('set_transition', args))
   )
 
   server.registerTool(

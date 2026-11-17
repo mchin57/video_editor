@@ -4,7 +4,7 @@
  * main's `callRenderer` and the renderer's handlers can't drift apart.
  */
 
-import type { Project, TimelineItemRef } from '../project'
+import type { LayerTransition, Project, TimelineItemRef, TransitionKind } from '../project'
 import type { CompPath } from '../compositions'
 import type { TimelineSummary } from './timelineSummary'
 import type { UndoChanges } from './undoSummary'
@@ -77,6 +77,19 @@ export interface AssistantOps {
   setPlayhead: {
     args: { timeSec: number; sourceDurations: Record<string, number> }
     result: { timeSec: number; durationSec: number }
+  }
+  /** One clip edge's transition in ONE undo step (`setSideTransition`); throws,
+   *  changing nothing, when it can't. `partnerId` = the clip a dissolve / dip
+   *  joins it to. `sourceDurations` bounds the crossfade on open-ended audio. */
+  setTransition: {
+    args: {
+      id: string
+      side: 'in' | 'out'
+      kind: TransitionKind | 'none'
+      sec?: number
+      sourceDurations: Record<string, number>
+    }
+    result: { transition: LayerTransition | null; partnerId: string | null; timeline: TimelineSummary }
   }
 }
 

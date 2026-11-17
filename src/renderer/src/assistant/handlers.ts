@@ -145,6 +145,10 @@ const handlers: Handlers = {
     usePlayback.getState().setPlaying(false)
     usePlayback.getState().setTime(t)
     return { timeSec: t, durationSec }
+  },
+  setTransition: ({ id, side, kind, sec, sourceDurations }) => {
+    const r = useProject.getState().setSideTransition(id, side, kind, sec, (mediaId) => sourceDurations[mediaId] ?? 0)
+    return { ...r, timeline: summarizeTimeline(comp()) }
   }
 }
 

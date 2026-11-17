@@ -148,6 +148,35 @@ export function closeGap<C extends Composition>(
 }
 
 /**
+ * Move `also` (a clip's whole link group) and everything from `atSec` on by
+ * `delta` as ONE set, with the script lines pinned at or after `atSec` — the
+ * slide that makes or resizes a transition's overlap (`lib/transitions.ts`:
+ * the incoming clip, its group and everything after it move left, so the reel
+ * gets shorter). Unlike `closeGap` nothing is clamped: when the set's earliest
+ * tile would pass 0, `c` comes back unchanged (callers measure the room first
+ * with `roomBefore`).
+ */
+export function shiftFrom<C extends Composition>(c: C, atSec: number, delta: number, also: TimelineItemRef[] = []): C {
+  if (delta === 0) return c
+  const at = Math.max(0, atSec)
+  const movers = [...also, ...tilesFrom(c, at, also)]
+  if (delta < 0 && roomBefore(c, movers) < -delta - EPS) return c
+  return mapScript(moveItemsBy(c, movers, delta) as C, (t) => (t >= at - EPS ? Math.max(0, t + delta) : t))
+}
+
+/** How far `refs` can move left as one set: their earliest start (they stop
+ *  together at 0). Infinity for no tiles. */
+export function roomBefore(c: Composition, refs: TimelineItemRef[]): number {
+  const keys = refKeys(refs)
+  return Math.min(
+    Infinity,
+    ...timelineTiles(c)
+      .filter((t) => keys.has(refKey(t.ref)))
+      .map((t) => t.startSec)
+  )
+}
+
+/**
  * Make room for tiles that were just added at `atSec`: `after` is `before`
  * plus the new tiles, and everything else from `atSec` on moves later by how
  * far the new tiles reach past it — the new item's length (a clip with sound:

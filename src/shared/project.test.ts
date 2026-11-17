@@ -11,7 +11,7 @@ import {
   pillRadiusPx,
   stabilizeOverridden
 } from './project'
-import type { CaptionSegment, CaptionsConfig, AudioClip } from './project'
+import type { CaptionSegment, CaptionsConfig, AudioClip, Layer } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { makeWorkoutLayer } from './layers'
 
@@ -748,5 +748,34 @@ describe('migrateProject — audio re-timing (v32)', () => {
     expect('speed' in p.audioClips[0]).toBe(false)
     expect('freezes' in p.audioClips[0]).toBe(false)
     expect(p.audioClips[1]).toEqual(retimed)
+  })
+})
+
+describe('migrateProject — transitions (v35)', () => {
+  it('stamps a v34 document current; layers with and without transitions load as saved', () => {
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(35)
+    const plain: Layer = {
+      id: 'v',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'image', mediaId: 'm', opacity: 1 }
+    }
+    const faded: Layer = {
+      ...plain,
+      id: 'w',
+      transitionIn: { kind: 'dissolve', sec: 0.5 },
+      transitionOut: { kind: 'fade', sec: 1 }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 34, layers: [plain, faded] })
+    expect(p.version).toBe(PROJECT_VERSION)
+    // Absent = a cut: nothing is written onto an old layer.
+    expect(p.layers[0]).toEqual(plain)
+    expect('transitionIn' in p.layers[0]).toBe(false)
+    expect('transitionOut' in p.layers[0]).toBe(false)
+    expect(p.layers[1]).toEqual(faded)
   })
 })
