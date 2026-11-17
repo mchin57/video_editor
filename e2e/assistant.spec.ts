@@ -33,6 +33,7 @@ const TOOLS = [
   'request_feature',
   'set_playhead',
   'set_text',
+  'set_transition',
   'split_clip',
   'trim_clip',
   'undo',
@@ -765,6 +766,40 @@ test('set_playhead parks the playhead, paused, clamped to the edit', async ({ el
     /^Playhead at 3s \(clamped; the edit is 3s long\)/
   )
   expect(await page.evaluate(() => window.__reelStores.usePlayback.getState().time)).toBe(3)
+})
+
+test('set_transition joins two clips in one call and one undo step; get_timeline reports it', async ({
+  electronApp,
+  appPage: page
+}) => {
+  await page.evaluate(() => {
+    const st = window.__reelStores.useProject.getState()
+    st.addVideoLayer('A', 'no-such-media', 0, 4, true)
+    st.addVideoLayer('B', 'no-such-media', 4, 4, true)
+  })
+  const c = await connect(await pipeOf(electronApp))
+  const r = await call(c, 'set_transition', { id: 'B', side: 'in', kind: 'dipBlack', sec: 0.8 })
+  expect(r.isError, textOf(r)).toBeFalsy()
+  const out = JSON.parse(textOf(r)) as { transition: unknown; partnerId: string; note: string }
+  expect(out).toMatchObject({ transition: { kind: 'dipBlack', sec: 0.8 }, partnerId: 'A' })
+  expect(out.note).toMatch(/One undo step/)
+
+  const timeline = JSON.parse(textOf(await call(c, 'get_timeline'))) as {
+    layers: { id: string; startSec: number; transitionIn?: unknown; transitionOut?: unknown }[]
+  }
+  const byId = Object.fromEntries(timeline.layers.map((l) => [l.id, l]))
+  expect(byId.B).toMatchObject({ startSec: 3.2, transitionIn: { kind: 'dipBlack', sec: 0.8, withId: 'A' } })
+  expect(byId.A).toMatchObject({ transitionOut: { kind: 'dipBlack', sec: 0.8, withId: 'B' } })
+
+  // A clip with no neighbour on that side: refused, nothing changed.
+  const bad = await call(c, 'set_transition', { id: 'A', side: 'in', kind: 'dissolve' })
+  expect(bad.isError).toBe(true)
+  expect(textOf(bad)).toMatch(/No clip ends where this one starts/)
+
+  await call(c, 'undo')
+  const after = await page.evaluate(() => window.__reelStores.useProject.getState().project!.layers)
+  expect(after.find((l) => l.id === 'B')).toMatchObject({ startSec: 4 })
+  expect(after.find((l) => l.id === 'B')!.transitionIn).toBeUndefined()
 })
 
 /** A 3 s black 540×960 clip, synthesized with the real ffmpeg. */

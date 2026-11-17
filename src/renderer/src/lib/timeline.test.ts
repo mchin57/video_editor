@@ -895,3 +895,56 @@ describe('extractAudioClip (#58)', () => {
     expect(plain.volumeLevelId).toBe('default')
   })
 })
+
+describe('transitions through splits and trims (#64)', () => {
+  const withEdges = (l: Layer): Layer => ({
+    ...l,
+    transitionIn: { kind: 'dissolve', sec: 0.5 },
+    transitionOut: { kind: 'fade', sec: 1 }
+  })
+
+  it('a video split: the left half keeps the transition in, the right half the transition out', () => {
+    const [left, right] = splitVideoLayer(withEdges(makeVideoLayer('v', 'm', 0, 6)), 3, () => 'r')!
+    expect(left.transitionIn).toEqual({ kind: 'dissolve', sec: 0.5 })
+    expect('transitionOut' in left).toBe(false)
+    expect(right.transitionOut).toEqual({ kind: 'fade', sec: 1 })
+    expect('transitionIn' in right).toBe(false)
+  })
+
+  it('an image split follows the same rule', () => {
+    const img: Layer = withEdges({
+      id: 'i',
+      hidden: false,
+      startSec: 0,
+      endSec: 6,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'image', mediaId: 'm', opacity: 1 }
+    })
+    const [left, right] = splitStaticLayer(img, 2, () => 'r')!
+    expect(left.transitionIn).toEqual({ kind: 'dissolve', sec: 0.5 })
+    expect('transitionOut' in left).toBe(false)
+    expect(right.transitionOut).toEqual({ kind: 'fade', sec: 1 })
+    expect('transitionIn' in right).toBe(false)
+  })
+
+  it('a split of a tile without transitions adds no fields', () => {
+    const [left, right] = splitVideoLayer(makeVideoLayer('v', 'm', 0, 6), 3, () => 'r')!
+    for (const half of [left, right]) {
+      expect('transitionIn' in half).toBe(false)
+      expect('transitionOut' in half).toBe(false)
+    }
+  })
+
+  it('a trim keeps each transition on its edge, unchanged', () => {
+    const l = withEdges(makeVideoLayer('v', 'm', 0, 6))
+    for (const edge of ['start', 'end'] as const) {
+      for (const d of [-0.5, 0.7]) {
+        const { tile } = trimLayerEdge(l, edge, d, 20)
+        expect(tile.transitionIn).toEqual({ kind: 'dissolve', sec: 0.5 })
+        expect(tile.transitionOut).toEqual({ kind: 'fade', sec: 1 })
+      }
+    }
+  })
+})

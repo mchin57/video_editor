@@ -310,6 +310,115 @@ black + `signalstats` YAVG readbacks (drives `buildOpacityCmdLines` /
 - A still image needs the `-loop 1` + `fps=30` treatment (like transform
   keyframes) so there are frames for the commands to fire on.
 
+## Transitions — dissolve and dip through the opacity path (verified ffmpeg 8.1.1, 2026-11-16, #64)
+
+A transition is NOT `xfade` (which joins two whole equal-size streams): the
+incoming clip is an ordinary overlay whose opacity ramps through the keyframed-
+opacity path above, and a dip adds a colour card behind the two clips (first
+built as a full-frame plate; the card that replaced it is measured below, "The
+dip card sits only behind the clips"). Checked through the
+exporter's own `buildExportArgs` + `buildOpacityCmdLines` (bundled from the
+source), 360×640 x264 sources of two flat colours (A = 200/59/39, B = 38/77/199
+after the round trip), centre 100×100 mean RGB of every output frame:
+
+- **Dissolve = B's opacity 0→1 over the overlap, A untouched underneath.** With
+  B over A and the ramp over [2.5, 3.0], every frame matched
+  `α·B + (1−α)·A` (α the ramp at the frame's time n/30) to **≤ 2.4 code
+  values** (19 frames). The 50/50 point (t = 2.75) falls between frames 82
+  (α 0.467: 123/67/114) and 83 (α 0.533: 112/68/125); the 50/50 blend of the
+  measured sources is 119/68/119 — between them, as it should be. Frame 75
+  (t = 2.5) is A exactly and frame 90 (t = 3.0) B exactly. A must NOT fade out
+  too: two opposite ramps darken the middle (A·(1−α) under B·α lets the layer
+  below through).
+- **Two ramps multiply in one command file.** The layer's own opacity
+  keyframes (1 → 0.4 over [2.5, 3.5]) times the transition ramp (0 → 1 over
+  [2.5, 3.0]) as ONE point list — the product sampled every 1/30 s where both
+  change (it is quadratic there), linear after — matched `kf(t)·ramp(t)` blended
+  over A to **≤ 2.75 code values** at 18 frames across both stretches. No
+  second `colorchannelmixer` is needed: the shared function multiplies.
+- **Dip = A fades out over the first half onto a plate, B fades in over the
+  second half.** A full-frame `drawbox=x=0:y=0:w=iw:h=ih:color=0xFFFFFF:t=fill`
+  painted on the composite just UNDER A (enabled for the whole window), with a
+  green layer under everything: frames went A → 250/240/239 (t 2.733, A at
+  0.067) → 239/242/251 (t 2.767, B at 0.067) → B, never green — the plate hides
+  what is under the pair. `0x000000` gave 12/2/1 and 1/4/13 at the same two
+  frames (dip to black). (That full-frame plate also blanked everything outside
+  the clips — a letterboxed clip's bars, the main video under a
+  picture-in-picture pair — so the owner chose a card behind the clips instead;
+  see below.)
+- **`drawbox` on a transparent base needs `replace=1`.** On a `yuva420p` base (a
+  nested comp's intermediate) the default `replace=0` leaves alpha at 0 — the
+  plate would be invisible in the parent; `replace=1` writes alpha 255 inside
+  the box (alphaextract YAVG 0 → 255 → 0 across the enable window). On the
+  opaque `yuv420p` base `replace=1` gives identical pixels (255/255/255 inside,
+  47/174/63 after, both ways). (No longer used by the card below, which is an
+  overlay; kept as a verified fact.)
+- **The dip card sits only behind the clips (verified 2026-11-17).** The card is
+  one opaque colour SOURCE per covered clip, run through that clip's own
+  placement steps and overlaid where the clip is:
+  `color=c=0xRRGGBB:s=<the clip's pre-shift size>:r=30:d=<len>,setsar=1,format=yuv420p`
+  (`yuva420p` when rotated)`,setpts=PTS-STARTPTS+<start>/TB[,rotate=…][,scale=…:eval=frame]`
+  then `[prev][ppN]overlay=<the clip's own x:y>:enable='gte(t,a)*lt(t,b)'`
+  (`plateChains`, exporterArgs.ts). Through the exporter's own `buildExportArgs`
+  (bundled from the source), 1080×1920 x264, a full-frame green backdrop
+  (30/190/30 after the round trip), mean RGB of 200×200 regions (40×40 for the
+  small ones), dip window [2.0, 2.5):
+  - **Letterboxed 16:9 pair** (a 1080×608 band in the middle), dip to white:
+    frame 68 (t 2.267) band 240/240/252 (the card, B at 0.067), the bars above
+    and below 30/190/30 — the backdrop, untouched. Frame 60 band 197/38/37 (A).
+  - **Picture-in-picture pair in two places** (432×768 at (540, 96) and at
+    (108, 1056)) over a main full-frame video, dip to black: frame 68 A's box
+    0/0/0, B's box 1/1/13, the main video elsewhere 30/190/30. The card is the
+    UNION of the boxes, and nothing else goes dark.
+  - **Half-open window:** frame 75 (t = 2.5, the window's end) A's box shows the
+    main video again (30/190/30) and B's box is B (39/37/198); frame 59 (before
+    the window) A's box is A (197/38/37), B's box the main video.
+  - **Rotated box (30°):** its centre 255/255/255; a corner of the UNROTATED box
+    that lies outside the rotated one 30/190/30 — the card is the rotated box,
+    not its bounding rectangle.
+  - **Keyframed box** (moving 400 px right over its first second): at its
+    frame-68 position 240/240/252; a strip only its START position covered
+    30/190/30 — the card follows the keyframes. Rotation and keyframes need no
+    approximation: the card runs the clip's own `rotate` / per-frame `scale` /
+    overlay expressions.
+  - **Nested comp** (transparent `yuva420p` base, VP9 out): alpha 255 inside the
+    card, 0 in the bars; RGB 240/240/252. An overlay of an opaque source writes
+    alpha, so no `replace=1` is needed.
+  - **The real app** (e2e `transitionExport.spec.ts`): letterbox band
+    240/240/252 with the bars 30/190/30 (unchanged from before the dip), PiP box
+    1/1/13 with the main video 30/190/30. With the old full-frame plate the same
+    spec failed: the bar above the band changed by 225 in red (it went white).
+- **Audio: two linear `afade`s summed by `amix=normalize=0` dip about 3 dB in
+  the middle when the two sides are different material.** Clip A fade-out 0.5 s
+  and clip B fade-in 0.5 s over the same window, through `buildAudioGraph`, AAC
+  out, RMS relative to the clips alone:
+  - 440 Hz vs 660 Hz tones: **−2.95 dB** over the middle 100 ms, **−3.25 dB**
+    at the worst 20 ms window (theory for linear fades of uncorrelated signals:
+    (1−α)² + α² = 0.5 → −3.01 dB at α = 0.5);
+  - two pink noises (different seeds): −0.99 / −2.90 / −3.98 / −1.41 / −0.80 dB
+    in the five 100 ms windows (theory −0.83 / −2.32 / −2.95 / −2.32 / −0.83;
+    pink noise wanders ±1 dB in 100 ms);
+  - the SAME take on both sides, sample-aligned: −0.42 dB in the middle (theory
+    0 dB — the amplitudes add).
+  So a crossfade between two different shots dips by ~3 dB at its midpoint with
+  today's shared linear curve (`fadeGainAt`). An equal-power curve would hold the
+  level; changing the shared curve is an owner decision, not made here.
+- **What the export emits** (`exportTransitions.ts`, `layerOpacityPoints`): the
+  incoming clip's points go through the existing `opacityAnim` (so it takes the
+  rgba pipeline for its whole length), a dip's card is one colour source +
+  overlay per covered clip (above) inserted just before the layer it goes under
+  (no new input), and a layer without a
+  transition gets exactly its old keyframe points — an export without
+  transitions is byte-identical (`exporter.test.ts` snapshots unchanged). The
+  real app's export of a red and a blue clip (e2e `transitionExport.spec.ts`):
+  dissolve midpoint 114/38/125 between red 198/39/38 and blue 39/37/198, dip to
+  black 1/1/13, dip to white 240/240/252, crossfade middle −2.95 dB.
+- **Cost of the rgba pipeline**: a 19.5 s 1080×1920 synthetic reel (two
+  `testsrc2` clips, the second with a dissolve ramp) took 1.86 / 2.50 s plain vs
+  2.01 / 2.42 s with the ramp on x264, 2.15 / 2.02 s vs 2.28 / 2.04 s on NVENC
+  (two runs each) — within run-to-run noise. Not measured on a real 4K iPhone
+  reel.
+
 ## Graphics marks — draw-on sequences & alpha fade-in (verified ffmpeg 8.1.1, 2026-10-21)
 
 Each graphics mark is an ordinary image overlay (`exportGraphics.ts`); its

@@ -10,6 +10,18 @@ export const HOOK_SEC = 3
 export const SNAP_PX = 7
 /** Pointer slop (px) below which a press+release counts as a click, not a drag. */
 export const CLICK_SLOP = 2
+/** Width (px) of a tile's trim handles (`w-1.5` in Timeline.tsx): the band at
+ *  each edge where a press always trims, above a transition's wedge and grip. */
+export const TRIM_HANDLE_PX = 6
+/** Hit width (px) of a transition wedge's length grip (`timeline/transitions.tsx`). */
+export const GRIP_PX = 6
+/**
+ * Where a transition's grip sits: its offset (px) from the tile edge on its
+ * side — centred on the wedge's inner tip (`wedgePx` in from the edge), but
+ * never inside the trim handle's band, so a very short wedge's grip stays
+ * reachable beside the handle instead of under it.
+ */
+export const gripOffsetPx = (wedgePx: number): number => Math.max(TRIM_HANDLE_PX, wedgePx - GRIP_PX / 2)
 export const GUTTER = 84
 export const RULER_H = 20
 export const ROW_H = 26

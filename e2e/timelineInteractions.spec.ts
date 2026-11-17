@@ -36,7 +36,9 @@ async function drag(page: Page, el: Locator, dx: number, dy = 0): Promise<void> 
 }
 
 const edge = (tile: Locator, side: 'left' | 'right'): Locator =>
-  side === 'left' ? tile.locator('div.cursor-ew-resize').first() : tile.locator('div.cursor-ew-resize').last()
+  side === 'left'
+    ? tile.locator('div.cursor-ew-resize:not([data-testid])').first()
+    : tile.locator('div.cursor-ew-resize:not([data-testid])').last()
 
 const store = <T>(page: Page, fn: () => T): Promise<T> => page.evaluate(fn)
 

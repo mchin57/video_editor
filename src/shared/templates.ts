@@ -25,6 +25,7 @@ import { PROJECT_VERSION, createEmptyProject, isNeutralColor, migrateProject } f
 import { GRAPHIC_TOOLS } from './graphics'
 import { EASINGS } from './markAnim'
 import { audioPlayedSec } from './audioTiming'
+import { TRANSITION_KINDS } from './transitions'
 import { FORBIDDEN_NAME_CHARS, RESERVED_DEVICE_NAME } from './fileName'
 
 /** Bump when the stored shape changes incompatibly (`sanitizeTemplate` refuses newer). */
@@ -326,12 +327,18 @@ function validText(c: Record<string, unknown>): boolean {
   )
 }
 
+/** A tile edge's transition (shared/transitions.ts): a known kind and a positive length. */
+const validTransition = (t: unknown): boolean =>
+  isObj(t) && typeof t.kind === 'string' && t.kind in TRANSITION_KINDS && isNum(t.sec) && t.sec > 0
+
 function validLayer(v: unknown): v is Layer {
   if (!isObj(v) || !isStr(v.id) || !isObj(v.content)) return false
   if (![v.startSec, v.endSec, v.x, v.y, v.scale].every(isNum)) return false
   if ((v.endSec as number) <= (v.startSec as number)) return false
   if (v.keyframes !== undefined && !(Array.isArray(v.keyframes) && v.keyframes.every(validKeyframe))) return false
   for (const k of ['rotationDeg', 'stretchX', 'stretchY'] as const) if (v[k] !== undefined && !isNum(v[k])) return false
+  for (const k of ['transitionIn', 'transitionOut'] as const)
+    if (v[k] !== undefined && !validTransition(v[k])) return false
   const c = v.content
   switch (c.kind) {
     case 'text':

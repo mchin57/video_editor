@@ -8,6 +8,7 @@
 import type { AudioClip, CaptionSegment, FreezeHold, Layer, LayerKeyframe, VideoContent } from '@shared/project'
 import { audioTiming, effectiveOut } from '@shared/project'
 import { layerTransformAt } from '@shared/layers'
+import { splitTransitions } from '@shared/transitions'
 import { extractedAudioClip } from '@shared/volumeLevels'
 import { hasVolumeLine, splitVolumeKeyframes } from '@shared/audioEnvelope'
 import { audioTimelineAt } from '@shared/audioTiming'
@@ -130,6 +131,8 @@ function splitWindow(
  * `window = playedBetween(inSec, outSec) + Σ holds`. The ramp keyframes are
  * source-anchored, so both halves keep the full ramp list unchanged; transform
  * keyframes are start-relative and get partitioned (`splitLayerKeyframes`).
+ * Transitions split like a text entrance/exit: the left half keeps the
+ * transition IN, the right half the transition OUT (`splitTransitions`).
  */
 export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => string): [Layer, Layer] | null {
   if (layer.content.kind !== 'video') return null
@@ -151,7 +154,7 @@ export function splitVideoLayer(layer: Layer, atSec: number, makeId: () => strin
     keyframes: rightKfs,
     content: { ...c, inSec: cutSource, freezes: rightFreezes.length ? rightFreezes : undefined }
   }
-  return [left, right]
+  return splitTransitions(left, right)
 }
 
 /**
@@ -177,6 +180,8 @@ export function splitWorkoutLayer(layer: Layer, atSec: number, makeId: () => str
  *   right half keeps the EXIT (copying both onto both halves would replay the
  *   animation mid-block). `wordHighlight` is the exception: it spans the whole
  *   window rather than being an entrance, so both halves keep it;
+ * - an image's transitions, by the same rule: the left half keeps the
+ *   transition IN, the right half the transition OUT (`splitTransitions`);
  * - graphics marks (start-relative `atSec`): the left half keeps those that
  *   appear before the cut, the right half all of them re-based to its start
  *   (`shiftMarks` — one already on screen keeps its moment as a negative
@@ -205,7 +210,7 @@ export function splitStaticLayer(layer: Layer, atSec: number, makeId: () => stri
       animation: { ...anim, ...(spansWindow ? {} : { in: 'none' }) }
     }
   }
-  return [left, right]
+  return splitTransitions(left, right)
 }
 
 /**

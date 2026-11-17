@@ -11,7 +11,7 @@ import {
   pillRadiusPx,
   stabilizeOverridden
 } from './project'
-import type { CaptionSegment, CaptionsConfig, AudioClip } from './project'
+import type { CaptionSegment, CaptionsConfig, AudioClip, Layer } from './project'
 import { DEFAULT_FONT_ID, isKnownFont } from './fonts'
 import { makeWorkoutLayer } from './layers'
 
@@ -751,9 +751,38 @@ describe('migrateProject — audio re-timing (v32)', () => {
   })
 })
 
-describe('migrateProject — colour table controls and LUTs (v35)', () => {
-  it('stamps an older document current; graded clips and images load as saved, nothing is added', () => {
+describe('migrateProject — transitions (v35)', () => {
+  it('stamps a v34 document current; layers with and without transitions load as saved', () => {
     expect(PROJECT_VERSION).toBeGreaterThanOrEqual(35)
+    const plain: Layer = {
+      id: 'v',
+      hidden: false,
+      startSec: 0,
+      endSec: 4,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'image', mediaId: 'm', opacity: 1 }
+    }
+    const faded: Layer = {
+      ...plain,
+      id: 'w',
+      transitionIn: { kind: 'dissolve', sec: 0.5 },
+      transitionOut: { kind: 'fade', sec: 1 }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 34, layers: [plain, faded] })
+    expect(p.version).toBe(PROJECT_VERSION)
+    // Absent = a cut: nothing is written onto an old layer.
+    expect(p.layers[0]).toEqual(plain)
+    expect('transitionIn' in p.layers[0]).toBe(false)
+    expect('transitionOut' in p.layers[0]).toBe(false)
+    expect(p.layers[1]).toEqual(faded)
+  })
+})
+
+describe('migrateProject — colour table controls and LUTs (v36)', () => {
+  it('stamps an older document current; graded clips and images load as saved, nothing is added', () => {
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(36)
     const base = { hidden: false, startSec: 0, endSec: 2, x: 540, y: 960, scale: 1 }
     const graded = {
       ...base,
@@ -770,7 +799,7 @@ describe('migrateProject — colour table controls and LUTs (v35)', () => {
       }
     }
     const image = { ...base, id: 'I', content: { kind: 'image', mediaId: 'i', opacity: 1 } }
-    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 34, layers: [graded, image] })
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 35, layers: [graded, image] })
     expect(p.version).toBe(PROJECT_VERSION)
     // Absent = neutral: an old grade keeps exactly its fields (so its CSS / lutrgb look).
     expect(p.layers[0]).toEqual(graded)

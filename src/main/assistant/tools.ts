@@ -288,6 +288,11 @@ export const toolHandlers: { [K in ToolName]: (args: ToolArgs[K]) => Promise<Too
     return text(`Playhead at ${r2(r.timeSec)}s${clamped}. Playback is paused there.`)
   },
 
+  set_transition: async ({ id, side, kind, sec }) => {
+    const r = await callRenderer('setTransition', { id, side, kind, sec, sourceDurations: await sourceDurations() })
+    return json({ ...r, note: 'One undo step: call undo to revert it.' })
+  },
+
   render_frame: async ({ times }) => {
     // Render what the editor shows, so times match get_text / get_timeline: inside a
     // compound clip those are the clip's own local seconds.

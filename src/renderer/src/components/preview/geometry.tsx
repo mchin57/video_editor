@@ -3,7 +3,7 @@
 import { type CSSProperties, type JSX } from 'react'
 import type { Layer, VideoContent } from '@shared/project'
 import { type MediaAsset } from '@shared/media'
-import { layerTransformAt, stretchedBox, type ResizeBox } from '@shared/layers'
+import { effectiveImageAspect, layerTransformAt, stretchedBox, type ResizeBox } from '@shared/layers'
 import { kindInfo } from '@shared/layerKinds'
 import { normalizeDeg } from '@shared/rotation'
 import { gradeCssFilter, needsGradeTable, type ColorLook } from '@shared/grade'
@@ -79,6 +79,16 @@ export const mediaAspect = (asset: MediaAsset | undefined, content: VideoContent
   if ('crop' in content && content.crop) return content.crop.w / content.crop.h
   const v = asset?.probe.video
   return v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
+}
+/** A video / image layer's box aspect: a video's crop (else its source's
+ *  aspect); an image's source aspect reshaped by its crop and swapped by a
+ *  90°/270° turn. What `StackVideo` / `StackImage` size their box with — and
+ *  what a dip's card behind them uses, so the card is exactly their box. */
+export function mediaLayerAspect(layer: Layer, asset: MediaAsset | undefined): number {
+  const c = layer.content
+  if (c.kind === 'video') return mediaAspect(asset, c)
+  if (c.kind === 'image') return effectiveImageAspect(mediaAspect(asset, {}), c.crop, c.rotateQuarters)
+  return mediaAspect(asset, {})
 }
 /** The selected element's box as the handles need it: centre + UNROTATED size
  *  in logical px, its rotation, and the stage's screen px per logical px (for

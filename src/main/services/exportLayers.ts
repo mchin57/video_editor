@@ -19,7 +19,7 @@ import { ensureImagePath, getAsset } from './mediaStore'
 import { hdrToSdrChain } from './proxy'
 import { r } from './ffmpegFilters'
 import { lookFilter } from './exportGrade'
-import type { ExportVideo } from './exporterArgs'
+import type { ExportBox, ExportVideo } from './exporterArgs'
 import type { CompositionRender, Prerendered } from './exportRender'
 import { exportTextLayer } from './exportText'
 import { exportGraphicsLayer } from './exportGraphics'
@@ -49,19 +49,63 @@ export function exportLayer(pass: CompositionRender, l: Layer): Promise<void> {
   }
 }
 
-async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoContent): Promise<void> {
-  const { ctx, m, s } = pass
-  const asset = await getAsset(c.mediaId, ctx.session)
-  if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
-  const v = asset.probe.video
-  const aspect = c.crop
+/** A source's display size, as the probe gives it. */
+type DisplaySize = { displayWidth: number; displayHeight: number } | null | undefined
+
+/** A video layer's box aspect: its crop's, else the source's display aspect. */
+const videoAspect = (c: VideoContent, v: DisplaySize): number =>
+  c.crop
     ? c.crop.w / c.crop.h
     : v && v.displayHeight > 0
       ? v.displayWidth / v.displayHeight
       : FRAME.width / FRAME.height
+
+/** An image layer's box aspect: base aspect, reshaped by crop, swapped for a
+ *  90°/270° turn (shared helper). */
+const imageAspect = (c: ImageContent, v: DisplaySize): number =>
+  effectiveImageAspect(v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1, c.crop, c.rotateQuarters)
+
+/**
+ * A layer's box as the compositor places it (output px): the display box at
+ * its scale and stretch, centred on its position, with its rotation and
+ * position/scale keyframes. The ONE computation behind a video / image
+ * layer's own picture and a dip's card behind it (`mediaLayerBox`).
+ */
+function layerBox(pass: CompositionRender, l: Layer, aspect: number): ExportBox {
+  const { m, s } = pass
   const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
   const boxW = box.w * s
   const boxH = box.h * s
+  return {
+    boxW,
+    boxH,
+    x: r(m.x(l.x) - boxW / 2),
+    y: r(m.y(l.y) - boxH / 2),
+    rotationDeg: l.rotationDeg,
+    keyframes: pass.keyframes(l, aspect)
+  }
+}
+
+/**
+ * Where a video / image layer's picture is placed (`layerBox`, from its
+ * source's probe exactly as its exporter reads it), or null for another kind
+ * or a missing source — what a dip's card copies (`platesByLayer`).
+ */
+export async function mediaLayerBox(pass: CompositionRender, l: Layer): Promise<ExportBox | null> {
+  const c = l.content
+  if (c.kind !== 'video' && c.kind !== 'image') return null
+  const asset = await getAsset(c.mediaId, pass.ctx.session)
+  if (!asset) return null
+  const v = asset.probe.video
+  return layerBox(pass, l, c.kind === 'video' ? videoAspect(c, v) : imageAspect(c, v))
+}
+
+async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoContent): Promise<void> {
+  const { ctx } = pass
+  const asset = await getAsset(c.mediaId, ctx.session)
+  if (!asset) throw new Error(`Missing source media for a layer (${c.mediaId}).`)
+  const v = asset.probe.video
+  const aspect = videoAspect(c, v)
   const trimLen = Math.max(0.01, c.outSec - c.inSec)
   // Stabilization (clip override, else project default) pre-renders a
   // trimmed, SDR, stabilized intermediate; the composite then reads it from
@@ -94,12 +138,9 @@ async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoConte
     crop: c.crop ?? null,
     flipH: c.flipH,
     flipV: c.flipV,
-    rotationDeg: l.rotationDeg,
     colorEq: await lookFilter(c, pass.tmp, ctx.session.root),
-    boxW,
-    boxH,
-    x: r(m.x(l.x) - boxW / 2),
-    y: r(m.y(l.y) - boxH / 2),
+    // Box, position, rotation and keyframes (what a dip's card copies too).
+    ...layerBox(pass, l, aspect),
     startSec: l.startSec,
     endSec: l.endSec,
     freezes: (c.freezes ?? []).map((f) => ({ atLocal: f.atSec - c.inSec, holdSec: f.holdSec })),
@@ -107,7 +148,6 @@ async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoConte
     // Speed-ramp profile → boundary points in trimmed-input time. The
     // shared `speedSegments` resolves the same profile the preview plays.
     ramp: hasSpeedRamp(c) ? rampPoints(c) : undefined,
-    keyframes: pass.keyframes(l, aspect),
     opacity: await pass.opacityAnim(l)
   }
   pass.visuals.push({ kind: 'video', video: clip })
@@ -143,25 +183,18 @@ function rampPoints(c: VideoContent): { u: number; v: number }[] {
 }
 
 async function exportImageLayer(pass: CompositionRender, l: Layer, c: ImageContent): Promise<void> {
-  const { ctx, m, s } = pass
+  const { ctx } = pass
   const imgPath = await ensureImagePath(c.mediaId, ctx.session)
   if (!existsSync(imgPath)) return // display PNG missing → skip rather than fail
   const v = (await getAsset(c.mediaId, ctx.session))?.probe.video
-  const base = v && v.displayHeight > 0 ? v.displayWidth / v.displayHeight : 1
-  // base aspect, reshaped by crop, swapped for 90°/270° rotation (shared helper).
-  const aspect = effectiveImageAspect(base, c.crop, c.rotateQuarters)
+  const aspect = imageAspect(c, v)
   const q = (((c.rotateQuarters ?? 0) % 4) + 4) % 4
-  const box = stretchedBox(aspect, l.scale, l.stretchX ?? 1, l.stretchY ?? 1)
-  const boxW = box.w * s
-  const boxH = box.h * s
   pass.visuals.push({
     kind: 'image',
     image: {
       path: imgPath,
-      boxW,
-      boxH,
-      x: r(m.x(l.x) - boxW / 2),
-      y: r(m.y(l.y) - boxH / 2),
+      // Box, position, rotation and keyframes (what a dip's card copies too).
+      ...layerBox(pass, l, aspect),
       startSec: l.startSec,
       endSec: l.endSec,
       opacity: c.opacity,
@@ -169,9 +202,7 @@ async function exportImageLayer(pass: CompositionRender, l: Layer, c: ImageConte
       rotateQuarters: q,
       flipH: c.flipH,
       flipV: c.flipV,
-      rotationDeg: l.rotationDeg,
       grade: await lookFilter(c, pass.tmp, ctx.session.root),
-      keyframes: pass.keyframes(l, aspect),
       opacityAnim: await pass.opacityAnim(l, c.opacity)
     }
   })

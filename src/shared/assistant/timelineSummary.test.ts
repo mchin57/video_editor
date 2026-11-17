@@ -179,3 +179,25 @@ describe('summarizeTimeline', () => {
     expect(s.durationSec).toBe(1)
   })
 })
+
+describe('summarizeTimeline — transitions (#64)', () => {
+  it('lists each edge’s transition, naming the clip a dissolve / dip joins it to', () => {
+    const a = { ...makeVideoLayer('A', 'm', 0, 4), transitionOut: { kind: 'dissolve' as const, sec: 0.5 } }
+    const b = {
+      ...makeVideoLayer('B', 'm', 3.5, 4),
+      transitionIn: { kind: 'dissolve' as const, sec: 0.5 },
+      transitionOut: { kind: 'fade' as const, sec: 1 }
+    }
+    const [sa, sb] = summarizeTimeline({ ...createEmptyComposition(), layers: [a, b] }).layers
+    expect(sa.transitionOut).toEqual({ kind: 'dissolve', sec: 0.5, withId: 'B' })
+    expect(sa.transitionIn).toBeUndefined()
+    expect(sb.transitionIn).toEqual({ kind: 'dissolve', sec: 0.5, withId: 'A' })
+    expect(sb.transitionOut).toEqual({ kind: 'fade', sec: 1 })
+  })
+
+  it('a layer without transitions has neither field', () => {
+    const [s] = summarizeTimeline({ ...createEmptyComposition(), layers: [makeImageLayer('I', 'm', 0, 3)] }).layers
+    expect('transitionIn' in s).toBe(false)
+    expect('transitionOut' in s).toBe(false)
+  })
+})

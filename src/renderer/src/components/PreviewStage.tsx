@@ -29,6 +29,8 @@ import { usePlaybackClock } from '@/hooks/usePlaybackClock'
 import { dragKeyframe, dragMode, movedLayer, movedMotionEnd, resizedLayer, withCaptionStyle } from '@/lib/canvasDrag'
 import { CompAudioTrack } from './preview/audio'
 import { StackLayer } from './preview/layers'
+import { dipPlatesUnder } from './preview/transitions'
+import { transitionPlates } from '@shared/transitions'
 
 /**
  * The playback surface, shaped like the project's output format. Composites the
@@ -222,6 +224,8 @@ export function PreviewStage(): JSX.Element {
   }
 
   const activeLayers = layersAtTime(previewLayers, time).filter((l) => !l.hidden)
+  // Dip plates (transitions): drawn just under the layer they belong beneath.
+  const plates = useMemo(() => transitionPlates(previewLayers), [previewLayers])
   const selectedLayer = activeLayers.find((l) => l.id === selectedLayerId) ?? null
 
   // Measure the selected layer's box for the resize handles. Re-runs whenever the
@@ -287,7 +291,8 @@ export function PreviewStage(): JSX.Element {
             <CompAudioTrack clips={audioClips} assetById={assetById} time={time} playing={playing} />
 
             {/* The composited layer stack, back (index 0) → front. */}
-            {activeLayers.map((rawLayer, i) => (
+            {activeLayers.map((rawLayer, i) => [
+              ...dipPlatesUnder(plates, previewLayers, rawLayer.id, time, 10 + i, assetById),
               <StackLayer
                 key={rawLayer.id}
                 rawLayer={rawLayer}
@@ -299,7 +304,7 @@ export function PreviewStage(): JSX.Element {
                 onMoveDown={(e) => startLayerMove(e, withKeyframedTransform(rawLayer, time))}
                 editable
               />
-            ))}
+            ])}
 
             {/* Active captions: each rendered at its own effective style (lane-wide or
                 per-caption override) through the SAME TextBlock as a text layer,

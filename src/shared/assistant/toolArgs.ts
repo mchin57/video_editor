@@ -5,6 +5,7 @@
  */
 
 import type { TextEdit, TextQuery } from './onScreenText'
+import type { TransitionKind } from '../project'
 
 type NoArgs = Record<string, never>
 
@@ -31,6 +32,7 @@ export interface ToolArgs {
   get_text: TextQuery
   set_text: { edits: TextEdit[] }
   set_playhead: { timeSec: number }
+  set_transition: { id: string; side: 'in' | 'out'; kind: TransitionKind | 'none'; sec?: number }
   render_frame: { times: number[] }
   request_feature: { title: string; problem: string; proposal: string; workaround?: string }
 }
