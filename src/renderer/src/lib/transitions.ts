@@ -50,10 +50,14 @@ import {
 } from '@shared/transitions'
 import { expandGroup, type SourceDuration } from './links'
 import { roomBefore, SEAM_GAP_SEC, shiftFrom, tilesFrom } from './ripple'
+import { replaceAt, updateById } from './arrays'
 
 const EPS = 1e-6
 
-/** Lengths are kept to the millisecond (float noise from tile maths stays out of the document). */
+/** Lengths and fades are kept to the millisecond (float noise from tile maths
+ *  stays out of the document). Local on purpose: there is no shared seconds
+ *  rounder for the renderer (docs/SHARED.md — `f3` is main's string
+ *  formatter, and each pure module keeps its own `r3`). */
 const ms = (sec: number): number => Math.round(sec * 1000) / 1000
 
 /** Why Add transition is (not) available for a selection, and what it would do. */
@@ -126,14 +130,18 @@ export function placeAbove<C extends Composition>(c: C, lowerId: string, upperId
   const lo = c.layers.findIndex((l) => l.id === lowerId)
   const up = c.layers.findIndex((l) => l.id === upperId)
   if (lo < 0 || up < 0 || up > lo) return c
-  const layers = c.layers.filter((l) => l.id !== upperId)
-  layers.splice(layers.findIndex((l) => l.id === lowerId) + 1, 0, c.layers[up])
-  return { ...c, layers }
+  // Lift the upper tile out, then put it back right after the lower one: the
+  // lower one's slot becomes [lower, upper].
+  const without = c.layers.filter((l) => l.id !== upperId)
+  const at = without.findIndex((l) => l.id === lowerId)
+  return { ...c, layers: replaceAt(without, at, 1, without[at], c.layers[up]) }
 }
 
-function mapLayer<C extends Composition>(c: C, id: string, fn: (l: Layer) => Layer): C {
-  return { ...c, layers: c.layers.map((l) => (l.id === id ? fn(l) : l)) }
-}
+/** `c` with layer `id` replaced by `fn(layer)` (`updateById`). */
+const mapLayer = <C extends Composition>(c: C, id: string, fn: (l: Layer) => Layer): C => ({
+  ...c,
+  layers: updateById(c.layers, id, fn)
+})
 
 /** Audio clip `a`'s timeline window through the shared timing (its source
  *  window played at its speed, holds included — shared/audioTiming.ts), or

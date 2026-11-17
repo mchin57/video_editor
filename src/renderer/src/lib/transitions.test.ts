@@ -349,6 +349,12 @@ describe('the ripple pieces', () => {
   it('placeAbove moves the upper tile directly above the lower one', () => {
     const c = comp([video('B', 4, 4), makeTextLayer('T', 0, 9), video('A', 0, 4)])
     expect(placeAbove(c, 'A', 'B').layers.map((l) => l.id)).toEqual(['T', 'A', 'B'])
+    // The lower tile at the top of what is left: the upper one goes after it.
+    const two = comp([video('B', 4, 4), video('A', 0, 4), makeTextLayer('T', 0, 9)])
+    expect(placeAbove(two, 'A', 'B').layers.map((l) => l.id)).toEqual(['A', 'B', 'T'])
+    expect(placeAbove(comp([video('B', 4, 4), video('A', 0, 4)]), 'A', 'B').layers.map((l) => l.id)).toEqual(['A', 'B'])
+    // Already above: unchanged.
+    expect(placeAbove(c, 'T', 'A')).toBe(c)
   })
 })
 
