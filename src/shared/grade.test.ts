@@ -17,7 +17,7 @@ import {
   type ColorLook
 } from './grade'
 import { NEUTRAL_COLOR, hasNewColorControls, isNeutralColor, type ColorAdjust } from './project'
-import { n6 as cubeN6, parseCube, tetrahedral, writeCube, type CubeTable } from './cube'
+import { n6, parseCube, tetrahedral, writeCube, type CubeTable } from './cube'
 import { tintMatrix } from './tint'
 
 const g = (brightness: number, contrast = 1, saturation = 1) => ({ brightness, contrast, saturation })
@@ -213,7 +213,7 @@ describe('bakeGradeTable', () => {
     const t = bakeGradeTable({}, null, 17)
     const want = Float32Array.from(
       Array.from({ length: 17 ** 3 }, (_, i) => [i % 17, Math.floor(i / 17) % 17, Math.floor(i / 289)]).flatMap((c) =>
-        c.map((v) => cubeN6(v / 16))
+        c.map((v) => n6(v / 16))
       )
     )
     expect(t.every((v, i) => v === want[i])).toBe(true)

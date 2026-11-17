@@ -38,10 +38,9 @@ import {
   type VideoContent
 } from './project'
 import { isNeutralTint, tintMatrix } from './tint'
-import { n6 as cubeN6, sampleCube, type CubeTable } from './cube'
-
-/** Round to 6 places so the preview, the export string and the tests print the same numbers. */
-const n6 = (v: number): number => Math.round(v * 1e6) / 1e6
+// `n6` (round to 6 places) is the one rounding the preview, the export strings,
+// the written tables and the tests share.
+import { n6, sampleCube, type CubeTable } from './cube'
 
 /** The most saturation a grade applies — the Inspector slider's top. Above
  *  about 2.08 a matrix entry leaves `colorchannelmixer`'s −2..2 range and the
@@ -332,9 +331,9 @@ export function bakeGradeTable(look: ColorLook, lut: CubeTable | null, size = GR
         rgb[1] = g / s
         rgb[2] = b / s
         f(rgb, o)
-        out[i++] = cubeN6(o[0])
-        out[i++] = cubeN6(o[1])
-        out[i++] = cubeN6(o[2])
+        out[i++] = n6(o[0])
+        out[i++] = n6(o[1])
+        out[i++] = n6(o[2])
       }
     }
   }

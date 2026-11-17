@@ -129,7 +129,8 @@ function sizeOf(rest: string[], line: number, lo: number, hi: number): number {
   return v
 }
 
-/** Round to 6 places — what the written file holds, so both sides read the same numbers. */
+/** Round to 6 places — what a written table holds, and what the grade (shared/grade.ts) rounds its
+ *  curve and matrices to, so the preview, the export strings and the tests all see the same numbers. */
 export const n6 = (v: number): number => Math.round(v * 1e6) / 1e6
 
 /** A 3D table as `.cube` text: `LUT_3D_SIZE` then one `r g b` line per entry (6 decimals, LF). */
