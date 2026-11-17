@@ -5,7 +5,7 @@
  * change slides again; removing leaves the overlap.
  */
 import { describe, it, expect } from 'vitest'
-import type { AudioClip, Composition, Layer, LayerTransition, TimelineItemRef } from '@shared/project'
+import type { AudioClip, CaptionSegment, Composition, Layer, LayerTransition, TimelineItemRef } from '@shared/project'
 import { createEmptyComposition, createEmptyProject } from '@shared/project'
 import { makeImageLayer, makeTextLayer, makeVideoLayer } from '@shared/layers'
 import { pairOf, transitionPairs } from '@shared/transitions'
@@ -215,6 +215,53 @@ describe('length, kind, removal and fades', () => {
       startSec: 8,
       transitionOut: tr('fade', 1.5)
     })
+  })
+})
+
+describe('tiles inside the overlap stay with the outgoing clip (owner decision 7)', () => {
+  const caption = (id: string, start: number, end: number): CaptionSegment => ({
+    id,
+    startSec: start,
+    endSec: end,
+    text: id,
+    words: [],
+    enabled: true
+  })
+  /** reel() plus two UNLINKED captions: one over A's last words (3.7–4), one
+   *  over B's words a second in (5–5.8). */
+  const captioned = (): Composition => {
+    const c = reel()
+    return {
+      ...c,
+      captions: { ...c.captions, segments: [caption('endOfA', 3.7, 4), caption('inB', 5, 5.8)] }
+    }
+  }
+  const cap = (c: Composition, id: string): number => c.captions.segments.find((s) => s.id === id)!.startSec
+
+  it('applying: the caption over the outgoing clip’s end stays; the one after the cut slides with B', () => {
+    const c = applyTransition(captioned(), AB, 'dissolve')
+    expect(get(c, 'B').startSec).toBe(3.5)
+    expect(cap(c, 'endOfA')).toBe(3.7) // now inside the overlap [3.5, 4)
+    expect(cap(c, 'inB')).toBe(4.5)
+  })
+
+  it('resizing, again and again: B, its group and the tiles after the cut move; the caption in the overlap never does', () => {
+    let c = applyTransition(captioned(), AB, 'dissolve')
+    for (const sec of [1, 0.25, 0.5, 2]) {
+      c = setTransitionLength(c, 'B', 'in', sec)
+      const b = get(c, 'B')
+      expect(b.startSec).toBeCloseTo(4 - sec, 9) // the cut (A's end) never moves
+      expect(getA(c, 'b').startSec).toBeCloseTo(b.startSec, 9)
+      expect(cap(c, 'endOfA'), `at ${sec} s`).toBe(3.7)
+      expect(cap(c, 'inB') - b.startSec, `at ${sec} s`).toBeCloseTo(1, 9) // keeps its place on B
+      expect(get(c, 'T').startSec - b.startSec).toBeCloseTo(4.5, 9) // the title over C too
+    }
+  })
+
+  it('the room to grow is measured from the cut (a caption in the overlap does not block it)', () => {
+    // B and everything after the cut can slide to 0; the caption in the overlap is not part of that set.
+    const c = applyTransition(captioned(), AB, 'dissolve')
+    expect(maxSideSec(c, 'B', 'in')).toBe(2)
   })
 })
 

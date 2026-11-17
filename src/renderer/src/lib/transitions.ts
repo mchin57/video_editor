@@ -19,7 +19,11 @@
  *   transition's length (ordinary fade fields, editable afterwards). A length
  *   change carries a fade along only while it still equals the old length.
  * - **Resizing a pair slides the incoming side again** by the change, so the
- *   overlap always equals the length.
+ *   overlap always equals the length — the incoming clip, its link group and
+ *   the tiles after the CUT (the outgoing clip's end, i.e. the incoming
+ *   clip's pre-overlap start, which no resize moves). A tile that starts
+ *   inside the overlap (an unlinked caption over the outgoing clip's last
+ *   words) stays put.
  * - **Removing a transition leaves the overlap** as a plain overlap (both sides
  *   of a pair go; nothing slides back, the fades stay).
  * - Lengths: 0.5 s by default, 0.1–2 s, never more than half the shorter clip.
@@ -36,6 +40,7 @@ import {
   TRANSITION_KINDS,
   TRANSITION_MIN_SEC,
   withTransition,
+  type TransitionPair,
   type TransitionSide
 } from '@shared/transitions'
 import { expandGroup, timelineTiles, type SourceDuration } from './links'
@@ -89,17 +94,27 @@ export function transitionCandidate(c: Composition, refs: TimelineItemRef[]): Tr
   }
   const len = ms(clampTransitionSec(sec, max))
   const slide = Math.max(0, ms(len - overlap))
-  if (slide > EPS && roomBefore(c, movers(c, b)) < slide - 1e-3) {
+  if (slide > EPS && roomBefore(c, movers(c, b, b.startSec)) < slide - 1e-3) {
     return { ok: false, reason: 'There is no room to slide the second clip in.' }
   }
   return { ok: true, outId: a.id, inId: b.id, sec: len, slide }
 }
 
-/** What slides when the incoming clip `b` moves: its group and everything after its start. */
-function movers(c: Composition, b: Layer): TimelineItemRef[] {
+/** What slides when the incoming clip `b` moves: its group and every tile
+ *  that starts at or after `fromSec` (`tilesFrom`). */
+function movers(c: Composition, b: Layer, fromSec: number): TimelineItemRef[] {
   const group = groupOf(c, b.id)
-  return [...group, ...tilesFrom(c, b.startSec, group)]
+  return [...group, ...tilesFrom(c, fromSec, group)]
 }
+
+/**
+ * Where a pair's tiles "after the cut" begin: the incoming clip's ORIGINAL,
+ * pre-overlap start — the end of the outgoing clip, which no resize moves
+ * (only the incoming side slides), so it is the same point however often the
+ * pair is resized. A tile that starts inside the overlap (before it) stays
+ * with the outgoing clip.
+ */
+const cutOf = (c: Composition, pair: TransitionPair): number => c.layers.find((l) => l.id === pair.outId)!.endSec
 
 /** `upperId` placed directly above `lowerId` in the stack when it is below it now. */
 export function placeAbove<C extends Composition>(c: C, lowerId: string, upperId: string): C {
@@ -178,14 +193,18 @@ export function maxSideSec(c: Composition, id: string, side: TransitionSide): nu
   if (!pair) return maxTransitionSec(tileLen(l))
   const a = c.layers.find((x) => x.id === pair.outId)!
   const b = c.layers.find((x) => x.id === pair.inId)!
-  return Math.min(maxTransitionSec(tileLen(a), tileLen(b)), pair.sec + roomBefore(c, movers(c, b)))
+  return Math.min(maxTransitionSec(tileLen(a), tileLen(b)), pair.sec + roomBefore(c, movers(c, b, cutOf(c, pair))))
 }
 
 /**
  * Change the length of layer `id`'s transition on `side`. A pair resizes
  * together: the incoming side slides by the change (so the overlap stays equal
- * to the length) and the crossfade follows. A lone side (a fade) just changes.
- * Held to [0.1 s, `maxSideSec`].
+ * to the length) and the crossfade follows. What slides is the incoming clip,
+ * its link group and every tile that starts at or after the CUT (`cutOf`: the
+ * outgoing clip's end, the incoming clip's pre-overlap start) — a tile that
+ * starts inside the overlap, such as an unlinked caption over the outgoing
+ * clip's last words, stays. A lone side (a fade) just changes. Held to
+ * [0.1 s, `maxSideSec`].
  */
 export function setTransitionLength<C extends Composition>(
   c: C,
@@ -203,8 +222,7 @@ export function setTransitionLength<C extends Composition>(
     return Math.abs(next - tr.sec) < EPS ? c : mapLayer(c, id, (x) => withTransition(x, side, { ...tr, sec: next }))
   const delta = next - pair.sec
   if (Math.abs(delta) < EPS) return c
-  const b = c.layers.find((x) => x.id === pair.inId)!
-  let out = shiftFrom(c, b.startSec, -delta, groupOf(c, b.id))
+  let out = shiftFrom(c, cutOf(c, pair), -delta, groupOf(c, pair.inId))
   if (out === c) return c // no room (maxSideSec should have prevented it)
   const resized: LayerTransition = { kind: pair.kind, sec: next }
   out = mapLayer(out, pair.outId, (x) => withTransition(x, 'out', resized))
