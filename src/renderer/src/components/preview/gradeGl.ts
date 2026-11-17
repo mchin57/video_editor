@@ -64,7 +64,9 @@ export interface GradeGl {
   /** Upload a baked table (`size`³ RGB, red fastest). */
   setTable(size: number, data: Float32Array): void
   /** Draw `source` through the table at `width`×`height` (the canvas is resized
-   *  to match). False when there is nothing to draw yet (no table / no frame). */
+   *  to match). False when there is nothing to draw yet (no table / no size).
+   *  THROWS when the source can't be uploaded (a CORS-tainted or broken
+   *  element) — the caller shows the plain element instead. */
   draw(source: GradeSource, width: number, height: number): boolean
   /** The context is gone (lost, or never made). */
   readonly lost: boolean
@@ -145,11 +147,9 @@ export function createGradeGl(canvas: HTMLCanvasElement): GradeGl | null {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, scaled ? gl.LINEAR : gl.NEAREST)
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
-      try {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source)
-      } catch {
-        return false // a frame that isn't ready yet (or a source that went away mid-draw)
-      }
+      // The caller only draws a source that has a frame, so a throw here is real
+      // (a tainted or broken source): it propagates, and the caller falls back.
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source)
       gl.viewport(0, 0, width, height)
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)

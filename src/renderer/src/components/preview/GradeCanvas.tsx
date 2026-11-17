@@ -23,8 +23,10 @@
  * a slider dragged THROUGH neutral doesn't drop and remake a context.
  *
  * If WebGL2 is unavailable or its context is lost, `onStatus('unavailable')`
- * tells the layer to show the element ungraded with `GradeNotice`; a LUT whose
- * file can't be read reports `'lut-missing'` and draws the rest of the look.
+ * tells the layer to show the element ungraded with `GradeNotice`; a source
+ * WebGL can't take (a picture that won't load with CORS, an upload that
+ * throws) reports `'failed'` the same way, logged; a LUT whose file can't be
+ * read reports `'lut-missing'` and draws the rest of the look.
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react'
@@ -37,7 +39,10 @@ import { createGradeGl, MAX_GRADED_IMAGE_SIDE, type GradeGl, type GradeSource } 
 const log = createLogger('grade-preview')
 
 /** How the colour-table preview is doing. */
-export type GradeStatus = 'ok' | 'unavailable' | 'lut-missing'
+export type GradeStatus = 'ok' | 'unavailable' | 'failed' | 'lut-missing'
+
+/** Whether the canvas is drawing (the rest of) the look — false shows the plain element ungraded. */
+const drawing = (s: GradeStatus): boolean => s === 'ok' || s === 'lut-missing'
 
 /** How long a look stays on the table path after it stops needing it (see the header). */
 export const TABLE_PATH_HOLD_MS = 250
@@ -80,7 +85,7 @@ export function useGradeView(look: ColorLook): GradeView {
   return {
     graded,
     status,
-    hideElement: graded && drawn && status !== 'unavailable',
+    hideElement: graded && drawn && drawing(status),
     onStatus: setStatus,
     onDrawn: setDrawn
   }
@@ -119,6 +124,8 @@ export function GradeCanvas({
   const tableRef = useRef<Float32Array | null>(null)
   /** How many tables have been baked — `data-bakes`, what a test waits on after changing the look. */
   const bakesRef = useRef(0)
+  /** The current source can't be drawn by WebGL (a picture that won't load, an upload that throws). */
+  const failedRef = useRef(false)
   /** Draws the current frame / picture (set by the source effect). */
   const redrawRef = useRef<() => void>(() => {})
   const status = useLatest(onStatus)
@@ -144,6 +151,17 @@ export function GradeCanvas({
     let source: GradeSource | null = video?.current ?? null
     let raf = 0
     let disposed = false
+    failedRef.current = false
+    const what = imageSrc ? 'picture' : 'clip'
+    /** WebGL can't take this source: show the plain element ungraded, with the notice, and say why in the log. */
+    const fail = (why: string, error?: unknown): void => {
+      if (failedRef.current) return
+      failedRef.current = true
+      log.warn(`${why}: the ${what} shows ungraded in the preview`, error)
+      delete canvas.dataset.drawn
+      drawnCb.current(false)
+      status.current('failed')
+    }
     const size = (): [number, number] => {
       if (source instanceof HTMLVideoElement) return [source.videoWidth, source.videoHeight]
       if (!source || !source.naturalWidth) return [0, 0]
@@ -152,12 +170,19 @@ export function GradeCanvas({
     }
     const draw = (): void => {
       const gl = glRef.current
-      if (!gl || !source) return
+      if (!gl || !source || failedRef.current) return
       if (source instanceof HTMLVideoElement && source.readyState < 2) return
       if (source instanceof HTMLImageElement && !source.complete) return
       const [w, h] = size()
+      let drew: boolean
+      try {
+        drew = gl.draw(source, w, h)
+      } catch (error) {
+        fail('WebGL could not read the frame', error)
+        return
+      }
       // The first picture: now the layer may hide its plain element (`data-drawn` is a test seam).
-      if (gl.draw(source, w, h) && !canvas.dataset.drawn) {
+      if (drew && !canvas.dataset.drawn) {
         canvas.dataset.drawn = '1'
         drawnCb.current(true)
       }
@@ -165,17 +190,17 @@ export function GradeCanvas({
     const init = (): void => {
       glRef.current = createGradeGl(canvas)
       if (!glRef.current) {
-        log.warn('WebGL2 is unavailable: the clip shows ungraded in the preview')
+        log.warn(`WebGL2 is unavailable: the ${what} shows ungraded in the preview`)
         status.current('unavailable')
         return
       }
       if (tableRef.current) glRef.current.setTable(GRADE_TABLE_SIZE, tableRef.current)
-      status.current(lutMissingNow.current ? 'lut-missing' : 'ok')
+      status.current(failedRef.current ? 'failed' : lutMissingNow.current ? 'lut-missing' : 'ok')
       draw()
     }
     const onLost = (e: Event): void => {
       e.preventDefault() // lets the browser offer it back (webglcontextrestored)
-      log.warn('the WebGL context was lost: the clip shows ungraded in the preview')
+      log.warn(`the WebGL context was lost: the ${what} shows ungraded in the preview`)
       // Its textures and program went with it; a restore makes new ones.
       glRef.current = null
       delete canvas.dataset.drawn
@@ -219,6 +244,7 @@ export function GradeCanvas({
       img.crossOrigin = 'anonymous'
       img.decoding = 'async'
       img.onload = kick
+      img.onerror = () => fail(`the picture ${imageSrc} could not be loaded for WebGL`)
       img.src = imageSrc
       source = img
     }
@@ -230,7 +256,7 @@ export function GradeCanvas({
       canvas.removeEventListener('webglcontextlost', onLost)
       canvas.removeEventListener('webglcontextrestored', onRestored)
       if (source instanceof HTMLVideoElement) for (const [ev, fn] of events) source.removeEventListener(ev, fn)
-      if (img) img.onload = null
+      if (img) img.onload = img.onerror = null
       redrawRef.current = () => {}
       // Give the context back now (not at garbage collection), then drop its canvas.
       glRef.current?.dispose()
@@ -251,7 +277,7 @@ export function GradeCanvas({
       tableRef.current = bakeGradeTable(parsed, lutTable)
       glRef.current?.setTable(GRADE_TABLE_SIZE, tableRef.current)
       redrawRef.current()
-      if (glRef.current && !glRef.current.lost) status.current(lutMissing ? 'lut-missing' : 'ok')
+      if (glRef.current && !glRef.current.lost && !failedRef.current) status.current(lutMissing ? 'lut-missing' : 'ok')
       bakesRef.current++
       if (canvasRef.current) canvasRef.current.dataset.bakes = String(bakesRef.current)
     })
@@ -267,7 +293,9 @@ export function GradeNotice({ status, lutName }: { status: GradeStatus; lutName?
   const text =
     status === 'unavailable'
       ? 'Colour preview off (WebGL unavailable) — the export still applies the grade'
-      : `LUT “${lutName ?? 'LUT'}” is missing — shown without it`
+      : status === 'failed'
+        ? 'Colour preview off (WebGL couldn’t read this media) — the export still applies the grade'
+        : `LUT “${lutName ?? 'LUT'}” is missing — shown without it`
   return (
     <div
       data-testid="grade-warning"

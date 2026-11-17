@@ -64,3 +64,18 @@ describe('createGradeGl', () => {
     expect(createGradeGl(canvasWith(gl))).toBeNull()
   })
 })
+
+describe('draw', () => {
+  it('draws nothing before a table; an upload that throws is NOT swallowed (the caller falls back)', () => {
+    const { gl, calls } = fakeGl()
+    const g = createGradeGl(canvasWith(gl))!
+    const video = document.createElement('video')
+    expect(g.draw(video, 16, 9)).toBe(false)
+    g.setTable(2, new Float32Array(24))
+    expect(g.draw(video, 16, 9)).toBe(true)
+    calls.get('texImage2D')!.mockImplementation(() => {
+      throw new DOMException('The video element contains cross-origin data', 'SecurityError')
+    })
+    expect(() => g.draw(video, 16, 9)).toThrow('cross-origin')
+  })
+})

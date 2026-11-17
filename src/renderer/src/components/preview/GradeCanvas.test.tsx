@@ -6,16 +6,19 @@
  *   so a slider dragged THROUGH neutral never drops and remakes the canvas.
  * - `useGradeView` + `GradeCanvas`, wired as the preview's layers wire them: the
  *   plain element stays visible until the canvas has drawn its first frame.
+ * - A source WebGL can't read (a picture that won't load with CORS, an upload
+ *   that throws) falls back to the plain element with the notice, logged.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, useRef, type JSX } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ColorLook } from '@shared/grade'
+import { setLogSink, type LogEntry } from '@shared/log'
 import type * as GradeCanvasModule from './GradeCanvas'
 
 /** What the fake WebGL does: whether a context can be made, and whether a draw puts a picture up. */
-const gl = vi.hoisted(() => ({ available: true, drawOk: false, draws: 0 }))
+const gl = vi.hoisted(() => ({ available: true, drawOk: false, drawThrows: false, draws: 0 }))
 
 vi.mock('./gradeGl', () => ({
   MAX_GRADED_IMAGE_SIDE: 2048,
@@ -26,6 +29,7 @@ vi.mock('./gradeGl', () => ({
           setTable: () => {},
           draw: () => {
             gl.draws++
+            if (gl.drawThrows) throw new DOMException('The video element contains cross-origin data', 'SecurityError')
             return gl.drawOk
           },
           dispose: () => {}
@@ -57,7 +61,7 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
-  Object.assign(gl, { available: true, drawOk: false, draws: 0 })
+  Object.assign(gl, { available: true, drawOk: false, drawThrows: false, draws: 0 })
   for (const k of Object.keys(api)) delete api[k]
   qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   host = document.createElement('div')
@@ -165,5 +169,76 @@ describe('the plain element under a graded canvas', () => {
     act(() => vi.advanceTimersByTime(mod.TABLE_PATH_HOLD_MS))
     expect(document.querySelector('[data-testid="grade-canvas"]')).toBeNull()
     expect(visible(plain())).toBe(true)
+  })
+})
+
+/** A picture as `StackImage` draws it: the plain <img>, the canvas loading its own CORS copy, the notice. */
+function GradedPicture({ look, src }: { look: ColorLook; src: string }): JSX.Element {
+  const g = mod.useGradeView(look)
+  return (
+    <div>
+      {g.graded && <mod.GradeNotice status={g.status} lutName={look.lut?.name} />}
+      <img data-testid="plain" src={src} alt="" style={g.hideElement ? { opacity: 0 } : {}} />
+      {g.graded && <mod.GradeCanvas look={look} imageSrc={src} style={{}} onStatus={g.onStatus} onDrawn={g.onDrawn} />}
+    </div>
+  )
+}
+
+describe('when WebGL cannot read the media', () => {
+  const warm: ColorLook = { color: { ...neutral, temperature: 0.5 } }
+  const notice = (): string | null => document.querySelector('[data-testid="grade-warning"]')?.textContent ?? null
+  let logged: LogEntry[]
+  beforeEach(() => {
+    logged = []
+    setLogSink((e) => logged.push(e))
+  })
+  afterEach(() => setLogSink(null))
+
+  it('a picture that will not load for WebGL shows plain, with the notice, and is logged', () => {
+    const made: HTMLImageElement[] = []
+    const RealImage = window.Image
+    vi.stubGlobal(
+      'Image',
+      class extends RealImage {
+        constructor() {
+          super()
+          made.push(this)
+        }
+      }
+    )
+    try {
+      act(() =>
+        root!.render(
+          <QueryClientProvider client={qc}>
+            <GradedPicture look={warm} src="reelmedia://project/pic.png" />
+          </QueryClientProvider>
+        )
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(made).toHaveLength(1)
+    expect(made[0].crossOrigin).toBe('anonymous')
+    act(() => void made[0].dispatchEvent(new Event('error')))
+    expect(visible(plain())).toBe(true)
+    expect(notice()).toContain('WebGL couldn’t read this media')
+    expect(logged).toContainEqual(
+      expect.objectContaining({ level: 'warn', scope: 'grade-preview', message: expect.stringContaining('picture') })
+    )
+  })
+
+  it('a frame whose upload throws falls back to the plain clip, with the notice, and is logged once', () => {
+    show(warm)
+    gl.drawOk = true
+    frameReady('seeked')
+    expect(visible(plain())).toBe(false)
+    gl.drawThrows = true
+    frameReady('seeked')
+    frameReady('seeked')
+    expect(visible(plain()), 'the plain clip is back').toBe(true)
+    expect(notice()).toContain('WebGL couldn’t read this media')
+    const warns = logged.filter((e) => e.message.includes('could not read the frame'))
+    expect(warns).toHaveLength(1)
+    expect(warns[0].error).toBeInstanceOf(DOMException)
   })
 })
