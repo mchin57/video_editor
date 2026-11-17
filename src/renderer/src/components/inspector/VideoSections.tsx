@@ -3,19 +3,19 @@
  *  and background removal. */
 
 import { type JSX } from 'react'
-import type { Composition, Layer, VideoContent } from '@shared/project'
-import { DEFAULT_STABILIZE, NEUTRAL_COLOR, effectiveStabilize, isNeutralColor } from '@shared/project'
+import type { Layer, VideoContent } from '@shared/project'
+import { DEFAULT_STABILIZE, effectiveStabilize } from '@shared/project'
 import type { MediaAsset } from '@shared/media'
 import { assetAspect } from '@shared/media'
 import { hasSpeedRamp } from '@shared/speed'
-import { DEFAULT_TINT, isNeutralTint } from '@shared/tint'
 import { activeComp, projectFormat, useProject } from '@/state/projectStore'
 import { retimeLock } from '@/lib/links'
 import { useUi } from '@/state/ui'
 import { formatDuration, formatFps } from '@/lib/format'
 import { CollapsibleSection } from '../CollapsibleSection'
-import { Field, NumberInput, Row, colorCls, disabledCls, inputCls } from '../ui'
-import { LiveRange, OverrideToggle, StabilizeSliders, setLayer, type TriMode } from './controls'
+import { Field, NumberInput, Row, disabledCls, inputCls } from '../ui'
+import { OverrideToggle, StabilizeSliders, type TriMode } from './controls'
+import { ColorSection } from './ColorSection'
 import { RemoveBackground } from './RemoveBackground'
 import { PoseSection } from './PoseSection'
 import { FreezeFrames, SpeedControl } from './VideoTiming'
@@ -155,69 +155,6 @@ export function VideoClipSections({
       <RemoveBackground key={`matte-${id}`} layerId={id} content={c} asset={asset} />
       <PoseSection key={`pose-${id}`} layer={layer} content={c} asset={asset} />
     </>
-  )
-}
-
-/** Exposure / contrast / saturation and the tint, live while dragging (one undo step each). */
-function ColorSection({ layerId, content: c }: { layerId: string; content: VideoContent }): JSX.Element {
-  const updateContent = useProject((s) => s.updateLayerContent)
-  const mut = setLayer(layerId)
-  const col = c.color ?? NEUTRAL_COLOR
-  const setCol =
-    (prop: 'brightness' | 'contrast' | 'saturation') =>
-    (p: Composition, v: number): Composition =>
-      mut(p, (l) =>
-        l.content.kind === 'video'
-          ? { ...l, content: { ...l.content, color: { ...(l.content.color ?? NEUTRAL_COLOR), [prop]: v } } }
-          : l
-      )
-  // An untinted clip shows the default colour at 0%, so dragging the strength
-  // up starts from a sepia.
-  const tint = c.tint ?? { ...DEFAULT_TINT, amount: 0 }
-  const setTintAmount = (p: Composition, v: number): Composition =>
-    mut(p, (l) =>
-      l.content.kind === 'video'
-        ? { ...l, content: { ...l.content, tint: { color: l.content.tint?.color ?? tint.color, amount: v } } }
-        : l
-    )
-  return (
-    <CollapsibleSection
-      id="color"
-      title="Color"
-      right={
-        !isNeutralColor(c.color) || !isNeutralTint(c.tint) ? (
-          <button
-            onClick={() => updateContent(layerId, { color: undefined, tint: undefined })}
-            className="text-[10px] text-zinc-400 hover:text-zinc-200"
-          >
-            Reset
-          </button>
-        ) : null
-      }
-    >
-      <Field label={`Exposure  ${col.brightness >= 0 ? '+' : ''}${col.brightness.toFixed(2)}`}>
-        <LiveRange min={-0.5} max={0.5} step={0.02} value={col.brightness} transform={setCol('brightness')} />
-      </Field>
-      <Field label={`Contrast  ${col.contrast.toFixed(2)}`}>
-        <LiveRange min={0.5} max={1.8} step={0.02} value={col.contrast} transform={setCol('contrast')} />
-      </Field>
-      <Field label={`Saturation  ${col.saturation.toFixed(2)}`}>
-        <LiveRange min={0} max={2} step={0.02} value={col.saturation} transform={setCol('saturation')} />
-      </Field>
-      <Field label={`Tint  ${Math.round(tint.amount * 100)}%`}>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            data-testid="tint-color"
-            title="Tint color"
-            value={tint.color}
-            onChange={(e) => updateContent(layerId, { tint: { ...tint, color: e.target.value } })}
-            className={colorCls}
-          />
-          <LiveRange min={0} max={1} step={0.02} value={tint.amount} transform={setTintAmount} />
-        </div>
-      </Field>
-    </CollapsibleSection>
   )
 }
 

@@ -24,6 +24,7 @@ import {
   saveTemplate,
   setTemplateSound
 } from './templates'
+import { importLut } from './luts'
 
 let dir: string
 let root: string
@@ -223,5 +224,137 @@ describe('instantiateTemplate', () => {
     })
     expect(assets).toEqual([])
     expect(template.audio[0].file).toBeNull()
+  })
+})
+
+describe('LUTs in templates (#55)', () => {
+  /** The selection with a frozen clip's effect and the picture both using the project's LUT. */
+  function graded(): ReelTemplate {
+    const lut = { file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 }
+    const t = selection('Warm look')
+    return {
+      ...t,
+      clipEffect: {
+        holdSec: 1,
+        zoom: null,
+        color: { brightness: 0, contrast: 1, saturation: 1, temperature: 0.4 },
+        tint: null,
+        lut
+      },
+      layers: t.layers.map((l) => ({ ...l, content: { ...l.content, lut } }) as typeof l)
+    }
+  }
+  const projectLuts = (): string => {
+    const d = join(dir, 'project', 'luts')
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, '0123456789abcdef.cube'), 'LUT_1D_SIZE 2\n0 0 0\n1 1 1\n')
+    return d
+  }
+
+  it('saves its OWN copy of the LUT, carries it through the share file, and drops it into the project', async () => {
+    const luts = projectLuts()
+    await saveTemplate(root, graded(), resolve, (f) => join(luts, f))
+    const [t] = await mine()
+    expect(t.clipEffect!.lut).toEqual({ file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 })
+    expect(t.clipEffect!.color).toMatchObject({ temperature: 0.4 })
+    expect(readdirSync(join(root, t.id)).sort()).toEqual(
+      ['0123456789abcdef.cube', 'ding.mp3', 'logo.png', 'template.json'].sort()
+    )
+    rmSync(luts, { recursive: true })
+
+    // Share file round trip.
+    const share = join(dir, 'warm.reeltemplate')
+    await exportTemplate(root, t.id, share)
+    expect(Object.keys(JSON.parse(readFileSync(share, 'utf8')).files)).toContain('0123456789abcdef.cube')
+    await importTemplate(root, share)
+    const copy = (await mine()).find((x) => x.id !== t.id)!
+    expect(existsSync(join(root, copy.id, '0123456789abcdef.cube'))).toBe(true)
+
+    // Dropping: the LUT goes through adoptLut (the project's luts/), the picture's too.
+    const adoptedLuts: string[] = []
+    const { template } = await instantiateTemplate(
+      root,
+      t.id,
+      async (path, name) => ({ id: `lib-${name}`, originalPath: path }) as MediaAsset,
+      async (path) => {
+        adoptedLuts.push(path)
+        return 'fedcba9876543210.cube'
+      }
+    )
+    expect(adoptedLuts).toEqual([join(root, t.id, '0123456789abcdef.cube')])
+    expect(template.clipEffect!.lut!.file).toBe('fedcba9876543210.cube')
+    expect(template.layers[0].content).toMatchObject({ lut: { file: 'fedcba9876543210.cube', strength: 0.6 } })
+  })
+
+  it('a LUT that cannot be read is left out of the drop, named for the notice; the rest of the template lands', async () => {
+    const luts = projectLuts()
+    await saveTemplate(root, graded(), resolve, (f) => join(luts, f))
+    const [t] = await mine()
+    // The template's own copy is damaged after it was saved (not a table any more).
+    writeFileSync(join(root, t.id, '0123456789abcdef.cube'), 'LUT_3D_SIZE 2\n0 0 0\n')
+    const project = join(dir, 'other-project')
+    const { template, assets, lutsLeftOut } = await instantiateTemplate(
+      root,
+      t.id,
+      async (path, name) => ({ id: `lib-${name}`, originalPath: path }) as MediaAsset,
+      async (path) => (await importLut(project, path)).file
+    )
+    // Named as the Inspector shows it, never by the stored hash.
+    expect(lutsLeftOut).toEqual(['Warm'])
+    expect(template.clipEffect!.lut).toBeNull()
+    expect(template.clipEffect!.color).toMatchObject({ temperature: 0.4 })
+    expect(template.layers).toHaveLength(1)
+    expect(template.layers[0].content).toMatchObject({ kind: 'image', mediaId: 'lib-Warm look — logo.png', lut: null })
+    expect(template.audio[0].file).toBe('lib-Warm look — ding.mp3')
+    expect(assets).toHaveLength(2)
+    expect(existsSync(join(project, 'luts'))).toBe(false)
+  })
+
+  it('a usable LUT is not reported; adoptLut failing for any reason leaves it out too', async () => {
+    const luts = projectLuts()
+    await saveTemplate(root, graded(), resolve, (f) => join(luts, f))
+    const [t] = await mine()
+    const project = join(dir, 'other-project')
+    const ok = await instantiateTemplate(
+      root,
+      t.id,
+      async (path, name) => ({ id: `lib-${name}`, originalPath: path }) as MediaAsset,
+      async (path) => (await importLut(project, path)).file
+    )
+    expect(ok.lutsLeftOut).toEqual([])
+    expect(ok.template.clipEffect!.lut!.file).toMatch(/^[0-9a-f]{16}\.cube$/)
+    const failed = await instantiateTemplate(
+      root,
+      t.id,
+      async (path, name) => ({ id: `lib-${name}`, originalPath: path }) as MediaAsset,
+      async () => {
+        throw new Error('disk full')
+      }
+    )
+    expect(failed.lutsLeftOut).toEqual(['Warm'])
+    expect(failed.template.clipEffect!.lut).toBeNull()
+  })
+
+  it('refuses a share file whose LUT is not a table, up front, naming the LUT', async () => {
+    const luts = projectLuts()
+    await saveTemplate(root, graded(), resolve, (f) => join(luts, f))
+    const [t] = await mine()
+    const share = join(dir, 'warm.reeltemplate')
+    await exportTemplate(root, t.id, share)
+    const parsed = JSON.parse(readFileSync(share, 'utf8'))
+    parsed.files['0123456789abcdef.cube'] = Buffer.from('TITLE "x"\n0 0 0\n').toString('base64')
+    writeFileSync(share, JSON.stringify(parsed))
+    await expect(importTemplate(root, share)).rejects.toThrow(
+      /can’t be imported: its LUT “Warm” isn’t a LUT we can use: Not a \.cube table/
+    )
+    expect((await mine()).map((x) => x.id)).toEqual([t.id])
+  })
+
+  it('leaves out a LUT whose project file has gone (the rest of the look stays)', async () => {
+    await saveTemplate(root, graded(), resolve, () => null)
+    const [t] = await mine()
+    expect(t.clipEffect!.lut).toBeNull()
+    expect(t.clipEffect!.color).toMatchObject({ temperature: 0.4 })
+    expect((t.layers[0].content as { lut?: unknown }).lut).toBeNull()
   })
 })

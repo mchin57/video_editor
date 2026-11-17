@@ -7,7 +7,8 @@ import { AUDIO_EXTS } from '@shared/media'
 import { TEMPLATE_FILE_EXT, sanitizeTemplate } from '@shared/templates'
 import { copyIntoProject, requireUsable } from '../services/mediaStore'
 import { requireSession } from '../services/projectSession'
-import { safeFileName } from '../services/projectLayout'
+import { lutPath, safeFileName } from '../services/projectLayout'
+import { importLut } from '../services/luts'
 import {
   deleteTemplate,
   exportTemplate,
@@ -29,7 +30,12 @@ export function registerTemplateHandlers(): void {
     const t = sanitizeTemplate(template)
     if (!t) throw new Error("That selection can't be saved as a template.")
     const s = requireSession()
-    return saveTemplate(templatesRoot(), t, (id) => requireUsable(id, s))
+    return saveTemplate(
+      templatesRoot(),
+      t,
+      (id) => requireUsable(id, s),
+      (file) => lutPath(s.root, file)
+    )
   })
 
   handle('deleteTemplate', (_event, id) => deleteTemplate(templatesRoot(), id))
@@ -72,6 +78,12 @@ export function registerTemplateHandlers(): void {
     // The project gets its OWN copy of each file (in generated/), so it never
     // points into the templates folder; identical files dedupe by fingerprint.
     const s = requireSession()
-    return instantiateTemplate(templatesRoot(), id, (path, name) => copyIntoProject(path, name, s))
+    // Its LUTs go into the project's luts/ (checked, stored once).
+    return instantiateTemplate(
+      templatesRoot(),
+      id,
+      (path, name) => copyIntoProject(path, name, s),
+      async (path) => (await importLut(s.root, path)).file
+    )
   })
 }

@@ -43,9 +43,11 @@ import {
   layerRotation,
   flipTransform,
   videoFillStyle,
+  lookCssFilter,
   mediaLayerAspect,
   TintFilter
 } from './geometry'
+import { GradeCanvas, GradeNotice, useGradeView } from './GradeCanvas'
 import { StyledText, TextBlock, InlineTextEditor, Sparkles } from './text'
 import { CompAudioTrack } from './audio'
 import { StackGraphics } from './graphics'
@@ -85,6 +87,8 @@ function VideoLayerView({
   // doesn't drift past it (and trigger reseek jitter).
   const frozen = isFrozenAt(content, layer, time)
   const fill = useMemo(() => videoFillStyle(content, asset), [content, asset])
+  // A look the CSS filters can't draw goes through the colour table (GradeCanvas).
+  const grade = useGradeView(content)
 
   // Clip speed: the element plays at the same rate the shared time mapping
   // advances, so the drift-resync stays quiet. Constant speed sets the rate
@@ -124,6 +128,7 @@ function VideoLayerView({
       style={boxStyle}
       onPointerDown={onMoveDown}
       data-resizebox={selected ? '' : undefined}
+      data-layer-id={layer.id}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
       {/* Flips mirror the CROPPED picture, so they act on this box-filling
@@ -139,7 +144,7 @@ function VideoLayerView({
           src={videoProxyUrl(asset)}
           muted={silenced}
           playsInline
-          style={fill}
+          style={grade.hideElement ? { ...fill, opacity: 0 } : fill}
           onLoadedMetadata={() => {
             const v = ref.current
             if (v) {
@@ -148,7 +153,11 @@ function VideoLayerView({
             }
           }}
         />
+        {grade.graded && (
+          <GradeCanvas look={content} video={ref} style={fill} onStatus={grade.onStatus} onDrawn={grade.onDrawn} />
+        )}
       </div>
+      {grade.graded && <GradeNotice status={grade.status} lutName={content.lut?.name} />}
       {/* Outside the flip wrapper: the overlay mirrors its points itself, so
           angle labels never read backwards. */}
       <PoseOverlay layer={layer} content={content} asset={asset} time={time} editable={editable} />
@@ -454,6 +463,7 @@ function StackImage({
   onMoveDown
 }: KindViewProps<ImageContent>): JSX.Element {
   const asset = assetById.get(content.mediaId)
+  const grade = useGradeView(content)
   // Effective aspect: base → reshaped by crop → swapped by 90°/270° rotation.
   const cr = content.crop
   const aspect = mediaLayerAspect(layer, asset)
@@ -469,6 +479,7 @@ function StackImage({
   // box, so swap its width/height (cqw/cqh resolve to the box via its
   // container context) for odd quarter-turns.
   const flip = `scaleX(${content.flipH ? -1 : 1}) scaleY(${content.flipV ? -1 : 1})`
+  const filter = lookCssFilter(content)
   const imgStyle: CSSProperties = cr
     ? {
         position: 'absolute',
@@ -478,16 +489,30 @@ function StackImage({
         top: `${-(cr.y / cr.h) * 100}%`,
         objectFit: 'fill',
         maxWidth: 'none',
-        opacity: content.opacity
+        opacity: content.opacity,
+        filter
       }
-    : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: content.opacity }
+    : {
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        objectFit: 'fill',
+        opacity: content.opacity,
+        filter
+      }
+  const src = imageUrl(asset ?? { id: content.mediaId })
   return (
     <div
       style={box}
       onPointerDown={onMoveDown}
       data-resizebox={selected ? '' : undefined}
+      data-layer-id={layer.id}
       className={`overflow-hidden ${selected ? 'cursor-move outline-dashed outline-2 outline-sky-400' : 'cursor-pointer'}`}
     >
+      {grade.graded && <GradeNotice status={grade.status} lutName={content.lut?.name} />}
+      {/* Always, like the clip's: the element keeps its CSS look while a canvas hasn't drawn. */}
+      <TintFilter tint={content.tint} />
       <div
         style={{
           position: 'absolute',
@@ -499,7 +524,16 @@ function StackImage({
           overflow: 'hidden'
         }}
       >
-        <img src={imageUrl(asset ?? { id: content.mediaId })} alt="" draggable={false} style={imgStyle} />
+        <img src={src} alt="" draggable={false} style={grade.hideElement ? { ...imgStyle, opacity: 0 } : imgStyle} />
+        {grade.graded && (
+          <GradeCanvas
+            look={content}
+            imageSrc={src}
+            style={imgStyle}
+            onStatus={grade.onStatus}
+            onDrawn={grade.onDrawn}
+          />
+        )}
       </div>
     </div>
   )

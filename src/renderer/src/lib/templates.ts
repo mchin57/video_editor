@@ -26,6 +26,7 @@ import { PROJECT_VERSION, isNeutralColor } from '@shared/project'
 import { layerTransformAt, playedVideoDuration, videoTimelineTime } from '@shared/layers'
 import { audioSourceAt } from '@shared/audioTiming'
 import { isNeutralTint } from '@shared/tint'
+import { activeLut } from '@shared/grade'
 import {
   TEMPLATE_FORMAT_VERSION,
   cleanTemplateName,
@@ -163,6 +164,8 @@ export function applyClipEffect(
   }
   if (fx.color && !isNeutralColor(fx.color)) content.color = { ...fx.color }
   if (fx.tint && !isNeutralTint(fx.tint)) content.tint = { ...fx.tint }
+  // Its LUT is already the project's copy (`mapTemplateLuts` on instantiate).
+  if (fx.lut) content.lut = { ...fx.lut }
   // The zoom runs across the whole head hold (the rest of an earlier hold included).
   const zoomSec = freezes.find((f) => Math.abs(f.atSec - vc.inSec) < EPS)!.holdSec
   const base = { x: at.x, y: at.y, scale: at.scale }
@@ -260,6 +263,30 @@ export function applyTemplate(
   return { comp: c, added, effectSkipped }
 }
 
+/**
+ * What the template gallery says after dropping template `name` (null = nothing
+ * to say, the gallery closes): no clip under the playhead for its effect, and
+ * each LUT that couldn't be taken (missing or damaged — main left it out and
+ * placed the rest), by the name the Inspector shows, never its stored file.
+ */
+export function templateDropNote(
+  name: string,
+  { effectSkipped, lutsLeftOut }: { effectSkipped: boolean; lutsLeftOut: string[] }
+): string | null {
+  const notes: string[] = []
+  if (effectSkipped) {
+    notes.push('There was no clip under the playhead, so only its overlays and sounds were added — no freeze.')
+  }
+  if (lutsLeftOut.length) {
+    const names = lutsLeftOut.map((n) => `“${n}”`).join(', ')
+    const one = lutsLeftOut.length === 1
+    notes.push(
+      `Its LUT${one ? '' : 's'} ${names} ${one ? 'is' : 'are'} missing or can’t be read, so ${one ? 'it was' : 'they were'} left out; the rest of the look was kept.`
+    )
+  }
+  return notes.length ? `Added “${name}”. ${notes.join(' ')}` : null
+}
+
 // --- Save as template --------------------------------------------------------
 
 export interface TemplateCapture {
@@ -286,7 +313,9 @@ function captureEffect(l: Layer): { fx: TemplateClipEffect; originSec: number } 
       holdSec: hold.holdSec,
       zoom: zoomed && a.scale > 0 ? { scale: b.scale / a.scale, dx: b.x - a.x, dy: b.y - a.y } : null,
       color: c.color && !isNeutralColor(c.color) ? { ...c.color } : null,
-      tint: c.tint && !isNeutralTint(c.tint) ? { ...c.tint } : null
+      tint: c.tint && !isNeutralTint(c.tint) ? { ...c.tint } : null,
+      // The project's LUT file name here; main copies it into the template on save.
+      ...(activeLut(c.lut) ? { lut: { ...c.lut! } } : {})
     }
   }
 }

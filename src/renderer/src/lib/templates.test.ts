@@ -23,6 +23,7 @@ import {
   HELD_SOURCE_FRAMES,
   applyTemplate,
   clipUnder,
+  templateDropNote,
   templateFromSelection,
   textPieceFromSelection,
   type DropMedia
@@ -346,6 +347,33 @@ describe('templateFromSelection', () => {
     ])
   })
 
+  it('carries the newer controls and a LUT through a drop and back (#105, #55)', () => {
+    const look = {
+      ...fx,
+      color: { brightness: 0.1, contrast: 1, saturation: 1, temperature: 0.4, greenMagenta: -0.2, vibrance: 0.3 },
+      lut: { file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 }
+    }
+    const { comp, added } = applyTemplate(edit(), tpl({ clipEffect: look }), 4, media, makeId)
+    const held = vid(comp, added[0].id)
+    expect(held.content.color).toEqual(look.color)
+    expect(held.content.lut).toEqual(look.lut)
+    expect(videos(comp)[0].content.lut).toBeUndefined()
+    const got = templateFromSelection(comp, added, 'Warm hold', 'new', () => 'Sting')
+    if ('error' in got) throw new Error(got.error)
+    expect(got.template.clipEffect).toMatchObject({ color: look.color, lut: look.lut })
+    // A LUT at strength 0 isn't carried.
+    const off = applyTemplate(
+      edit(),
+      tpl({ clipEffect: { ...look, lut: { ...look.lut, strength: 0 } } }),
+      4,
+      media,
+      makeId
+    )
+    const again = templateFromSelection(off.comp, off.added, 'Off', 'new', () => 'Sting')
+    if ('error' in again) throw new Error(again.error)
+    expect(again.template.clipEffect!.lut).toBeUndefined()
+  })
+
   it('times overlays from the earliest piece when no clip is frozen', () => {
     const c = {
       ...createEmptyComposition(),
@@ -440,5 +468,20 @@ describe('textPieceFromSelection', () => {
       error: 'Select one or more text layers on the timeline first.'
     })
     expect(textPieceFromSelection(comp, [])).toHaveProperty('error')
+  })
+})
+
+describe('templateDropNote', () => {
+  it('says nothing for a clean drop (the gallery closes)', () => {
+    expect(templateDropNote('Sting', { effectSkipped: false, lutsLeftOut: [] })).toBeNull()
+  })
+
+  it('names each LUT that was left out by its Inspector name, alone or with the no-clip note', () => {
+    expect(templateDropNote('Warm look', { effectSkipped: false, lutsLeftOut: ['Warm'] })).toBe(
+      'Added “Warm look”. Its LUT “Warm” is missing or can’t be read, so it was left out; the rest of the look was kept.'
+    )
+    const both = templateDropNote('Warm look', { effectSkipped: true, lutsLeftOut: ['Warm', 'Teal'] })!
+    expect(both).toContain('no clip under the playhead')
+    expect(both).toContain('Its LUTs “Warm”, “Teal” are missing or can’t be read, so they were left out')
   })
 })

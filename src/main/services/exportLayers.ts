@@ -17,7 +17,8 @@ import { effectiveImageAspect, FRAME, stretchedBox } from '@shared/layers'
 import { existsSync } from 'node:fs'
 import { ensureImagePath, getAsset } from './mediaStore'
 import { hdrToSdrChain } from './proxy'
-import { gradeFilter, r } from './ffmpegFilters'
+import { r } from './ffmpegFilters'
+import { lookFilter } from './exportGrade'
 import type { ExportBox, ExportVideo } from './exporterArgs'
 import type { CompositionRender, Prerendered } from './exportRender'
 import { exportTextLayer } from './exportText'
@@ -137,7 +138,7 @@ async function exportVideoLayer(pass: CompositionRender, l: Layer, c: VideoConte
     crop: c.crop ?? null,
     flipH: c.flipH,
     flipV: c.flipV,
-    colorEq: gradeFilter(c.color, c.tint),
+    colorEq: await lookFilter(c, pass.tmp, ctx.session.root),
     // Box, position, rotation and keyframes (what a dip's card copies too).
     ...layerBox(pass, l, aspect),
     startSec: l.startSec,
@@ -201,6 +202,7 @@ async function exportImageLayer(pass: CompositionRender, l: Layer, c: ImageConte
       rotateQuarters: q,
       flipH: c.flipH,
       flipV: c.flipV,
+      grade: await lookFilter(c, pass.tmp, ctx.session.root),
       opacityAnim: await pass.opacityAnim(l, c.opacity)
     }
   })

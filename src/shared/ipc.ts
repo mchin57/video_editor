@@ -84,6 +84,11 @@ export const IPC = {
   renameShared: 'shared:rename',
   deleteShared: 'shared:delete',
   instantiateShared: 'shared:instantiate',
+  // Colour LUTs in the open project's luts/ (shared/cube.ts, main/services/luts.ts)
+  readLut: 'luts:read',
+  importLutDialog: 'luts:importDialog',
+  shareLut: 'luts:share',
+  copySharedLut: 'luts:copyShared',
   // AI assistant: main ⇄ renderer bridge + status for Settings
   assistantResponse: 'assistant:response',
   assistantStatus: 'assistant:status'
@@ -97,9 +102,12 @@ export interface StillRequest {
   /** Source-pixel crop to apply (null = full frame). */
   crop: { x: number; y: number; w: number; h: number } | null
   /** Color correction to apply (null = none). */
-  color: { brightness: number; contrast: number; saturation: number } | null
-  /** Tint to apply after the color correction (absent/null = none). */
+  color: import('./project').ColorAdjust | null
+  /** Tint ("Color wash") to apply after the color correction (absent/null = none). */
   tint?: import('./tint').Tint | null
+  /** LUT to apply after the wash (absent/null = none) — a look that needs the
+   *  colour table renders through it, as the clip does (shared/grade.ts). */
+  lut?: import('./project').LutRef | null
   /** Mirror the (cropped) picture, like the clip does on screen. Layer rotation
    *  is a transform like position, so a still does not bake it in. */
   flipH?: boolean
@@ -227,6 +235,12 @@ type SharedItem = import('./sharedLibrary').SharedItem
 type SharedAddResult = import('./sharedLibrary').SharedAddResult
 type SharedFileKind = Exclude<import('./sharedLibrary').SharedKind, 'text'>
 
+/** A LUT taken into the project: its stored name in `luts/` and a name to show. */
+export interface ImportedLut {
+  file: string
+  name: string
+}
+
 export interface IpcInvoke {
   getCapabilities: Fn<[], import('./ffmpeg').FfmpegCapabilities>
   getDataDir: Fn<[], string>
@@ -330,8 +344,9 @@ export interface IpcInvoke {
   exportTemplateDialog: Fn<[id: string], string | null>
   importTemplateDialog: Fn<[], TemplateEntry[] | null>
   /** The template ready to drop: its media adopted into the open project's
-   *  library (copies), references swapped for their media ids. */
-  instantiateTemplate: Fn<[id: string], { template: ReelTemplate; assets: MediaAsset[] }>
+   *  library (copies), references swapped for their media ids. `lutsLeftOut`
+   *  names (as the Inspector does) each LUT that couldn't be taken and was dropped. */
+  instantiateTemplate: Fn<[id: string], { template: ReelTemplate; assets: MediaAsset[]; lutsLeftOut: string[] }>
 
   // Shared library — editor-wide, under <data>/shared (shared/sharedLibrary.ts).
   // Every change returns the updated list; a dialog canceled returns null.
@@ -346,6 +361,18 @@ export interface IpcInvoke {
   deleteShared: Fn<[id: string], SharedItem[]>
   /** Item `id`'s file copied into the open project's library. */
   instantiateShared: Fn<[id: string], MediaAsset>
+
+  // Colour LUTs — `.cube` tables copied into the open project's `luts/`
+  // (content-named, stored once). A file that isn't a usable table is refused
+  // with the reason (the call rejects).
+  /** The parsed table `file` names in the open project's `luts/`. */
+  readLut: Fn<[file: string], import('./cube').CubeTable>
+  /** Pick a `.cube` and copy it in; null when the dialog is canceled. */
+  importLutDialog: Fn<[], ImportedLut | null>
+  /** Put the project's LUT `file` in the shared library as `name`. */
+  shareLut: Fn<[file: string, name: string], SharedAddResult>
+  /** Shared LUT `id` copied into the open project's `luts/`. */
+  copySharedLut: Fn<[id: string], ImportedLut>
 
   /** The AI assistant's pipe server status, for Settings. */
   assistantStatus: Fn<[], import('./assistant/protocol').AssistantStatus>

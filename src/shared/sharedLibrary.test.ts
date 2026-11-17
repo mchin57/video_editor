@@ -14,6 +14,7 @@ import {
   migrateSharedItem,
   sanitizeSharedItem,
   sharedExtsFor,
+  isLutPath,
   sharedKindOf,
   sharedTextTemplate,
   sortShared,
@@ -67,6 +68,12 @@ describe('sharedKindOf / sharedExtsFor', () => {
     expect(sharedExtsFor('graphic')).toContain('png')
     expect(sharedExtsFor('video')).toContain('mp4')
     expect(sharedExtsFor('sound')).not.toContain('png')
+    expect(sharedExtsFor('lut')).toEqual(['cube'])
+  })
+  it('knows a LUT by its .cube name (it is not media, so never probed)', () => {
+    expect(isLutPath('C:\\luts\\Warm.CUBE')).toBe(true)
+    expect(isLutPath('C:\\clips\\a.mp4')).toBe(false)
+    expect(sanitizeSharedItem(sound({ kind: 'lut', file: 'Warm.cube', durationSec: 0 }))).not.toBeNull()
   })
 })
 

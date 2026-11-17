@@ -25,6 +25,7 @@ button), then creates the whole structure at once. There is no untitled state.
   <Name>.reel     the save file (written at creation, then only by Save)
   generated/      media the editor makes: background removal, audio effects, extracted audio, stills
   transcripts/    whisper word timings, one file per clip (slow to rebuild, so not in cache/)
+  luts/           imported colour LUTs (.cube), named by their content (made on first import)
   cache/          proxies, thumbnails, waveforms, display PNGs (safe to delete, rebuilds itself)
   autosave.json   crash recovery (not the save file)
 ```
@@ -157,7 +158,7 @@ is no file to act on.
 
 ## Save As
 
-Writes the `.reel` into a new project folder, copying `generated/` and `transcripts/` (`cache/` is
+Writes the `.reel` into a new project folder, copying `generated/`, `transcripts/`, `pose/` and `luts/` (`cache/` is
 optional). It recomputes every relative path against the new location. Absolute paths don't change.
 
 ## Cleanup on open

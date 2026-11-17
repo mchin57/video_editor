@@ -779,3 +779,51 @@ describe('migrateProject — transitions (v35)', () => {
     expect(p.layers[1]).toEqual(faded)
   })
 })
+
+describe('migrateProject — colour table controls and LUTs (v36)', () => {
+  it('stamps an older document current; graded clips and images load as saved, nothing is added', () => {
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(36)
+    const base = { hidden: false, startSec: 0, endSec: 2, x: 540, y: 960, scale: 1 }
+    const graded = {
+      ...base,
+      id: 'V',
+      content: {
+        kind: 'video',
+        mediaId: 'm',
+        inSec: 0,
+        outSec: 2,
+        mute: false,
+        gainDb: 0,
+        color: { brightness: 0.2, contrast: 1.3, saturation: 1.4 },
+        tint: { color: '#e8c290', amount: 0.6 }
+      }
+    }
+    const image = { ...base, id: 'I', content: { kind: 'image', mediaId: 'i', opacity: 1 } }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: 35, layers: [graded, image] })
+    expect(p.version).toBe(PROJECT_VERSION)
+    // Absent = neutral: an old grade keeps exactly its fields (so its CSS / lutrgb look).
+    expect(p.layers[0]).toEqual(graded)
+    expect(p.layers[1]).toEqual(image)
+    for (const k of ['lut', 'color', 'tint']) expect(k in p.layers[1].content).toBe(false)
+    expect('lut' in p.layers[0].content).toBe(false)
+  })
+
+  it('a document using the new fields loads them as saved', () => {
+    const look = {
+      color: { brightness: 0, contrast: 1, saturation: 1, temperature: 0.4, greenMagenta: -0.2, vibrance: 0.3 },
+      lut: { file: '0123456789ab.cube', name: 'Warm', strength: 0.6 }
+    }
+    const l = {
+      id: 'I',
+      hidden: false,
+      startSec: 0,
+      endSec: 2,
+      x: 540,
+      y: 960,
+      scale: 1,
+      content: { kind: 'image', mediaId: 'i', opacity: 1, ...look }
+    }
+    const p = migrateProject({ ...createEmptyProject('p', 'P'), version: PROJECT_VERSION, layers: [l] })
+    expect(p.layers[0]).toEqual(l)
+  })
+})

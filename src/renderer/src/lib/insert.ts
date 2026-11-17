@@ -17,6 +17,9 @@ import type { DropMedia } from '@/lib/templates'
 import { instantiateShared, instantiateTemplate } from '@/ipc/client'
 import { placeAsset } from '@/lib/placeAsset'
 import { sharedTextTemplate, type SharedItem } from '@shared/sharedLibrary'
+import { templateLutFiles } from '@shared/templates'
+import type { QueryClient } from '@tanstack/react-query'
+import { invalidateLuts } from '@/hooks/useLut'
 
 /** A text layer at the playhead (3s), a third of the way down the frame. */
 export function insertText(): void {
@@ -49,12 +52,20 @@ export function insertGraphics(): void {
  * copies its media into the project's library first, then the store adds them
  * and places the template (`dropTemplate`) — ONE undo step for both. `library`
  * gives the library's source lengths and frame rates (a whole-source audio
- * clip needs a length to be cut; the held frame is cut by frame rate).
- * Resolves whether its clip effect found no clip under the playhead.
+ * clip needs a length to be cut; the held frame is cut by frame rate). `qc`
+ * re-reads the LUTs it stored (`invalidateLuts`).
+ * Resolves whether its clip effect found no clip under the playhead, and the
+ * names of any LUTs main had to leave out (missing or unreadable).
  */
-export async function insertTemplate(id: string, library: DropMedia): Promise<{ effectSkipped: boolean }> {
+export async function insertTemplate(
+  id: string,
+  library: DropMedia,
+  qc: QueryClient
+): Promise<{ effectSkipped: boolean; lutsLeftOut: string[] }> {
   const at = usePlayback.getState().time
-  const { template, assets } = await instantiateTemplate(id)
+  const { template, assets, lutsLeftOut } = await instantiateTemplate(id)
+  // Its LUTs are in the project's luts/ now: a preview that found one missing reads it again.
+  void invalidateLuts(qc, templateLutFiles(template))
   await idle() // the copy can finish mid-drag
   const store = useProject.getState()
   const fresh = new Map(assets.map((a) => [a.id, a]))
@@ -66,7 +77,7 @@ export async function insertTemplate(id: string, library: DropMedia): Promise<{ 
   store.beginGesture()
   try {
     if (assets.length) store.addMedia(assets.map((a) => a.id))
-    return store.dropTemplate(template, at, media)
+    return { ...store.dropTemplate(template, at, media), lutsLeftOut }
   } finally {
     store.endGesture()
   }

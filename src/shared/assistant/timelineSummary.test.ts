@@ -63,6 +63,50 @@ describe('summarizeTimeline', () => {
     expect(s.durationSec).toBe(5)
   })
 
+  it('reports a clip’s and a picture’s colour look in the Inspector’s words — only what is set (#105, #55)', () => {
+    const v = makeVideoLayer('v', 'm1', 0, 4)
+    const i = makeImageLayer('i', 'm2', 0, 2)
+    const plain = makeVideoLayer('p', 'm1', 5, 6)
+    const comp = {
+      ...createEmptyComposition(),
+      layers: [
+        {
+          ...v,
+          content: {
+            ...v.content,
+            color: {
+              brightness: 0.2,
+              contrast: 1,
+              saturation: 1.3,
+              temperature: 0.4,
+              greenMagenta: -0.25,
+              vibrance: 0
+            },
+            tint: { color: '#ffd999', amount: 0.5 },
+            lut: { file: '0123456789abcdef.cube', name: 'Warm', strength: 0.6 }
+          }
+        } as typeof v,
+        { ...i, content: { ...i.content, lut: { file: 'x.cube', name: 'Off', strength: 0 } } } as typeof i,
+        {
+          ...plain,
+          content: { ...plain.content, color: { brightness: 0, contrast: 1, saturation: 1 } }
+        } as typeof plain
+      ]
+    }
+    const s = summarizeTimeline(comp)
+    expect(s.layers.find((l) => l.id === 'v')!.color).toEqual({
+      exposure: 0.2,
+      saturation: 1.3,
+      temperature: 0.4,
+      tint: -0.25,
+      colorWash: { color: '#ffd999', amount: 0.5 },
+      lut: { name: 'Warm', strength: 0.6 }
+    })
+    // A LUT at strength 0 and a neutral grade are no look at all.
+    expect(s.layers.find((l) => l.id === 'i')!.color).toBeUndefined()
+    expect(s.layers.find((l) => l.id === 'p')!.color).toBeUndefined()
+  })
+
   it('reports a clip’s volume line at the timeline seconds its points play; a flat clip has none', () => {
     const lined = audio({
       startSec: 5,

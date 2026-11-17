@@ -20,7 +20,7 @@ import {
 } from '@/ipc/client'
 import { useLibrary } from '@/hooks/useMedia'
 import { insertTemplate } from '@/lib/insert'
-import { templateFromSelection } from '@/lib/templates'
+import { templateDropNote, templateFromSelection } from '@/lib/templates'
 import { activeComp, useProject } from '@/state/projectStore'
 import { useUi } from '@/state/ui'
 import { TemplatePreview } from './TemplatePreview'
@@ -98,14 +98,12 @@ function Gallery({ mode }: { mode: 'gallery' | 'save' }): JSX.Element {
     setBusy(true)
     setError(null)
     setNote(null)
-    insertTemplate(t.id, media).then(
-      ({ effectSkipped }) => {
+    insertTemplate(t.id, media, qc).then(
+      (res) => {
         setBusy(false)
-        if (effectSkipped) {
-          setNote(
-            `Added “${t.name}”. There was no clip under the playhead, so only its overlays and sounds were added — no freeze.`
-          )
-        } else close()
+        const said = templateDropNote(t.name, res)
+        if (said) setNote(said)
+        else close()
       },
       (err: unknown) => {
         setBusy(false)

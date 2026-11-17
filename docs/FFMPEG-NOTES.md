@@ -1500,6 +1500,114 @@ and reading the pixel back as rgb24:
 - **Alpha survives**: a 50%-alpha `yuva420p` source keeps alpha 129 through
   it (the `aa` term defaults to 1), so background-removed clips can be tinted.
 
+## Colour table — lut3d in the export, a WebGL shader in the preview (verified ffmpeg 8.1.1 / Electron 42, 2026-11-16, #105 #55)
+
+A grade that uses a newer control (temperature, green / magenta, vibrance) or a
+`.cube` LUT is baked from `shared/grade.ts` into ONE 3D table that the export
+applies with `lut3d` and the preview with a WebGL2 shader. Measured with scratch
+scripts before anything was wired:
+
+**What real `.cube` files look like** (122 files from six free packs on this
+machine: GroundControl, Adanmq / Kim Amland, LC3D Kodak / Fuji, Convergent Design
+Odyssey, Filmic, OBS):
+
+- 3D sizes 32 (76 files), 33 (44) and 64 (1); OBS also ships a 1D file
+  (`LUT_1D_SIZE 32`). No 17s or 65s in these packs.
+- Headers: `TITLE "…"` (quoted) in most, `#` comment lines, blank lines, and in
+  three files `DOMAIN_MIN 0.0 0.0 0.0` / `DOMAIN_MAX 1.0 1.0 1.0`. No
+  `LUT_3D_INPUT_RANGE`. Every file is CRLF; numbers come as `0`, `0.00747692`,
+  `0.000000` or `-0.0000`; one file dips to −0.0003 (so values outside 0..1 do
+  occur and are clamped). Data is red-fastest, then green, then blue.
+- `lut3d` honours `DOMAIN_MIN` / `DOMAIN_MAX` (a 0..2 domain halves an 8-bit
+  ramp). The editor never hands a user's file to ffmpeg, though: it parses it
+  (`shared/cube.ts`) and bakes it into its own table, so only the files the
+  editor writes (plain `LUT_3D_SIZE` + data, LF) reach `lut3d`.
+
+**`lut3d` on the export's inputs:**
+
+- **The YUV → RGB conversion is the same as `lutrgb`'s**: an identity table
+  (17, 33 or 65 points, trilinear or tetrahedral) gave exactly the decode of the
+  BT.709-tagged patch clip, and exactly identity `lutrgb`. It negotiates `rgb24`
+  from `yuv420p`, `argb` from `yuva420p` and `gbrp10le` from 10-bit input.
+- **Interpolation**: `tetrahedral` is the default (also `nearest`, `trilinear`,
+  `pyramid`, `prism`); `nearest` moved an identity by up to 3 levels (33 points).
+  The editor writes `interp=tetrahedral` explicitly.
+- **Output is TRUNCATED, not rounded**: a table mapping v → v/2 gave 1 → 0,
+  101 → 50, 255 → 127. The preview's shader floors the same way.
+- **Alpha survives**: a 50 % `yuva420p` source, a VP9-alpha WebM (decoded with
+  `libvpx-vp9`) and a 25 % rgba PNG kept alpha 127 / 127 / 63 through it.
+- **Cost** at 1080×1920, 150 frames, median of 3: no filter 112 ms, the legacy
+  `lutrgb` + `colorchannelmixer` 208 ms, `lut3d` 33 points 508 ms, 65 points
+  624 ms (about 3.4 ms a frame). Loading the table: about 14 ms for 33 points
+  (0.97 MB of text), about 130 ms for 65 (7.4 MB).
+- `file` is not a runtime option (no `T` flag); `interp` is.
+- Placement: where the grade sits today — after the HDR tonemap (its output is
+  SDR `yuv420p`, so the table sees SDR like the proxy the preview plays), the
+  stabilized intermediate (opaque SDR `yuv420p`), crop / flips / scale; before
+  `setsar` / `format` / rotation / the opacity mixer (`aa` multiplies whatever
+  alpha the table passed through).
+
+**The preview's WebGL2 shader against `lut3d`** (this project's Electron 42,
+ANGLE on the RTX 4070 Ti SUPER via D3D11; and with hardware acceleration
+disabled, ANGLE on WARP "Microsoft Basic Render Driver" — WebGL2 was still
+there): a tetrahedral lookup written exactly like `vf_lut3d.c`'s, on a
+`RGB32F` 3D texture read with `texelFetch`, floored to 8 bits like `lut3d`.
+
+- **Every 24-bit colour** (a 4096×4096 PNG, the same input both sides): within
+  1 level of `lut3d` on every channel, 99.28–99.9998 % exactly equal (identity
+  33 / 65, a synthetic warm table, GroundControl Warm Hunny 709 (33),
+  Kodak Portra 400 (32), Contraste Hard (64), the legacy grade at 65). WARP
+  gave the same numbers.
+- **A video frame** (the BT.709 patch clip's proxy, as the preview plays it):
+  WebGL's upload of the `<video>` decoded within 2 levels of ffmpeg's decode —
+  the same 2 the `<video>` element's own screenshot shows; NOT the BT.601 slip
+  of a 2D canvas `drawImage` (see "Clip grade" above). Through a LUT the gap is
+  that input difference times the LUT's slope: 2 (identity, warm), 3 (Portra,
+  Contraste Hard), 6 (Warm Hunny). The canvas as screenshotted equals its own
+  `readPixels` exactly.
+- Straight alpha comes through the upload with `UNPACK_PREMULTIPLY_ALPHA_WEBGL`
+  false (VP9-alpha video and rgba PNG: alpha 127 / 63, colour within 1–2 of
+  `lut3d` after un-premultiplying).
+- **Context count** (2026-11-17): 20 table-graded clips mounted and unmounted in
+  turn under a table-graded picture that stays on screen. With the unmounted
+  canvases still referenced (not yet garbage collected) and their contexts NOT
+  released, Chromium logged "Too many active WebGL contexts. Oldest context will
+  be lost." and took the picture's (the least recently drawn); when the GC had
+  collected the canvases first, nothing was lost — so without a release it is
+  down to GC timing. `dispose` releasing each context (`WEBGL_lose_context`)
+  keeps the picture's in every case (`e2e/colorTable.spec.ts`).
+
+**The old three sliders through the table** (65 points, tetrahedral, floored),
+every 24-bit colour sampled every 7th pixel, against today's two paths — the
+preview's CSS (`applyGrade`) and the export's `lutrgb` + `colorchannelmixer`:
+exposure ±, contrast 0.6 / 1.5, saturation 0.4 / 1.4, all three, exposure up +
+contrast down, each slider at its end: worst 1–3 levels, mean ≤ 0.5. The worst
+corner, exposure +0.5 + contrast 1.8 + saturation 2, reads 6 (1.5 % of channels
+over 2); at 33 points the same corner was 11 and ordinary grades up to 5, which
+is why the table has 65 points. The error is interpolation across the clamps
+(a kink inside a grid cell); at grid points the table IS the grade.
+
+**Through the app** (`e2e/colorTable.spec.ts`, real preview screenshots vs the
+exported frame, 8 patches of the BT.709 clip, tolerance 12 as in "Clip grade"):
+temperature +0.7 / −0.7: 8 / 10; tint +0.7 / −0.7: 8 / 7; vibrance +0.8 / −0.8:
+8 / 8; everything at once (old sliders, new controls, a wash): 9; a 17-point LUT
+at 100 / 40 %: 7 / 7, at 60 % after a grade: 8 (each case moved the preview by
+14–59 levels and the export, against an ungraded export of the same frame, by
+13–61; the weakest is tint +0.7 at 13, which the spec requires to be above the
+tolerance). A graded picture (an RGB PNG, the image chain with the table
+after `scale`, before `format=rgba`): 2; its CSS / `lutrgb` path: 4. The canvas
+drawn over a cropped, mirrored, rotated, keyframed clip and a VP9-alpha matte
+matched the plain elements' screenshot to a mean of 0.7 levels over a 13 × 23
+grid, paused and after a second of playback; inside the moved clip's own box
+(where its keyframed opacity is 0.9) 0.5 / 0.8 — a canvas ignoring that opacity
+read 8.0 there and only 3.2 over the whole frame.
+
+**Not measured:** 10-bit sources through `lut3d` (it would work in
+`gbrp10le` while the preview's upload is 8-bit); a GPU without float-texture
+support (WebGL2 guarantees `texelFetch` on `RGB32F`); a picture with an
+embedded ICC profile (the preview uploads it with the browser's default
+colour conversion, ffmpeg ignores the profile).
+
 ## Recording time — when a clip was filmed (verified ffprobe 8.1.1, 2026-10-25)
 
 A workout overlay syncs to footage by its recording time (docs/WORKOUT-OVERLAY.md

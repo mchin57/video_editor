@@ -14,41 +14,22 @@
  * Chromium's vs ffmpeg's YUV decode (an UNGRADED clip is checked first so that
  * baseline is visible) — the old `eq` chain missed by 20–60 levels.
  *
+ * These looks (the three sliders and the wash) keep the CSS path in the preview
+ * — no colour-table canvas — and the `lutrgb` / `colorchannelmixer` export;
+ * newer controls and LUTs are e2e/colorTable.spec.ts.
+ *
  * ARRANGE via store, ACT via the real export IPC (native Save dialog stubbed),
  * ASSERT on pixels. Skipped without the bundled ffmpeg.
  */
-import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 import { FFMPEG } from './bin'
+import { PATCHES, exportedPatches, frameAt, makePatchClip, previewPatches } from './colorPatches'
 
-/** Patch colours, row-major in a 2 × 4 grid. */
-const PATCHES: [number, number, number][] = [
-  [64, 64, 64],
-  [128, 128, 128],
-  [192, 192, 192],
-  [192, 64, 32],
-  [64, 128, 192],
-  [200, 30, 30],
-  [30, 200, 90],
-  [250, 240, 10]
-]
-const COLS = 2
-const ROWS = 4
 /** Max per-channel difference (0–255) between preview and export, any patch. */
 const TOLERANCE = 12
-
-const W = 1080
-const H = 1920
-
-/** The centre of patch `i` as a fraction of the frame. */
-const patchCentre = (i: number): { fx: number; fy: number } => ({
-  fx: ((i % COLS) + 0.5) / COLS,
-  fy: (Math.floor(i / COLS) + 0.5) / ROWS
-})
 
 type Grade = { brightness: number; contrast: number; saturation: number }
 const CASES: { name: string; color?: Grade; tint?: { color: string; amount: number } }[] = [
@@ -70,57 +51,6 @@ const CASES: { name: string; color?: Grade; tint?: { color: string; amount: numb
   }
 ]
 
-/** A frame of `file` at `t` as a per-pixel RGB reader (ffmpeg's own decode). */
-function frameAt(file: string, t: number): (x: number, y: number) => number[] {
-  const buf = execFileSync(
-    FFMPEG,
-    ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
-    { maxBuffer: W * H * 3 + 1024 }
-  )
-  return (x, y) => {
-    const i = (y * W + x) * 3
-    return [buf[i], buf[i + 1], buf[i + 2]]
-  }
-}
-
-/** The mean RGB of the 4×4 block around patch `i` in the exported frame. */
-const exportedPatches = (px: (x: number, y: number) => number[]): number[][] =>
-  PATCHES.map((_, i) => {
-    const { fx, fy } = patchCentre(i)
-    const sum = [0, 0, 0]
-    for (let dy = -2; dy < 2; dy++)
-      for (let dx = -2; dx < 2; dx++) {
-        const p = px(Math.round(fx * W) + dx, Math.round(fy * H) + dy)
-        for (let c = 0; c < 3; c++) sum[c] += p[c]
-      }
-    return sum.map((v) => Math.round(v / 16))
-  })
-
-/** The preview canvas's patches, read from a real screenshot (mean of a 4×4 block). */
-async function previewPatches(page: Page, electronApp: import('@playwright/test').ElectronApplication) {
-  const box = (await page.getByTestId('preview-canvas').boundingBox())!
-  const png = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height: box.height } })
-  return electronApp.evaluate(
-    ({ nativeImage }, { b64, fracs }) => {
-      const img = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'))
-      const { width, height } = img.getSize()
-      const bgra = img.toBitmap()
-      return fracs.map(({ fx, fy }) => {
-        const sum = [0, 0, 0]
-        for (let dy = -2; dy < 2; dy++)
-          for (let dx = -2; dx < 2; dx++) {
-            const i = ((Math.round(fy * height) + dy) * width + Math.round(fx * width) + dx) * 4
-            sum[0] += bgra[i + 2]
-            sum[1] += bgra[i + 1]
-            sum[2] += bgra[i]
-          }
-        return sum.map((v) => Math.round(v / 16))
-      })
-    },
-    { b64: png.toString('base64'), fracs: PATCHES.map((_, i) => patchCentre(i)) }
-  )
-}
-
 test('a graded clip exports with the colours the preview shows (exposure, contrast, saturation, tint)', async ({
   appPage: page,
   electronApp,
@@ -131,33 +61,7 @@ test('a graded clip exports with the colours the preview shows (exposure, contra
 
   // The patches are drawn in RGB and converted to YUV with the BT.709 matrix and tagged as such, like phone footage.
   const clip = join(projectsDir, 'E2E', 'patches.mp4')
-  let vf = 'color=c=black:s=540x960:r=30:d=2,format=rgb24'
-  PATCHES.forEach(([r, g, b], i) => {
-    const hex = [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')
-    vf += `,drawbox=x=${(i % COLS) * 270}:y=${Math.floor(i / COLS) * 240}:w=270:h=240:color=0x${hex}:t=fill`
-  })
-  execFileSync(FFMPEG, [
-    '-y',
-    '-v',
-    'error',
-    '-f',
-    'lavfi',
-    '-i',
-    `${vf},scale=out_color_matrix=bt709:out_range=tv,format=yuv420p`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'ultrafast',
-    '-crf',
-    '0',
-    '-colorspace',
-    'bt709',
-    '-color_primaries',
-    'bt709',
-    '-color_trc',
-    'bt709',
-    clip
-  ])
+  makePatchClip(clip)
 
   const id = await page.evaluate(async (p) => {
     const [asset] = await window.api.importPaths([p])
@@ -193,6 +97,12 @@ test('a graded clip exports with the colours the preview shows (exposure, contra
     )
     // Two animation frames: the CSS filter has been applied and painted.
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    // These looks take the CSS path (shared/grade.ts `needsGradeTable`), never the
+    // colour table: no WebGL canvas, the CSS filter on the <video> itself.
+    await expect(page.locator('[data-testid="grade-canvas"]')).toHaveCount(0)
+    const filter = await page.locator('[data-layer-id="V"] video').evaluate((v) => (v as HTMLVideoElement).style.filter)
+    if (c.color || c.tint) expect(filter, `${c.name}: CSS filter`).toContain(c.color ? 'brightness(' : 'url(')
+    else expect(filter).toBe('')
     const preview = await previewPatches(page, electronApp)
 
     const out = join(dir, `case${n}.mp4`)

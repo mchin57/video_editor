@@ -236,6 +236,30 @@ describe('edge cases', () => {
     ])
   })
 
+  it('takes a .cube LUT on the LUTs tab by parsing it (never probing), refuses a broken one and misfiled ones', async () => {
+    const cube = write('Warm_Look.cube', 'TITLE "w"\r\nLUT_1D_SIZE 2\r\n0 0 0\r\n1 1 0.8\r\n')
+    const deps = fakeDeps()
+    const res = await addSharedFiles(root, [cube], deps, 'lut')
+    expect(res.skipped).toEqual([])
+    const item = res.items.find((i) => i.id === res.added[0])!
+    expect(item).toMatchObject({ kind: 'lut', file: 'Warm_Look.cube', preview: null, durationSec: 0, layers: [] })
+    expect(deps.thumbs).toEqual([])
+    expect((await sharedFile(root, item.id)).path).toBe(join(root, item.id, 'Warm_Look.cube'))
+    // The same table again is already there.
+    expect((await addSharedFiles(root, [cube], deps, 'lut')).already).toEqual([item.id])
+
+    const broken = write('broken.cube', 'LUT_3D_SIZE 2\n0 0 0\n')
+    const sound = write('w.wav', 'W')
+    const bad = await addSharedFiles(root, [broken, sound], deps, 'lut')
+    expect(bad.skipped).toEqual([
+      { name: 'broken.cube', reason: expect.stringMatching(/^It isn’t a LUT we can use: .*should have 8 entries/) },
+      { name: 'w.wav', reason: 'Only .cube LUT files go on the LUTs tab.' }
+    ])
+    const misfiled = await addSharedFiles(root, [write('cool.cube', 'LUT_1D_SIZE 2\n0 0 0\n1 1 1\n')], deps, 'sound')
+    expect(misfiled.skipped[0].reason).toBe("It isn't a sound, so it belongs on the LUTs tab.")
+    expect(readdirSync(root).filter((n) => n !== item.id)).toEqual([])
+  })
+
   it('a text piece can’t be renamed to another text piece’s name (saving would replace both)', async () => {
     await saveSharedText(root, 'Bio', [makeTextLayer('A', 0, 2)])
     const list = await saveSharedText(root, 'Hook', [makeTextLayer('B', 0, 2)])

@@ -6,7 +6,7 @@ import { type MediaAsset } from '@shared/media'
 import { effectiveImageAspect, layerTransformAt, stretchedBox, type ResizeBox } from '@shared/layers'
 import { kindInfo } from '@shared/layerKinds'
 import { normalizeDeg } from '@shared/rotation'
-import { gradeCssFilter } from '@shared/grade'
+import { gradeCssFilter, needsGradeTable, type ColorLook } from '@shared/grade'
 import { isNeutralTint, tintFeColorMatrix, tintMatrix, type Tint } from '@shared/tint'
 import { LOGICAL } from '@/lib/coords'
 import { pct } from './frame'
@@ -44,16 +44,23 @@ export const layerRotation = (layer: Pick<Layer, 'rotationDeg'>): number =>
 /** Mirror transform for flipped media, or undefined. */
 export const flipTransform = (c: { flipH?: boolean; flipV?: boolean }): string | undefined =>
   c.flipH || c.flipV ? `scaleX(${c.flipH ? -1 : 1}) scaleY(${c.flipV ? -1 : 1})` : undefined
+/** The CSS `filter` drawing a clip's or picture's look: the grade's CSS chain,
+ *  then the wash's SVG filter — or undefined when there's nothing to draw, or
+ *  when the look goes through the colour table instead (`GradeCanvas`). */
+export function lookCssFilter(look: ColorLook): string | undefined {
+  if (needsGradeTable(look)) return undefined
+  const parts: string[] = []
+  if (look.color) parts.push(gradeCssFilter(look.color))
+  // The tint runs after the grade, as the export's colorchannelmixer runs after the grade filters.
+  if (look.tint && !isNeutralTint(look.tint)) parts.push(`url(#${tintFilterId(look.tint)})`)
+  return parts.length ? parts.join(' ') : undefined
+}
+
 /** CSS for the <video>/<img> filling its layer box (crop/color aware). */
 export function videoFillStyle(content: VideoContent, asset: MediaAsset | undefined): CSSProperties {
   const crop = content.crop
   const v = asset?.probe.video
-  const col = content.color
-  const parts: string[] = []
-  if (col) parts.push(gradeCssFilter(col))
-  // The tint runs after the grade, as the export's colorchannelmixer runs after the grade filters.
-  if (content.tint && !isNeutralTint(content.tint)) parts.push(`url(#${tintFilterId(content.tint)})`)
-  const filter = parts.length ? parts.join(' ') : undefined
+  const filter = lookCssFilter(content)
   if (crop && v) {
     return {
       position: 'absolute',
@@ -132,6 +139,7 @@ export const tintFilterId = (t: Tint): string =>
  */
 export function TintFilter({ tint }: { tint: Tint | null | undefined }): JSX.Element | null {
   if (!tint || isNeutralTint(tint)) return null
+  // (A look drawn through the colour table bakes the wash in; this def is then unused.)
   return (
     <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
       <filter id={tintFilterId(tint)} colorInterpolationFilters="sRGB">

@@ -63,12 +63,25 @@ const audioFxSettings = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chorus'), chorus: z.object({ voices: num, rateHz: num, depth: num }) })
 ])
 
+/** A `LutRef` (shared/project.ts); main checks `file` is a name it writes before reading it. */
+const lutRef = z.object({ file: z.string().min(1), name: z.string(), strength: num })
+
 const stillRequest = z.object({
   mediaId: id,
   sourceSec: num,
   crop: z.object({ x: num, y: num, w: num, h: num }).nullable(),
-  color: z.object({ brightness: num, contrast: num, saturation: num }).nullable(),
+  color: z
+    .object({
+      brightness: num,
+      contrast: num,
+      saturation: num,
+      temperature: num.optional(),
+      greenMagenta: num.optional(),
+      vibrance: num.optional()
+    })
+    .nullable(),
   tint: z.object({ color: z.string(), amount: num }).nullable().optional(),
+  lut: lutRef.nullable().optional(),
   flipH: z.boolean().optional(),
   flipV: z.boolean().optional()
 })
@@ -154,12 +167,17 @@ export const INVOKE_SCHEMAS = {
   instantiateTemplate: args(id),
 
   listShared: args(),
-  addSharedFilesDialog: args(z.enum(['sound', 'graphic', 'video'])),
+  addSharedFilesDialog: args(z.enum(['sound', 'graphic', 'video', 'lut'])),
   addSharedFromLibrary: args(id),
   saveSharedText: args(z.string(), z.array(z.unknown())),
   renameShared: args(id, z.string()),
   deleteShared: args(id),
   instantiateShared: args(id),
+
+  readLut: args(id),
+  importLutDialog: args(),
+  shareLut: args(id, z.string()),
+  copySharedLut: args(id),
 
   assistantStatus: args()
 } satisfies { [K in InvokeName]: z.ZodType<InvokeArgs<K>> }

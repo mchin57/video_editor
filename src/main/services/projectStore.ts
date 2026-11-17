@@ -46,6 +46,7 @@ import {
   transcriptPath,
   posePath,
   poseRoot,
+  lutsRoot,
   transcriptsRoot
 } from './projectLayout'
 import { newId } from '@shared/ids'
@@ -420,10 +421,11 @@ export function saveProjectAs(project: Project, chosenPath: string): Promise<{ p
       await ensureProjectFolders(to)
       await copyTree(generatedRoot(from), generatedRoot(to))
       await copyTree(transcriptsRoot(from), transcriptsRoot(to))
-      // Detected poses too (created on first use, so only when there are any).
-      if (existsSync(poseRoot(from))) {
-        await fsp.mkdir(poseRoot(to), { recursive: true })
-        await copyTree(poseRoot(from), poseRoot(to))
+      // Detected poses and imported LUTs too (created on first use, so only when there are any).
+      for (const dir of [poseRoot, lutsRoot]) {
+        if (!existsSync(dir(from))) continue
+        await fsp.mkdir(dir(to), { recursive: true })
+        await copyTree(dir(from), dir(to))
       }
       session.reroot(to, fromRelativePath)
     }

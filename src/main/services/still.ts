@@ -44,8 +44,10 @@ export async function generateStill(
   output: string,
   sourceSec: number,
   vfChain: string[] = [],
-  inputDecoder: string | null = null
+  inputDecoder: string | null = null,
+  /** ffmpeg's working directory — where a `lut3d` table the chain names lives. */
+  cwd?: string
 ): Promise<void> {
   const { ffmpeg } = await getBinaries()
-  await runFfmpeg(ffmpeg, buildStillArgs(input, output, sourceSec, vfChain, inputDecoder), 0)
+  await runFfmpeg(ffmpeg, buildStillArgs(input, output, sourceSec, vfChain, inputDecoder), 0, undefined, cwd)
 }

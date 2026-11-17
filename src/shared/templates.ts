@@ -18,7 +18,7 @@
  * Pure — main (storage, import/export) and the renderer (gallery, drop) share it.
  */
 
-import type { AudioClip, ColorAdjust, Layer } from './project'
+import type { AudioClip, ColorAdjust, Layer, LutRef } from './project'
 import type { Tint } from './tint'
 import { isNeutralTint } from './tint'
 import { PROJECT_VERSION, createEmptyProject, isNeutralColor, migrateProject } from './project'
@@ -46,10 +46,15 @@ export interface TemplateClipEffect {
    *  was at the drop point: `scale` multiplies its zoom, `dx`/`dy` move it in
    *  canonical px. Null = no zoom. */
   zoom: { scale: number; dx: number; dy: number } | null
-  /** Colour correction of the held frame (null = left as the clip has it). */
+  /** Colour correction of the held frame (null = left as the clip has it),
+   *  the newer controls included. */
   color: ColorAdjust | null
-  /** Tint of the held frame (null = left as the clip has it). */
+  /** Tint ("Color wash") of the held frame (null = left as the clip has it). */
   tint: Tint | null
+  /** A LUT on the held frame (absent/null = left as the clip has it). Inside a
+   *  template its `file` is a `.cube` in the template's folder, swapped for the
+   *  project's copy only through `mapTemplateLuts`. */
+  lut?: LutRef | null
 }
 
 /** An audio clip's mix and timing, minus its identity and media. `speed`
@@ -115,7 +120,8 @@ export function templateDuration(t: ReelTemplate): number {
   return end
 }
 
-/** Every file the template refers to, deduped, in order. */
+/** Every MEDIA file the template refers to (pictures, sounds), deduped, in
+ *  order. Its LUTs are `templateLutFiles`; all of them, `templateAllFiles`. */
 export function templateFiles(t: ReelTemplate): string[] {
   const out: string[] = []
   const add = (f: string): void => {
@@ -126,10 +132,41 @@ export function templateFiles(t: ReelTemplate): string[] {
   return out
 }
 
+/** Every LUT reference in the template (the clip effect's, then each picture's), in order. */
+export function templateLutRefs(t: ReelTemplate): LutRef[] {
+  const out: LutRef[] = []
+  if (t.clipEffect?.lut) out.push(t.clipEffect.lut)
+  for (const l of t.layers) if (l.content.kind === 'image' && l.content.lut) out.push(l.content.lut)
+  return out
+}
+
+/** Every `.cube` LUT file the template refers to (the clip effect's, a picture's), deduped. */
+export const templateLutFiles = (t: ReelTemplate): string[] => [
+  ...new Set(
+    templateLutRefs(t)
+      .map((r) => r.file)
+      .filter(Boolean)
+  )
+]
+
+/** The names (as the Inspector shows them) the template gives LUT file `file`, deduped. */
+export const templateLutNames = (t: ReelTemplate, file: string): string[] => [
+  ...new Set(
+    templateLutRefs(t)
+      .filter((r) => r.file === file)
+      .map((r) => r.name)
+  )
+]
+
+/** Every file the template's folder must hold: its media, then its LUTs. */
+export const templateAllFiles = (t: ReelTemplate): string[] => [
+  ...new Set([...templateFiles(t), ...templateLutFiles(t)])
+]
+
 /**
  * Rewrite every media reference through `fn` — file names → media ids on a
  * drop, media ids → file names on a save. `null` drops the reference: an image
- * layer goes, a sound becomes an empty slot.
+ * layer goes, a sound becomes an empty slot. (LUTs: `mapTemplateLuts`.)
  */
 export function mapTemplateFiles(t: ReelTemplate, fn: (ref: string) => string | null): ReelTemplate {
   const layers = t.layers.flatMap((l) => {
@@ -141,6 +178,24 @@ export function mapTemplateFiles(t: ReelTemplate, fn: (ref: string) => string | 
   return { ...t, layers, audio }
 }
 
+/**
+ * Rewrite every LUT reference's `file` through `fn` — the template's file
+ * names → the project's `luts/` names on a drop, and back on a save. `null`
+ * drops that LUT (the rest of the look stays).
+ */
+export function mapTemplateLuts(t: ReelTemplate, fn: (file: string) => string | null): ReelTemplate {
+  const map = (lut: LutRef | null | undefined): LutRef | null | undefined => {
+    if (!lut) return lut
+    const to = fn(lut.file)
+    return to ? { ...lut, file: to } : null
+  }
+  const layers = t.layers.map((l) =>
+    l.content.kind === 'image' && l.content.lut ? { ...l, content: { ...l.content, lut: map(l.content.lut) } } : l
+  )
+  const clipEffect = t.clipEffect?.lut ? { ...t.clipEffect, lut: map(t.clipEffect.lut) } : t.clipEffect
+  return { ...t, layers, clipEffect }
+}
+
 /** What a template does, for its gallery card ("Freeze 3s · zoom · tint · 1 text · sting: none"). */
 export function templateSummary(t: ReelTemplate): string {
   const parts: string[] = []
@@ -150,6 +205,7 @@ export function templateSummary(t: ReelTemplate): string {
     if (fx.zoom) parts.push('zoom')
     if (fx.tint && !isNeutralTint(fx.tint)) parts.push('tint')
     else if (fx.color && !isNeutralColor(fx.color)) parts.push('grade')
+    if (fx.lut) parts.push('LUT')
   }
   const count = (kind: string, one: string, many: string): void => {
     const n = t.layers.filter((l) => l.content.kind === kind).length
@@ -290,7 +346,7 @@ function validLayer(v: unknown): v is Layer {
     case 'graphics':
       return Array.isArray(c.marks) && c.marks.every(validMark)
     case 'image':
-      return isTemplateFileName(c.mediaId) && isNum(c.opacity)
+      return isTemplateFileName(c.mediaId) && isNum(c.opacity) && validLook(c)
     default:
       return false
   }
@@ -307,14 +363,30 @@ function validAudio(v: unknown): v is TemplateAudio {
   )
 }
 
+/** A colour grade: the three sliders, and the newer controls when present. */
+const validColor = (col: Record<string, unknown>): boolean =>
+  isNum(col.brightness) &&
+  isNum(col.contrast) &&
+  isNum(col.saturation) &&
+  (['temperature', 'greenMagenta', 'vibrance'] as const).every((k) => col[k] === undefined || isNum(col[k]))
+
+/** A LUT reference inside a template: a file in its folder, a name, a strength. */
+const validLut = (l: Record<string, unknown>): boolean =>
+  isTemplateFileName(l.file) && /\.cube$/i.test(l.file) && isStr(l.name) && isNum(l.strength)
+
+/** A picture's colour look (all optional). */
+const validLook = (c: Record<string, unknown>): boolean =>
+  isOptObj(c.color, validColor) &&
+  isOptObj(c.tint, (t) => isStr(t.color) && isNum(t.amount)) &&
+  isOptObj(c.lut, validLut)
+
 function validEffect(v: unknown): v is TemplateClipEffect {
   if (!isObj(v) || !isNum(v.holdSec) || v.holdSec <= 0) return false
   const z = v.zoom
   if (z !== null && !(isObj(z) && isNum(z.scale) && z.scale > 0 && isNum(z.dx) && isNum(z.dy))) return false
   const col = v.color
-  if (col !== null && !(isObj(col) && isNum(col.brightness) && isNum(col.contrast) && isNum(col.saturation))) {
-    return false
-  }
+  if (col !== null && !(isObj(col) && validColor(col))) return false
+  if (!isOptObj(v.lut, validLut)) return false
   const tint = v.tint
   return tint === null || (isObj(tint) && isStr(tint.color) && isNum(tint.amount))
 }
@@ -334,7 +406,7 @@ export function sanitizeTemplate(v: unknown): ReelTemplate | null {
   if (v.clipEffect !== null && !validEffect(v.clipEffect)) return null
   if (v.basedOn !== undefined && !isStr(v.basedOn)) return null
   if (v.projectVersion !== undefined && !isNum(v.projectVersion)) return null
-  const files = templateFiles(v as unknown as ReelTemplate).map((f) => f.toLowerCase())
+  const files = templateAllFiles(v as unknown as ReelTemplate).map((f) => f.toLowerCase())
   if (new Set(files).size !== files.length) return null
   if (!v.layers.length && !v.audio.length && !v.clipEffect) return null
   return v as unknown as ReelTemplate
@@ -379,7 +451,7 @@ export function parseTemplateShare(
   if (!template) return { error: "That template is damaged or incomplete, so it can't be imported." }
   const files = isObj(v.files) ? v.files : {}
   const out: Record<string, string> = {}
-  for (const f of templateFiles(template)) {
+  for (const f of templateAllFiles(template)) {
     const data = files[f]
     if (!isStr(data)) return { error: `That template is missing its file "${f}".` }
     out[f] = data
