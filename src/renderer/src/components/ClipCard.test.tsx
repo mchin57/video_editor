@@ -9,12 +9,16 @@ let ClipCard: typeof Card
 let root: Root | null = null
 let host: HTMLDivElement | null = null
 
+/** Importing ClipCard pulls in a large part of the renderer: it can pass
+ *  vitest's 5 s hook limit when the full suite's workers share the CPU. */
+const SLOW_IMPORT_MS = 30_000
+
 beforeAll(async () => {
   ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   // ClipCard imports ipc/client, which destructures window.api at load.
   ;(window as unknown as { api: unknown }).api = new Proxy({}, { get: () => () => undefined })
   ;({ ClipThumb, ClipCard } = await import('./ClipCard'))
-})
+}, SLOW_IMPORT_MS)
 
 afterEach(() => {
   act(() => root?.unmount())
